@@ -1,6 +1,9 @@
+// src/app/layout.tsx
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
+
+import Sidebar from "@/components/layout/Sidebar";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -25,11 +28,14 @@ export default function RootLayout({
   return (
     <html
       lang="pt-BR"
-      // "dark" força o modo escuro globalmente — sem isso todas as classes
-      // dark: do Tailwind ficam inativas e os cards perdem o visual completo.
       className={`${geistSans.variable} ${geistMono.variable} dark h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col bg-[#080810]">{children}</body>
+      <body className="min-h-full bg-[#080810]">
+        <Sidebar />
+        <div style={{ marginLeft: 200 }}>
+          {children}
+        </div>
+      </body>
     </html>
   );
 }

@@ -166,10 +166,24 @@ export default async function HomePage() {
 
       <div className="relative z-10 mx-auto max-w-[1560px] px-6 pb-16 md:px-10">
         <div className="flex flex-col gap-14">
-          <ContinueWatchingSection />
-          <ForYouSection />
-          <TrendingNowSection />
-          <WatchlistVivaSection />
+
+          {/* Each wrapper div carries the anchor id the Sidebar scrolls to */}
+          <div id="continue-watching">
+            <ContinueWatchingSection />
+          </div>
+
+          <div id="for-you">
+            <ForYouSection />
+          </div>
+
+          <div id="trending">
+            <TrendingNowSection />
+          </div>
+
+          <div id="watchlist">
+            <WatchlistVivaSection />
+          </div>
+
         </div>
       </div>
     </main>
