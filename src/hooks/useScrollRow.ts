@@ -8,67 +8,101 @@ interface UseScrollRowOptions {
 }
 
 interface UseScrollRowReturn {
-  ref: React.RefObject<HTMLDivElement>;
+  ref: React.RefObject<HTMLDivElement | null>;
   canScrollLeft: boolean;
   canScrollRight: boolean;
   scrollLeft: () => void;
   scrollRight: () => void;
 }
 
-export function useScrollRow({ step = 600 }: UseScrollRowOptions = {}): UseScrollRowReturn {
-  const ref = useRef<HTMLDivElement>(null);
-  const [canScrollLeft, setCanScrollLeft]   = useState(false);
+export function useScrollRow({
+  step = 600,
+}: UseScrollRowOptions = {}): UseScrollRowReturn {
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
   const [canScrollRight, setCanScrollRight] = useState(true);
 
   const sync = useCallback(() => {
     const el = ref.current;
-    if (!el) return;
+
+    if (!el) {
+      setCanScrollLeft(false);
+      setCanScrollRight(false);
+      return;
+    }
+
     setCanScrollLeft(el.scrollLeft > 4);
     setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
   }, []);
 
-  // Usa MutationObserver + ResizeObserver para detectar quando o div
-  // aparece no DOM (após loading terminar) e sincroniza imediatamente.
   useEffect(() => {
-    const el = ref.current;
-    if (!el) {
-      // Div ainda não existe — observa o pai para saber quando ele aparecer
-      const parent = document.querySelector("section") ?? document.body;
-      const mo = new MutationObserver(() => {
-        if (ref.current) {
-          mo.disconnect();
-          attachListeners(ref.current);
-        }
-      });
-      mo.observe(parent, { childList: true, subtree: true });
-      return () => mo.disconnect();
+    function attachListeners(el: HTMLDivElement) {
+      sync();
+
+      const raf = requestAnimationFrame(sync);
+
+      el.addEventListener("scroll", sync, { passive: true });
+
+      const resizeObserver = new ResizeObserver(sync);
+      resizeObserver.observe(el);
+
+      return () => {
+        cancelAnimationFrame(raf);
+        el.removeEventListener("scroll", sync);
+        resizeObserver.disconnect();
+      };
     }
-    return attachListeners(el);
-  }, [sync]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  function attachListeners(el: HTMLDivElement) {
-    // Sync imediato + após próximo frame (garante que scrollWidth foi calculado)
-    sync();
-    const raf = requestAnimationFrame(sync);
+    const el = ref.current;
 
-    el.addEventListener("scroll", sync, { passive: true });
-    const ro = new ResizeObserver(sync);
-    ro.observe(el);
+    if (el) {
+      return attachListeners(el);
+    }
+
+    const parent = document.querySelector("section") ?? document.body;
+
+    const mutationObserver = new MutationObserver(() => {
+      const currentEl = ref.current;
+
+      if (currentEl) {
+        mutationObserver.disconnect();
+        cleanup = attachListeners(currentEl);
+      }
+    });
+
+    let cleanup: (() => void) | undefined;
+
+    mutationObserver.observe(parent, {
+      childList: true,
+      subtree: true,
+    });
 
     return () => {
-      cancelAnimationFrame(raf);
-      el.removeEventListener("scroll", sync);
-      ro.disconnect();
+      mutationObserver.disconnect();
+      cleanup?.();
     };
-  }
+  }, [sync]);
 
   const scrollLeft = useCallback(() => {
-    ref.current?.scrollBy({ left: -step, behavior: "smooth" });
+    ref.current?.scrollBy({
+      left: -step,
+      behavior: "smooth",
+    });
   }, [step]);
 
   const scrollRight = useCallback(() => {
-    ref.current?.scrollBy({ left: step, behavior: "smooth" });
+    ref.current?.scrollBy({
+      left: step,
+      behavior: "smooth",
+    });
   }, [step]);
 
-  return { ref, canScrollLeft, canScrollRight, scrollLeft, scrollRight };
+  return {
+    ref,
+    canScrollLeft,
+    canScrollRight,
+    scrollLeft,
+    scrollRight,
+  };
 }

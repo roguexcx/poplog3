@@ -1,13 +1,21 @@
-// src/components/PosterCard.tsx
+// src/components/posters/PosterCard.tsx
+
 "use client";
 
 import Image from "next/image";
 import Link from "next/link";
+import type { ReactNode } from "react";
 
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
-import type { TMDBItem } from "@/lib/tmdb-types";
-import { getMediaLabel, getPosterUrl, getRating, getReleaseYear, getTitle } from "@/lib/tmdb-utils";
+import type { TMDBItem, TMDBMediaType } from "@/lib/tmdb-types";
+import {
+  getMediaLabel,
+  getPosterUrl,
+  getRating,
+  getReleaseYear,
+  getTitle,
+} from "@/lib/tmdb-utils";
 
 type Props = {
   item: TMDBItem;
@@ -18,15 +26,27 @@ type Props = {
 
 function IconBookmark({ filled }: { filled: boolean }) {
   return (
-    <svg viewBox="0 0 24 24" className="h-[13px] w-[13px]" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth={2.2}>
+    <svg
+      viewBox="0 0 24 24"
+      className="h-[13px] w-[13px]"
+      fill={filled ? "currentColor" : "none"}
+      stroke="currentColor"
+      strokeWidth={2.2}
+    >
       <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
     </svg>
   );
 }
 
-function IconCheck({ filled }: { filled: boolean }) {
+function IconCheck() {
   return (
-    <svg viewBox="0 0 24 24" className="h-[13px] w-[13px]" fill="none" stroke="currentColor" strokeWidth={2.4}>
+    <svg
+      viewBox="0 0 24 24"
+      className="h-[13px] w-[13px]"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2.4}
+    >
       <path d="M20 6 9 17l-5-5" />
     </svg>
   );
@@ -49,14 +69,26 @@ type ActionButtonProps = {
   active: boolean;
   saving: boolean;
   activeClass: string;
-  children: React.ReactNode;
+  children: ReactNode;
 };
 
-function ActionButton({ onClick, disabled, title, active, saving, activeClass, children }: ActionButtonProps) {
+function ActionButton({
+  onClick,
+  disabled,
+  title,
+  active,
+  saving,
+  activeClass,
+  children,
+}: ActionButtonProps) {
   return (
     <button
       type="button"
-      onClick={(e) => { e.preventDefault(); e.stopPropagation(); onClick(); }}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        onClick();
+      }}
       disabled={disabled}
       title={title}
       className={[
@@ -80,11 +112,19 @@ export default function PosterCard({ item, priority = false }: Props) {
   const year = getReleaseYear(item);
   const rating = getRating(item);
   const posterUrl = getPosterUrl(item.poster_path, "w500");
-  const type = item.media_type === "tv" ? "tv" : "movie";
-  const mediaLabel = getMediaLabel(item);
+
+  const type: TMDBMediaType = item.media_type === "tv" ? "tv" : "movie";
+  const mediaLabel = getMediaLabel({ ...item, media_type: type });
+
   const releaseYear = year !== "----" ? Number(year) : null;
 
-  const sharedProps = { tmdbId: item.id, mediaType: type, title, releaseYear };
+  const sharedProps = {
+    tmdbId: item.id,
+    mediaType: type,
+    title,
+    releaseYear,
+  };
+
   const watchlist = useWatchlistToggle(sharedProps);
   const watched = useWatchedToggle(sharedProps);
 
@@ -155,7 +195,7 @@ export default function PosterCard({ item, priority = false }: Props) {
             saving={watched.saving}
             activeClass="border-emerald-400/55 bg-emerald-400/[0.18] text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.25)]"
           >
-            <IconCheck filled={watched.isWatched} />
+            <IconCheck />
           </ActionButton>
         </div>
 
@@ -173,9 +213,14 @@ export default function PosterCard({ item, priority = false }: Props) {
         <h3 className="line-clamp-2 text-[13px] font-[500] leading-[1.35] tracking-[-0.01em] text-[#e8e8f0] transition-colors duration-200 group-hover:text-[#f4f4fa]">
           {title}
         </h3>
+
         <p className="mt-1 flex items-center gap-[5px] text-[11px] text-[#52526a]">
           {year !== "----" && <span>{year}</span>}
-          {year !== "----" && <span className="inline-block h-[2px] w-[2px] rounded-full bg-[#3a3a50]" />}
+
+          {year !== "----" && (
+            <span className="inline-block h-[2px] w-[2px] rounded-full bg-[#3a3a50]" />
+          )}
+
           <span>{type === "tv" ? "Série" : "Filme"}</span>
         </p>
       </Link>

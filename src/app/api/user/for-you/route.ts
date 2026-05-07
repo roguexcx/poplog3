@@ -27,6 +27,16 @@ type TMDBImage = {
   vote_count?: number;
 };
 
+type TMDBImagesResponse = {
+  posters?: TMDBImage[];
+  backdrops?: TMDBImage[];
+  logos?: TMDBImage[];
+};
+
+type TMDBListResponse = {
+  results?: TMDBItem[];
+};
+
 type TMDBItem = {
   id: number;
   title?: string;
@@ -118,7 +128,7 @@ function shuffleArray<T>(array: T[]): T[] {
 
 async function getCleanPosterPath(mediaType: MediaType, id: number): Promise<string | null> {
   try {
-    const data = await tmdbFetch(`/${mediaType}/${id}/images`, {
+    const data = await tmdbFetch<TMDBImagesResponse>(`/${mediaType}/${id}/images`, {
       include_image_language: "null,pt,en",
     });
 
@@ -140,23 +150,24 @@ async function getCleanPosterPath(mediaType: MediaType, id: number): Promise<str
 
 async function getRandomBackdropPath(mediaType: MediaType, id: number): Promise<string | null> {
   try {
-    // Adicionamos include_image_language: "null" para buscar especificamente as imagens sem texto
-    const data = await tmdbFetch(`/${mediaType}/${id}/images`, {
-      include_image_language: "null" 
+    const data = await tmdbFetch<TMDBImagesResponse>(`/${mediaType}/${id}/images`, {
+      include_image_language: "null",
     });
-    
+
     const backdrops: TMDBImage[] = data.backdrops ?? [];
 
     if (backdrops.length === 0) {
-      // Se não houver nenhuma estritamente sem texto, fazemos um fallback para a chamada padrão
-      const fallbackData = await tmdbFetch(`/${mediaType}/${id}/images`);
+      const fallbackData = await tmdbFetch<TMDBImagesResponse>(`/${mediaType}/${id}/images`);
       const fallbackBackdrops: TMDBImage[] = fallbackData.backdrops ?? [];
+
       if (fallbackBackdrops.length === 0) return null;
-      
-      return fallbackBackdrops.sort((a, b) => (b.vote_average ?? 0) - (a.vote_average ?? 0))[0]?.file_path ?? null;
+
+      return (
+        fallbackBackdrops.sort((a, b) => (b.vote_average ?? 0) - (a.vote_average ?? 0))[0]
+          ?.file_path ?? null
+      );
     }
 
-    // Ordenamos pelas melhores avaliações e pegamos as top 10 para o sorteio
     const bestPool = backdrops
       .sort((a, b) => (b.vote_average ?? 0) - (a.vote_average ?? 0))
       .slice(0, 10);
@@ -173,10 +184,9 @@ async function getRandomBackdropPath(mediaType: MediaType, id: number): Promise<
 async function normalizeForResponse(candidate: Candidate) {
   const { item, mediaType, seedReasonType, seedTitle } = candidate;
 
-  // Busca o poster "limpo" e um backdrop aleatório em paralelo para ganhar performance
   const [cleanPosterPath, randomBackdropPath] = await Promise.all([
     getCleanPosterPath(mediaType, item.id),
-    getRandomBackdropPath(mediaType, item.id)
+    getRandomBackdropPath(mediaType, item.id),
   ]);
 
   const genre_label =
@@ -190,7 +200,6 @@ async function normalizeForResponse(candidate: Candidate) {
     ...item,
     media_type: mediaType,
     clean_poster_path: cleanPosterPath,
-    // Substituímos o backdrop_path fixo pelo sorteado (ou fallback pro original)
     backdrop_path: randomBackdropPath ?? item.backdrop_path,
     title_label: getTitle(item),
     year: item.release_date?.split("-")[0] ?? item.first_air_date?.split("-")[0] ?? null,
@@ -216,7 +225,6 @@ export async function POST(request: Request) {
 
     const knownKeys = new Set(userTitles.map((t) => `${t.media_type}-${t.tmdb_id}`));
 
-    // Seeds ordenados por relevância
     const seeds = [
       ...shuffleArray(userTitles.filter((t) => t.favorite)).slice(0, 5),
       ...shuffleArray(userTitles.filter((t) => t.status === "watchlist")).slice(0, 2),
@@ -233,7 +241,7 @@ export async function POST(request: Request) {
 
       let seedDetails: TMDBItem;
       try {
-        seedDetails = await tmdbFetch(`/${mediaType}/${seed.tmdb_id}`);
+        seedDetails = await tmdbFetch<TMDBItem>(`/${mediaType}/${seed.tmdb_id}`);
       } catch {
         continue;
       }
@@ -246,7 +254,7 @@ export async function POST(request: Request) {
         `/${mediaType}/${seed.tmdb_id}/similar`,
       ]) {
         try {
-          const data = await tmdbFetch(endpoint, { page: "1" });
+          const data = await tmdbFetch<TMDBListResponse>(endpoint, { page: "1" });
           const results: TMDBItem[] = data.results ?? [];
 
           for (const raw of results.slice(0, 16)) {
@@ -291,6 +299,7 @@ export async function POST(request: Request) {
       : (movieCandidates[0] ?? tvCandidates[0] ?? allCandidates[0]);
 
     const usedKeys = new Set<string>();
+
     if (featuredCandidate) {
       usedKeys.add(`${featuredCandidate.mediaType}-${featuredCandidate.item.id}`);
     }
@@ -298,21 +307,24 @@ export async function POST(request: Request) {
     const sideMovies = movieCandidates.filter((c) => !usedKeys.has(`${c.mediaType}-${c.item.id}`));
     const sideTv = tvCandidates.filter((c) => !usedKeys.has(`${c.mediaType}-${c.item.id}`));
 
-    // Balanceia filmes e séries nos 4 cards laterais
     const balancedItems: Candidate[] = [];
+
     while (balancedItems.length < 4 && (sideMovies.length || sideTv.length)) {
       const nextMovie = sideMovies.shift();
       const nextTv = sideTv.shift();
+
       if (balancedItems.length < 4 && nextMovie) balancedItems.push(nextMovie);
       if (balancedItems.length < 4 && nextTv) balancedItems.push(nextTv);
     }
 
-    // Fallback se não tiver 4 candidatos balanceados
     if (balancedItems.length < 4) {
       const usedInBalanced = new Set(balancedItems.map((c) => `${c.mediaType}-${c.item.id}`));
       const fallback = allCandidates.filter(
-        (c) => !usedKeys.has(`${c.mediaType}-${c.item.id}`) && !usedInBalanced.has(`${c.mediaType}-${c.item.id}`),
+        (c) =>
+          !usedKeys.has(`${c.mediaType}-${c.item.id}`) &&
+          !usedInBalanced.has(`${c.mediaType}-${c.item.id}`),
       );
+
       balancedItems.push(...fallback.slice(0, 4 - balancedItems.length));
     }
 

@@ -18,12 +18,15 @@ export interface TMDBItem {
 
   release_date?: string;
   first_air_date?: string;
+  last_air_date?: string | null;
 
   vote_average?: number;
 
   popularity?: number;
 
   genre_ids?: number[];
+
+  number_of_seasons?: number | null;
 }
 
 export interface TMDBResponse<T> {

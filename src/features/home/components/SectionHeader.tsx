@@ -8,7 +8,7 @@ import { useEffect, useState } from "react";
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
 import { supabase } from "@/lib/supabase";
-import SectionHeader from "@/components/SectionHeader";
+import SectionHeader from "@/components/layout/SectionHeader";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 

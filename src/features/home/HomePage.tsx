@@ -4,7 +4,7 @@ import ContinueWatchingSection from "@/features/home/ContinueWatchingSection";
 import ForYouSection from "@/features/home/ForYouSection";
 import HeroSection from "@/features/home/components/HeroSection";
 import TrendingNowSection from "@/features/home/components/TrendingNowSection";
-import WatchlistVivaSection from "@/features/home/components/WatchlistVivaSection"; // ← NOVO
+import WatchlistVivaSection from "@/features/home/components/WatchlistVivaSection";
 
 import { getFeaturedDetails, getTrending } from "@/features/home/home-api";
 import {
@@ -30,16 +30,22 @@ type TMDBImage = {
   vote_count?: number;
 };
 
+type TMDBImagesResponse = {
+  backdrops?: TMDBImage[];
+  posters?: TMDBImage[];
+  logos?: TMDBImage[];
+};
+
 export const dynamic = "force-dynamic";
 
 async function getRandomHeroBackdropPath(
   mediaType: "movie" | "tv",
-  id: number
+  id: number,
 ): Promise<string | null> {
   try {
-    const data = await tmdbFetch(`/${mediaType}/${id}/images`, {
+    const data = (await tmdbFetch(`/${mediaType}/${id}/images`, {
       include_image_language: "null",
-    });
+    })) as TMDBImagesResponse;
 
     const backdrops: TMDBImage[] = data.backdrops ?? [];
 
@@ -50,17 +56,22 @@ async function getRandomHeroBackdropPath(
           (a.vote_average ?? 0) * 10 +
           (a.vote_count ?? 0) +
           (a.width ?? 0) / 100;
+
         const scoreB =
           (b.vote_average ?? 0) * 10 +
           (b.vote_count ?? 0) +
           (b.width ?? 0) / 100;
+
         return scoreB - scoreA;
       })
       .slice(0, 10);
 
-    if (bestPool.length === 0) return null;
+    if (bestPool.length === 0) {
+      return null;
+    }
 
     const chosen = bestPool[Math.floor(Math.random() * bestPool.length)];
+
     return chosen?.file_path ?? null;
   } catch {
     return null;
@@ -75,7 +86,7 @@ export default async function HomePage() {
       item.backdrop_path &&
       item.poster_path &&
       item.overview &&
-      item.vote_average >= 6.5
+      (item.vote_average ?? 0) >= 6.5,
   );
 
   const featuredItem =
@@ -86,7 +97,7 @@ export default async function HomePage() {
   const featuredType = featuredItem ? getMediaType(featuredItem) : "movie";
 
   const featuredItemsByType = trendingItems.filter(
-    (item) => getMediaType(item) === featuredType
+    (item) => getMediaType(item) === featuredType,
   );
 
   const featuredRank = featuredItem
@@ -97,23 +108,43 @@ export default async function HomePage() {
 
   const [featuredDetails, randomHeroBackdropPath] = await Promise.all([
     featuredItem ? getFeaturedDetails(featuredType, featuredItem.id) : null,
-    featuredItem ? getRandomHeroBackdropPath(featuredType, featuredItem.id) : null,
+    featuredItem
+      ? getRandomHeroBackdropPath(featuredType, featuredItem.id)
+      : null,
   ]);
 
-  const featuredTitle = featuredItem ? getTitle(featuredItem) : "Destaque do momento";
+  const featuredTitle = featuredItem
+    ? getTitle(featuredItem)
+    : "Destaque do momento";
 
   const backdropUrl = featuredItem
-    ? getBackdropUrl(randomHeroBackdropPath ?? featuredItem.backdrop_path, "original")
+    ? getBackdropUrl(
+        randomHeroBackdropPath ?? featuredItem.backdrop_path,
+        "original",
+      )
     : null;
 
   const posterUrl = featuredItem
     ? getPosterUrl(featuredItem.poster_path, "w500")
     : null;
 
-  const year = parseYear(featuredDetails?.release_date, featuredDetails?.first_air_date);
-  const genres = featuredDetails?.genres ? translateGenres(featuredDetails.genres) : null;
-  const runtime = formatRuntime(featuredDetails?.runtime, featuredDetails?.episode_run_time);
-  const seasons = featuredType === "tv" ? featuredDetails?.number_of_seasons ?? null : null;
+  const year = parseYear(
+    featuredDetails?.release_date,
+    featuredDetails?.first_air_date,
+  );
+
+  const genres = featuredDetails?.genres
+    ? translateGenres(featuredDetails.genres)
+    : null;
+
+  const runtime = formatRuntime(
+    featuredDetails?.runtime,
+    featuredDetails?.episode_run_time,
+  );
+
+  const seasons =
+    featuredType === "tv" ? featuredDetails?.number_of_seasons ?? null : null;
+
   const overview = featuredDetails?.overview ?? featuredItem?.overview ?? null;
 
   return (
@@ -138,7 +169,7 @@ export default async function HomePage() {
           <ContinueWatchingSection />
           <ForYouSection />
           <TrendingNowSection />
-          <WatchlistVivaSection /> {/* ← NOVO */}
+          <WatchlistVivaSection />
         </div>
       </div>
     </main>

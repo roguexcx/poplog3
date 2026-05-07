@@ -3,15 +3,15 @@
 import { NextResponse } from "next/server";
 import { tmdbFetch } from "@/lib/tmdb";
 
-type Params = {
+type RouteContext = {
   params: Promise<{
-    type: "movie" | "tv";
+    type: string;
     id: string;
   }>;
 };
 
-export async function GET(_request: Request, { params }: Params) {
-  const { type, id } = await params;
+export async function GET(_request: Request, context: RouteContext) {
+  const { type, id } = await context.params;
 
   if (type !== "movie" && type !== "tv") {
     return NextResponse.json({ error: "Tipo inválido" }, { status: 400 });
@@ -22,6 +22,10 @@ export async function GET(_request: Request, { params }: Params) {
     return NextResponse.json(data);
   } catch (error) {
     console.error("Erro ao buscar detalhes TMDB:", error);
-    return NextResponse.json({ error: "Erro ao buscar detalhes" }, { status: 500 });
+
+    return NextResponse.json(
+      { error: "Erro ao buscar detalhes" },
+      { status: 500 }
+    );
   }
 }
