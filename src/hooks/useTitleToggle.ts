@@ -2,12 +2,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useUser } from "@/hooks/useUser";
+import { useAuth } from "@/hooks/useAuth";
 
 type TitleToggleConfig<T> = {
-  /** Verifica o estado atual no banco */
   checkFn: (userId: string) => Promise<T>;
-  /** Executa o toggle e retorna o novo estado */
   toggleFn: (userId: string) => Promise<T>;
 };
 
@@ -28,7 +26,7 @@ export function useTitleToggle<T>(
   config: TitleToggleConfig<T>,
   deps: unknown[],
 ): TitleToggleReturn<T> {
-  const { user, loading: userLoading } = useUser();
+  const { user, loading: userLoading } = useAuth();
   const [state, setState] = useState<T>(initialState);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

@@ -8,6 +8,7 @@ type AuthState = {
   user: User | null;
   session: Session | null;
   loading: boolean;
+  isLoggedIn: boolean;
 };
 
 export function useAuth(): AuthState {
@@ -15,13 +16,14 @@ export function useAuth(): AuthState {
     user: null,
     session: null,
     loading: true,
+    isLoggedIn: false,
   });
 
   useEffect(() => {
     const supabase = createClient();
 
     // onAuthStateChange dispara imediatamente com INITIAL_SESSION,
-    // eliminando a race condition de chamar getSession() em paralelo.
+    // eliminando a race condition com getSession().
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -29,6 +31,7 @@ export function useAuth(): AuthState {
         user: session?.user ?? null,
         session,
         loading: false,
+        isLoggedIn: !!session?.user,
       });
     });
 

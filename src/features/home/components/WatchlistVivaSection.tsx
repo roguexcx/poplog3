@@ -379,6 +379,7 @@ export default function WatchlistVivaSection() {
   useEffect(() => {
     async function load() {
       try {
+        const supabase = createClient();
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) return;
 
