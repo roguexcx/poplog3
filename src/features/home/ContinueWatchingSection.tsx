@@ -5,7 +5,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/client";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -100,22 +100,38 @@ function scoreItem(item: UserTitle, today: string): number {
 // ─── Loader de dados ──────────────────────────────────────────────────────────
 
 async function loadContinueWatching(): Promise<UserTitle[]> {
-  const { data: { session } } = await supabase.auth.getSession();
+  const supabase = createClient();
+
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+
   if (!session) return [];
 
-  const { data: rawTitles } = await supabase
+  const { data: rawTitles, error: titlesError } = await supabase
     .from("user_titles")
     .select("*")
+    .eq("user_id", session.user.id)
     .eq("media_type", "tv")
     .eq("status", "watching")
     .order("created_at", { ascending: false });
 
+  if (titlesError) {
+    console.error("Erro ao carregar séries em andamento:", titlesError);
+    return [];
+  }
+
   if (!rawTitles?.length) return [];
 
-  const { data: episodeRows } = await supabase
+  const { data: episodeRows, error: episodesError } = await supabase
     .from("episode_progress")
     .select("tmdb_id, season, episode")
     .eq("user_id", session.user.id);
+
+  if (episodesError) {
+    console.error("Erro ao carregar progresso de episódios:", episodesError);
+    return [];
+  }
 
   const episodes: EpisodeProgress[] = episodeRows ?? [];
 
@@ -141,11 +157,15 @@ async function loadContinueWatching(): Promise<UserTitle[]> {
               const r = await fetch(
                 `/api/episodes?tvId=${title.tmdb_id}&season=${season.season_number}`,
               );
+
               if (!r.ok) return null;
+
               const data = await r.json();
+
               const available: AvailableEp[] = (data.episodes ?? []).filter(
                 (ep: AvailableEp) => ep.available,
               );
+
               return available.length > 0
                 ? { season: season.season_number, eps: available }
                 : null;
@@ -159,9 +179,12 @@ async function loadContinueWatching(): Promise<UserTitle[]> {
         .sort((a, b) => a.season - b.season);
 
       const watchedFromSeries = episodes.filter((ep) => ep.tmdb_id === title.tmdb_id);
-      const watchedEpisodeKeys = watchedFromSeries.map((ep) => `${ep.season}-${ep.episode}`);
+      const watchedEpisodeKeys = watchedFromSeries.map(
+        (ep) => `${ep.season}-${ep.episode}`,
+      );
 
       const totalEpisodes = seasonList.reduce((acc, s) => acc + s.eps.length, 0);
+
       const watchedEpisodes = watchedFromSeries.filter((watched) =>
         seasonList.some(
           (s) =>
@@ -171,11 +194,16 @@ async function loadContinueWatching(): Promise<UserTitle[]> {
       ).length;
 
       let nextEpisode: NextEpisode | null = null;
+
       for (const season of seasonList) {
         const watchedSet = new Set(
-          watchedFromSeries.filter((ep) => ep.season === season.season).map((ep) => ep.episode),
+          watchedFromSeries
+            .filter((ep) => ep.season === season.season)
+            .map((ep) => ep.episode),
         );
+
         const next = season.eps.find((ep) => !watchedSet.has(ep.episode_number));
+
         if (next) {
           nextEpisode = {
             season: season.season,
@@ -187,7 +215,14 @@ async function loadContinueWatching(): Promise<UserTitle[]> {
         }
       }
 
-      return { ...title, watchedEpisodes, totalEpisodes, nextEpisode, seasonList, watchedEpisodeKeys };
+      return {
+        ...title,
+        watchedEpisodes,
+        totalEpisodes,
+        nextEpisode,
+        seasonList,
+        watchedEpisodeKeys,
+      };
     }),
   );
 

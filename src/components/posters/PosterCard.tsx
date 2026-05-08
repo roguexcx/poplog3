@@ -81,26 +81,37 @@ function ActionButton({
   activeClass,
   children,
 }: ActionButtonProps) {
+  const unavailable = disabled || saving;
+
   return (
     <button
       type="button"
       onClick={(event) => {
         event.preventDefault();
         event.stopPropagation();
+
+        if (unavailable) return;
+
         onClick();
       }}
-      disabled={disabled}
-      title={title}
+      title={saving ? "Salvando..." : title}
+      aria-busy={saving}
+      aria-disabled={unavailable}
       className={[
         "grid h-[30px] w-[30px] place-items-center rounded-full border backdrop-blur-[10px]",
-        "transition-[transform,background,border-color,box-shadow] duration-200",
-        "hover:scale-110 disabled:cursor-not-allowed disabled:opacity-50",
+        "transition-[transform,background,border-color,box-shadow,opacity] duration-200",
+        saving ? "cursor-wait opacity-90" : "cursor-pointer hover:scale-110",
+        disabled && !saving ? "opacity-60" : "",
         active
           ? activeClass
           : "border-white/[0.18] bg-black/[0.72] text-white/85 hover:border-violet-500/60 hover:shadow-[0_0_12px_rgba(139,92,246,0.3)]",
       ].join(" ")}
     >
-      {saving ? <span className="text-[10px]">…</span> : children}
+      {saving ? (
+        <span className="h-[12px] w-[12px] animate-spin rounded-full border border-current border-t-transparent" />
+      ) : (
+        children
+      )}
     </button>
   );
 }
@@ -178,7 +189,7 @@ export default function PosterCard({ item, priority = false }: Props) {
         <div className="absolute left-2.5 top-2.5 z-20 flex flex-col gap-1.5">
           <ActionButton
             onClick={watchlist.toggle}
-            disabled={watchlist.loading || watchlist.saving || !watchlist.isLoggedIn}
+            disabled={watchlist.loading || !watchlist.isLoggedIn}
             title={watchlist.inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
             active={watchlist.inWatchlist}
             saving={watchlist.saving}
@@ -189,7 +200,7 @@ export default function PosterCard({ item, priority = false }: Props) {
 
           <ActionButton
             onClick={watched.toggle}
-            disabled={watched.loading || watched.saving || !watched.isLoggedIn}
+            disabled={watched.loading || !watched.isLoggedIn}
             title={watched.isWatched ? "Desmarcar como assistido" : "Já vi"}
             active={watched.isWatched}
             saving={watched.saving}

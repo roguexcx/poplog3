@@ -1,6 +1,6 @@
 // src/lib/user-title-service.ts
 
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/client";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -27,9 +27,15 @@ type TitleInput = {
   releaseYear?: number | null;
 };
 
+function getSupabase() {
+  return createClient();
+}
+
 // ─── Queries ──────────────────────────────────────────────────────────────────
 
 export async function getUserTitles(userId: string): Promise<UserTitle[]> {
+  const supabase = getSupabase();
+
   const { data, error } = await supabase
     .from("user_titles")
     .select("*")
@@ -49,8 +55,10 @@ export async function getUserTitles(userId: string): Promise<UserTitle[]> {
 export async function isTitleInWatchlist(
   userId: string,
   tmdbId: number,
-  mediaType: MediaType,
+  mediaType: MediaType
 ): Promise<boolean> {
+  const supabase = getSupabase();
+
   const { data, error } = await supabase
     .from("user_titles")
     .select("id")
@@ -58,14 +66,14 @@ export async function isTitleInWatchlist(
     .eq("tmdb_id", tmdbId)
     .eq("media_type", mediaType)
     .eq("status", "watchlist")
-    .limit(1);
+    .maybeSingle();
 
   if (error) {
     console.error("Erro ao verificar watchlist:", error);
     return false;
   }
 
-  return Boolean(data?.length);
+  return Boolean(data);
 }
 
 /**
@@ -79,6 +87,8 @@ export async function toggleWatchlist({
   title,
   releaseYear,
 }: TitleInput): Promise<boolean> {
+  const supabase = getSupabase();
+
   const inWatchlist = await isTitleInWatchlist(userId, tmdbId, mediaType);
 
   if (inWatchlist) {
@@ -92,7 +102,7 @@ export async function toggleWatchlist({
 
     if (error) {
       console.error("Erro ao remover da watchlist:", error);
-      return true; // falhou → mantém como true (ainda na watchlist)
+      return true;
     }
 
     return false;
@@ -110,7 +120,7 @@ export async function toggleWatchlist({
 
   if (error) {
     console.error("Erro ao adicionar à watchlist:", error);
-    return false; // falhou → mantém como false (não entrou)
+    return false;
   }
 
   return true;
@@ -121,8 +131,10 @@ export async function toggleWatchlist({
 export async function isTitleWatched(
   userId: string,
   tmdbId: number,
-  mediaType: MediaType,
+  mediaType: MediaType
 ): Promise<boolean> {
+  const supabase = getSupabase();
+
   const { data, error } = await supabase
     .from("user_titles")
     .select("id")
@@ -130,14 +142,14 @@ export async function isTitleWatched(
     .eq("tmdb_id", tmdbId)
     .eq("media_type", mediaType)
     .eq("status", "watched")
-    .limit(1);
+    .maybeSingle();
 
   if (error) {
     console.error("Erro ao verificar assistido:", error);
     return false;
   }
 
-  return Boolean(data?.length);
+  return Boolean(data);
 }
 
 /**
@@ -151,54 +163,51 @@ export async function toggleWatched({
   title,
   releaseYear,
 }: TitleInput): Promise<boolean> {
-  // Busca linha com status 'watched'
-  const { data: watchedRows, error: watchedError } = await supabase
+  const supabase = getSupabase();
+
+  const { data: watchedRow, error: watchedError } = await supabase
     .from("user_titles")
     .select("id")
     .eq("user_id", userId)
     .eq("tmdb_id", tmdbId)
     .eq("media_type", mediaType)
     .eq("status", "watched")
-    .limit(1);
+    .maybeSingle();
 
   if (watchedError) {
     console.error("Erro ao verificar assistido:", watchedError);
     return false;
   }
 
-  if (watchedRows?.length) {
-    // Remove o registro (não move para watchlist — o usuário pode nunca ter adicionado)
+  if (watchedRow) {
     const { error } = await supabase
       .from("user_titles")
       .delete()
-      .eq("id", watchedRows[0].id);
+      .eq("id", watchedRow.id);
 
     if (error) {
       console.error("Erro ao remover dos assistidos:", error);
-      return true; // falhou → mantém como assistido
+      return true;
     }
 
     return false;
   }
 
-  // Verifica se já existe um registro com outro status (ex: watchlist)
-  const { data: existingRows, error: existingError } = await supabase
+  const { data: existingRow, error: existingError } = await supabase
     .from("user_titles")
     .select("id")
     .eq("user_id", userId)
     .eq("tmdb_id", tmdbId)
     .eq("media_type", mediaType)
-    .limit(1);
+    .limit(1)
+    .maybeSingle();
 
   if (existingError) {
     console.error("Erro ao buscar título existente:", existingError);
     return false;
   }
 
-  const existing = existingRows?.[0];
-
-  if (existing) {
-    // Atualiza o registro existente para 'watched'
+  if (existingRow) {
     const { error } = await supabase
       .from("user_titles")
       .update({
@@ -207,7 +216,7 @@ export async function toggleWatched({
         title,
         release_year: releaseYear ?? null,
       })
-      .eq("id", existing.id);
+      .eq("id", existingRow.id);
 
     if (error) {
       console.error("Erro ao marcar como assistido:", error);
@@ -217,7 +226,6 @@ export async function toggleWatched({
     return true;
   }
 
-  // Sem registro existente — insere novo
   const { error } = await supabase.from("user_titles").insert({
     user_id: userId,
     tmdb_id: tmdbId,

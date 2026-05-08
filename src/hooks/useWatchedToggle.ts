@@ -1,6 +1,8 @@
 // src/hooks/useWatchedToggle.ts
 "use client";
 
+import { useCallback } from "react";
+
 import { useTitleToggle } from "@/hooks/useTitleToggle";
 import { isTitleWatched, toggleWatched } from "@/lib/user-title-service";
 import type { MediaType } from "@/lib/user-title-service";
@@ -12,15 +14,44 @@ type Input = {
   releaseYear?: number | null;
 };
 
-export function useWatchedToggle({ tmdbId, mediaType, title, releaseYear }: Input) {
-  const { state: isWatched, loading, saving, toggle, isLoggedIn } = useTitleToggle(
+function notifyUserTitlesUpdated() {
+  if (typeof window === "undefined") return;
+
+  window.dispatchEvent(new Event("poplog:user-titles-updated"));
+}
+
+export function useWatchedToggle({
+  tmdbId,
+  mediaType,
+  title,
+  releaseYear,
+}: Input) {
+  const {
+    state: isWatched,
+    loading,
+    saving,
+    toggle,
+    isLoggedIn,
+  } = useTitleToggle(
     false,
     {
       checkFn: (userId) => isTitleWatched(userId, tmdbId, mediaType),
-      toggleFn: (userId) => toggleWatched({ userId, tmdbId, mediaType, title, releaseYear }),
+      toggleFn: (userId) =>
+        toggleWatched({ userId, tmdbId, mediaType, title, releaseYear }),
     },
     [tmdbId, mediaType],
   );
 
-  return { isWatched, loading, saving, toggle, isLoggedIn };
+  const toggleAndNotify = useCallback(async () => {
+    await toggle();
+    notifyUserTitlesUpdated();
+  }, [toggle]);
+
+  return {
+    isWatched,
+    loading,
+    saving,
+    toggle: toggleAndNotify,
+    isLoggedIn,
+  };
 }

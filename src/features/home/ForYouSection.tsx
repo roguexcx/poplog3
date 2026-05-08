@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
 import SynopsisText from "@/features/home/components/SynopsisText";
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/client";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -355,22 +355,33 @@ export default function ForYouSection() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    async function load() {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
+  async function load() {
+    const supabase = createClient();
 
-      if (!session) {
-        setLoading(false);
-        return;
-      }
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
 
-      const { data: rawTitles } = await supabase.from("user_titles").select("*");
+    if (!session) {
+      setLoading(false);
+      return;
+    }
 
-      if (!rawTitles?.length) {
-        setLoading(false);
-        return;
-      }
+    const { data: rawTitles, error } = await supabase
+      .from("user_titles")
+      .select("*")
+      .eq("user_id", session.user.id);
+
+    if (error) {
+      console.error("Erro ao carregar títulos para recomendações:", error);
+      setLoading(false);
+      return;
+    }
+
+    if (!rawTitles?.length) {
+      setLoading(false);
+      return;
+    }
 
       const res = await fetch("/api/user/for-you", {
         method: "POST",

@@ -8,7 +8,7 @@ import ForYouSection from "@/features/home/ForYouSection";
 import WatchlistVivaSection from "@/features/home/components/WatchlistVivaSection";
 
 import { useAuth } from "@/hooks/useAuth";
-import { supabase } from "@/lib/supabase";
+import { createClient } from "@/lib/supabase/client";
 
 type MemberDataState = "loading" | "empty" | "has-data";
 
@@ -145,6 +145,8 @@ function EmptyMemberHome() {
 }
 
 async function checkMemberHasData(userId: string): Promise<MemberDataState> {
+  const supabase = createClient();
+
   const { data, error } = await supabase
     .from("user_titles")
     .select("id")
@@ -152,6 +154,7 @@ async function checkMemberHasData(userId: string): Promise<MemberDataState> {
     .limit(1);
 
   if (error) {
+    console.error("Erro ao verificar dados do usuário na Home:", error);
     return "empty";
   }
 
@@ -161,31 +164,52 @@ async function checkMemberHasData(userId: string): Promise<MemberDataState> {
 export default function HomeMemberSections() {
   const { user, loading: authLoading } = useAuth();
   const [dataState, setDataState] = useState<MemberDataState>("loading");
+  const [refreshKey, setRefreshKey] = useState(0);
 
   useEffect(() => {
     let active = true;
 
-    async function loadMemberState() {
-      if (!user) {
+    async function loadMemberState(showSkeleton = true) {
+      if (!user?.id) {
         setDataState("empty");
-        return;
+        return "empty" as MemberDataState;
       }
 
-      setDataState("loading");
+      if (showSkeleton) {
+        setDataState("loading");
+      }
 
       const result = await checkMemberHasData(user.id);
 
-      if (!active) return;
+      if (!active) return result;
 
       setDataState(result);
+
+      return result;
     }
 
     loadMemberState();
 
+    async function handleUserTitlesUpdated() {
+      const result = await loadMemberState(false);
+
+      if (!active) return;
+
+      if (result === "has-data") {
+        setRefreshKey((current) => current + 1);
+      }
+    }
+
+    window.addEventListener("poplog:user-titles-updated", handleUserTitlesUpdated);
+
     return () => {
       active = false;
+      window.removeEventListener(
+        "poplog:user-titles-updated",
+        handleUserTitlesUpdated,
+      );
     };
-  }, [user?.id, user]);
+  }, [user?.id]);
 
   if (authLoading) {
     return <MemberSectionsSkeleton />;
@@ -206,15 +230,15 @@ export default function HomeMemberSections() {
   return (
     <>
       <div id="continue-watching">
-        <ContinueWatchingSection key={`continue-${user.id}`} />
+        <ContinueWatchingSection key={`continue-${user.id}-${refreshKey}`} />
       </div>
 
       <div id="for-you">
-        <ForYouSection key={`for-you-${user.id}`} />
+        <ForYouSection key={`for-you-${user.id}-${refreshKey}`} />
       </div>
 
       <div id="watchlist">
-        <WatchlistVivaSection key={`watchlist-${user.id}`} />
+        <WatchlistVivaSection key={`watchlist-${user.id}-${refreshKey}`} />
       </div>
     </>
   );
