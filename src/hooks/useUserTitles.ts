@@ -3,11 +3,11 @@
 
 import { useEffect, useState } from "react";
 
-import { useUser } from "@/hooks/useUser";
+import { useAuth } from "@/hooks/useAuth";
 import { getUserTitles, type UserTitle } from "@/lib/user-title-service";
 
 export function useUserTitles() {
-  const { user, loading: userLoading } = useUser();
+  const { user, loading: userLoading } = useAuth();
   const [titles, setTitles] = useState<UserTitle[]>([]);
   const [loading, setLoading] = useState(true);
 

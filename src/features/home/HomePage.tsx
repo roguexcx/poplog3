@@ -12,6 +12,7 @@ import {
 } from "@/features/home/home-utils";
 
 import { tmdbFetch } from "@/lib/tmdb";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
 
 import {
   getBackdropUrl,
@@ -77,6 +78,11 @@ async function getRandomHeroBackdropPath(
 }
 
 export default async function HomePage() {
+  const supabase = await createSupabaseServerClient();
+  const {
+    data: { user: initialUser },
+  } = await supabase.auth.getUser();
+
   const trendingItems = await getTrending();
 
   const featuredCandidates = trendingItems.filter(
@@ -164,7 +170,7 @@ export default async function HomePage() {
 
       <div className="relative z-10 mx-auto max-w-[1560px] px-6 pb-16 md:px-10">
         <div className="flex flex-col gap-14">
-          <HomeMemberSections />
+          <HomeMemberSections initialUser={initialUser} />
 
           <div id="trending">
             <TrendingNowSection />
