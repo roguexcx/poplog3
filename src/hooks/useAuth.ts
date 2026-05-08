@@ -1,6 +1,5 @@
 "use client";
 
-// src/hooks/useAuth.ts
 import { useEffect, useState } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { createClient } from "@/lib/supabase/client";
@@ -21,16 +20,8 @@ export function useAuth(): AuthState {
   useEffect(() => {
     const supabase = createClient();
 
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setState({
-        user: session?.user ?? null,
-        session,
-        loading: false,
-      });
-    });
-
-    // Listen for auth changes — this is what makes sections react without reload
+    // onAuthStateChange dispara imediatamente com INITIAL_SESSION,
+    // eliminando a race condition de chamar getSession() em paralelo.
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {

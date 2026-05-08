@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import type { User } from "@supabase/supabase-js";
 
 import ContinueWatchingSection from "@/features/home/ContinueWatchingSection";
 import ForYouSection from "@/features/home/ForYouSection";
@@ -161,8 +162,18 @@ async function checkMemberHasData(userId: string): Promise<MemberDataState> {
   return data && data.length > 0 ? "has-data" : "empty";
 }
 
-export default function HomeMemberSections() {
-  const { user, loading: authLoading } = useAuth();
+type Props = {
+  initialUser?: User | null;
+};
+
+export default function HomeMemberSections({ initialUser }: Props) {
+  const { user: authUser, loading: authLoading } = useAuth();
+
+  // Se o servidor já resolveu a auth, usa o resultado imediatamente.
+  // O hook de auth atualiza em seguida para mudanças em tempo real.
+  const user = authLoading && initialUser !== undefined ? initialUser : authUser;
+  const isAuthLoading = authLoading && initialUser === undefined;
+
   const [dataState, setDataState] = useState<MemberDataState>("loading");
   const [refreshKey, setRefreshKey] = useState(0);
 
@@ -211,12 +222,12 @@ export default function HomeMemberSections() {
     };
   }, [user?.id]);
 
-  if (authLoading) {
+  if (isAuthLoading) {
     return <MemberSectionsSkeleton />;
   }
 
   if (!user) {
-    return null;
+    return <EmptyMemberHome />;
   }
 
   if (dataState === "loading") {
@@ -244,34 +255,3 @@ export default function HomeMemberSections() {
   );
 }
 
-// ... seu código anterior ...
-
-// src/features/home/HomeMemberSections.tsx
-
-export default function HomeMemberSections() {
-  const { user, loading: authLoading } = useAuth();
-  const [dataState, setDataState] = useState<MemberDataState>("loading");
-
-  // ... (mantenha seu useEffect)
-
-  // 1. Prioridade: Se está carregando a auth, mostre skeleton
-  if (authLoading) return <MemberSectionsSkeleton />;
-
-  // 2. Se a auth terminou e não tem usuário, mostre o banner de incentivo
-  if (!user) return <EmptyMemberHome />;
-
-  // 3. Se tem usuário, mas ainda estamos buscando os títulos dele no banco
-  if (dataState === "loading") return <MemberSectionsSkeleton />;
-
-  // 4. Se o usuário está logado mas não salvou nada ainda (vazio)
-  if (dataState === "empty") return <EmptyMemberHome />;
-
-  // 5. Sucesso: Usuário logado e com dados salvos
-  return (
-    <>
-      <ContinueWatchingSection key={`continue-${user.id}-${refreshKey}`} />
-      <ForYouSection key={`for-you-${user.id}-${refreshKey}`} />
-      <WatchlistVivaSection key={`watchlist-${user.id}-${refreshKey}`} />
-    </>
-  );
-}
