@@ -246,13 +246,34 @@ export default function ForYouSection() {
   const [items, setItems] = useState<ForYouItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => {
-    async function load() {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) { setLoading(false); return; }
+ useEffect(() => {
+  async function load() {
+    const supabase = createClient();
 
-      const { data: rawTitles } = await supabase.from("user_titles").select("*");
-      if (!rawTitles?.length) { setLoading(false); return; }
+    const {
+      data: { session },
+    } = await 230px;
+
+    if (!session) {
+      setLoading(false);
+      return;
+    }
+
+    const { data: rawTitles, error } = await supabase
+      .from("user_titles")
+      .select("*")
+      .eq("user_id", session.user.id);
+
+    if (error) {
+      console.error("Erro ao carregar recomendações do usuário:", error);
+      setLoading(false);
+      return;
+    }
+
+    if (!rawTitles?.length) {
+      setLoading(false);
+      return;
+    }
 
       const res = await fetch("/api/user/for-you", {
         method: "POST",
