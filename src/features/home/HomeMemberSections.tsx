@@ -243,3 +243,35 @@ export default function HomeMemberSections() {
     </>
   );
 }
+
+// ... seu código anterior ...
+
+// src/features/home/HomeMemberSections.tsx
+
+export default function HomeMemberSections() {
+  const { user, loading: authLoading } = useAuth();
+  const [dataState, setDataState] = useState<MemberDataState>("loading");
+
+  // ... (mantenha seu useEffect)
+
+  // 1. Prioridade: Se está carregando a auth, mostre skeleton
+  if (authLoading) return <MemberSectionsSkeleton />;
+
+  // 2. Se a auth terminou e não tem usuário, mostre o banner de incentivo
+  if (!user) return <EmptyMemberHome />;
+
+  // 3. Se tem usuário, mas ainda estamos buscando os títulos dele no banco
+  if (dataState === "loading") return <MemberSectionsSkeleton />;
+
+  // 4. Se o usuário está logado mas não salvou nada ainda (vazio)
+  if (dataState === "empty") return <EmptyMemberHome />;
+
+  // 5. Sucesso: Usuário logado e com dados salvos
+  return (
+    <>
+      <ContinueWatchingSection key={`continue-${user.id}-${refreshKey}`} />
+      <ForYouSection key={`for-you-${user.id}-${refreshKey}`} />
+      <WatchlistVivaSection key={`watchlist-${user.id}-${refreshKey}`} />
+    </>
+  );
+}
