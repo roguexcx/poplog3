@@ -1,10 +1,8 @@
 // src/features/home/HomePage.tsx
 
-import ContinueWatchingSection from "@/features/home/ContinueWatchingSection";
-import ForYouSection from "@/features/home/ForYouSection";
+import HomeMemberSections from "@/features/home/HomeMemberSections";
 import HeroSection from "@/features/home/components/HeroSection";
 import TrendingNowSection from "@/features/home/components/TrendingNowSection";
-import WatchlistVivaSection from "@/features/home/components/WatchlistVivaSection";
 
 import { getFeaturedDetails, getTrending } from "@/features/home/home-api";
 import {
@@ -166,24 +164,11 @@ export default async function HomePage() {
 
       <div className="relative z-10 mx-auto max-w-[1560px] px-6 pb-16 md:px-10">
         <div className="flex flex-col gap-14">
-
-          {/* Each wrapper div carries the anchor id the Sidebar scrolls to */}
-          <div id="continue-watching">
-            <ContinueWatchingSection />
-          </div>
-
-          <div id="for-you">
-            <ForYouSection />
-          </div>
+          <HomeMemberSections />
 
           <div id="trending">
             <TrendingNowSection />
           </div>
-
-          <div id="watchlist">
-            <WatchlistVivaSection />
-          </div>
-
         </div>
       </div>
     </main>

@@ -1,118 +1,47 @@
 "use client";
 
-// src/components/layout/Sidebar.tsx
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useCallback } from "react";
-
+import {
+  Home,
+  Search,
+  Film,
+  Tv,
+  LogOut,
+  User,
+} from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
-import LoginDrawer from "@/components/auth/LoginDrawer";
 import { createClient } from "@/lib/supabase/client";
+import LoginDrawer from "@/components/auth/LoginDrawer";
 
-// ─── Icons ────────────────────────────────────────────────────────────────────
+// ─── Configurações ──────────────────────────────────────────────────────────
 
-function IconHome({ filled }: { filled?: boolean }) {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path
-        d="M3 9.5L12 3l9 6.5V20a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V9.5z"
-        fill={filled ? "currentColor" : "none"}
-        stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round"
-      />
-    </svg>
-  );
-}
+const NAV_LINKS = [
+  { href: "/", label: "Início", icon: Home },
+  { href: "/buscar", label: "Buscar", icon: Search },
+  { href: "/filmes", label: "Filmes", icon: Film },
+  { href: "/series", label: "Séries", icon: Tv },
+];
 
-function IconSearch() {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle cx="11" cy="11" r="7.5" stroke="currentColor" strokeWidth="1.6" />
-      <path d="M17 17l3.5 3.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function IconFilm({ filled }: { filled?: boolean }) {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <rect x="2" y="4" width="20" height="16" rx="2"
-        fill={filled ? "currentColor" : "none"} fillOpacity={filled ? 0.15 : 0}
-        stroke="currentColor" strokeWidth="1.6" />
-      <path d="M7 4v16M17 4v16M2 9h3M2 15h3M19 9h3M19 15h3"
-        stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function IconTV({ filled }: { filled?: boolean }) {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <rect x="2" y="3" width="20" height="14" rx="2"
-        fill={filled ? "currentColor" : "none"} fillOpacity={filled ? 0.15 : 0}
-        stroke="currentColor" strokeWidth="1.6" />
-      <path d="M8 21h8M12 17v4" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-    </svg>
-  );
-}
-
-function IconBookmark({ filled }: { filled?: boolean }) {
-  return (
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M5 3h14a1 1 0 0 1 1 1v17l-8-4-8 4V4a1 1 0 0 1 1-1z"
-        fill={filled ? "currentColor" : "none"}
-        stroke="currentColor" strokeWidth="1.6" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function IconLogout() {
-  return (
-    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"
-        stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
-      <path d="M16 17l5-5-5-5M21 12H9"
-        stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function IconChevronDown() {
-  return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <path d="M6 9l6 6 6-6" stroke="currentColor" strokeWidth="2"
-        strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-// ─── Data ─────────────────────────────────────────────────────────────────────
-
-type AnchorLink = { label: string; anchor: string };
-
-const ROUTE_ANCHORS: Record<string, AnchorLink[]> = {
+const ROUTE_ANCHORS: Record<string, { label: string; anchor: string }[]> = {
   "/": [
     { label: "Continue Assistindo", anchor: "continue-watching" },
-    { label: "Para Você",           anchor: "for-you"           },
-    { label: "Em Alta",             anchor: "trending"          },
-    { label: "Minha Watchlist",     anchor: "watchlist"         },
+    { label: "Para Você", anchor: "for-you" },
+    { label: "Em Alta", anchor: "trending" },
+    { label: "Minha Watchlist", anchor: "watchlist" },
   ],
 };
 
-const NAV_LINKS = [
-  { href: "/",       label: "Início", icon: IconHome   },
-  { href: "/buscar", label: "Buscar", icon: IconSearch  },
-  { href: "/filmes", label: "Filmes", icon: IconFilm   },
-  { href: "/series", label: "Séries", icon: IconTV     },
-];
-
-// ─── Component ────────────────────────────────────────────────────────────────
+// ─── Componente Principal ─────────────────────────────────────────────────────
 
 export default function Sidebar() {
   const pathname = usePathname();
-  const { user, loading } = useAuth();
+  const { user } = useAuth();
 
-  const [loginOpen,    setLoginOpen]    = useState(false);
+  const [loginOpen, setLoginOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [isHovered, setIsHovered] = useState(false);
 
   const anchors = ROUTE_ANCHORS[pathname] ?? [];
 
@@ -122,307 +51,245 @@ export default function Sidebar() {
     setUserMenuOpen(false);
   }, []);
 
-  function scrollTo(anchor: string) {
-    document.getElementById(anchor)?.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-
   const displayName =
-    user?.user_metadata?.full_name ??
-    user?.email?.split("@")[0] ??
-    "Usuário";
+    user?.user_metadata?.full_name ?? user?.email?.split("@")[0] ?? "Usuário";
+
   const avatarLetter = displayName[0]?.toUpperCase() ?? "U";
 
   return (
     <>
-      {/*
-        position: fixed + left: 0 + top: 0
-        Nenhum pai deve ter transform, filter ou will-change
-        que criaria um novo containing block e quebraria o fixed.
-      */}
+      {/* ════════════════════════════════════════════════════════════
+          DESKTOP SIDEBAR
+      ════════════════════════════════════════════════════════════ */}
       <aside
-        style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          width: 200,
-          height: "100vh",
-          zIndex: 40,
-          display: "flex",
-          flexDirection: "column",
-          backgroundColor: "#08080f",
-          borderRight: "1px solid rgba(255,255,255,0.05)",
-        }}
-      >
-        {/* ── Logo ── */}
-        <div style={{ display: "flex", alignItems: "center", gap: 10, height: 64, padding: "0 20px", flexShrink: 0 }}>
-          <span style={{
-            display: "flex", alignItems: "center", justifyContent: "center",
-            width: 28, height: 28, borderRadius: 8,
-            backgroundColor: "#4f46e5",
-            fontSize: 12, fontWeight: 900, color: "white",
-            flexShrink: 0, userSelect: "none",
-          }}>
-            P
-          </span>
-          <span style={{ fontSize: 15, fontWeight: 700, letterSpacing: "-0.02em", color: "white" }}>
+  onMouseEnter={() => setIsHovered(true)}
+  onMouseLeave={() => setIsHovered(false)}
+  className={`
+    peer/sidebar fixed top-0 left-0 z-50 hidden h-screen flex-col
+    border-r border-white/5 bg-[#09090f]/80 backdrop-blur-xl
+    transition-all duration-300 ease-in-out md:flex
+    ${isHovered ? "w-60" : "w-20"}
+  `}
+>
+        {/* Logo */}
+        <div className="flex items-center gap-4 p-5">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-gradient-to-br from-indigo-600 to-purple-700 shadow-lg shadow-indigo-500/20">
+            <span className="text-xl font-black text-white">P</span>
+          </div>
+
+          <span
+            className={`
+              whitespace-nowrap text-lg font-bold text-white transition-all duration-300
+              ${isHovered ? "opacity-100 translate-x-0" : "opacity-0 -translate-x-2 pointer-events-none"}
+            `}
+          >
             Poplog
           </span>
         </div>
 
-        <Divider />
+        {/* Navegação */}
+        <nav className="mt-4 flex-1 space-y-2 px-3">
+          {NAV_LINKS.map((link) => {
+            const active = pathname === link.href;
 
-        {/* ── Main nav ── */}
-        <nav style={{ display: "flex", flexDirection: "column", gap: 2, padding: "12px 10px 0", flexShrink: 0 }}>
-          {NAV_LINKS.map(({ href, label, icon: Icon }) => {
-            const active = pathname === href;
             return (
               <Link
-                key={href}
-                href={href}
-                style={{
-                  position: "relative",
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 10,
-                  height: 40,
-                  padding: "0 12px",
-                  borderRadius: 10,
-                  fontSize: 14,
-                  fontWeight: 500,
-                  textDecoration: "none",
-                  color: active ? "white" : "rgb(113 113 122)",
-                  backgroundColor: active ? "rgba(255,255,255,0.07)" : "transparent",
-                  transition: "background-color 120ms, color 120ms",
-                }}
-                onMouseEnter={e => {
-                  if (!active) {
-                    (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(255,255,255,0.04)";
-                    (e.currentTarget as HTMLElement).style.color = "rgb(212 212 216)";
+                key={link.href}
+                href={link.href}
+                className={`
+                  group relative flex items-center gap-4 rounded-xl p-3
+                  transition-all duration-200
+                  ${
+                    active
+                      ? "bg-indigo-600/10 text-indigo-300"
+                      : "text-zinc-300 hover:bg-white/5 hover:text-white"
                   }
-                }}
-                onMouseLeave={e => {
-                  if (!active) {
-                    (e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
-                    (e.currentTarget as HTMLElement).style.color = "rgb(113 113 122)";
-                  }
-                }}
+                `}
               >
-                {active && (
-                  <span style={{
-                    position: "absolute", left: 0, top: "50%",
-                    transform: "translateY(-50%)",
-                    width: 2, height: 16, borderRadius: 2,
-                    backgroundColor: "#6366f1",
-                  }} />
+                <link.icon
+                  size={22}
+                  className={`
+                    shrink-0 transition-colors duration-200
+                    ${
+                      active
+                        ? "text-indigo-300 stroke-[2.5px]"
+                        : "text-zinc-300 stroke-[1.9px] group-hover:text-white"
+                    }
+                  `}
+                />
+
+                <span
+                  className={`
+                    whitespace-nowrap font-medium transition-all duration-300
+                    ${
+                      isHovered
+                        ? "opacity-100 translate-x-0"
+                        : "opacity-0 -translate-x-2 pointer-events-none"
+                    }
+                  `}
+                >
+                  {link.label}
+                </span>
+
+                {active && !isHovered && (
+                  <div className="absolute left-0 h-6 w-1 rounded-r-full bg-indigo-500" />
                 )}
-                <Icon filled={active} />
-                {label}
               </Link>
             );
           })}
-        </nav>
 
-        {/* ── Contextual anchors ── */}
-        {anchors.length > 0 && (
-          <>
-            <Divider style={{ marginTop: 20 }} />
-            <div style={{ display: "flex", flexDirection: "column", padding: "12px 10px 0", flexShrink: 0 }}>
-              <span style={{
-                display: "block", padding: "0 12px", marginBottom: 6,
-                fontSize: 10, fontWeight: 600,
-                textTransform: "uppercase", letterSpacing: "0.16em",
-                color: "rgb(63 63 70)",
-              }}>
+          {/* Âncoras da Home */}
+          {anchors.length > 0 && isHovered && (
+            <div className="mt-4 space-y-1 border-t border-white/5 pt-4">
+              <p className="mb-2 px-3 text-[10px] font-bold uppercase tracking-widest text-zinc-600">
                 Nesta página
-              </span>
-              {anchors.map(({ label, anchor }) => (
+              </p>
+
+              {anchors.map((anchor) => (
                 <button
-                  key={anchor}
-                  type="button"
-                  onClick={() => scrollTo(anchor)}
-                  style={{
-                    display: "flex", alignItems: "center", gap: 10,
-                    height: 32, padding: "0 12px",
-                    borderRadius: 8, border: "none",
-                    backgroundColor: "transparent",
-                    fontSize: 12, fontWeight: 500,
-                    color: "rgb(82 82 91)",
-                    cursor: "pointer", textAlign: "left",
-                    transition: "background-color 120ms, color 120ms",
-                  }}
-                  onMouseEnter={e => {
-                    (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(255,255,255,0.03)";
-                    (e.currentTarget as HTMLElement).style.color = "rgb(161 161 170)";
-                  }}
-                  onMouseLeave={e => {
-                    (e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
-                    (e.currentTarget as HTMLElement).style.color = "rgb(82 82 91)";
-                  }}
+                  key={anchor.anchor}
+                  onClick={() =>
+                    document
+                      .getElementById(anchor.anchor)
+                      ?.scrollIntoView({ behavior: "smooth" })
+                  }
+                  className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm text-zinc-500 transition-colors hover:bg-white/5 hover:text-indigo-300"
                 >
-                  <span style={{ width: 5, height: 5, borderRadius: "50%", backgroundColor: "currentColor", flexShrink: 0 }} />
-                  {label}
+                  <div className="h-1.5 w-1.5 rounded-full bg-current opacity-40" />
+                  {anchor.label}
                 </button>
               ))}
             </div>
-          </>
-        )}
+          )}
+        </nav>
 
-        <div style={{ flex: 1 }} />
-
-        {/* ── Watchlist ── */}
-        <div style={{ padding: "0 10px 8px", flexShrink: 0 }}>
-          <Link
-            href="/watchlist"
-            style={{
-              display: "flex", alignItems: "center", gap: 10,
-              height: 40, padding: "0 12px", borderRadius: 10,
-              fontSize: 14, fontWeight: 500, textDecoration: "none",
-              color: pathname === "/watchlist" ? "white" : "rgb(113 113 122)",
-              backgroundColor: pathname === "/watchlist" ? "rgba(255,255,255,0.07)" : "transparent",
-              transition: "background-color 120ms, color 120ms",
-            }}
-            onMouseEnter={e => {
-              if (pathname !== "/watchlist") {
-                (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(255,255,255,0.04)";
-                (e.currentTarget as HTMLElement).style.color = "rgb(212 212 216)";
-              }
-            }}
-            onMouseLeave={e => {
-              if (pathname !== "/watchlist") {
-                (e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
-                (e.currentTarget as HTMLElement).style.color = "rgb(113 113 122)";
-              }
-            }}
-          >
-            <IconBookmark filled={pathname === "/watchlist"} />
-            Watchlist
-          </Link>
-        </div>
-
-        <Divider />
-
-        {/* ── Auth ── */}
-        <div style={{ position: "relative", padding: "12px 10px", flexShrink: 0 }}>
-          {loading ? (
-            <div style={{ display: "flex", alignItems: "center", gap: 12, height: 48, padding: "0 12px" }}>
-              <div style={{ width: 32, height: 32, borderRadius: "50%", backgroundColor: "rgba(255,255,255,0.06)", flexShrink: 0 }} />
-              <div style={{ display: "flex", flexDirection: "column", gap: 6, flex: 1 }}>
-                <div style={{ height: 10, width: "60%", borderRadius: 4, backgroundColor: "rgba(255,255,255,0.06)" }} />
-                <div style={{ height: 8, width: "80%", borderRadius: 4, backgroundColor: "rgba(255,255,255,0.04)" }} />
-              </div>
-            </div>
-          ) : user ? (
-            <div style={{ position: "relative" }}>
+        {/* User / Auth */}
+        <div className="border-t border-white/5 p-3">
+          {user ? (
+            <div className="relative">
               <button
-                type="button"
-                onClick={() => setUserMenuOpen(v => !v)}
-                style={{
-                  display: "flex", alignItems: "center", gap: 10,
-                  width: "100%", padding: "8px 12px", borderRadius: 10,
-                  border: "none", backgroundColor: "transparent",
-                  cursor: "pointer", textAlign: "left",
-                  transition: "background-color 120ms",
-                }}
-                onMouseEnter={e => (e.currentTarget.style.backgroundColor = "rgba(255,255,255,0.04)")}
-                onMouseLeave={e => (e.currentTarget.style.backgroundColor = "transparent")}
+                onClick={() => setUserMenuOpen(!userMenuOpen)}
+                className="flex w-full items-center gap-3 rounded-xl p-2 text-zinc-300 transition-colors hover:bg-white/5 hover:text-white"
               >
-                {/* Avatar */}
-                <span style={{
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  width: 32, height: 32, borderRadius: "50%",
-                  backgroundColor: "rgba(79,70,229,0.25)",
-                  fontSize: 12, fontWeight: 700, color: "#a5b4fc",
-                  boxShadow: "0 0 0 1px rgba(99,102,241,0.25)",
-                  flexShrink: 0,
-                }}>
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 font-bold text-white shadow-inner">
                   {avatarLetter}
-                </span>
-                {/* Info */}
-                <span style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
-                  <span style={{ display: "block", fontSize: 13, fontWeight: 500, color: "rgb(212 212 216)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                </div>
+
+                <div
+                  className={`
+                    flex min-w-0 flex-col text-left transition-all duration-300
+                    ${
+                      isHovered
+                        ? "w-auto opacity-100 translate-x-0"
+                        : "w-0 opacity-0 -translate-x-2 pointer-events-none"
+                    }
+                  `}
+                >
+                  <span className="truncate text-sm font-semibold text-white">
                     {displayName}
                   </span>
-                  <span style={{ display: "block", fontSize: 10, color: "rgb(82 82 91)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {user.email}
+                  <span className="truncate text-[10px] text-zinc-500">
+                    Minha Conta
                   </span>
-                </span>
-                {/* Chevron */}
-                <span style={{ color: "rgb(82 82 91)", flexShrink: 0, transform: userMenuOpen ? "rotate(180deg)" : "none", transition: "transform 200ms" }}>
-                  <IconChevronDown />
-                </span>
+                </div>
               </button>
 
-              {/* Dropdown */}
               {userMenuOpen && (
-                <div style={{
-                  position: "absolute", bottom: "100%", left: 0, right: 0,
-                  marginBottom: 4, borderRadius: 10, overflow: "hidden",
-                  border: "1px solid rgba(255,255,255,0.06)",
-                  backgroundColor: "#0d0d18",
-                  boxShadow: "0 -8px 32px rgba(0,0,0,0.5)",
-                }}>
+                <div className="absolute bottom-full left-0 mb-2 w-56 overflow-hidden rounded-2xl border border-white/10 bg-[#12121a] shadow-2xl backdrop-blur-xl">
+                  <div className="border-b border-white/5 p-4">
+                    <p className="text-xs text-zinc-500">Logado como</p>
+                    <p className="truncate text-sm font-medium text-white">
+                      {user.email}
+                    </p>
+                  </div>
+
                   <button
-                    type="button"
                     onClick={handleLogout}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 10,
-                      width: "100%", padding: "12px 16px",
-                      border: "none", backgroundColor: "transparent",
-                      fontSize: 13, color: "rgb(161 161 170)",
-                      cursor: "pointer", textAlign: "left",
-                      transition: "background-color 120ms, color 120ms",
-                    }}
-                    onMouseEnter={e => {
-                      (e.currentTarget as HTMLElement).style.backgroundColor = "rgba(255,255,255,0.04)";
-                      (e.currentTarget as HTMLElement).style.color = "rgb(248 113 113)";
-                    }}
-                    onMouseLeave={e => {
-                      (e.currentTarget as HTMLElement).style.backgroundColor = "transparent";
-                      (e.currentTarget as HTMLElement).style.color = "rgb(161 161 170)";
-                    }}
+                    className="flex w-full items-center gap-3 p-4 text-sm text-red-400 transition-colors hover:bg-red-500/10"
                   >
-                    <IconLogout />
-                    Sair da conta
+                    <LogOut size={16} />
+                    Sair
                   </button>
                 </div>
               )}
             </div>
           ) : (
-            /* Logged out */
             <button
-              type="button"
               onClick={() => setLoginOpen(true)}
-              style={{
-                display: "flex", alignItems: "center", justifyContent: "center",
-                width: "100%", padding: "10px 16px", borderRadius: 10,
-                border: "none", backgroundColor: "#4f46e5",
-                fontSize: 13, fontWeight: 600, color: "white",
-                cursor: "pointer", transition: "background-color 120ms",
-              }}
-              onMouseEnter={e => (e.currentTarget.style.backgroundColor = "#6366f1")}
-              onMouseLeave={e => (e.currentTarget.style.backgroundColor = "#4f46e5")}
+              className="group flex w-full items-center gap-4 rounded-xl p-3 text-indigo-300 transition-all hover:bg-indigo-500/10 hover:text-indigo-200"
             >
-              Entrar
+              <User
+                size={22}
+                className="shrink-0 stroke-[1.9px] text-indigo-300 transition-colors group-hover:text-indigo-200"
+              />
+
+              <span
+                className={`
+                  whitespace-nowrap font-bold transition-all duration-300
+                  ${
+                    isHovered
+                      ? "opacity-100 translate-x-0"
+                      : "opacity-0 -translate-x-2 pointer-events-none"
+                  }
+                `}
+              >
+                Entrar
+              </span>
             </button>
           )}
         </div>
       </aside>
 
+      {/* ════════════════════════════════════════════════════════════
+          MOBILE BOTTOM NAV
+      ════════════════════════════════════════════════════════════ */}
+      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/5 bg-[#09090f]/90 px-4 pb-[env(safe-area-inset-bottom,12px)] pt-2 backdrop-blur-xl md:hidden">
+        <div className="flex items-center justify-around">
+          {NAV_LINKS.map((link) => {
+            const active = pathname === link.href;
+
+            return (
+              <Link
+                key={link.href}
+                href={link.href}
+                className={`
+                  flex flex-col items-center gap-1 rounded-xl p-2 transition-colors
+                  ${active ? "text-indigo-300" : "text-zinc-300"}
+                `}
+              >
+                <link.icon
+                  size={20}
+                  className={active ? "stroke-[2.5px]" : "stroke-[1.9px]"}
+                />
+                <span className="text-[10px] font-bold uppercase tracking-tighter">
+                  {link.label}
+                </span>
+              </Link>
+            );
+          })}
+
+          <button
+            onClick={() =>
+              user ? setUserMenuOpen(!userMenuOpen) : setLoginOpen(true)
+            }
+            className="flex flex-col items-center gap-1 rounded-xl p-2 text-zinc-300 transition-colors hover:text-white"
+          >
+            {user ? (
+              <div className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500 text-[10px] font-bold text-white">
+                {avatarLetter}
+              </div>
+            ) : (
+              <User size={20} className="stroke-[1.9px]" />
+            )}
+
+            <span className="text-[10px] font-bold uppercase tracking-tighter">
+              {user ? "Conta" : "Entrar"}
+            </span>
+          </button>
+        </div>
+      </nav>
+
       <LoginDrawer open={loginOpen} onClose={() => setLoginOpen(false)} />
     </>
-  );
-}
-
-// ─── Divider ──────────────────────────────────────────────────────────────────
-
-function Divider({ style }: { style?: React.CSSProperties }) {
-  return (
-    <div style={{
-      height: 1,
-      margin: "0 16px",
-      backgroundColor: "rgba(255,255,255,0.05)",
-      flexShrink: 0,
-      ...style,
-    }} />
   );
 }
