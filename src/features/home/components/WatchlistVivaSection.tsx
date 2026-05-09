@@ -434,8 +434,7 @@ export default function WatchlistVivaSection() {
     setVisible(selectFive(allTitles));
   }
 
-  function handleDismiss(id: number, _action: "watched" | "remove") {
-    // TODO: persistir ação no Supabase (watched/remove) conforme implementação da biblioteca
+  function handleDismiss(id: number, action: "watched" | "remove") {
     const next = allTitles.filter((t) => t.id !== id);
     setAllTitles(next);
     setVisible((prev) => {
@@ -445,6 +444,22 @@ export default function WatchlistVivaSection() {
       if (spare) return [...filtered, { ...spare, _slot: "free" as WatchlistSlot }];
       return filtered;
     });
+
+    // Persiste no Supabase em background
+    const supabase = createClient();
+    if (action === "watched") {
+      supabase
+        .from("user_titles")
+        .update({ status: "watched", watched_at: new Date().toISOString() })
+        .eq("id", id)
+        .then(() => {/* fire and forget */});
+    } else {
+      supabase
+        .from("user_titles")
+        .update({ status: null })
+        .eq("id", id)
+        .then(() => {/* fire and forget */});
+    }
   }
 
   if (!loading && allTitles.length === 0) return null;

@@ -246,7 +246,14 @@ export default async function TitleDetailPage({ params }: Props) {
   const sourceYear      = Number(year) || null;
 
   // Providers via utilitário centralizado
-  const streaming = await getStreamingInfo(data.id, type as "movie" | "tv");
+  const streaming = await getStreamingInfo(data.id, type as "movie" | "tv", {
+    releaseDate:         data.release_date ?? data.first_air_date ?? undefined,
+    productionCompanies: data.production_companies ?? [],
+    budget:              data.budget ?? 0,
+    revenue:             data.revenue ?? 0,
+    seasons:             data.number_of_seasons ?? null,
+    genre:               data.genres?.[0]?.name ?? null,
+  });
 
   const subscriptionProviders = [
     ...streaming.flatrate,
@@ -451,6 +458,59 @@ export default async function TitleDetailPage({ params }: Props) {
                     label="Comprar"
                     providers={streaming.buy.filter((p) => p.id !== featuredProvider.id)}
                   />
+                </div>
+              ) : streaming.streamStatus === "cinemas" ? (
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-rose-400/30 bg-rose-500/[0.12] px-4 py-2.5">
+                    <p className="text-[10px] font-black uppercase tracking-[0.12em] text-rose-300">
+                      Nos cinemas
+                    </p>
+                  </div>
+                  <div className="space-y-2 px-0.5">
+                    {streaming.estimatedPvodMonth && (
+                      <p className="text-[12px] text-zinc-400">
+                        Aluguel digital previsto para{" "}
+                        <span className="font-semibold text-zinc-200">{streaming.estimatedPvodMonth}</span>
+                      </p>
+                    )}
+                    {streaming.estimatedPlatform && streaming.estimatedMonth && (
+                      <p className="text-[12px] text-zinc-400">
+                        <span className="font-semibold text-zinc-200">{streaming.estimatedPlatform}</span>{" "}
+                        previsto para{" "}
+                        <span className="font-semibold text-zinc-200">{streaming.estimatedMonth}</span>
+                      </p>
+                    )}
+                    {!streaming.estimatedPvodMonth && !streaming.estimatedPlatform && (
+                      <p className="text-[12px] text-zinc-500">
+                        Streaming em breve — janela de distribuição em andamento
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ) : streaming.streamStatus === "chegando" ? (
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-amber-400/30 bg-amber-500/[0.12] px-4 py-2.5">
+                    <p className="text-[10px] font-black uppercase tracking-[0.12em] text-amber-300">
+                      Chegando em breve
+                    </p>
+                  </div>
+                  <div className="space-y-2 px-0.5">
+                    {streaming.estimatedPlatform && streaming.estimatedMonth ? (
+                      <p className="text-[12px] text-zinc-400">
+                        Previsto para{" "}
+                        <span className="font-semibold text-zinc-200">{streaming.estimatedMonth}</span>{" "}
+                        no{" "}
+                        <span className="font-semibold text-zinc-200">{streaming.estimatedPlatform}</span>
+                      </p>
+                    ) : (
+                      <p className="text-[12px] text-zinc-500">
+                        Ainda não disponível no Brasil
+                      </p>
+                    )}
+                    {streaming.availableAbroad && (
+                      <p className="text-[11px] text-zinc-600">Disponível fora do Brasil</p>
+                    )}
+                  </div>
                 </div>
               ) : streaming.availableAbroad ? (
                 <p className="text-sm text-zinc-400">

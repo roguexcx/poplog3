@@ -33,6 +33,7 @@ export type StreamingInfo = {
   origin: "cinema" | "streaming";
   estimatedPlatform: string | null;
   estimatedMonth: string | null;
+  estimatedPvodMonth: string | null;
   contextPool: string[];
 };
 
@@ -191,8 +192,9 @@ export function buildContextPool(opts: {
   providers: { name: string; type: string }[];
   studio: StudioInfo | null;
   genre: string | null;
+  origin: "cinema" | "streaming";
 }): string[] {
-  const { createdAt, releaseDate, streamStatus, mediaType, seasons, providers, studio, genre } = opts;
+  const { createdAt, releaseDate, streamStatus, mediaType, seasons, providers, studio, genre, origin } = opts;
 
   const pool: string[] = [];
   const daysSaved        = daysBetween(createdAt);
@@ -208,8 +210,6 @@ export function buildContextPool(opts: {
   const rent     = providers.find((p) => p.type === "rent");
   const buy      = providers.find((p) => p.type === "buy");
 
-  if (genre) pool.push(genre);
-
   if (streamStatus === "cinemas") {
     if (studio) {
       pool.push(
@@ -219,17 +219,31 @@ export function buildContextPool(opts: {
     } else {
       const weeksLeft = Math.max(1, Math.round((45 - daysSinceRelease) / 7));
       pool.push(
-        `Ainda nos cinemas · streaming em ~${weeksLeft} ${weeksLeft === 1 ? "semana" : "semanas"}`,
-        "Ainda em cartaz",
+        `Ainda nos cinemas · aluguel digital em ~${weeksLeft} ${weeksLeft === 1 ? "semana" : "semanas"}`,
+        "Ainda em cartaz · em breve no streaming",
       );
     }
   } else if (streamStatus === "chegando") {
-    if (studio) {
+    if (origin === "streaming") {
+      // Conteúdo nativo de streaming ainda indisponível no Brasil
+      if (studio) {
+        pool.push(
+          `Lançamento direto no ${studio.platform} · ainda não chegou ao Brasil`,
+          `Produção ${studio.platform} · em breve disponível no BR`,
+        );
+      } else {
+        pool.push(
+          "Disponível fora do Brasil · ainda não chegou ao streaming brasileiro",
+          "Em breve disponível no streaming brasileiro",
+        );
+      }
+    } else if (studio) {
+      // Origem cinema com studio conhecido
       const pvodPassed = daysSinceRelease >= studio.pvodDays;
       const svodMonth  = monthFromNow(releaseDate, studio.svodDays);
       if (pvodPassed) {
         pool.push(
-          `Aluguel Digital nos EUA · ${studio.platform} previsto para ${svodMonth} no BR`,
+          `Aluguel digital nos EUA · ${studio.platform} previsto para ${svodMonth} no BR`,
           `Já circula digitalmente fora do Brasil · chega ao ${studio.platform} em ${svodMonth}`,
         );
       } else {
@@ -239,10 +253,11 @@ export function buildContextPool(opts: {
         );
       }
     } else {
+      // Origem cinema sem studio mapeado
       const weeksSince = Math.round(daysSinceRelease / 7);
       pool.push(
-        `Saiu dos cinemas há ${weeksSince} semanas · janela de streaming se abrindo`,
-        "Transição cinema → streaming",
+        `Saiu dos cinemas há ${weeksSince} ${weeksSince === 1 ? "semana" : "semanas"} · janela de streaming se abrindo`,
+        "Transição cinema → streaming · em breve disponível",
       );
     }
   } else if (flatrate) {
@@ -323,7 +338,7 @@ export async function getStreamingInfo(
   const studio      = getStudioInfo(companies);
   const origin      = deriveOrigin(opts.budget ?? 0, opts.revenue ?? 0, mediaType);
 
-  const hasSubscription = br.flatrate.length > 0 || br.free.length > 0;
+  const hasSubscription = br.flatrate.length > 0 || br.free.length > 0 || br.ads.length > 0;
   const hasRentBuy      = br.rent.length > 0 || br.buy.length > 0;
   const daysSinceRelease = daysBetween(releaseDate);
 
@@ -347,6 +362,7 @@ export async function getStreamingInfo(
     providers: providersForContext,
     studio,
     genre: opts.genre ?? null,
+    origin,
   });
 
   return {
@@ -354,8 +370,9 @@ export async function getStreamingInfo(
     availableAbroad,
     streamStatus,
     origin,
-    estimatedPlatform: studio?.platform ?? null,
-    estimatedMonth:    studio ? monthFromNow(releaseDate, studio.svodDays) : null,
+    estimatedPlatform:    studio?.platform ?? null,
+    estimatedMonth:       studio ? monthFromNow(releaseDate, studio.svodDays) : null,
+    estimatedPvodMonth:   studio && studio.pvodDays > 0 ? monthFromNow(releaseDate, studio.pvodDays) : null,
     contextPool,
   };
 }

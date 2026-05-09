@@ -118,6 +118,8 @@ export interface TMDBTitleDetail {
   };
   production_countries?: Array<{ iso_3166_1: string; name: string }>;
   production_companies?: Array<{ id: number; name: string }>;
+  budget?: number;
+  revenue?: number;
   // appended responses
   credits?: {
     cast: TMDBCastMember[];
