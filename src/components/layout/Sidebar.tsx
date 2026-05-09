@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState, useCallback } from "react";
 import {
   Home,
@@ -10,6 +10,8 @@ import {
   Tv,
   LogOut,
   User,
+  Library,
+  Settings,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { createClient } from "@/lib/supabase/client";
@@ -22,6 +24,7 @@ const NAV_LINKS = [
   { href: "/buscar", label: "Buscar", icon: Search },
   { href: "/filmes", label: "Filmes", icon: Film },
   { href: "/series", label: "Séries", icon: Tv },
+  { href: "/profile", label: "Biblioteca", icon: Library },
 ];
 
 const ROUTE_ANCHORS: Record<string, { label: string; anchor: string }[]> = {
@@ -39,6 +42,7 @@ export default function Sidebar() {
   const pathname = usePathname();
   const { user } = useAuth();
 
+  const router = useRouter();
   const [loginOpen, setLoginOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
@@ -203,13 +207,33 @@ export default function Sidebar() {
                     </p>
                   </div>
 
-                  <button
-                    onClick={handleLogout}
-                    className="flex w-full items-center gap-3 p-4 text-sm text-red-400 transition-colors hover:bg-red-500/10"
+                  <Link
+                    href="/profile"
+                    onClick={() => setUserMenuOpen(false)}
+                    className="flex w-full items-center gap-3 p-4 text-sm text-zinc-300 transition-colors hover:bg-white/5 hover:text-white"
                   >
-                    <LogOut size={16} />
-                    Sair
-                  </button>
+                    <Library size={16} />
+                    Minha Biblioteca
+                  </Link>
+
+                  <Link
+                    href="/settings"
+                    onClick={() => setUserMenuOpen(false)}
+                    className="flex w-full items-center gap-3 px-4 pb-4 text-sm text-zinc-300 transition-colors hover:bg-white/5 hover:text-white"
+                  >
+                    <Settings size={16} />
+                    Configurações
+                  </Link>
+
+                  <div className="border-t border-white/5">
+                    <button
+                      onClick={handleLogout}
+                      className="flex w-full items-center gap-3 p-4 text-sm text-red-400 transition-colors hover:bg-red-500/10"
+                    >
+                      <LogOut size={16} />
+                      Sair
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -245,7 +269,7 @@ export default function Sidebar() {
       ════════════════════════════════════════════════════════════ */}
       <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/5 bg-[#09090f]/90 px-4 pb-[env(safe-area-inset-bottom,12px)] pt-2 backdrop-blur-xl md:hidden">
         <div className="flex items-center justify-around">
-          {NAV_LINKS.map((link) => {
+          {NAV_LINKS.filter((l) => l.href !== "/profile").map((link) => {
             const active = pathname === link.href;
 
             return (
@@ -269,13 +293,15 @@ export default function Sidebar() {
           })}
 
           <button
-            onClick={() =>
-              user ? setUserMenuOpen(!userMenuOpen) : setLoginOpen(true)
-            }
-            className="flex flex-col items-center gap-1 rounded-xl p-2 text-zinc-300 transition-colors hover:text-white"
+            onClick={() => user ? router.push("/profile") : setLoginOpen(true)}
+            className={`flex flex-col items-center gap-1 rounded-xl p-2 transition-colors ${
+              pathname === "/profile" ? "text-indigo-300" : "text-zinc-300 hover:text-white"
+            }`}
           >
             {user ? (
-              <div className="flex h-5 w-5 items-center justify-center rounded-full bg-indigo-500 text-[10px] font-bold text-white">
+              <div className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white ${
+                pathname === "/profile" ? "bg-indigo-400" : "bg-indigo-500"
+              }`}>
                 {avatarLetter}
               </div>
             ) : (
@@ -283,7 +309,7 @@ export default function Sidebar() {
             )}
 
             <span className="text-[10px] font-bold uppercase tracking-tighter">
-              {user ? "Conta" : "Entrar"}
+              {user ? "Biblioteca" : "Entrar"}
             </span>
           </button>
         </div>
