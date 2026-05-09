@@ -269,7 +269,7 @@ export default async function TitleDetailPage({ params }: Props) {
         <h2 className="mb-3 text-[11px] font-black uppercase tracking-[0.35em] text-sky-300">
           Sinopse
         </h2>
-        <p className="leading-relaxed text-slate-300">
+        <p className="leading-relaxed text-zinc-300">
           {data.overview || "Sem descrição disponível."}
         </p>
       </section>
@@ -279,7 +279,7 @@ export default async function TitleDetailPage({ params }: Props) {
           <h2 className="mb-3 text-[11px] font-black uppercase tracking-[0.35em] text-sky-300">
             Trailer
           </h2>
-          <div className="overflow-hidden rounded-2xl border border-white/10 shadow-xl">
+          <div className="overflow-hidden rounded-2xl border border-white/10 shadow-[0_18px_60px_rgba(0,0,0,0.5)]">
             <iframe
               src={`https://www.youtube.com/embed/${trailer.key}`}
               title={`Trailer de ${title}`}
@@ -310,7 +310,7 @@ export default async function TitleDetailPage({ params }: Props) {
           {cast.map((person) => (
             <div
               key={person.id}
-              className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-3 transition hover:bg-white/[0.07]"
+              className="group flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-3 transition duration-200 hover:border-white/[0.18] hover:bg-white/[0.07]"
             >
               {person.profile_path ? (
                 <Image
@@ -324,39 +324,49 @@ export default async function TitleDetailPage({ params }: Props) {
                 <div className="h-12 w-12 shrink-0 rounded-xl bg-white/5" />
               )}
               <div className="min-w-0">
-                <p className="truncate font-bold text-slate-100">{person.name}</p>
-                <p className="truncate text-sm text-slate-500">{person.character}</p>
+                <p className="truncate font-bold text-zinc-100">{person.name}</p>
+                <p className="truncate text-sm text-zinc-500">{person.character}</p>
               </div>
             </div>
           ))}
         </div>
       </section>
     ) : (
-      <p className="text-sm text-slate-500">Elenco não disponível.</p>
+      <p className="text-sm text-zinc-500">Elenco não disponível.</p>
     );
 
   return (
-    <main className="min-h-screen bg-[#0b0f14] text-white">
+    <main className="min-h-screen bg-[#080810] text-white">
 
-      {/* Backdrop */}
-      <div className="relative h-[45vh] min-h-[300px] md:h-[50vh]">
-        {data.backdrop_path && (
+      {/* Hero — backdrop cinematográfico com camadas de gradiente */}
+      <div className="relative h-[48vh] min-h-[320px] overflow-hidden md:h-[54vh]">
+        {data.backdrop_path ? (
           <Image
             src={`https://image.tmdb.org/t/p/original${data.backdrop_path}`}
             alt={title}
             fill
             priority
             sizes="100vw"
-            className="object-cover object-top opacity-40"
+            className="object-cover object-top opacity-45"
           />
+        ) : (
+          <div className="absolute inset-0 bg-[#0a0a14]" />
         )}
-        <div className="absolute inset-0 bg-gradient-to-b from-black/30 via-black/20 to-[#0b0f14]" />
+        {/* Gradiente horizontal — apaga as bordas laterais */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(8,8,16,0.95)_0%,rgba(8,8,16,0.55)_40%,rgba(8,8,16,0.20)_70%,rgba(8,8,16,0.60)_100%)]" />
+        {/* Gradiente vertical — funde no bg da página */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(8,8,16,0.70)_0%,transparent_28%,rgba(8,8,16,0.30)_58%,#080810_100%)]" />
+        {/* Glow sky-blue sutil no topo */}
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_68%_8%,rgba(56,189,248,0.18),transparent_38%)]" />
+        {/* Textura de pontos — igual à home */}
+        <div className="absolute inset-0 opacity-[0.03] [background-image:radial-gradient(circle_at_center,white_1px,transparent_1px)] [background-size:24px_24px]" />
       </div>
 
-      {/* Poster + title block — overlaps the backdrop */}
-      <div className="relative z-10 mx-auto -mt-36 max-w-7xl px-4 sm:px-6">
+      {/* Poster + título — sobrepõe o hero */}
+      <div className="relative z-10 mx-auto -mt-40 max-w-7xl px-4 sm:px-6">
         <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-end sm:gap-8">
-          <div className="w-36 shrink-0 overflow-hidden rounded-2xl border border-white/10 shadow-2xl shadow-black/60 sm:w-44 md:w-52">
+          {/* Poster */}
+          <div className="w-36 shrink-0 overflow-hidden rounded-2xl border border-white/[0.12] shadow-[0_24px_80px_rgba(0,0,0,0.75)] sm:w-44 md:w-52">
             {data.poster_path ? (
               <Image
                 src={`https://image.tmdb.org/t/p/w500${data.poster_path}`}
@@ -367,19 +377,21 @@ export default async function TitleDetailPage({ params }: Props) {
                 className="w-full object-cover"
               />
             ) : (
-              <div className="flex aspect-[2/3] items-center justify-center bg-white/5 text-sm text-slate-500">
+              <div className="flex aspect-[2/3] items-center justify-center bg-white/5 text-sm text-zinc-500">
                 Sem poster
               </div>
             )}
           </div>
+
+          {/* Info textual */}
           <div className="flex-1 text-center sm:pb-2 sm:text-left">
-            <h1 className="text-2xl font-black leading-tight sm:text-3xl md:text-4xl">
+            <h1 className="text-3xl font-black leading-tight tracking-tight sm:text-4xl md:text-[2.8rem]">
               {title}
             </h1>
             {originalTitle && originalTitle !== title && (
-              <p className="mt-1 text-sm text-slate-500">{originalTitle}</p>
+              <p className="mt-1.5 text-sm text-zinc-500">{originalTitle}</p>
             )}
-            <div className="mt-3 flex flex-wrap justify-center gap-x-3 gap-y-1 text-sm font-semibold text-slate-400 sm:justify-start">
+            <div className="mt-3 flex flex-wrap justify-center gap-x-3 gap-y-1 text-sm font-semibold text-zinc-400 sm:justify-start">
               <span>{contentTypeLabel}</span>
               {year && <span>· {year}</span>}
               {runtime && <span>· {runtime}</span>}
@@ -389,9 +401,9 @@ export default async function TitleDetailPage({ params }: Props) {
               )}
             </div>
             {directors.length > 0 && (
-              <p className="mt-2 text-sm text-slate-500">
+              <p className="mt-2 text-sm text-zinc-500">
                 Direção{" "}
-                <span className="font-bold text-slate-300">
+                <span className="font-bold text-zinc-300">
                   {directors.map((d) => d.name).join(", ")}
                 </span>
               </p>
@@ -400,8 +412,8 @@ export default async function TitleDetailPage({ params }: Props) {
         </div>
       </div>
 
-      {/* Main content */}
-      <div className="mx-auto mt-8 max-w-7xl px-4 sm:px-6">
+      {/* Conteúdo principal */}
+      <div className="mx-auto mt-10 max-w-7xl px-4 sm:px-6">
         <div className="flex flex-col gap-8 lg:flex-row lg:items-start lg:gap-10">
 
           {/* Sidebar */}
@@ -415,18 +427,18 @@ export default async function TitleDetailPage({ params }: Props) {
             />
 
             {/* Onde assistir */}
-            <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-5 shadow-2xl shadow-black/30 backdrop-blur-xl">
+            <div className="rounded-[1.65rem] border border-white/10 bg-white/[0.04] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl">
               <div className="mb-4 flex items-center justify-between">
                 <h2 className="text-[11px] font-black uppercase tracking-[0.35em] text-sky-300">
                   Onde assistir
                 </h2>
-                <div className="rounded-full bg-sky-300/15 px-3 py-1 text-[10px] font-black text-sky-200">
+                <div className="rounded-full bg-sky-400/15 px-3 py-1 text-[10px] font-black text-sky-300">
                   BR
                 </div>
               </div>
               {hasWatchProviders && featuredProvider ? (
                 <div className="space-y-4">
-                  <div className="overflow-hidden rounded-2xl border border-sky-300/20 bg-sky-300/10 p-4">
+                  <div className="overflow-hidden rounded-xl border border-sky-400/20 bg-sky-400/[0.08] p-4 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.12)]">
                     <div className="flex items-center gap-3">
                       {featuredProvider.logo_path && (
                         <Image
@@ -434,11 +446,11 @@ export default async function TitleDetailPage({ params }: Props) {
                           alt={featuredProvider.provider_name}
                           width={64}
                           height={64}
-                          className="h-12 w-12 rounded-2xl object-cover shadow-xl"
+                          className="h-11 w-11 rounded-xl object-cover shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
                         />
                       )}
                       <div className="min-w-0 flex-1">
-                        <p className="text-[10px] font-black uppercase tracking-widest text-sky-300">
+                        <p className="text-[10px] font-black uppercase tracking-widest text-sky-400">
                           {featuredProviderLabel}
                         </p>
                         <p className="truncate text-base font-black text-white">
@@ -453,19 +465,22 @@ export default async function TitleDetailPage({ params }: Props) {
                   <ProviderChips title="Comprar" providers={watchProviders?.buy} excludeProviderId={featuredProvider.provider_id} />
                 </div>
               ) : (
-                <p className="text-sm text-slate-500">Nenhuma opção disponível no Brasil no momento.</p>
+                <p className="text-sm text-zinc-500">Nenhuma opção disponível no Brasil no momento.</p>
               )}
             </div>
 
             {/* Gêneros */}
             {genres.length > 0 && (
-              <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-5">
+              <div className="rounded-[1.65rem] border border-white/10 bg-white/[0.04] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.38)]">
                 <h2 className="mb-3 text-[11px] font-black uppercase tracking-[0.35em] text-sky-300">
                   Gêneros
                 </h2>
                 <div className="flex flex-wrap gap-2">
                   {genres.map((g) => (
-                    <span key={g} className="rounded-full border border-white/10 bg-white/[0.04] px-3 py-1 text-xs font-bold text-slate-300">
+                    <span
+                      key={g}
+                      className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-xs font-semibold text-zinc-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md"
+                    >
                       {g}
                     </span>
                   ))}
@@ -474,7 +489,7 @@ export default async function TitleDetailPage({ params }: Props) {
             )}
           </div>
 
-          {/* Main area with tabs */}
+          {/* Área principal com abas */}
           <div className="min-w-0 flex-1">
             <TitleTabs
               type={type}

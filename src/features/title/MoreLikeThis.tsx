@@ -217,7 +217,7 @@ export default function MoreLikeThis({
             <Link
               key={item.id}
               href={`/title/${mediaType}/${item.id}`}
-              className="group w-[140px] shrink-0 overflow-hidden rounded-2xl border border-white/10 bg-white/[0.05] shadow-xl shadow-black/20 transition hover:-translate-y-1 hover:border-sky-300/40 hover:bg-white/[0.08] lg:w-auto lg:shrink lg:rounded-3xl"
+              className="group w-[140px] shrink-0 overflow-hidden rounded-[1.1rem] border border-white/10 bg-white/[0.04] shadow-[0_16px_48px_rgba(0,0,0,0.4)] transition duration-300 hover:-translate-y-1 hover:border-sky-400/35 hover:bg-white/[0.07] hover:shadow-[0_22px_60px_rgba(56,189,248,0.1)] lg:w-auto lg:shrink"
             >
               <div className="relative aspect-[2/3] overflow-hidden bg-zinc-900">
                 {item.poster_path ? (
@@ -237,7 +237,7 @@ export default function MoreLikeThis({
                     className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
                   />
                 ) : (
-                  <div className="flex h-full items-center justify-center text-sm text-slate-500">
+                  <div className="flex h-full items-center justify-center text-sm text-zinc-500">
                     Sem imagem
                   </div>
                 )}
@@ -251,13 +251,13 @@ export default function MoreLikeThis({
                 <h3 className="line-clamp-2 text-xs font-black leading-tight text-white lg:text-sm">
                   {itemTitle}
                 </h3>
-                <div className="flex flex-wrap gap-x-1.5 gap-y-1 text-[10px] font-semibold text-slate-400 lg:text-xs">
+                <div className="flex flex-wrap gap-x-1.5 gap-y-1 text-[10px] font-semibold text-zinc-400 lg:text-xs">
                   <span>{itemTypeLabel}</span>
                   {itemYear && <span>• {itemYear}</span>}
                   {itemRating && <span>• ★ {itemRating}</span>}
                 </div>
                 {item._reason && (
-                  <p className="line-clamp-1 text-[9px] text-slate-500 lg:text-[10px]">
+                  <p className="line-clamp-1 text-[9px] text-zinc-500 lg:text-[10px]">
                     {item._reason}
                   </p>
                 )}

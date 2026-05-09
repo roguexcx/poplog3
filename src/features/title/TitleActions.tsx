@@ -130,7 +130,7 @@ function ConfirmModal({
   onCancel: () => void;
 }) {
   return (
-    <div className="mt-2 rounded-2xl border border-white/10 bg-[#111820] p-4">
+    <div className="mt-2 rounded-2xl border border-white/10 bg-[#0e0e1a] p-4">
       <p className="mb-1 text-sm font-black text-white">{title}</p>
       <p className="mb-4 text-xs leading-relaxed text-slate-400">{message}</p>
       <div className="flex gap-2">
@@ -466,7 +466,7 @@ export default function TitleActions({
   }
 
   return (
-    <div className="rounded-[2rem] border border-white/10 bg-white/[0.04] p-4 shadow-2xl shadow-black/30 backdrop-blur-xl">
+    <div className="rounded-[1.65rem] border border-white/10 bg-white/[0.04] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.5)] backdrop-blur-xl">
 
       <div className="mb-4 flex items-center justify-between">
         <h2 className="text-[11px] font-black uppercase tracking-[0.35em] text-sky-300">
@@ -487,8 +487,8 @@ export default function TitleActions({
           disabled={loading === "watchlist"}
           className={`group flex w-full items-center gap-3 rounded-2xl border px-4 py-3.5 text-sm font-bold transition duration-200
             ${isWatchlist
-              ? "border-sky-400/50 bg-sky-400/15 text-sky-300 hover:bg-sky-400/20"
-              : "border-white/10 bg-white/[0.04] text-slate-300 hover:border-white/20 hover:bg-white/10 hover:text-white"
+              ? "border-sky-400/50 bg-sky-400/15 text-sky-300 shadow-[0_0_14px_rgba(56,189,248,0.18)] hover:bg-sky-400/20"
+              : "border-white/10 bg-white/[0.04] text-zinc-300 hover:border-white/20 hover:bg-white/10 hover:text-white"
             } disabled:cursor-not-allowed disabled:opacity-60`}
         >
           <IconBookmark filled={isWatchlist} />
@@ -509,12 +509,12 @@ export default function TitleActions({
                 disabled={loading === "watched" || loading === "conclude" || isWatched}
                 className={`group flex w-full items-center gap-3 rounded-2xl border px-4 py-3.5 text-sm font-bold transition duration-200
                   ${watchingActive
-                    ? "border-sky-400/50 bg-sky-400/15 text-sky-300 hover:bg-sky-400/20"
+                    ? "border-sky-400/50 bg-sky-400/15 text-sky-300 shadow-[0_0_14px_rgba(56,189,248,0.18)] hover:bg-sky-400/20"
                     : isWatched
-                      ? "border-emerald-400/50 bg-emerald-400/15 text-emerald-300 cursor-default"
+                      ? "border-emerald-400/50 bg-emerald-400/15 text-emerald-300 shadow-[0_0_14px_rgba(52,211,153,0.15)] cursor-default"
                       : showSeriesMenu
                         ? "border-white/20 bg-white/10 text-white"
-                        : "border-white/10 bg-white/[0.04] text-slate-300 hover:border-white/20 hover:bg-white/10 hover:text-white"
+                        : "border-white/10 bg-white/[0.04] text-zinc-300 hover:border-white/20 hover:bg-white/10 hover:text-white"
                   } disabled:cursor-not-allowed disabled:opacity-60`}
               >
                 {isWatched ? <IconCheck filled /> : <IconPlay />}
@@ -543,7 +543,7 @@ export default function TitleActions({
               </button>
 
               {showSeriesMenu && !watchingActive && !isWatched && (
-                <div className="mt-1.5 overflow-hidden rounded-2xl border border-white/10 bg-[#111820]">
+                <div className="mt-1.5 overflow-hidden rounded-2xl border border-white/10 bg-[#0e0e1a]">
                   <button
                     onClick={handleGoToEpisodes}
                     className="flex w-full items-center gap-3 px-4 py-3 text-sm font-bold text-slate-300 transition hover:bg-white/[0.06] hover:text-white"
@@ -617,8 +617,8 @@ export default function TitleActions({
               disabled={loading === "watched"}
               className={`group flex w-full items-center gap-3 rounded-2xl border px-4 py-3.5 text-sm font-bold transition duration-200
                 ${isWatched
-                  ? "border-emerald-400/50 bg-emerald-400/15 text-emerald-300 hover:bg-emerald-400/20"
-                  : "border-white/10 bg-white/[0.04] text-slate-300 hover:border-white/20 hover:bg-white/10 hover:text-white"
+                  ? "border-emerald-400/50 bg-emerald-400/15 text-emerald-300 shadow-[0_0_14px_rgba(52,211,153,0.18)] hover:bg-emerald-400/20"
+                  : "border-white/10 bg-white/[0.04] text-zinc-300 hover:border-white/20 hover:bg-white/10 hover:text-white"
                 } disabled:cursor-not-allowed disabled:opacity-60`}
             >
               <IconCheck filled={isWatched} />
@@ -647,7 +647,7 @@ export default function TitleActions({
           )}
 
           {showDatePicker && (
-            <div className="mt-2 rounded-2xl border border-white/10 bg-[#111820] p-4">
+            <div className="mt-2 rounded-2xl border border-white/10 bg-[#0e0e1a] p-4">
               <p className="mb-3 text-xs font-bold text-slate-300">
                 {isTv ? "Quando você concluiu?" : "Quando você assistiu?"}
               </p>
@@ -682,8 +682,8 @@ export default function TitleActions({
           disabled={loading === "favorite"}
           className={`group flex w-full items-center gap-3 rounded-2xl border px-4 py-3.5 text-sm font-bold transition duration-200
             ${isFavorite
-              ? "border-amber-400/50 bg-amber-400/15 text-amber-300 hover:bg-amber-400/20"
-              : "border-white/10 bg-white/[0.04] text-slate-300 hover:border-white/20 hover:bg-white/10 hover:text-white"
+              ? "border-amber-400/50 bg-amber-400/15 text-amber-300 shadow-[0_0_14px_rgba(251,191,36,0.18)] hover:bg-amber-400/20"
+              : "border-white/10 bg-white/[0.04] text-zinc-300 hover:border-white/20 hover:bg-white/10 hover:text-white"
             } disabled:cursor-not-allowed disabled:opacity-60`}
         >
           <IconStar filled={isFavorite} />
@@ -701,8 +701,8 @@ export default function TitleActions({
           disabled={loading === "fridge"}
           className={`group flex w-full items-center gap-3 rounded-2xl border px-4 py-3.5 text-sm font-bold transition duration-200
             ${isFridge
-              ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-300 hover:bg-cyan-400/15"
-              : "border-white/[0.06] bg-white/[0.02] text-slate-500 hover:border-white/10 hover:bg-white/[0.04] hover:text-slate-300"
+              ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-300 shadow-[0_0_14px_rgba(34,211,238,0.15)] hover:bg-cyan-400/15"
+              : "border-white/[0.06] bg-white/[0.02] text-zinc-500 hover:border-white/10 hover:bg-white/[0.04] hover:text-zinc-300"
             } disabled:cursor-not-allowed disabled:opacity-60`}
         >
           <IconFridge filled={isFridge} />

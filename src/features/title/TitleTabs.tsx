@@ -94,8 +94,8 @@ function DatePicker({
 }) {
   const [value, setValue] = useState(initial);
   return (
-    <div className="mt-2 rounded-2xl border border-white/10 bg-[#111820] p-3">
-      <p className="mb-2 text-xs font-bold text-slate-300">Quando você assistiu?</p>
+    <div className="mt-2 rounded-2xl border border-white/10 bg-[#0e0e1a] p-3">
+      <p className="mb-2 text-xs font-bold text-zinc-300">Quando você assistiu?</p>
       <input
         type="date"
         value={value}
@@ -112,7 +112,7 @@ function DatePicker({
         </button>
         <button
           onClick={onCancel}
-          className="flex-1 rounded-xl border border-white/10 py-1.5 text-xs font-bold text-slate-400 transition hover:text-white"
+          className="flex-1 rounded-xl border border-white/10 py-1.5 text-xs font-bold text-zinc-400 transition hover:text-white"
         >
           Cancelar
         </button>
@@ -171,7 +171,7 @@ function EpisodeRow({
             />
           ) : (
             <div className="flex h-full w-full items-center justify-center">
-              <span className="text-[10px] text-slate-600">
+              <span className="text-[10px] text-zinc-600">
                 {isAvailable ? `T${seasonNumber}E${episode.episode_number}` : "🔒"}
               </span>
             </div>
@@ -181,11 +181,11 @@ function EpisodeRow({
         {/* Info */}
         <div className="min-w-0 flex-1">
           <div className="flex items-baseline gap-2">
-            <span className="shrink-0 text-[10px] font-black text-slate-500">
+            <span className="shrink-0 text-[10px] font-black text-zinc-500">
               E{episode.episode_number}
             </span>
             <p className={`truncate text-sm font-bold ${
-              !isAvailable ? "text-slate-600" : isWatched ? "text-slate-300" : "text-slate-100"
+              !isAvailable ? "text-zinc-600" : isWatched ? "text-zinc-300" : "text-zinc-100"
             }`}>
               {episode.name}
             </p>
@@ -194,23 +194,23 @@ function EpisodeRow({
           {isAvailable && (
             <>
               {episode.runtime && (
-                <p className="mt-0.5 text-[11px] text-slate-500">
+                <p className="mt-0.5 text-[11px] text-zinc-500">
                   {formatRuntime(episode.runtime)}
                 </p>
               )}
               {episode.overview && (
-                <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-slate-500">
+                <p className="mt-1 line-clamp-2 text-[11px] leading-relaxed text-zinc-500">
                   {episode.overview}
                 </p>
               )}
               {isWatched && progress?.watched_at && !showDatePicker && (
                 <div className="mt-1.5 flex items-center gap-1.5">
-                  <span className="text-[10px] text-slate-600">
+                  <span className="text-[10px] text-zinc-600">
                     {formatWatchedAt(progress.watched_at)}
                   </span>
                   <button
                     onClick={() => setShowDatePicker(true)}
-                    className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] text-slate-600 transition hover:bg-white/10 hover:text-slate-400"
+                    className="flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] text-zinc-600 transition hover:bg-white/10 hover:text-zinc-400"
                   >
                     <IconPencil />
                     editar
@@ -221,7 +221,7 @@ function EpisodeRow({
           )}
 
           {!isAvailable && airDateLabel && (
-            <p className="mt-0.5 text-[11px] text-slate-600">
+            <p className="mt-0.5 text-[11px] text-zinc-600">
               Estreia em {airDateLabel}
             </p>
           )}
@@ -242,7 +242,7 @@ function EpisodeRow({
             </svg>
           </button>
         ) : (
-          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white/5 text-slate-700">
+          <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-white/5 text-zinc-700">
             <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
               <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
               <path d="M7 11V7a5 5 0 0 1 10 0v4" />
@@ -496,7 +496,7 @@ function EpisodesTab({
   }
 
   if (!seasons.length) {
-    return <p className="text-sm text-slate-500">Nenhuma temporada disponível.</p>;
+    return <p className="text-sm text-zinc-500">Nenhuma temporada disponível.</p>;
   }
 
   const today = new Date();
@@ -537,7 +537,7 @@ function EpisodesTab({
               className={`shrink-0 rounded-full border px-4 py-1.5 text-xs font-bold transition ${
                 activeSeason === season.season_number
                   ? "border-sky-400/50 bg-sky-400/15 text-sky-300"
-                  : "border-white/10 bg-white/[0.04] text-slate-400 hover:border-white/20 hover:text-white"
+                  : "border-white/10 bg-white/[0.04] text-zinc-400 hover:border-white/20 hover:text-white"
               }`}
             >
               {season.name ?? `T${season.season_number}`}
@@ -554,14 +554,14 @@ function EpisodesTab({
 
       {/* Card da temporada */}
       {currentSeason && (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4">
+        <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-4 shadow-[0_8px_30px_rgba(0,0,0,0.35)]">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <p className="text-sm font-black text-slate-200">{currentSeason.name}</p>
-              <p className="mt-0.5 text-[11px] text-slate-500">
+              <p className="text-sm font-black text-zinc-200">{currentSeason.name}</p>
+              <p className="mt-0.5 text-[11px] text-zinc-500">
                 {totalInSeason} disponíveis
                 {futureEps.length > 0 && (
-                  <span className="ml-1 text-slate-600">· {futureEps.length} em breve</span>
+                  <span className="ml-1 text-zinc-600">· {futureEps.length} em breve</span>
                 )}
                 {currentSeason.air_date && (
                   <> · {new Date(currentSeason.air_date).getFullYear()}</>
@@ -579,7 +579,7 @@ function EpisodesTab({
                 className={`shrink-0 rounded-full border px-3 py-1.5 text-[11px] font-bold transition disabled:opacity-50 ${
                   allSeasonDone
                     ? "border-emerald-400/40 bg-emerald-400/10 text-emerald-300 hover:bg-emerald-400/20"
-                    : "border-white/10 bg-white/[0.04] text-slate-400 hover:border-sky-400/40 hover:text-sky-300"
+                    : "border-white/10 bg-white/[0.04] text-zinc-400 hover:border-sky-400/40 hover:text-sky-300"
                 }`}
               >
                 {markingAll ? "Salvando..." : allSeasonDone ? "✓ Temporada vista" : "Marcar temporada"}
@@ -594,7 +594,7 @@ function EpisodesTab({
                 style={{ width: `${pct}%` }}
               />
             </div>
-            <span className="shrink-0 text-[11px] font-bold text-slate-500">
+            <span className="shrink-0 text-[11px] font-bold text-zinc-500">
               {watchedInSeason}/{totalInSeason}
             </span>
           </div>
@@ -604,13 +604,13 @@ function EpisodesTab({
       {/* Selecionar todos */}
       {userId && totalInSeason > 0 && (
         <div className="flex items-center justify-between">
-          <span className="text-[11px] text-slate-600">
+          <span className="text-[11px] text-zinc-600">
             {watchedInSeason} de {totalInSeason} disponíveis vistos
           </span>
           <button
             onClick={() => currentSeason && handleMarkSeason(currentSeason, !allSeasonDone)}
             disabled={markingAll}
-            className="text-[11px] font-bold text-slate-500 transition hover:text-sky-300 disabled:opacity-50"
+            className="text-[11px] font-bold text-zinc-500 transition hover:text-sky-300 disabled:opacity-50"
           >
             {allSeasonDone ? "Desmarcar todos" : "Marcar disponíveis"}
           </button>
@@ -639,7 +639,7 @@ function EpisodesTab({
       )}
 
       {!userId && (
-        <p className="text-center text-sm text-slate-600">
+        <p className="text-center text-sm text-zinc-600">
           <a href="/login" className="text-sky-400 hover:text-sky-300">Faça login</a>{" "}
           para marcar episódios.
         </p>
@@ -692,7 +692,7 @@ function TitleTabsInner({
               className={`shrink-0 -mb-px border-b-2 px-5 py-3 text-[11px] font-black uppercase tracking-[0.25em] transition ${
                 activeTab === tab.key
                   ? "border-sky-400 text-sky-300"
-                  : "border-transparent text-slate-500 hover:text-white"
+                  : "border-transparent text-zinc-500 hover:text-white"
               }`}
             >
               {tab.label}
