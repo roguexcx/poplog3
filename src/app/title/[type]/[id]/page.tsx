@@ -11,7 +11,6 @@ import MoreLikeThis from "@/features/title/MoreLikeThis";
 import type {
   TMDBTitleDetail,
   TMDBSeason,
-  TMDBVideo,
   RawCandidate,
 } from "@/features/title/title-types";
 
@@ -55,8 +54,8 @@ async function getData(type: string, id: string): Promise<TMDBTitleDetail | null
   if (type !== "movie" && type !== "tv") return null;
   const appendTo =
     type === "movie"
-      ? "credits,videos,watch/providers,keywords,recommendations,similar,release_dates"
-      : "credits,videos,watch/providers,keywords,recommendations,similar,content_ratings";
+      ? "credits,watch/providers,keywords,recommendations,similar,release_dates"
+      : "credits,watch/providers,keywords,recommendations,similar,content_ratings";
   try {
     return await tmdbFetch<TMDBTitleDetail>(`/${type}/${id}`, {
       append_to_response: appendTo,
@@ -98,25 +97,27 @@ async function getSeasons(tvId: string, seasonNumbers: number[]): Promise<TMDBSe
   return results.filter((s): s is TMDBSeason => s !== null);
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+async function getTrailerKey(type: string, id: string): Promise<string | null> {
+  type VideoResult = { site: string; type: string; key: string };
 
-function getBestTrailer(videos: TMDBVideo[] = []): TMDBVideo | undefined {
-  function scoreVideo(video: TMDBVideo): number {
-    const name = video.name.toLowerCase();
-    let score = 0;
-    if (video.type === "Trailer") score += 40;
-    if (video.iso_639_1 === "pt") score += 30;
-    if (/brasil|pt-br|portugu[eê]s brasileiro|dublado|dublagem/i.test(name)) score += 80;
-    if (/oficial|official/i.test(name)) score += 20;
-    if (/portugal|pt-pt|portugu[eê]s de portugal|legendas pt|dobrado/i.test(name)) score -= 120;
-    if (/legendado|legendas/i.test(name)) score -= 15;
-    return score;
+  function pick(results: VideoResult[]): string | null {
+    const yt = results.filter((v) => v.site === "YouTube");
+    return (yt.find((v) => v.type === "Trailer") ?? yt.find((v) => v.type === "Teaser"))?.key ?? null;
   }
-  return videos
-    .filter((v) => v.site === "YouTube")
-    .map((video) => ({ video, score: scoreVideo(video) }))
-    .sort((a, b) => b.score - a.score)[0]?.video;
+
+  try {
+    const ptBR = await tmdbFetch<{ results: VideoResult[] }>(`/${type}/${id}/videos`, { language: "pt-BR" });
+    const key = pick(ptBR.results ?? []);
+    if (key) return key;
+
+    const fallback = await tmdbFetch<{ results: VideoResult[] }>(`/${type}/${id}/videos`);
+    return pick(fallback.results ?? []);
+  } catch {
+    return null;
+  }
 }
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function mergeProviders(...groups: (TMDBProvider[] | undefined)[]): TMDBProvider[] {
   const map = new Map<number, TMDBProvider>();
@@ -221,7 +222,7 @@ export default async function TitleDetailPage({ params }: Props) {
 
   const directors = (data.credits?.crew ?? []).filter((p) => p.job === "Director");
   const cast      = (data.credits?.cast ?? []).slice(0, 8);
-  const trailer   = getBestTrailer(data.videos?.results ?? []);
+  const trailerKey = await getTrailerKey(type, id);
 
   const candidates      = getCandidates(data);
   const sourceGenreIds  = genreIds;
@@ -274,14 +275,14 @@ export default async function TitleDetailPage({ params }: Props) {
         </p>
       </section>
 
-      {trailer && (
+      {trailerKey && (
         <section>
           <h2 className="mb-3 text-[11px] font-black uppercase tracking-[0.35em] text-sky-300">
             Trailer
           </h2>
           <div className="overflow-hidden rounded-2xl border border-white/10 shadow-[0_18px_60px_rgba(0,0,0,0.5)]">
             <iframe
-              src={`https://www.youtube.com/embed/${trailer.key}`}
+              src={`https://www.youtube.com/embed/${trailerKey}`}
               title={`Trailer de ${title}`}
               allowFullScreen
               className="aspect-video w-full"
@@ -347,7 +348,7 @@ export default async function TitleDetailPage({ params }: Props) {
             fill
             priority
             sizes="100vw"
-            className="object-cover object-top opacity-45"
+            className="object-cover object-center opacity-45"
           />
         ) : (
           <div className="absolute inset-0 bg-[#020617]" />
@@ -408,6 +409,17 @@ export default async function TitleDetailPage({ params }: Props) {
                 </span>
               </p>
             )}
+            {/* Botões de ação — linha horizontal abaixo dos metadados */}
+            <div className="mt-4 flex justify-center sm:justify-start">
+              <TitleActions
+                tmdbId={data.id}
+                mediaType={type as "movie" | "tv"}
+                title={title}
+                releaseYear={year ? parseInt(year) : null}
+                seasons={seasons}
+                inline
+              />
+            </div>
           </div>
         </div>
       </div>
@@ -418,13 +430,6 @@ export default async function TitleDetailPage({ params }: Props) {
 
           {/* Sidebar */}
           <div className="w-full space-y-4 lg:w-[280px] lg:shrink-0">
-            <TitleActions
-              tmdbId={data.id}
-              mediaType={type as "movie" | "tv"}
-              title={title}
-              releaseYear={year ? parseInt(year) : null}
-              seasons={seasons}
-            />
 
             {/* Onde assistir */}
             <div className="rounded-[1.65rem] border border-white/10 bg-white/[0.04] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl">

@@ -28,6 +28,7 @@ type Props = {
   title: string;
   releaseYear?: number | null;
   seasons?: TitleActionSeason[];
+  inline?: boolean;
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -159,6 +160,7 @@ export default function TitleActions({
   title,
   releaseYear,
   seasons = [],
+  inline = false,
 }: Props) {
   const router = useRouter();
   const supabase = createClient();
@@ -456,6 +458,15 @@ export default function TitleActions({
   const watchingActive = isTv && (userTitle.status === "watching" || (currentWatchedEpisodes > 0 && !isWatched));
 
   if (initialLoading) {
+    if (inline) {
+      return (
+        <div className="flex flex-wrap gap-2">
+          {[0, 1, 2, 3].map((i) => (
+            <div key={i} className="h-8 w-28 animate-pulse rounded-full bg-white/5" />
+          ))}
+        </div>
+      );
+    }
     return (
       <div className="space-y-2">
         {[0, 1, 2, 3].map((i) => (
@@ -465,6 +476,189 @@ export default function TitleActions({
     );
   }
 
+  // ── Inline (horizontal pills) render ──────────────────────────────────────
+  if (inline) {
+    const pillBase = "flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition duration-200 disabled:cursor-not-allowed disabled:opacity-60";
+    const pillOff  = "border-white/10 bg-white/[0.04] text-zinc-300 hover:border-white/20 hover:bg-white/10 hover:text-white";
+
+    return (
+      <div ref={seriesMenuRef}>
+        <div className="flex flex-wrap gap-2">
+
+          {/* Watchlist */}
+          <button
+            onClick={handleWatchlist}
+            disabled={loading === "watchlist"}
+            className={`${pillBase} ${isWatchlist ? "border-sky-400/50 bg-sky-400/15 text-sky-300 shadow-[0_0_14px_rgba(56,189,248,0.18)]" : pillOff}`}
+          >
+            <IconBookmark filled={isWatchlist} />
+            <span>{loading === "watchlist" ? "..." : isWatchlist ? "Na watchlist" : "Watchlist"}</span>
+          </button>
+
+          {/* Acompanhar série / Assistido filme */}
+          {isTv ? (
+            <button
+              onClick={handleSeriesMainButton}
+              disabled={loading === "watched" || loading === "conclude" || isWatched}
+              className={`${pillBase} ${
+                watchingActive
+                  ? "border-sky-400/50 bg-sky-400/15 text-sky-300 shadow-[0_0_14px_rgba(56,189,248,0.18)]"
+                  : isWatched
+                    ? "border-emerald-400/50 bg-emerald-400/15 text-emerald-300 shadow-[0_0_14px_rgba(52,211,153,0.15)] cursor-default"
+                    : pillOff
+              }`}
+            >
+              {isWatched ? <IconCheck filled /> : <IconPlay />}
+              <span>
+                {loading === "watched" || loading === "conclude"
+                  ? "..."
+                  : isWatched
+                    ? "Concluída"
+                    : watchingActive
+                      ? "Acompanhando"
+                      : "Acompanhar"}
+              </span>
+              {watchingActive && currentEpisodeCount > 0 && (
+                <span className="font-black text-sky-400">{currentWatchedEpisodes}/{currentEpisodeCount}</span>
+              )}
+              {!watchingActive && !isWatched && <IconChevron />}
+            </button>
+          ) : (
+            <button
+              onClick={handleWatched}
+              disabled={loading === "watched"}
+              className={`${pillBase} ${isWatched ? "border-emerald-400/50 bg-emerald-400/15 text-emerald-300 shadow-[0_0_14px_rgba(52,211,153,0.18)]" : pillOff}`}
+            >
+              <IconCheck filled={isWatched} />
+              <span>{loading === "watched" ? "..." : isWatched ? "Assistido" : "Marcar assistido"}</span>
+            </button>
+          )}
+
+          {/* Favorito */}
+          <button
+            onClick={handleFavorite}
+            disabled={loading === "favorite"}
+            className={`${pillBase} ${isFavorite ? "border-amber-400/50 bg-amber-400/15 text-amber-300 shadow-[0_0_14px_rgba(251,191,36,0.18)]" : pillOff}`}
+          >
+            <IconStar filled={isFavorite} />
+            <span>{loading === "favorite" ? "..." : isFavorite ? "Favorito" : "Favoritar"}</span>
+          </button>
+
+          {/* Geladeira */}
+          <button
+            onClick={handleFridge}
+            disabled={loading === "fridge"}
+            className={`${pillBase} ${isFridge ? "border-cyan-400/40 bg-cyan-400/10 text-cyan-300 shadow-[0_0_14px_rgba(34,211,238,0.15)]" : "border-white/[0.06] bg-white/[0.02] text-zinc-500 hover:border-white/10 hover:bg-white/[0.04] hover:text-zinc-300"}`}
+          >
+            <IconFridge filled={isFridge} />
+            <span>{loading === "fridge" ? "..." : isFridge ? "Na geladeira" : "Geladeira"}</span>
+          </button>
+
+        </div>
+
+        {/* Sub-controles (dropdown séries, data, modal) */}
+        {isTv && showSeriesMenu && !watchingActive && !isWatched && (
+          <div className="mt-2 overflow-hidden rounded-2xl border border-white/10 bg-[#0e0e1a]">
+            <button
+              onClick={handleGoToEpisodes}
+              className="flex w-full items-center gap-3 px-4 py-3 text-sm font-bold text-slate-300 transition hover:bg-white/[0.06] hover:text-white"
+            >
+              <IconPlay />
+              <span>Marcar episódios assistidos</span>
+            </button>
+            <div className="mx-4 border-t border-white/[0.06]" />
+            <button
+              onClick={handleWatchedAll}
+              className="flex w-full items-center gap-3 px-4 py-3 text-sm font-bold text-slate-300 transition hover:bg-white/[0.06] hover:text-emerald-300"
+            >
+              <IconCheck filled={false} />
+              <span>Já assisti tudo</span>
+            </button>
+          </div>
+        )}
+
+        {isTv && watchingActive && !isWatched && (
+          <div className="mt-1.5 px-1">
+            <button
+              onClick={handleMarkConcluded}
+              disabled={loading === "conclude"}
+              className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold text-slate-500 transition hover:bg-white/10 hover:text-emerald-300 disabled:opacity-50"
+            >
+              <IconCheck filled={false} />
+              {loading === "conclude" ? "Salvando..." : "Marcar como concluída"}
+            </button>
+          </div>
+        )}
+
+        {isTv && isWatched && (
+          <div className="mt-1.5 px-1">
+            <button
+              onClick={handleUndoConcluded}
+              disabled={loading === "conclude"}
+              className="flex items-center gap-1.5 rounded-full px-3 py-1 text-[11px] font-bold text-slate-500 transition hover:bg-white/10 hover:text-slate-300 disabled:opacity-50"
+            >
+              ↩ Desfazer conclusão
+            </button>
+          </div>
+        )}
+
+        {showConfirm && (
+          <ConfirmModal
+            title="Marcar como concluída?"
+            message={`Você assistiu ${currentWatchedEpisodes} de ${currentEpisodeCount || "?"} episódios. Deseja marcar "${title}" como concluída mesmo assim?`}
+            onConfirm={handleConfirmConcluded}
+            onCancel={() => setShowConfirm(false)}
+          />
+        )}
+
+        {(isWatched || (!isTv && isWatched)) && userTitle.watched_at && !showDatePicker && (
+          <div className="mt-1.5 flex items-center gap-1.5 px-1">
+            <span className="text-[11px] text-slate-500">
+              {isTv ? "Concluída" : "Assistido"} em {formatWatchedAt(userTitle.watched_at)}
+            </span>
+            <button
+              onClick={handleEditDate}
+              className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] text-slate-500 transition hover:bg-white/10 hover:text-slate-300"
+            >
+              <IconPencil />
+              editar
+            </button>
+          </div>
+        )}
+
+        {showDatePicker && (
+          <div className="mt-2 rounded-2xl border border-white/10 bg-[#0e0e1a] p-4">
+            <p className="mb-3 text-xs font-bold text-slate-300">
+              {isTv ? "Quando você concluiu?" : "Quando você assistiu?"}
+            </p>
+            <input
+              type="date"
+              value={pickerDate}
+              max={toDateInputValue(new Date())}
+              onChange={(e) => setPickerDate(e.target.value)}
+              className="w-full rounded-xl border border-white/10 bg-white/5 px-4 py-2.5 text-sm text-white outline-none focus:border-sky-400/60 [color-scheme:dark]"
+            />
+            <div className="mt-3 flex gap-2">
+              <button
+                onClick={handleSaveDate}
+                className="flex-1 rounded-xl bg-white py-2 text-sm font-bold text-black transition hover:bg-sky-100"
+              >
+                Salvar
+              </button>
+              <button
+                onClick={() => setShowDatePicker(false)}
+                className="flex-1 rounded-xl border border-white/10 py-2 text-sm font-bold text-slate-400 transition hover:text-white"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  // ── Sidebar (vertical card) render ────────────────────────────────────────
   return (
     <div className="rounded-[1.65rem] border border-white/10 bg-white/[0.04] p-4 shadow-[0_18px_60px_rgba(0,0,0,0.5)] backdrop-blur-xl">
 
