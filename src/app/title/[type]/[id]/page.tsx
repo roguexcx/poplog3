@@ -512,6 +512,19 @@ export default async function TitleDetailPage({ params }: Props) {
                     )}
                   </div>
                 </div>
+              ) : streaming.inferred && streaming.estimatedPlatform ? (
+                <div className="space-y-3">
+                  <div className="rounded-xl border border-amber-400/30 bg-amber-500/[0.12] px-4 py-2.5">
+                    <p className="text-[10px] font-black uppercase tracking-[0.12em] text-amber-300">
+                      Provável disponibilidade
+                    </p>
+                  </div>
+                  <p className="px-0.5 text-[12px] text-zinc-400">
+                    Com base na janela de lançamento do estúdio, deve estar disponível no{" "}
+                    <span className="font-semibold text-zinc-200">{streaming.estimatedPlatform}</span>.
+                    Verifique diretamente na plataforma.
+                  </p>
+                </div>
               ) : streaming.availableAbroad ? (
                 <p className="text-sm text-zinc-400">
                   Disponível fora do Brasil

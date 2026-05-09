@@ -207,7 +207,7 @@ export async function POST(request: Request) {
             estimated_month:       streaming.estimatedMonth,
             context_pool:          streaming.contextPool,
             fridge:                row.fridge ?? false,
-            stream_status_updated: needsCheck,
+            stream_status_updated: needsCheck && !streaming.inferred,
           };
         } catch {
           return null;

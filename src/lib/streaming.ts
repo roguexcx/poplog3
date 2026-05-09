@@ -34,6 +34,8 @@ export type StreamingInfo = {
   estimatedPlatform: string | null;
   estimatedMonth: string | null;
   estimatedPvodMonth: string | null;
+  // True quando o status "confirmado" é inferido por janela SVOD, não confirmado pelo TMDB
+  inferred: boolean;
   contextPool: string[];
 };
 
@@ -193,8 +195,9 @@ export function buildContextPool(opts: {
   studio: StudioInfo | null;
   genre: string | null;
   origin: "cinema" | "streaming";
+  inferred?: boolean;
 }): string[] {
-  const { createdAt, releaseDate, streamStatus, mediaType, seasons, providers, studio, genre, origin } = opts;
+  const { createdAt, releaseDate, streamStatus, mediaType, seasons, providers, studio, genre, origin, inferred } = opts;
 
   const pool: string[] = [];
   const daysSaved        = daysBetween(createdAt);
@@ -209,6 +212,20 @@ export function buildContextPool(opts: {
   const flatrate = providers.find((p) => p.type === "flatrate");
   const rent     = providers.find((p) => p.type === "rent");
   const buy      = providers.find((p) => p.type === "buy");
+
+  // Caso especial: status inferido por janela SVOD — TMDB sem dados de provider para BR
+  if (inferred && studio) {
+    const daysSaved = daysBetween(createdAt);
+    if (daysSaved > 365) {
+      pool.push(`Na lista há mais de um ano · verifique no ${studio.platform}`);
+    } else if (daysSaved > 90) {
+      pool.push(`Na lista há ${Math.round(daysSaved / 30)} meses · verifique no ${studio.platform}`);
+    } else {
+      pool.push(`Janela de streaming aberta · verifique no ${studio.platform}`);
+    }
+    pool.push(`Deve estar no ${studio.platform} · dados de streaming em atualização`);
+    return pool;
+  }
 
   if (streamStatus === "cinemas") {
     if (studio) {
@@ -310,7 +327,8 @@ export async function getStreamingInfo(
   mediaType: "movie" | "tv",
   opts: StreamingOpts = {},
 ): Promise<StreamingInfo> {
-  const providersData = await tmdbFetch(`/${mediaType}/${tmdbId}/watch/providers`);
+  // watch/providers não usa language — passamos null para não filtrar por país de idioma
+  const providersData = await tmdbFetch(`/${mediaType}/${tmdbId}/watch/providers`, {}, 3600, null);
 
   const br = extractProviders(providersData, "BR");
 
@@ -342,9 +360,22 @@ export async function getStreamingInfo(
   const hasRentBuy      = br.rent.length > 0 || br.buy.length > 0;
   const daysSinceRelease = daysBetween(releaseDate);
 
-  const streamStatus = deriveStreamStatus(
-    origin, releaseDate, hasSubscription, hasRentBuy, daysSinceRelease,
-  );
+  // Inferência por janela SVOD: se o estúdio tem janela conhecida e ela já passou,
+  // mas o TMDB não tem dados de provider BR, tratamos como confirmado.
+  // Isso acontece porque o TMDB/JustWatch tem dados defasados para o Brasil.
+  const svodWindowPassed =
+    !hasSubscription &&
+    !hasRentBuy &&
+    origin === "cinema" &&
+    studio !== null &&
+    studio.svodDays > 0 &&
+    daysSinceRelease > studio.svodDays;
+
+  const inferred = svodWindowPassed;
+
+  const streamStatus = inferred
+    ? ("confirmado" as StreamStatus)
+    : deriveStreamStatus(origin, releaseDate, hasSubscription, hasRentBuy, daysSinceRelease);
 
   const providersForContext = [
     ...br.flatrate.map((p) => ({ name: p.name, type: "flatrate" as const })),
@@ -363,6 +394,7 @@ export async function getStreamingInfo(
     studio,
     genre: opts.genre ?? null,
     origin,
+    inferred,
   });
 
   return {
@@ -373,6 +405,7 @@ export async function getStreamingInfo(
     estimatedPlatform:    studio?.platform ?? null,
     estimatedMonth:       studio ? monthFromNow(releaseDate, studio.svodDays) : null,
     estimatedPvodMonth:   studio && studio.pvodDays > 0 ? monthFromNow(releaseDate, studio.pvodDays) : null,
+    inferred,
     contextPool,
   };
 }
