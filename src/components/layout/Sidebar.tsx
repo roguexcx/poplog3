@@ -298,18 +298,12 @@ export default function Sidebar() {
               pathname === "/profile" ? "text-indigo-300" : "text-zinc-300 hover:text-white"
             }`}
           >
-            {user ? (
-              <div className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white ${
-                pathname === "/profile" ? "bg-indigo-400" : "bg-indigo-500"
-              }`}>
-                {avatarLetter}
-              </div>
-            ) : (
-              <User size={20} className="stroke-[1.9px]" />
-            )}
-
+            <Library
+              size={20}
+              className={pathname === "/profile" ? "stroke-[2.5px]" : "stroke-[1.9px]"}
+            />
             <span className="text-[10px] font-bold uppercase tracking-tighter">
-              {user ? "Biblioteca" : "Entrar"}
+              Biblioteca
             </span>
           </button>
         </div>

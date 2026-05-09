@@ -2,17 +2,9 @@
 
 import SearchBar from "@/features/search/SearchBar";
 import FeaturedCard from "@/features/home/components/FeaturedCard";
+import FilterChips from "@/features/home/components/FilterChips";
 import { getHeroHeadline } from "@/features/home/home-utils";
 import type { TMDBItem } from "@/types/tmdb";
-
-const FILTER_CHIPS = [
-  "Hoje à noite",
-  "Filmes",
-  "Séries",
-  "Aleatório",
-  "2h ou menos",
-  "Finalizar série",
-] as const;
 
 type Props = {
   backdropUrl: string | null;
@@ -104,17 +96,7 @@ export default function HeroSection({
             <SearchBar />
           </div>
 
-          <div className="mt-5 flex flex-wrap gap-2">
-            {FILTER_CHIPS.map((chip) => (
-              <button
-                key={chip}
-                type="button"
-                className="rounded-full border border-white/10 bg-black/25 px-4 py-2 text-xs font-semibold text-zinc-200 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-md transition hover:bg-white/10"
-              >
-                {chip}
-              </button>
-            ))}
-          </div>
+          <FilterChips />
         </div>
 
         {/* Right: featured card (desktop only) */}
