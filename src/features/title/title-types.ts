@@ -27,6 +27,17 @@ export interface TMDBVideo {
   site: string;
   type: string;
   official: boolean;
+  iso_639_1?: string;
+}
+
+export interface TMDBEpisode {
+  id: number;
+  episode_number: number;
+  name: string;
+  overview: string;
+  runtime: number | null;
+  still_path: string | null;
+  air_date: string | null;
 }
 
 export interface TMDBStreamingProvider {
@@ -44,6 +55,7 @@ export interface TMDBSeason {
   air_date: string | null;
   poster_path: string | null;
   overview: string;
+  episodes?: TMDBEpisode[];
 }
 
 export interface TMDBRelatedItem {
@@ -55,8 +67,23 @@ export interface TMDBRelatedItem {
   release_date?: string;
   first_air_date?: string;
   vote_average?: number;
+  vote_count?: number;
+  genre_ids?: number[];
   media_type?: string;
 }
+
+export type TitleActionSeason = {
+  season_number: number;
+  episodes?: {
+    episode_number: number;
+    air_date?: string | null;
+  }[];
+};
+
+export type RawCandidate = TMDBRelatedItem & {
+  _fromRecommendations: boolean;
+  _fromSimilar: boolean;
+};
 
 export interface TMDBTitleDetail {
   id: number;
@@ -64,8 +91,10 @@ export interface TMDBTitleDetail {
   title?: string;
   release_date?: string;
   runtime?: number;
+  original_title?: string;
   // tv
   name?: string;
+  original_name?: string;
   first_air_date?: string;
   last_air_date?: string;
   episode_run_time?: number[];
@@ -83,6 +112,10 @@ export interface TMDBTitleDetail {
   vote_count?: number;
   genres?: TMDBGenre[];
   original_language?: string;
+  keywords?: {
+    keywords?: Array<{ id: number; name: string }>;
+    results?: Array<{ id: number; name: string }>;
+  };
   production_countries?: Array<{ iso_3166_1: string; name: string }>;
   production_companies?: Array<{ id: number; name: string }>;
   // appended responses
@@ -98,6 +131,8 @@ export interface TMDBTitleDetail {
       BR?: {
         link?: string;
         flatrate?: Array<{ provider_id: number; provider_name: string; logo_path: string }>;
+        free?: Array<{ provider_id: number; provider_name: string; logo_path: string }>;
+        ads?: Array<{ provider_id: number; provider_name: string; logo_path: string }>;
         rent?: Array<{ provider_id: number; provider_name: string; logo_path: string }>;
         buy?: Array<{ provider_id: number; provider_name: string; logo_path: string }>;
       };
