@@ -48,14 +48,6 @@ const STATUS_LABELS: Record<string, string> = {
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
-function IconPlay() {
-  return (
-    <svg viewBox="0 0 24 24" style={{ width: 14, height: 14 }} fill="currentColor">
-      <path d="M8 5v14l11-7z" />
-    </svg>
-  );
-}
-
 function IconBookmark({ filled }: { filled: boolean }) {
   return (
     <svg
@@ -97,10 +89,9 @@ function IconStar() {
 type Props = {
   detail: TMDBTitleDetail;
   mediaType: "movie" | "tv";
-  hasTrailer: boolean;
 };
 
-export default function TitleHero({ detail, mediaType, hasTrailer }: Props) {
+export default function TitleHero({ detail, mediaType }: Props) {
   const title = getDetailTitle(detail);
   const year = getReleaseYear(detail);
   const days = daysSinceRelease(detail);
@@ -131,86 +122,42 @@ export default function TitleHero({ detail, mediaType, hasTrailer }: Props) {
   const seasons = detail.number_of_seasons;
   const statusLabel = detail.status ? (STATUS_LABELS[detail.status] ?? detail.status) : null;
 
-  // Contextual badges
-  const userBadge = watched.isWatched
-    ? { label: "✓ Assistido", bg: "rgba(90,160,90,0.15)", color: "#6abf6a", border: "rgba(90,160,90,0.3)" }
-    : watchlist.inWatchlist
-    ? { label: "🔖 Na lista", bg: "rgba(80,130,210,0.15)", color: "#6a9fdf", border: "rgba(80,130,210,0.3)" }
-    : null;
-
+  // Badge: só mostra se lançado hoje ou ontem (genuinamente novo)
   const releaseBadge =
-    days !== null && days >= 0 && days <= 30
+    days !== null && days >= 0 && days <= 1
       ? {
-          label: days === 0 ? "Lançado hoje" : `Lançado há ${days} ${days === 1 ? "dia" : "dias"}`,
+          label: days === 0 ? "Lançado hoje" : "Lançado ontem",
           bg: "rgba(220,150,50,0.12)",
           color: "#e09050",
           border: "rgba(220,150,50,0.25)",
         }
-      : days !== null && days > 30 && days <= 90
-      ? {
-          label: `Lançado há ${Math.round(days / 30)} meses`,
-          bg: "rgba(150,150,150,0.08)",
-          color: "rgba(255,255,255,0.4)",
-          border: "rgba(255,255,255,0.1)",
-        }
       : null;
 
-  // Primary button logic
-  let primaryLabel: string;
-  let primaryBg: string;
-  let primaryColor: string;
-  let primaryBorder: string;
-  let primaryAction: () => void;
+  // Badge de status do usuário
+  const userBadge = watched.isWatched
+    ? { label: "✓ Assistido", bg: "rgba(90,160,90,0.15)", color: "#6abf6a", border: "rgba(90,160,90,0.3)" }
+    : null;
 
-  const isPrimaryLoading = watchlist.loading || watched.loading;
-  const isPrimarySaving = watchlist.saving || watched.saving;
-
-  if (watched.isWatched) {
-    primaryLabel = isPrimarySaving ? "..." : "✓ Assistido";
-    primaryBg = "rgba(90,160,90,0.2)";
-    primaryColor = "#6abf6a";
-    primaryBorder = "rgba(90,160,90,0.4)";
-    primaryAction = watched.toggle;
-  } else if (watchlist.inWatchlist) {
-    primaryLabel = isPrimarySaving ? "..." : "▶ Na lista";
-    primaryBg = "rgba(80,130,210,0.2)";
-    primaryColor = "#6a9fdf";
-    primaryBorder = "rgba(80,130,210,0.35)";
-    primaryAction = watchlist.toggle;
-  } else {
-    primaryLabel = isPrimarySaving ? "..." : "Quero ver";
-    primaryBg = "rgba(120,100,220,0.85)";
-    primaryColor = "#fff";
-    primaryBorder = "transparent";
-    primaryAction = watchlist.toggle;
-  }
+  const isLoading = watchlist.loading || watched.loading;
+  const isSaving = watchlist.saving || watched.saving;
 
   const btnBase = {
     borderRadius: "8px",
     padding: "8px 18px",
     fontSize: "12px",
-    fontWeight: 500,
+    fontWeight: 500 as const,
     cursor: "pointer",
     transition: "opacity 0.15s",
     display: "flex",
     alignItems: "center",
     gap: "5px",
     border: "0.5px solid",
-    whiteSpace: "nowrap",
-  };
-
-  const btnSecondary = {
-    ...btnBase,
-    background: "rgba(255,255,255,0.08)",
-    color: "rgba(255,255,255,0.75)",
-    borderColor: "rgba(255,255,255,0.15)",
+    whiteSpace: "nowrap" as const,
+    lineHeight: 1,
   };
 
   return (
-    <div
-      className="relative w-full overflow-hidden"
-      style={{ minHeight: 420 }}
-    >
+    <div className="relative w-full overflow-hidden" style={{ minHeight: 420 }}>
       {/* Backdrop */}
       {backdropUrl ? (
         <div className="absolute inset-0">
@@ -241,47 +188,23 @@ export default function TitleHero({ detail, mediaType, hasTrailer }: Props) {
         }}
       />
 
-      {/* Floating play button */}
-      {hasTrailer && (
-        <button
-          type="button"
-          onClick={() => window.dispatchEvent(new Event("poplog:open-trailer"))}
-          style={{
-            position: "absolute",
-            top: 20,
-            right: 20,
-            zIndex: 10,
-            width: 40,
-            height: 40,
-            borderRadius: "50%",
-            background: "rgba(255,255,255,0.12)",
-            border: "0.5px solid rgba(255,255,255,0.2)",
-            color: "rgba(255,255,255,0.85)",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            transition: "background 0.2s",
-          }}
-          title="Assistir trailer"
-        >
-          <IconPlay />
-        </button>
-      )}
-
-      {/* Main content — bottom-aligned */}
-      <div
-        className="relative z-10 flex items-end"
-        style={{ minHeight: 420, padding: "32px" }}
-      >
+      {/* Main content — bottom-aligned, same max-width as page sections */}
+      <div className="relative z-10 flex items-end" style={{ minHeight: 420 }}>
         <div
-          className="flex w-full gap-6"
-          style={{ maxWidth: 920, alignItems: "flex-end" }}
+          style={{
+            maxWidth: 1100,
+            margin: "0 auto",
+            width: "100%",
+            padding: "0 24px 32px",
+            display: "flex",
+            gap: 24,
+            alignItems: "flex-end",
+          }}
         >
           {/* Poster */}
           {posterUrl && (
             <div
-              className="flex-shrink-0 hidden sm:block"
+              className="hidden sm:block flex-shrink-0"
               style={{
                 width: 110,
                 aspectRatio: "2/3",
@@ -298,7 +221,7 @@ export default function TitleHero({ detail, mediaType, hasTrailer }: Props) {
 
           {/* Info block */}
           <div className="flex min-w-0 flex-col gap-2.5 pb-1">
-            {/* Contextual badges */}
+            {/* Badges — só aparecem se tiverem conteúdo relevante */}
             {(userBadge || releaseBadge) && (
               <div className="flex flex-wrap items-center gap-2">
                 {userBadge && (
@@ -367,15 +290,7 @@ export default function TitleHero({ detail, mediaType, hasTrailer }: Props) {
             </div>
 
             {/* Title */}
-            <h1
-              style={{
-                fontSize: 32,
-                fontWeight: 600,
-                color: "#fff",
-                lineHeight: 1.1,
-                margin: 0,
-              }}
-            >
+            <h1 style={{ fontSize: 32, fontWeight: 600, color: "#fff", lineHeight: 1.1, margin: 0 }}>
               {title}
             </h1>
 
@@ -413,59 +328,63 @@ export default function TitleHero({ detail, mediaType, hasTrailer }: Props) {
 
             {/* Action buttons */}
             <div className="mt-1 flex flex-wrap items-center gap-2">
-              {/* Primary */}
-              <button
-                type="button"
-                onClick={primaryAction}
-                disabled={isPrimaryLoading || isPrimarySaving}
-                style={{
-                  ...btnBase,
-                  background: primaryBg,
-                  color: primaryColor,
-                  borderColor: primaryBorder,
-                  opacity: isPrimaryLoading ? 0.5 : 1,
-                }}
-              >
-                {primaryLabel}
-              </button>
-
-              {/* Secondary: mark as watched (only when not yet watched) */}
-              {!watched.isWatched && (
+              {watched.isWatched ? (
+                /* Já assistiu — destaque no "Assistido", clicar remove */
                 <button
                   type="button"
                   onClick={watched.toggle}
-                  disabled={watched.loading || !watched.isLoggedIn}
+                  disabled={isLoading || isSaving}
                   style={{
-                    ...btnSecondary,
-                    opacity: watched.loading ? 0.5 : 1,
+                    ...btnBase,
+                    background: "rgba(90,160,90,0.2)",
+                    color: "#6abf6a",
+                    borderColor: "rgba(90,160,90,0.4)",
+                    opacity: isLoading ? 0.5 : 1,
                   }}
                 >
                   <IconCheck />
-                  {watched.saving ? "..." : "Já vi"}
+                  {isSaving ? "..." : "Assistido"}
                 </button>
-              )}
+              ) : (
+                /* Não assistiu — "Quero ver" como primário, "Assistido" como secundário */
+                <>
+                  <button
+                    type="button"
+                    onClick={watchlist.toggle}
+                    disabled={isLoading || isSaving || !watchlist.isLoggedIn}
+                    style={{
+                      ...btnBase,
+                      background: watchlist.inWatchlist
+                        ? "rgba(80,130,210,0.2)"
+                        : "rgba(120,100,220,0.85)",
+                      color: watchlist.inWatchlist ? "#6a9fdf" : "#fff",
+                      borderColor: watchlist.inWatchlist
+                        ? "rgba(80,130,210,0.35)"
+                        : "transparent",
+                      opacity: isLoading ? 0.5 : 1,
+                    }}
+                  >
+                    <IconBookmark filled={watchlist.inWatchlist} />
+                    {isSaving ? "..." : watchlist.inWatchlist ? "Na lista" : "Quero ver"}
+                  </button>
 
-              {/* Icon button: watchlist */}
-              <button
-                type="button"
-                onClick={watchlist.toggle}
-                disabled={watchlist.loading || !watchlist.isLoggedIn}
-                style={{
-                  ...btnBase,
-                  background: watchlist.inWatchlist
-                    ? "rgba(80,130,210,0.15)"
-                    : "rgba(255,255,255,0.08)",
-                  color: watchlist.inWatchlist ? "#6a9fdf" : "rgba(255,255,255,0.75)",
-                  borderColor: watchlist.inWatchlist
-                    ? "rgba(80,130,210,0.35)"
-                    : "rgba(255,255,255,0.15)",
-                  opacity: watchlist.loading ? 0.5 : 1,
-                  padding: "8px 14px",
-                }}
-              >
-                <IconBookmark filled={watchlist.inWatchlist} />
-                Lista
-              </button>
+                  <button
+                    type="button"
+                    onClick={watched.toggle}
+                    disabled={watched.loading || !watched.isLoggedIn}
+                    style={{
+                      ...btnBase,
+                      background: "rgba(255,255,255,0.08)",
+                      color: "rgba(255,255,255,0.75)",
+                      borderColor: "rgba(255,255,255,0.15)",
+                      opacity: watched.loading ? 0.5 : 1,
+                    }}
+                  >
+                    <IconCheck />
+                    {watched.saving ? "..." : "Assistido"}
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>

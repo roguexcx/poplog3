@@ -7,7 +7,6 @@ import TitleWatchProviders from "@/features/title/TitleWatchProviders";
 import TitleSeasons from "@/features/title/TitleSeasons";
 import TitleCast from "@/features/title/TitleCast";
 import TitleSimilar from "@/features/title/TitleSimilar";
-import TitleTrailerModal from "@/features/title/TitleTrailerModal";
 
 type Props = {
   detail: TMDBTitleDetail;
@@ -50,9 +49,7 @@ export default function TitlePage({ detail, mediaType }: Props) {
 
   return (
     <div style={{ background: "#080810", minHeight: "100vh" }}>
-      {trailerKey && <TitleTrailerModal trailerKey={trailerKey} />}
-
-      <TitleHero detail={detail} mediaType={mediaType} hasTrailer={!!trailerKey} />
+      <TitleHero detail={detail} mediaType={mediaType} />
 
       <div style={{ maxWidth: "1100px", margin: "0 auto", padding: "32px 24px" }}>
         <TitleSynopsisTrailer
