@@ -3,8 +3,9 @@
 // /api/top-rated, /api/tv-top-rated, /api/trending, /api/upcoming.
 //
 // Query params:
-//   type   = "trending" | "popular" | "top_rated" | "upcoming"
-//   media  = "movie" | "tv"  (required for popular and top_rated)
+//   type   = "trending" | "popular" | "top_rated" | "upcoming" | "now_playing" | "on_the_air"
+//   media  = "movie" | "tv"  (required for popular, top_rated, now_playing, on_the_air)
+//   page   = number (default 1)
 
 import { type NextRequest, NextResponse } from "next/server";
 import { tmdbFetch } from "@/lib/tmdb";
@@ -51,6 +52,12 @@ function tmdbEndpoint(
       return null;
     case "upcoming":
       return "/movie/upcoming";
+    case "now_playing":
+      if (media === "movie") return "/movie/now_playing";
+      return null;
+    case "on_the_air":
+      if (media === "tv") return "/tv/on_the_air";
+      return null;
     default:
       return null;
   }
@@ -60,18 +67,19 @@ export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const type = searchParams.get("type") ?? "";
   const media = searchParams.get("media");
+  const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
 
   const endpoint = tmdbEndpoint(type, media);
 
   if (!endpoint) {
     return NextResponse.json(
-      { error: "Parâmetros inválidos. Use type=trending|popular|top_rated|upcoming e media=movie|tv quando necessário." },
+      { error: "Parâmetros inválidos. Use type=trending|popular|top_rated|upcoming|now_playing|on_the_air e media=movie|tv quando necessário." },
       { status: 400 },
     );
   }
 
   try {
-    const data = await tmdbFetch<TMDBResponse<TMDBItem>>(endpoint, { page: 1 });
+    const data = await tmdbFetch<TMDBResponse<TMDBItem>>(endpoint, { page });
     let results = data.results ?? [];
 
     if (type === "trending") {
