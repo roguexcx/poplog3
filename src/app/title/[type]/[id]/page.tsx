@@ -5,6 +5,8 @@ import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { tmdbFetch } from "@/lib/tmdb";
 import { getContentTypeLabel, normalizeKeywordName } from "@/lib/title-utils";
+import { getStreamingInfo } from "@/lib/streaming";
+import type { StreamingProvider } from "@/lib/streaming";
 import TitleActions from "@/features/title/TitleActions";
 import TitleTabs from "@/features/title/TitleTabs";
 import MoreLikeThis from "@/features/title/MoreLikeThis";
@@ -15,20 +17,6 @@ import type {
 } from "@/features/title/title-types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-type TMDBProvider = {
-  provider_id: number;
-  provider_name: string;
-  logo_path?: string | null;
-};
-
-type WatchProviders = {
-  flatrate?: TMDBProvider[];
-  free?: TMDBProvider[];
-  ads?: TMDBProvider[];
-  rent?: TMDBProvider[];
-  buy?: TMDBProvider[];
-};
 
 type Props = {
   params: Promise<{ type: string; id: string }>;
@@ -54,8 +42,8 @@ async function getData(type: string, id: string): Promise<TMDBTitleDetail | null
   if (type !== "movie" && type !== "tv") return null;
   const appendTo =
     type === "movie"
-      ? "credits,watch/providers,keywords,recommendations,similar,release_dates"
-      : "credits,watch/providers,keywords,recommendations,similar,content_ratings";
+      ? "credits,keywords,recommendations,similar,release_dates"
+      : "credits,keywords,recommendations,similar,content_ratings";
   try {
     return await tmdbFetch<TMDBTitleDetail>(`/${type}/${id}`, {
       append_to_response: appendTo,
@@ -138,14 +126,6 @@ const STATUS_LABELS: Record<string, string> = {
   "Released":          "Lançado",
 };
 
-function mergeProviders(...groups: (TMDBProvider[] | undefined)[]): TMDBProvider[] {
-  const map = new Map<number, TMDBProvider>();
-  groups.flat().forEach((provider) => {
-    if (provider?.provider_id) map.set(provider.provider_id, provider);
-  });
-  return Array.from(map.values());
-}
-
 function getGenreIds(data: TMDBTitleDetail): number[] {
   return (data.genres ?? []).map((g) => g.id).filter(Boolean);
 }
@@ -198,32 +178,29 @@ function SidebarLabel({ children }: { children: React.ReactNode }) {
 }
 
 function ProviderChips({
-  title,
+  label,
   providers,
-  excludeProviderId,
 }: {
-  title: string;
-  providers?: TMDBProvider[];
-  excludeProviderId?: number;
+  label: string;
+  providers: StreamingProvider[];
 }) {
-  const filtered = providers?.filter((p) => p.provider_id !== excludeProviderId);
-  if (!filtered?.length) return null;
+  if (!providers.length) return null;
   return (
     <div>
       <p className="mb-2 text-[10px] font-black uppercase tracking-[0.3em] text-slate-500">
-        {title}
+        {label}
       </p>
       <div className="flex flex-wrap gap-2">
-        {filtered.slice(0, 6).map((provider) => (
+        {providers.slice(0, 6).map((p) => (
           <div
-            key={provider.provider_id}
-            title={provider.provider_name}
+            key={p.id}
+            title={p.name}
             className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.06] transition hover:scale-105 hover:border-sky-300/40"
           >
-            {provider.logo_path && (
+            {p.logo && (
               <Image
-                src={`https://image.tmdb.org/t/p/w92${provider.logo_path}`}
-                alt={provider.provider_name}
+                src={`https://image.tmdb.org/t/p/w92${p.logo}`}
+                alt={p.name}
                 width={28}
                 height={28}
                 className="h-6 w-6 rounded-md object-contain"
@@ -268,26 +245,23 @@ export default async function TitleDetailPage({ params }: Props) {
   const sourceKeywords  = getSourceKeywords(data);
   const sourceYear      = Number(year) || null;
 
-  // Watch providers
-  const watchProviders: WatchProviders | undefined = data["watch/providers"]?.results?.BR;
-  const freeAndAdsProviders = mergeProviders(watchProviders?.free, watchProviders?.ads);
-  const featuredProvider =
-    watchProviders?.flatrate?.[0] ??
-    freeAndAdsProviders?.[0] ??
-    watchProviders?.rent?.[0] ??
-    watchProviders?.buy?.[0];
-  const featuredProviderLabel = watchProviders?.flatrate?.[0]
+  // Providers via utilitário centralizado
+  const streaming = await getStreamingInfo(data.id, type as "movie" | "tv");
+
+  const subscriptionProviders = [
+    ...streaming.flatrate,
+    ...streaming.free,
+    ...streaming.ads,
+  ].filter((p, i, arr) => arr.findIndex((q) => q.id === p.id) === i);
+
+  const featuredProvider = subscriptionProviders[0] ?? streaming.rent[0] ?? streaming.buy[0] ?? null;
+  const featuredProviderLabel = subscriptionProviders[0]
     ? "Streaming"
-    : freeAndAdsProviders?.[0]
-      ? "Grátis ou com anúncios"
-      : watchProviders?.rent?.[0]
-        ? "Alugar"
-        : "Comprar";
+    : streaming.rent[0]
+      ? "Alugar"
+      : "Comprar";
   const hasWatchProviders = Boolean(
-    watchProviders?.flatrate?.length ||
-      freeAndAdsProviders.length ||
-      watchProviders?.rent?.length ||
-      watchProviders?.buy?.length,
+    subscriptionProviders.length || streaming.rent.length || streaming.buy.length,
   );
 
   // Ficha técnica
@@ -439,22 +413,17 @@ export default async function TitleDetailPage({ params }: Props) {
 
             {/* Onde assistir */}
             <div className="rounded-[1.65rem] border border-white/10 bg-white/[0.04] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.45)] backdrop-blur-xl">
-              <div className="mb-4 flex items-center justify-between">
-                <h2 className="text-[11px] font-black uppercase tracking-[0.35em] text-sky-300">
-                  Onde assistir
-                </h2>
-                <div className="rounded-full bg-sky-400/15 px-3 py-1 text-[10px] font-black text-sky-300">
-                  BR
-                </div>
-              </div>
+              <h2 className="mb-4 text-[11px] font-black uppercase tracking-[0.35em] text-sky-300">
+                Onde assistir
+              </h2>
               {hasWatchProviders && featuredProvider ? (
                 <div className="space-y-4">
                   <div className="overflow-hidden rounded-xl border border-sky-400/20 bg-sky-400/[0.08] p-4 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.12)]">
                     <div className="flex items-center gap-3">
-                      {featuredProvider.logo_path && (
+                      {featuredProvider.logo && (
                         <Image
-                          src={`https://image.tmdb.org/t/p/w185${featuredProvider.logo_path}`}
-                          alt={featuredProvider.provider_name}
+                          src={`https://image.tmdb.org/t/p/w185${featuredProvider.logo}`}
+                          alt={featuredProvider.name}
                           width={64}
                           height={64}
                           className="h-11 w-11 rounded-xl object-cover shadow-[0_8px_24px_rgba(0,0,0,0.5)]"
@@ -465,16 +434,28 @@ export default async function TitleDetailPage({ params }: Props) {
                           {featuredProviderLabel}
                         </p>
                         <p className="truncate text-base font-black text-white">
-                          {featuredProvider.provider_name}
+                          {featuredProvider.name}
                         </p>
                       </div>
                     </div>
                   </div>
-                  <ProviderChips title="Outros streamings" providers={watchProviders?.flatrate} excludeProviderId={featuredProvider.provider_id} />
-                  <ProviderChips title="Grátis / anúncios" providers={freeAndAdsProviders} excludeProviderId={featuredProvider.provider_id} />
-                  <ProviderChips title="Alugar" providers={watchProviders?.rent} excludeProviderId={featuredProvider.provider_id} />
-                  <ProviderChips title="Comprar" providers={watchProviders?.buy} excludeProviderId={featuredProvider.provider_id} />
+                  <ProviderChips
+                    label="Outros streamings"
+                    providers={subscriptionProviders.filter((p) => p.id !== featuredProvider.id)}
+                  />
+                  <ProviderChips
+                    label="Alugar"
+                    providers={streaming.rent.filter((p) => p.id !== featuredProvider.id)}
+                  />
+                  <ProviderChips
+                    label="Comprar"
+                    providers={streaming.buy.filter((p) => p.id !== featuredProvider.id)}
+                  />
                 </div>
+              ) : streaming.availableAbroad ? (
+                <p className="text-sm text-zinc-400">
+                  Disponível fora do Brasil
+                </p>
               ) : (
                 <p className="text-sm text-zinc-500">Nenhuma opção disponível no Brasil no momento.</p>
               )}
