@@ -9,7 +9,7 @@ import type { TMDBSeason, TMDBEpisode } from "@/features/title/title-types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Tab = "overview" | "episodes" | "cast";
+type Tab = "overview" | "episodes";
 
 type EpisodeProgress = {
   season: number;
@@ -20,7 +20,6 @@ type EpisodeProgress = {
 type Props = {
   type: string;
   overviewContent: React.ReactNode;
-  castContent: React.ReactNode;
   seasons: TMDBSeason[];
   tmdbId: number;
   mediaType: "movie" | "tv";
@@ -653,7 +652,6 @@ function EpisodesTab({
 function TitleTabsInner({
   type,
   overviewContent,
-  castContent,
   seasons,
   tmdbId,
   userId,
@@ -673,12 +671,8 @@ function TitleTabsInner({
     ? [
         { key: "overview",  label: "Visão geral" },
         { key: "episodes",  label: "Episódios" },
-        { key: "cast",      label: "Elenco" },
       ]
-    : [
-        { key: "overview",  label: "Visão geral" },
-        { key: "cast",      label: "Elenco" },
-      ];
+    : [];
 
   return (
     <div>
@@ -710,7 +704,6 @@ function TitleTabsInner({
           initialSeason={initialSeason}
         />
       )}
-      {activeTab === "cast" && castContent}
     </div>
   );
 }

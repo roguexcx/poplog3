@@ -119,6 +119,25 @@ async function getTrailerKey(type: string, id: string): Promise<string | null> {
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+const LANGUAGE_NAMES: Record<string, string> = {
+  en: "Inglês", pt: "Português", es: "Espanhol", fr: "Francês",
+  de: "Alemão", it: "Italiano", ja: "Japonês", ko: "Coreano",
+  zh: "Chinês", ru: "Russo", ar: "Árabe", hi: "Hindi",
+  nl: "Holandês", sv: "Sueco", pl: "Polonês", tr: "Turco",
+  da: "Dinamarquês", fi: "Finlandês", nb: "Norueguês", th: "Tailandês",
+};
+
+const STATUS_LABELS: Record<string, string> = {
+  "Returning Series":  "Em exibição",
+  "Ended":             "Encerrada",
+  "Canceled":          "Cancelada",
+  "In Production":     "Em produção",
+  "Post Production":   "Pós-produção",
+  "Planned":           "Planejada",
+  "Rumored":           "Em rumores",
+  "Released":          "Lançado",
+};
+
 function mergeProviders(...groups: (TMDBProvider[] | undefined)[]): TMDBProvider[] {
   const map = new Map<number, TMDBProvider>();
   groups.flat().forEach((provider) => {
@@ -161,6 +180,22 @@ function getCandidates(data: TMDBTitleDetail): RawCandidate[] {
 }
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
+
+function SidebarCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="rounded-[1.65rem] border border-white/10 bg-white/[0.04] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.38)]">
+      {children}
+    </div>
+  );
+}
+
+function SidebarLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="mb-3 text-[11px] font-black uppercase tracking-[0.35em] text-sky-300">
+      {children}
+    </p>
+  );
+}
 
 function ProviderChips({
   title,
@@ -220,8 +255,12 @@ export default async function TitleDetailPage({ params }: Props) {
   const contentTypeLabel = getContentTypeLabel(type, genreIds);
   const genres: string[] = (data.genres ?? []).map((g) => g.name);
 
-  const directors = (data.credits?.crew ?? []).filter((p) => p.job === "Director");
-  const cast      = (data.credits?.cast ?? []).slice(0, 8);
+  const directors  = (data.credits?.crew ?? []).filter((p) => p.job === "Director");
+  const writers    = (data.credits?.crew ?? [])
+    .filter((p) => p.department === "Writing" && (p.job === "Screenplay" || p.job === "Writer" || p.job === "Story"))
+    .slice(0, 3);
+  const cast       = (data.credits?.cast ?? []).slice(0, 8);
+  const creators   = data.created_by ?? [];
   const trailerKey = await getTrailerKey(type, id);
 
   const candidates      = getCandidates(data);
@@ -229,6 +268,7 @@ export default async function TitleDetailPage({ params }: Props) {
   const sourceKeywords  = getSourceKeywords(data);
   const sourceYear      = Number(year) || null;
 
+  // Watch providers
   const watchProviders: WatchProviders | undefined = data["watch/providers"]?.results?.BR;
   const freeAndAdsProviders = mergeProviders(watchProviders?.free, watchProviders?.ads);
   const featuredProvider =
@@ -249,6 +289,12 @@ export default async function TitleDetailPage({ params }: Props) {
       watchProviders?.rent?.length ||
       watchProviders?.buy?.length,
   );
+
+  // Ficha técnica
+  const originCountry   = data.production_countries?.[0]?.name ?? null;
+  const langCode        = data.original_language ?? null;
+  const langName        = langCode ? (LANGUAGE_NAMES[langCode] ?? langCode.toUpperCase()) : null;
+  const statusLabel     = data.status ? (STATUS_LABELS[data.status] ?? data.status) : null;
 
   // Séries: busca temporadas completas (com episódios)
   let seasons: TMDBSeason[] = [];
@@ -301,41 +347,6 @@ export default async function TitleDetailPage({ params }: Props) {
     </div>
   );
 
-  const castContent =
-    cast.length > 0 ? (
-      <section>
-        <h2 className="mb-4 text-[11px] font-black uppercase tracking-[0.35em] text-sky-300">
-          Elenco principal
-        </h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          {cast.map((person) => (
-            <div
-              key={person.id}
-              className="group flex items-center gap-3 rounded-2xl border border-white/10 bg-white/[0.04] p-3 transition duration-200 hover:border-white/[0.18] hover:bg-white/[0.07]"
-            >
-              {person.profile_path ? (
-                <Image
-                  src={`https://image.tmdb.org/t/p/w185${person.profile_path}`}
-                  alt={person.name}
-                  width={50}
-                  height={50}
-                  className="h-12 w-12 shrink-0 rounded-xl object-cover"
-                />
-              ) : (
-                <div className="h-12 w-12 shrink-0 rounded-xl bg-white/5" />
-              )}
-              <div className="min-w-0">
-                <p className="truncate font-bold text-zinc-100">{person.name}</p>
-                <p className="truncate text-sm text-zinc-500">{person.character}</p>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-    ) : (
-      <p className="text-sm text-zinc-500">Elenco não disponível.</p>
-    );
-
   return (
     <main className="min-h-screen bg-[#020617] text-white">
 
@@ -353,13 +364,9 @@ export default async function TitleDetailPage({ params }: Props) {
         ) : (
           <div className="absolute inset-0 bg-[#020617]" />
         )}
-        {/* Gradiente horizontal — apaga as bordas laterais */}
         <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(2,6,23,0.96)_0%,rgba(2,6,23,0.55)_40%,rgba(2,6,23,0.20)_70%,rgba(2,6,23,0.60)_100%)]" />
-        {/* Gradiente vertical — funde no bg da página */}
         <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(2,6,23,0.70)_0%,transparent_28%,rgba(2,6,23,0.30)_58%,#020617_100%)]" />
-        {/* Glow sky-blue sutil no topo */}
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_68%_8%,rgba(56,189,248,0.18),transparent_38%)]" />
-        {/* Textura de pontos — igual à home */}
         <div className="absolute inset-0 opacity-[0.03] [background-image:radial-gradient(circle_at_center,white_1px,transparent_1px)] [background-size:24px_24px]" />
       </div>
 
@@ -409,7 +416,6 @@ export default async function TitleDetailPage({ params }: Props) {
                 </span>
               </p>
             )}
-            {/* Botões de ação — linha horizontal abaixo dos metadados */}
             <div className="mt-4 flex justify-center sm:justify-start">
               <TitleActions
                 tmdbId={data.id}
@@ -476,10 +482,8 @@ export default async function TitleDetailPage({ params }: Props) {
 
             {/* Gêneros */}
             {genres.length > 0 && (
-              <div className="rounded-[1.65rem] border border-white/10 bg-white/[0.04] p-5 shadow-[0_18px_60px_rgba(0,0,0,0.38)]">
-                <h2 className="mb-3 text-[11px] font-black uppercase tracking-[0.35em] text-sky-300">
-                  Gêneros
-                </h2>
+              <SidebarCard>
+                <SidebarLabel>Gêneros</SidebarLabel>
                 <div className="flex flex-wrap gap-2">
                   {genres.map((g) => (
                     <span
@@ -490,8 +494,127 @@ export default async function TitleDetailPage({ params }: Props) {
                     </span>
                   ))}
                 </div>
-              </div>
+              </SidebarCard>
             )}
+
+            {/* Elenco */}
+            {cast.length > 0 && (
+              <SidebarCard>
+                <SidebarLabel>Elenco</SidebarLabel>
+                <div className="space-y-3">
+                  {cast.map((person) => (
+                    <div key={person.id} className="flex items-center gap-3">
+                      {person.profile_path ? (
+                        <Image
+                          src={`https://image.tmdb.org/t/p/w185${person.profile_path}`}
+                          alt={person.name}
+                          width={40}
+                          height={40}
+                          className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-white/10"
+                        />
+                      ) : (
+                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/5 ring-1 ring-white/10 text-xs text-zinc-500">
+                          {person.name.charAt(0)}
+                        </div>
+                      )}
+                      <div className="min-w-0">
+                        <p className="truncate text-xs font-bold text-zinc-200">{person.name}</p>
+                        <p className="truncate text-[11px] text-zinc-500">{person.character}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </SidebarCard>
+            )}
+
+            {/* Ficha técnica */}
+            <SidebarCard>
+              <SidebarLabel>Ficha técnica</SidebarLabel>
+              <dl className="space-y-3">
+
+                {/* Diretor (filmes) */}
+                {type === "movie" && directors.length > 0 && (
+                  <div>
+                    <dt className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-600">Direção</dt>
+                    <dd className="mt-0.5 text-xs font-semibold text-zinc-300">
+                      {directors.map((d) => d.name).join(", ")}
+                    </dd>
+                  </div>
+                )}
+
+                {/* Criador (séries) */}
+                {type === "tv" && creators.length > 0 && (
+                  <div>
+                    <dt className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-600">Criação</dt>
+                    <dd className="mt-0.5 text-xs font-semibold text-zinc-300">
+                      {creators.map((c) => c.name).join(", ")}
+                    </dd>
+                  </div>
+                )}
+
+                {/* Roteiristas */}
+                {writers.length > 0 && (
+                  <div>
+                    <dt className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-600">Roteiro</dt>
+                    <dd className="mt-0.5 text-xs font-semibold text-zinc-300">
+                      {writers.map((w) => w.name).join(", ")}
+                    </dd>
+                  </div>
+                )}
+
+                {/* País de origem */}
+                {originCountry && (
+                  <div>
+                    <dt className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-600">País</dt>
+                    <dd className="mt-0.5 text-xs font-semibold text-zinc-300">{originCountry}</dd>
+                  </div>
+                )}
+
+                {/* Idioma original */}
+                {langName && (
+                  <div>
+                    <dt className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-600">Idioma</dt>
+                    <dd className="mt-0.5 text-xs font-semibold text-zinc-300">{langName}</dd>
+                  </div>
+                )}
+
+                {/* Duração (filmes) */}
+                {type === "movie" && data.runtime && (
+                  <div>
+                    <dt className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-600">Duração</dt>
+                    <dd className="mt-0.5 text-xs font-semibold text-zinc-300">{data.runtime} min</dd>
+                  </div>
+                )}
+
+                {/* Temporadas / Episódios (séries) */}
+                {type === "tv" && (
+                  <>
+                    {data.number_of_seasons != null && (
+                      <div>
+                        <dt className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-600">Temporadas</dt>
+                        <dd className="mt-0.5 text-xs font-semibold text-zinc-300">{data.number_of_seasons}</dd>
+                      </div>
+                    )}
+                    {data.number_of_episodes != null && (
+                      <div>
+                        <dt className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-600">Episódios</dt>
+                        <dd className="mt-0.5 text-xs font-semibold text-zinc-300">{data.number_of_episodes}</dd>
+                      </div>
+                    )}
+                  </>
+                )}
+
+                {/* Status */}
+                {statusLabel && (
+                  <div>
+                    <dt className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-600">Status</dt>
+                    <dd className="mt-0.5 text-xs font-semibold text-zinc-300">{statusLabel}</dd>
+                  </div>
+                )}
+
+              </dl>
+            </SidebarCard>
+
           </div>
 
           {/* Área principal com abas */}
@@ -499,7 +622,6 @@ export default async function TitleDetailPage({ params }: Props) {
             <TitleTabs
               type={type}
               overviewContent={overviewContent}
-              castContent={castContent}
               seasons={seasons}
               tmdbId={data.id}
               mediaType={type as "movie" | "tv"}
