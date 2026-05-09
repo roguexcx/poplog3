@@ -336,7 +336,7 @@ export default async function TitleDetailPage({ params }: Props) {
     );
 
   return (
-    <main className="min-h-screen bg-[#080810] text-white">
+    <main className="min-h-screen bg-[#020617] text-white">
 
       {/* Hero — backdrop cinematográfico com camadas de gradiente */}
       <div className="relative h-[48vh] min-h-[320px] overflow-hidden md:h-[54vh]">
@@ -350,12 +350,12 @@ export default async function TitleDetailPage({ params }: Props) {
             className="object-cover object-top opacity-45"
           />
         ) : (
-          <div className="absolute inset-0 bg-[#0a0a14]" />
+          <div className="absolute inset-0 bg-[#020617]" />
         )}
         {/* Gradiente horizontal — apaga as bordas laterais */}
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(8,8,16,0.95)_0%,rgba(8,8,16,0.55)_40%,rgba(8,8,16,0.20)_70%,rgba(8,8,16,0.60)_100%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(2,6,23,0.96)_0%,rgba(2,6,23,0.55)_40%,rgba(2,6,23,0.20)_70%,rgba(2,6,23,0.60)_100%)]" />
         {/* Gradiente vertical — funde no bg da página */}
-        <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(8,8,16,0.70)_0%,transparent_28%,rgba(8,8,16,0.30)_58%,#080810_100%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(2,6,23,0.70)_0%,transparent_28%,rgba(2,6,23,0.30)_58%,#020617_100%)]" />
         {/* Glow sky-blue sutil no topo */}
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_68%_8%,rgba(56,189,248,0.18),transparent_38%)]" />
         {/* Textura de pontos — igual à home */}
