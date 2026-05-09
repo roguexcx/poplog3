@@ -25,8 +25,9 @@ export async function POST(request: Request) {
         const mediaType = title.media_type === "tv" ? "tv" : "movie";
 
         try {
+          const appendTo = mediaType === "tv" ? "genres,seasons" : "genres";
           const tmdb = await tmdbFetch(`/${mediaType}/${title.tmdb_id}`, {
-            append_to_response: "images",
+            append_to_response: appendTo,
           });
 
           return { ...title, tmdb };
