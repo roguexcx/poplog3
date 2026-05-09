@@ -3,13 +3,12 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
 import SynopsisText from "@/features/home/components/SynopsisText";
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
-import { createClient } from "@/lib/supabase/client";
+import { useUserData } from "@/context/UserDataContext";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -78,9 +77,7 @@ function formatRating(value?: number): string | null {
 
 function parseReleaseYear(year?: string | null): number | null {
   if (!year) return null;
-
   const n = Number(year);
-
   return Number.isFinite(n) ? n : null;
 }
 
@@ -110,11 +107,7 @@ function ForYouActions({ item }: { item: ForYouItem }) {
           watchlist.toggle();
         }}
         disabled={watchlist.loading || watchlist.saving || !watchlist.isLoggedIn}
-        title={
-          watchlist.inWatchlist
-            ? "Remover da watchlist"
-            : "Adicionar à watchlist"
-        }
+        title={watchlist.inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
         className={[
           btnBase,
           watchlist.inWatchlist
@@ -151,33 +144,24 @@ function ForYouActions({ item }: { item: ForYouItem }) {
   );
 }
 
-// ─── FeaturedCard, card grande ────────────────────────────────────────────────
+// ─── FeaturedCard ─────────────────────────────────────────────────────────────
 
 function FeaturedForYouCard({ item }: { item: ForYouItem }) {
-  const router = useRouter();
-
   const backdropUrl = getImageUrl(item.backdrop_path, "w1280");
   const rating = formatRating(item.vote_average);
-
   const isLongTitle = item.title_label.length > 24;
   const isLongOverview = (item.overview?.length ?? 0) > 140;
-
-  function openTitlePage() {
-    router.push(`/title/${item.media_type}/${item.id}`);
-  }
+  const slug = `/title/${item.media_type}/${item.id}`;
 
   return (
-    <article
-      role="link"
-      tabIndex={0}
-      onClick={openTitlePage}
-      onKeyDown={(event) => {
-        if (event.key === "Enter") {
-          openTitlePage();
-        }
-      }}
-      className="group relative h-[320px] cursor-pointer overflow-hidden rounded-[1.65rem] border border-white/10 bg-white/[0.04] shadow-[0_20px_80px_rgba(0,0,0,0.42)] transition duration-300 hover:-translate-y-1 hover:border-sky-300/40 hover:shadow-[0_24px_90px_rgba(56,189,248,0.16)]"
-    >
+    <article className="group relative h-[320px] overflow-hidden rounded-[1.65rem] border border-white/10 bg-white/[0.04] shadow-[0_20px_80px_rgba(0,0,0,0.42)] transition duration-300 hover:-translate-y-1 hover:border-sky-300/40 hover:shadow-[0_24px_90px_rgba(56,189,248,0.16)]">
+      {/* Overlay link — z-[5] so action buttons (z-40) stay clickable */}
+      <Link
+        href={slug}
+        className="absolute inset-0 z-[5]"
+        aria-label={`Abrir ${item.title_label}`}
+      />
+
       <ForYouActions item={item} />
 
       {backdropUrl && (
@@ -231,9 +215,7 @@ function FeaturedForYouCard({ item }: { item: ForYouItem }) {
         </h3>
 
         {item.genre_label && (
-          <p className="mt-2 text-[12px] font-semibold text-zinc-300">
-            {item.genre_label}
-          </p>
+          <p className="mt-2 text-[12px] font-semibold text-zinc-300">{item.genre_label}</p>
         )}
 
         <SynopsisText
@@ -320,7 +302,7 @@ function SmallForYouCard({ item }: { item: ForYouItem }) {
   );
 }
 
-// ─── Skeletons ────────────────────────────────────────────────────────────────
+// ─── Skeleton ─────────────────────────────────────────────────────────────────
 
 function ForYouSkeleton() {
   return (
@@ -350,59 +332,35 @@ function ForYouSkeleton() {
 // ─── Seção principal ──────────────────────────────────────────────────────────
 
 export default function ForYouSection() {
+  const { titles, loading: titlesLoading } = useUserData();
   const [featured, setFeatured] = useState<ForYouItem | null>(null);
   const [items, setItems] = useState<ForYouItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-  async function load() {
-    const supabase = createClient();
+    if (titlesLoading) return;
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-
-    if (!session) {
+    if (titles.length === 0) {
       setLoading(false);
       return;
     }
 
-    const { data: rawTitles, error } = await supabase
-      .from("user_titles")
-      .select("*")
-      .eq("user_id", session.user.id);
+    setLoading(true);
 
-    if (error) {
-      console.error("Erro ao carregar títulos para recomendações:", error);
-      setLoading(false);
-      return;
-    }
-
-    if (!rawTitles?.length) {
-      setLoading(false);
-      return;
-    }
-
-      const res = await fetch("/api/user/for-you", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ titles: rawTitles }),
-      });
-
-      if (!res.ok) {
-        setLoading(false);
-        return;
-      }
-
-      const json = await res.json();
-
-      setFeatured(json.featured ?? null);
-      setItems(json.items ?? []);
-      setLoading(false);
-    }
-
-    load();
-  }, []);
+    fetch("/api/user/for-you", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ titles }),
+    })
+      .then((res) => (res.ok ? res.json() : null))
+      .then((json) => {
+        if (json) {
+          setFeatured(json.featured ?? null);
+          setItems(json.items ?? []);
+        }
+      })
+      .finally(() => setLoading(false));
+  }, [titles, titlesLoading]);
 
   if (!loading && !featured && items.length === 0) return null;
 
@@ -410,9 +368,7 @@ export default function ForYouSection() {
     <section>
       <div className="mb-5 flex items-end justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black tracking-tight text-white">
-            Para você
-          </h2>
+          <h2 className="text-2xl font-black tracking-tight text-white">Para você</h2>
           <p className="mt-1 text-sm text-zinc-400">
             Escolhas personalizadas com base no que você ama.
           </p>

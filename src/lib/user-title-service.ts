@@ -1,23 +1,10 @@
 // src/lib/user-title-service.ts
 
 import { createClient } from "@/lib/supabase/client";
+import type { MediaType, UserTitle } from "@/types/user";
 
-// ─── Tipos ────────────────────────────────────────────────────────────────────
-
-export type MediaType = "movie" | "tv";
-
-export type UserTitle = {
-  id: string;
-  user_id: string;
-  tmdb_id: number;
-  media_type: MediaType;
-  status: string;
-  favorite: boolean;
-  created_at: string;
-  watched_at: string | null;
-  title: string | null;
-  release_year: number | null;
-};
+// Re-export so existing importers don't break
+export type { MediaType, UserTitle };
 
 type TitleInput = {
   userId: string;

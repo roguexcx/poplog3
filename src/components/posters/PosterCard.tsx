@@ -8,7 +8,7 @@ import type { ReactNode } from "react";
 
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
-import type { TMDBItem, TMDBMediaType } from "@/lib/tmdb-types";
+import type { TMDBItem, TMDBMediaType } from "@/types/tmdb";
 import {
   getMediaLabel,
   getPosterUrl,

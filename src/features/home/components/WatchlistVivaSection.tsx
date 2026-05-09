@@ -5,14 +5,26 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
+import { useUserData } from "@/context/UserDataContext";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type StreamStatus = "streaming" | "chegando" | "cinemas" | "confirmado" | "unavailable";
+type WatchlistRow = {
+  id: string;
+  tmdb_id: number;
+  media_type: "movie" | "tv";
+  title: string | null;
+  release_year: number | null;
+  created_at: string;
+  fridge?: boolean | null;
+  stream_status?: string | null;
+  stream_status_checked_at?: string | null;
+};
 type WatchlistSlot = "recent" | "old" | "free" | "fridge";
 
 interface WatchlistTitle {
-  id: number;
+  id: string;
   tmdb_id: number;
   media_type: "movie" | "tv";
   title: string;
@@ -71,7 +83,7 @@ function selectFive(all: WatchlistTitle[]): Array<WatchlistTitle & { _slot: Watc
   const middle = main.filter((t) => !recent.includes(t) && !old.includes(t));
 
   const picked: Array<WatchlistTitle & { _slot: WatchlistSlot }> = [];
-  const usedIds = new Set<number>();
+  const usedIds = new Set<string>();
 
   function addFrom(pool: WatchlistTitle[], slot: WatchlistSlot): boolean {
     const avail = pool.filter((t) => !usedIds.has(t.id));
@@ -191,7 +203,7 @@ function WatchlistCard({
   onDismiss,
 }: {
   item: WatchlistTitle & { _slot: WatchlistSlot };
-  onDismiss: (id: number, action: "watched" | "remove") => void;
+  onDismiss: (id: string, action: "watched" | "remove") => void;
 }) {
   const [imgErr, setImgErr]         = useState(false);
   const [dismissed, setDismissed]   = useState(false);
@@ -372,27 +384,25 @@ function SkeletonCard() {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function WatchlistVivaSection() {
+  const { titles: userTitles, loading: titlesLoading } = useUserData();
   const [allTitles, setAllTitles] = useState<WatchlistTitle[]>([]);
   const [visible, setVisible]     = useState<Array<WatchlistTitle & { _slot: WatchlistSlot }>>([]);
   const [loading, setLoading]     = useState(true);
 
   useEffect(() => {
+    if (titlesLoading) return;
+
+    const rows = userTitles.filter((t) => t.status === "watchlist") as WatchlistRow[];
+
+    if (!rows.length) {
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+
     async function load() {
       try {
-        const supabase = createClient();
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
-
-        const { data: rows, error } = await supabase
-          .from("user_titles")
-          .select("id, tmdb_id, media_type, title, release_year, created_at, fridge, stream_status, stream_status_checked_at")
-          .eq("user_id", user.id)
-          .eq("status", "watchlist")
-          .order("created_at", { ascending: false })
-          .limit(100);
-
-        if (error || !rows?.length) return;
-
         const res = await fetch("/api/watchlist/live", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -400,12 +410,13 @@ export default function WatchlistVivaSection() {
         });
         if (!res.ok) return;
 
-        const json   = await res.json();
-        const titles: WatchlistTitle[] = json.titles ?? [];
+        const json = await res.json();
+        const enriched: WatchlistTitle[] = json.titles ?? [];
 
         // Persiste stream_status atualizado de volta no Supabase
-        const updated = titles.filter((t) => t.stream_status_updated);
+        const updated = enriched.filter((t) => t.stream_status_updated);
         if (updated.length > 0) {
+          const supabase = createClient();
           await Promise.all(
             updated.map((t) =>
               supabase
@@ -419,22 +430,23 @@ export default function WatchlistVivaSection() {
           );
         }
 
-        setAllTitles(titles);
-        setVisible(selectFive(titles));
+        setAllTitles(enriched);
+        setVisible(selectFive(enriched));
       } catch {
         // falha silenciosa — seção não aparece
       } finally {
         setLoading(false);
       }
     }
+
     load();
-  }, []);
+  }, [userTitles, titlesLoading]);
 
   function reshuffle() {
     setVisible(selectFive(allTitles));
   }
 
-  function handleDismiss(id: number, action: "watched" | "remove") {
+  function handleDismiss(id: string, action: "watched" | "remove") {
     const next = allTitles.filter((t) => t.id !== id);
     setAllTitles(next);
     setVisible((prev) => {

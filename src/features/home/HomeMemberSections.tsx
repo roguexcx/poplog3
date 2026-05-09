@@ -1,7 +1,6 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
 import type { User } from "@supabase/supabase-js";
 
 import ContinueWatchingSection from "@/features/home/ContinueWatchingSection";
@@ -9,9 +8,9 @@ import ForYouSection from "@/features/home/ForYouSection";
 import WatchlistVivaSection from "@/features/home/components/WatchlistVivaSection";
 
 import { useAuth } from "@/hooks/useAuth";
-import { createClient } from "@/lib/supabase/client";
+import { UserDataProvider, useUserData } from "@/context/UserDataContext";
 
-type MemberDataState = "loading" | "empty" | "has-data";
+// ─── Skeletons / Empty ────────────────────────────────────────────────────────
 
 function MemberSectionsSkeleton() {
   return (
@@ -105,39 +104,21 @@ function EmptyMemberHome() {
 
         <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-1">
           <div className="rounded-2xl border border-white/10 bg-black/30 p-4 backdrop-blur-xl">
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-sky-300">
-              01
-            </p>
-            <h3 className="mt-2 text-sm font-bold text-white">
-              Marque o que já viu
-            </h3>
-            <p className="mt-1 text-xs leading-5 text-zinc-400">
-              Isso ajuda o sistema a entender seu gosto.
-            </p>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-sky-300">01</p>
+            <h3 className="mt-2 text-sm font-bold text-white">Marque o que já viu</h3>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">Isso ajuda o sistema a entender seu gosto.</p>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-black/30 p-4 backdrop-blur-xl">
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-violet-300">
-              02
-            </p>
-            <h3 className="mt-2 text-sm font-bold text-white">
-              Monte sua watchlist
-            </h3>
-            <p className="mt-1 text-xs leading-5 text-zinc-400">
-              Guarde títulos para decidir depois sem perder nada.
-            </p>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-violet-300">02</p>
+            <h3 className="mt-2 text-sm font-bold text-white">Monte sua watchlist</h3>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">Guarde títulos para decidir depois sem perder nada.</p>
           </div>
 
           <div className="rounded-2xl border border-white/10 bg-black/30 p-4 backdrop-blur-xl">
-            <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-300">
-              03
-            </p>
-            <h3 className="mt-2 text-sm font-bold text-white">
-              Receba recomendações
-            </h3>
-            <p className="mt-1 text-xs leading-5 text-zinc-400">
-              Sua página fica mais inteligente conforme você usa.
-            </p>
+            <p className="text-xs font-black uppercase tracking-[0.18em] text-emerald-300">03</p>
+            <h3 className="mt-2 text-sm font-bold text-white">Receba recomendações</h3>
+            <p className="mt-1 text-xs leading-5 text-zinc-400">Sua página fica mais inteligente conforme você usa.</p>
           </div>
         </div>
       </div>
@@ -145,22 +126,32 @@ function EmptyMemberHome() {
   );
 }
 
-async function checkMemberHasData(userId: string): Promise<MemberDataState> {
-  const supabase = createClient();
+// ─── Content (consumes context) ───────────────────────────────────────────────
 
-  const { data, error } = await supabase
-    .from("user_titles")
-    .select("id")
-    .eq("user_id", userId)
-    .limit(1);
+function MemberContent() {
+  const { titles, loading } = useUserData();
 
-  if (error) {
-    console.error("Erro ao verificar dados do usuário na Home:", error);
-    return "empty";
-  }
+  if (loading) return <MemberSectionsSkeleton />;
+  if (titles.length === 0) return <EmptyMemberHome />;
 
-  return data && data.length > 0 ? "has-data" : "empty";
+  return (
+    <>
+      <div id="continue-watching">
+        <ContinueWatchingSection />
+      </div>
+
+      <div id="for-you">
+        <ForYouSection />
+      </div>
+
+      <div id="watchlist">
+        <WatchlistVivaSection />
+      </div>
+    </>
+  );
 }
+
+// ─── Public export ────────────────────────────────────────────────────────────
 
 type Props = {
   initialUser?: User | null;
@@ -169,89 +160,15 @@ type Props = {
 export default function HomeMemberSections({ initialUser }: Props) {
   const { user: authUser, loading: authLoading } = useAuth();
 
-  // Se o servidor já resolveu a auth, usa o resultado imediatamente.
-  // O hook de auth atualiza em seguida para mudanças em tempo real.
   const user = authLoading && initialUser !== undefined ? initialUser : authUser;
   const isAuthLoading = authLoading && initialUser === undefined;
 
-  const [dataState, setDataState] = useState<MemberDataState>("loading");
-  const [refreshKey, setRefreshKey] = useState(0);
-
-  useEffect(() => {
-    let active = true;
-
-    async function loadMemberState(showSkeleton = true) {
-      if (!user?.id) {
-        setDataState("empty");
-        return "empty" as MemberDataState;
-      }
-
-      if (showSkeleton) {
-        setDataState("loading");
-      }
-
-      const result = await checkMemberHasData(user.id);
-
-      if (!active) return result;
-
-      setDataState(result);
-
-      return result;
-    }
-
-    loadMemberState();
-
-    async function handleUserTitlesUpdated() {
-      const result = await loadMemberState(false);
-
-      if (!active) return;
-
-      if (result === "has-data") {
-        setRefreshKey((current) => current + 1);
-      }
-    }
-
-    window.addEventListener("poplog:user-titles-updated", handleUserTitlesUpdated);
-
-    return () => {
-      active = false;
-      window.removeEventListener(
-        "poplog:user-titles-updated",
-        handleUserTitlesUpdated,
-      );
-    };
-  }, [user?.id]);
-
-  if (isAuthLoading) {
-    return <MemberSectionsSkeleton />;
-  }
-
-  if (!user) {
-    return <EmptyMemberHome />;
-  }
-
-  if (dataState === "loading") {
-    return <MemberSectionsSkeleton />;
-  }
-
-  if (dataState === "empty") {
-    return <EmptyMemberHome />;
-  }
+  if (isAuthLoading) return <MemberSectionsSkeleton />;
+  if (!user) return <EmptyMemberHome />;
 
   return (
-    <>
-      <div id="continue-watching">
-        <ContinueWatchingSection key={`continue-${user.id}-${refreshKey}`} />
-      </div>
-
-      <div id="for-you">
-        <ForYouSection key={`for-you-${user.id}-${refreshKey}`} />
-      </div>
-
-      <div id="watchlist">
-        <WatchlistVivaSection key={`watchlist-${user.id}-${refreshKey}`} />
-      </div>
-    </>
+    <UserDataProvider userId={user.id}>
+      <MemberContent />
+    </UserDataProvider>
   );
 }
-

@@ -4,7 +4,8 @@
 import { useEffect, useState } from "react";
 
 import { useAuth } from "@/hooks/useAuth";
-import { getUserTitles, type UserTitle } from "@/lib/user-title-service";
+import { getUserTitles } from "@/lib/user-title-service";
+import type { UserTitle } from "@/types/user";
 
 export function useUserTitles() {
   const { user, loading: userLoading } = useAuth();

@@ -1,7 +1,7 @@
 // src/features/search/useSearch.ts
 
 import { useEffect, useRef, useState } from "react";
-import type { TMDBItem } from "@/lib/tmdb-types";
+import type { TMDBItem } from "@/types/tmdb";
 
 const DEBOUNCE_MS = 400;
 const MAX_RESULTS = 10;

@@ -1,20 +1,9 @@
 // src/features/home/home-api.ts
 
-import type { TMDBItem, TMDBMediaType, TMDBResponse } from "@/lib/tmdb-types";
+import type { TMDBItem, TMDBMediaType, TMDBResponse, TMDBDetails } from "@/types/tmdb";
 
-// ─── Tipos ────────────────────────────────────────────────────────────────────
-
-export type TMDBDetails = {
-  id: number;
-  overview?: string;
-  genres?: { id: number; name: string }[];
-  runtime?: number;
-  release_date?: string;
-  // TV
-  first_air_date?: string;
-  number_of_seasons?: number;
-  episode_run_time?: number[];
-};
+// Re-export so HomePage.tsx can use the type without changing its import
+export type { TMDBDetails };
 
 // ─── Helpers privados ─────────────────────────────────────────────────────────
 
@@ -22,38 +11,42 @@ function withMediaType(items: TMDBItem[], mediaType: TMDBMediaType): TMDBItem[] 
   return items.map((item) => ({ ...item, media_type: item.media_type ?? mediaType }));
 }
 
-async function fetchHomeSection(
-  endpoint: string,
-  mediaType?: TMDBMediaType,
+async function fetchList(
+  type: string,
+  media?: "movie" | "tv",
 ): Promise<TMDBItem[]> {
-  const res = await fetch(`${process.env.NEXT_PUBLIC_BASE_URL}${endpoint}`, {
-    next: { revalidate: 300 }, // 5 min — evita no-store em cada request
-  });
+  const params = new URLSearchParams({ type });
+  if (media) params.set("media", media);
+
+  const res = await fetch(
+    `${process.env.NEXT_PUBLIC_BASE_URL}/api/tmdb/list?${params.toString()}`,
+    { next: { revalidate: 300 } },
+  );
 
   if (!res.ok) return [];
 
   const data: TMDBResponse<TMDBItem> = await res.json();
   const results = data.results ?? [];
 
-  return mediaType ? withMediaType(results, mediaType) : results;
+  return media ? withMediaType(results, media) : results;
 }
 
 // ─── Exports públicos ─────────────────────────────────────────────────────────
 
 export async function getTrending(): Promise<TMDBItem[]> {
-  return fetchHomeSection("/api/trending");
+  return fetchList("trending");
 }
 
 export async function getPopularMovies(): Promise<TMDBItem[]> {
-  return fetchHomeSection("/api/popular", "movie");
+  return fetchList("popular", "movie");
 }
 
 export async function getPopularTV(): Promise<TMDBItem[]> {
-  return fetchHomeSection("/api/tv-popular", "tv");
+  return fetchList("popular", "tv");
 }
 
 export async function getUpcomingMovies(): Promise<TMDBItem[]> {
-  return fetchHomeSection("/api/upcoming", "movie");
+  return fetchList("upcoming");
 }
 
 export async function getFeaturedDetails(

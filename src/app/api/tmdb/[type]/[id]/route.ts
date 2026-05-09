@@ -19,7 +19,9 @@ export async function GET(_request: Request, context: RouteContext) {
 
   try {
     const data = await tmdbFetch(`/${type}/${id}`, {}, 60 * 60);
-    return NextResponse.json(data);
+    return NextResponse.json(data, {
+      headers: { "Cache-Control": "s-maxage=3600, stale-while-revalidate=7200" },
+    });
   } catch (error) {
     console.error("Erro ao buscar detalhes TMDB:", error);
 

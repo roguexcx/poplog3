@@ -1,6 +1,6 @@
 // src/lib/tmdb-utils.ts
 
-import type { TMDBItem, TMDBMediaType } from "@/lib/tmdb-types";
+import type { TMDBItem, TMDBMediaType } from "@/types/tmdb";
 
 const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
 

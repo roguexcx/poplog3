@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 
 import { createClient } from "@/lib/supabase/client";
+import { useUserData } from "@/context/UserDataContext";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -42,7 +43,7 @@ type NextEpisode = {
   still_path?: string | null;
 };
 
-type UserTitle = {
+type WatchingTitle = {
   id: string;
   tmdb_id: number;
   media_type: "movie" | "tv";
@@ -76,7 +77,7 @@ function getContextLabel(
   return `Reta final da T${seasonNumber}`;
 }
 
-function scoreItem(item: UserTitle, today: string): number {
+function scoreItem(item: WatchingTitle, today: string): number {
   const watched = item.watchedEpisodes ?? 0;
   const total = item.totalEpisodes ?? 0;
   const remaining = Math.max(total - watched, 0);
@@ -90,7 +91,6 @@ function scoreItem(item: UserTitle, today: string): number {
 
   if (watched === 0) score -= 20;
 
-  // Rotação diária determinística
   const seed = `${today}-${item.tmdb_id}`;
   score += seed.split("").reduce((acc, c) => acc + c.charCodeAt(0), 0) % 10;
 
@@ -99,34 +99,18 @@ function scoreItem(item: UserTitle, today: string): number {
 
 // ─── Loader de dados ──────────────────────────────────────────────────────────
 
-async function loadContinueWatching(): Promise<UserTitle[]> {
+async function enrichWatching(
+  rawTitles: { id: string; tmdb_id: number; media_type: string; status: string | null }[],
+  userId: string,
+): Promise<WatchingTitle[]> {
+  if (!rawTitles.length) return [];
+
   const supabase = createClient();
-
-  const {
-    data: { session },
-  } = await supabase.auth.getSession();
-
-  if (!session) return [];
-
-  const { data: rawTitles, error: titlesError } = await supabase
-    .from("user_titles")
-    .select("*")
-    .eq("user_id", session.user.id)
-    .eq("media_type", "tv")
-    .eq("status", "watching")
-    .order("created_at", { ascending: false });
-
-  if (titlesError) {
-    console.error("Erro ao carregar séries em andamento:", titlesError);
-    return [];
-  }
-
-  if (!rawTitles?.length) return [];
 
   const { data: episodeRows, error: episodesError } = await supabase
     .from("episode_progress")
     .select("tmdb_id, season, episode")
-    .eq("user_id", session.user.id);
+    .eq("user_id", userId);
 
   if (episodesError) {
     console.error("Erro ao carregar progresso de episódios:", episodesError);
@@ -138,12 +122,12 @@ async function loadContinueWatching(): Promise<UserTitle[]> {
   const res = await fetch("/api/user/titles", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ titles: rawTitles, accessToken: session.access_token }),
+    body: JSON.stringify({ titles: rawTitles }),
   });
 
   if (!res.ok) return [];
 
-  const { titles: watchingTitles }: { titles: UserTitle[] } = await res.json();
+  const { titles: watchingTitles }: { titles: WatchingTitle[] } = await res.json();
 
   const enriched = await Promise.all(
     watchingTitles.map(async (title) => {
@@ -157,15 +141,11 @@ async function loadContinueWatching(): Promise<UserTitle[]> {
               const r = await fetch(
                 `/api/episodes?tvId=${title.tmdb_id}&season=${season.season_number}`,
               );
-
               if (!r.ok) return null;
-
               const data = await r.json();
-
               const available: AvailableEp[] = (data.episodes ?? []).filter(
                 (ep: AvailableEp) => ep.available,
               );
-
               return available.length > 0
                 ? { season: season.season_number, eps: available }
                 : null;
@@ -185,11 +165,11 @@ async function loadContinueWatching(): Promise<UserTitle[]> {
 
       const totalEpisodes = seasonList.reduce((acc, s) => acc + s.eps.length, 0);
 
-      const watchedEpisodes = watchedFromSeries.filter((watched) =>
+      const watchedEpisodes = watchedFromSeries.filter((w) =>
         seasonList.some(
           (s) =>
-            s.season === watched.season &&
-            s.eps.some((ep) => ep.episode_number === watched.episode),
+            s.season === w.season &&
+            s.eps.some((ep) => ep.episode_number === w.episode),
         ),
       ).length;
 
@@ -201,9 +181,7 @@ async function loadContinueWatching(): Promise<UserTitle[]> {
             .filter((ep) => ep.season === season.season)
             .map((ep) => ep.episode),
         );
-
         const next = season.eps.find((ep) => !watchedSet.has(ep.episode_number));
-
         if (next) {
           nextEpisode = {
             season: season.season,
@@ -215,14 +193,7 @@ async function loadContinueWatching(): Promise<UserTitle[]> {
         }
       }
 
-      return {
-        ...title,
-        watchedEpisodes,
-        totalEpisodes,
-        nextEpisode,
-        seasonList,
-        watchedEpisodeKeys,
-      };
+      return { ...title, watchedEpisodes, totalEpisodes, nextEpisode, seasonList, watchedEpisodeKeys };
     }),
   );
 
@@ -246,7 +217,7 @@ function CardSkeleton() {
 
 // ─── Card ─────────────────────────────────────────────────────────────────────
 
-function WatchingCard({ item }: { item: UserTitle }) {
+function WatchingCard({ item }: { item: WatchingTitle }) {
   const title = item.tmdb?.name ?? `Série #${item.tmdb_id}`;
   const next = item.nextEpisode!;
   const watched = item.watchedEpisodes ?? 0;
@@ -286,7 +257,6 @@ function WatchingCard({ item }: { item: UserTitle }) {
       <div className="absolute inset-0 bg-gradient-to-r from-black/55 via-transparent to-black/25" />
       <div className="absolute inset-0 opacity-0 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.35),inset_0_-70px_90px_rgba(2,6,23,0.88)] transition duration-300 group-hover:opacity-100" />
 
-      {/* Play button */}
       <div className="absolute right-4 top-1/2 grid h-11 w-11 -translate-y-1/2 place-items-center rounded-full border border-white/20 bg-black/45 text-sm text-white shadow-[0_12px_34px_rgba(0,0,0,0.45)] backdrop-blur-md transition group-hover:scale-105 group-hover:border-sky-200/40 group-hover:bg-white/15">
         ▶
       </div>
@@ -325,14 +295,29 @@ function WatchingCard({ item }: { item: UserTitle }) {
 // ─── Seção principal ──────────────────────────────────────────────────────────
 
 export default function ContinueWatchingSection() {
-  const [items, setItems] = useState<UserTitle[]>([]);
+  const { titles, loading: titlesLoading, userId } = useUserData();
+  const [items, setItems] = useState<WatchingTitle[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const watchingRaw = useMemo(
+    () => titles.filter((t) => t.media_type === "tv" && t.status === "watching"),
+    [titles],
+  );
+
   useEffect(() => {
-    loadContinueWatching()
+    if (titlesLoading) return;
+
+    if (watchingRaw.length === 0) {
+      setItems([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    enrichWatching(watchingRaw, userId)
       .then(setItems)
       .finally(() => setLoading(false));
-  }, []);
+  }, [watchingRaw, titlesLoading, userId]);
 
   const hasItems = useMemo(() => items.length > 0, [items]);
   if (!loading && !hasItems) return null;

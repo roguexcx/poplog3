@@ -4,7 +4,7 @@ import Link from "next/link";
 import FeaturedCardActions from "@/features/home/components/FeaturedCardActions";
 import SynopsisText from "@/features/home/components/SynopsisText";
 import { getRating } from "@/lib/tmdb-utils";
-import type { TMDBItem } from "@/lib/tmdb-types";
+import type { TMDBItem } from "@/types/tmdb";
 
 type Props = {
   item: TMDBItem;

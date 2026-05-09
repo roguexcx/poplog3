@@ -5,7 +5,7 @@ import { useRef } from "react";
 import PosterCard from "@/components/posters/PosterCard";
 import SectionHeader from "@/components/layout/SectionHeader";
 
-import type { TMDBItem } from "@/lib/tmdb-types";
+import type { TMDBItem } from "@/types/tmdb";
 
 type HomeSectionProps = {
   title: string;

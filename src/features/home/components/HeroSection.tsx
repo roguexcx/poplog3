@@ -3,7 +3,7 @@
 import SearchBar from "@/features/search/SearchBar";
 import FeaturedCard from "@/features/home/components/FeaturedCard";
 import { getHeroHeadline } from "@/features/home/home-utils";
-import type { TMDBItem } from "@/lib/tmdb-types";
+import type { TMDBItem } from "@/types/tmdb";
 
 const FILTER_CHIPS = [
   "Hoje à noite",

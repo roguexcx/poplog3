@@ -90,7 +90,7 @@ function toTrendingItem(raw: RawTMDBItem): TrendingItem {
 }
 
 async function fetchTrending(): Promise<TrendingItem[]> {
-  const res = await fetch("/api/trending");
+  const res = await fetch("/api/tmdb/list?type=trending");
   if (!res.ok) return [];
   const json = await res.json();
   return (json.results ?? []).map(toTrendingItem);
