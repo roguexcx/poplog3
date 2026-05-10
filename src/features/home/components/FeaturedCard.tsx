@@ -3,7 +3,8 @@
 import Link from "next/link";
 import FeaturedCardActions from "@/features/home/components/FeaturedCardActions";
 import SynopsisText from "@/features/home/components/SynopsisText";
-import { getRating } from "@/lib/tmdb-utils";
+import LocalizedTitle from "@/components/titles/LocalizedTitle";
+import { getOriginalTitle, getRating } from "@/lib/tmdb-utils";
 import type { TMDBItem } from "@/types/tmdb";
 
 type Props = {
@@ -33,6 +34,8 @@ export default function FeaturedCard({
   genres,
   overview,
 }: Props) {
+  const originalTitle = getOriginalTitle(item);
+
   return (
     <div className="hidden justify-end lg:flex">
       <div className="w-full max-w-[500px] translate-y-4">
@@ -53,7 +56,12 @@ export default function FeaturedCard({
 
           {/* Info */}
           <div className="min-w-0 pt-2">
-            <h2 className="text-[1.45rem] font-black leading-tight text-white">{title}</h2>
+            <LocalizedTitle
+              as="h2"
+              title={title}
+              originalTitle={originalTitle}
+              variant="large"
+            />
 
             <div className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-2 text-xs font-semibold text-zinc-300">
               <span className="text-violet-300">★ {getRating(item) ?? "N/A"}</span>

@@ -19,6 +19,7 @@ type SeriesProgressEventDetail = {
 type UserTitle = {
   status: Status;
   favorite: boolean;
+  fridge: boolean;
   watched_at: string | null;
 };
 
@@ -167,7 +168,7 @@ export default function TitleActions({
   const isTv = mediaType === "tv";
 
   const [userId, setUserId]                 = useState<string | null>(null);
-  const [userTitle, setUserTitle]           = useState<UserTitle>({ status: null, favorite: false, watched_at: null });
+  const [userTitle, setUserTitle]           = useState<UserTitle>({ status: null, favorite: false, fridge: false, watched_at: null });
   const [loading, setLoading]               = useState<"watchlist" | "watched" | "conclude" | "favorite" | "fridge" | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [showDatePicker, setShowDatePicker] = useState(false);
@@ -228,7 +229,7 @@ export default function TitleActions({
 
       const { data } = await supabase
         .from("user_titles")
-        .select("status, favorite, watched_at")
+        .select("status, favorite, fridge, watched_at")
         .eq("user_id", user.id)
         .eq("tmdb_id", tmdbId)
         .eq("media_type", mediaType)
@@ -238,6 +239,7 @@ export default function TitleActions({
         setUserTitle({
           status: data.status,
           favorite: data.favorite,
+          fridge: data.fridge ?? data.status === "fridge",
           watched_at: data.watched_at ?? null,
         });
       }
@@ -253,7 +255,13 @@ export default function TitleActions({
 
   async function save(patch: Partial<UserTitle>) {
     if (!userId) return;
-    const next = { ...userTitle, ...patch };
+    const draft = { ...userTitle, ...patch };
+    const normalizedStatus = draft.status === "fridge" ? "watchlist" : draft.status;
+    const next = {
+      ...draft,
+      status: normalizedStatus,
+      fridge: normalizedStatus === "watchlist" ? draft.fridge : false,
+    };
     setUserTitle(next);
 
     await supabase.from("user_titles").upsert({
@@ -262,6 +270,7 @@ export default function TitleActions({
       media_type:   mediaType,
       status:       next.status,
       favorite:     next.favorite,
+      fridge:       next.fridge,
       watched_at:   next.watched_at,
       title:        title ?? null,
       release_year: releaseYear ?? null,
@@ -321,7 +330,7 @@ export default function TitleActions({
   async function handleWatchlist() {
     if (!requireAuth()) return;
     setLoading("watchlist");
-    await save({ status: userTitle.status === "watchlist" ? null : "watchlist" });
+    await save({ status: userTitle.status === "watchlist" && !userTitle.fridge ? null : "watchlist", fridge: false });
     setLoading(null);
   }
 
@@ -342,10 +351,10 @@ export default function TitleActions({
   async function handleFridge() {
     if (!requireAuth()) return;
     setLoading("fridge");
-    if (userTitle.status === "fridge") {
-      await save({ status: currentWatchedEpisodes > 0 ? "watching" : null });
+    if (isFridge) {
+      await save({ status: "watchlist", fridge: false });
     } else {
-      await save({ status: "fridge" });
+      await save({ status: "watchlist", fridge: true });
     }
     setLoading(null);
   }
@@ -449,9 +458,9 @@ export default function TitleActions({
   const currentEpisodeCount    = seriesProgress.episodeCount;
   const currentWatchedEpisodes = seriesProgress.watchedEpisodes;
 
-  const isWatchlist = userTitle.status === "watchlist";
+  const isWatchlist = userTitle.status === "watchlist" && !userTitle.fridge;
   const isWatched   = userTitle.status === "watched";
-  const isFridge    = userTitle.status === "fridge";
+  const isFridge    = userTitle.fridge || userTitle.status === "fridge";
   const isFavorite  = userTitle.favorite;
 
   const allWatched     = currentEpisodeCount > 0 && currentWatchedEpisodes >= currentEpisodeCount;

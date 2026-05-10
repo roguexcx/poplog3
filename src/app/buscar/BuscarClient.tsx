@@ -5,7 +5,8 @@ import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Search } from "lucide-react";
-import { getPosterUrl, getRating, getReleaseYear, getTitle } from "@/lib/tmdb-utils";
+import LocalizedTitle from "@/components/titles/LocalizedTitle";
+import { getOriginalTitle, getPosterUrl, getRating, getReleaseYear, getTitle } from "@/lib/tmdb-utils";
 import type { TMDBItem } from "@/types/tmdb";
 
 // ─── Mapeamento de categorias → genre_ids TMDB ────────────────────────────────
@@ -46,6 +47,7 @@ function useDebounce<T>(value: T, delay: number): T {
 function ResultCard({ item, priority = false }: { item: TMDBItem; priority?: boolean }) {
   const type   = item.media_type ?? "movie";
   const title  = getTitle(item);
+  const originalTitle = getOriginalTitle(item);
   const year   = getReleaseYear(item);
   const rating = getRating(item);
   const poster = getPosterUrl(item.poster_path, "w342");
@@ -75,7 +77,12 @@ function ResultCard({ item, priority = false }: { item: TMDBItem; priority?: boo
         )}
       </div>
       <div className="mt-2 px-0.5">
-        <p className="line-clamp-2 text-[12px] font-medium leading-[1.35] text-[#e0e0f0]">{title}</p>
+        <LocalizedTitle
+          title={title}
+          originalTitle={originalTitle}
+          variant="poster"
+          className="line-clamp-2 text-[12px] font-medium leading-[1.35] text-[#e0e0f0]"
+        />
         <p className="mt-0.5 text-[10px] text-zinc-600">
           {year !== "----" ? `${year} · ` : ""}
           {type === "movie" ? "Filme" : "Série"}

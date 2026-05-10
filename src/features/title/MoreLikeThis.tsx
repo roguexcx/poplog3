@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
+import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import {
   GENRE_NAMES,
   getContentTypeLabel,
@@ -33,6 +34,10 @@ type Props = {
 
 function getItemTitle(item: RawCandidate): string {
   return item.title ?? item.name ?? "Sem título";
+}
+
+function getItemOriginalTitle(item: RawCandidate): string | null {
+  return item.original_title ?? item.original_name ?? null;
 }
 
 function getItemYear(item: RawCandidate): string | null {
@@ -209,6 +214,7 @@ export default function MoreLikeThis({
       <div className="-mx-4 flex gap-3 overflow-x-auto px-4 pb-3 no-scrollbar sm:-mx-6 sm:px-6 lg:mx-0 lg:grid lg:grid-cols-5 lg:overflow-visible lg:px-0 lg:pb-0">
         {items.map((item) => {
           const itemTitle     = getItemTitle(item);
+          const itemOriginalTitle = getItemOriginalTitle(item);
           const itemYear      = getItemYear(item);
           const itemRating    = typeof item.vote_average === "number" ? item.vote_average.toFixed(1) : null;
           const itemTypeLabel = getContentTypeLabel(mediaType, item.genre_ids ?? []);
@@ -248,9 +254,13 @@ export default function MoreLikeThis({
                 )}
               </div>
               <div className="space-y-1 p-3 lg:p-4">
-                <h3 className="line-clamp-2 text-xs font-black leading-tight text-white lg:text-sm">
-                  {itemTitle}
-                </h3>
+                <LocalizedTitle
+                  as="h3"
+                  title={itemTitle}
+                  originalTitle={itemOriginalTitle}
+                  variant="poster"
+                  className="line-clamp-2 text-xs font-black leading-tight text-white lg:text-sm"
+                />
                 <div className="flex flex-wrap gap-x-1.5 gap-y-1 text-[10px] font-semibold text-zinc-400 lg:text-xs">
                   <span>{itemTypeLabel}</span>
                   {itemYear && <span>• {itemYear}</span>}

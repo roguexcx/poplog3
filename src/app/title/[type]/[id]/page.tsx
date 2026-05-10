@@ -10,6 +10,7 @@ import type { StreamingProvider } from "@/lib/streaming";
 import TitleActions from "@/features/title/TitleActions";
 import TitleTabs from "@/features/title/TitleTabs";
 import MoreLikeThis from "@/features/title/MoreLikeThis";
+import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import type {
   TMDBTitleDetail,
   TMDBSeason,
@@ -374,12 +375,12 @@ export default async function TitleDetailPage({ params }: Props) {
 
           {/* Info textual */}
           <div className="flex-1 text-center sm:pb-2 sm:text-left">
-            <h1 className="text-3xl font-black leading-tight tracking-tight sm:text-4xl md:text-[2.8rem]">
-              {title}
-            </h1>
-            {originalTitle && originalTitle !== title && (
-              <p className="mt-1.5 text-sm text-zinc-500">{originalTitle}</p>
-            )}
+            <LocalizedTitle
+              as="h1"
+              title={title}
+              originalTitle={originalTitle}
+              variant="hero"
+            />
             <div className="mt-3 flex flex-wrap justify-center gap-x-3 gap-y-1 text-sm font-semibold text-zinc-400 sm:justify-start">
               <span>{contentTypeLabel}</span>
               {year && <span>· {year}</span>}

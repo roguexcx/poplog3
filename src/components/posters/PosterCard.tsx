@@ -8,8 +8,10 @@ import type { ReactNode } from "react";
 
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
+import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import type { TMDBItem, TMDBMediaType } from "@/types/tmdb";
 import {
+  getOriginalTitle,
   getMediaLabel,
   getPosterUrl,
   getRating,
@@ -120,6 +122,7 @@ function ActionButton({
 
 export default function PosterCard({ item, priority = false }: Props) {
   const title = getTitle(item);
+  const originalTitle = getOriginalTitle(item);
   const year = getReleaseYear(item);
   const rating = getRating(item);
   const posterUrl = getPosterUrl(item.poster_path, "w500");
@@ -221,9 +224,13 @@ export default function PosterCard({ item, priority = false }: Props) {
 
       {/* Meta */}
       <Link href={`/title/${type}/${item.id}`} className="mt-2.5 block px-0.5">
-        <h3 className="line-clamp-2 text-[13px] font-[500] leading-[1.35] tracking-[-0.01em] text-[#e8e8f0] transition-colors duration-200 group-hover:text-[#f4f4fa]">
-          {title}
-        </h3>
+        <LocalizedTitle
+          as="h3"
+          title={title}
+          originalTitle={originalTitle}
+          variant="poster"
+          className="line-clamp-2 text-[13px] font-[500] leading-[1.35] tracking-[-0.01em] text-[#e8e8f0] transition-colors duration-200 group-hover:text-[#f4f4fa]"
+        />
 
         <p className="mt-1 flex items-center gap-[5px] text-[11px] text-[#52526a]">
           {year !== "----" && <span>{year}</span>}

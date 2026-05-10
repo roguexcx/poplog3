@@ -24,6 +24,7 @@ type EnrichedTitle = {
   tmdb_id: number;
   media_type: "movie" | "tv";
   title: string;
+  original_title_label: string | null;
   poster_path: string | null;
   year: string | null;
   genre: string | null;
@@ -46,6 +47,8 @@ type TMDBDetails = Record<string, unknown> & {
   id?: number;
   title?: string;
   name?: string;
+  original_title?: string | null;
+  original_name?: string | null;
   poster_path?: string | null;
   release_date?: string | null;
   first_air_date?: string | null;
@@ -136,6 +139,7 @@ export async function POST(request: Request) {
               tmdb_id:               row.tmdb_id,
               media_type:            row.media_type,
               title:                 details.title ?? details.name ?? row.title,
+              original_title_label:  details.original_title ?? details.original_name ?? null,
               poster_path:           details.poster_path ?? null,
               year:                  row.release_year ? String(row.release_year) : null,
               genre,
@@ -192,6 +196,7 @@ export async function POST(request: Request) {
             tmdb_id:               row.tmdb_id,
             media_type:            row.media_type,
             title:                 details.title ?? details.name ?? row.title,
+            original_title_label:  details.original_title ?? details.original_name ?? null,
             poster_path:           details.poster_path ?? null,
             year:                  releaseDate ? String(new Date(releaseDate).getFullYear()) : null,
             genre,

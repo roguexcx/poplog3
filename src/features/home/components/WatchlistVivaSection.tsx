@@ -6,6 +6,7 @@ import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { useUserData } from "@/context/UserDataContext";
+import LocalizedTitle from "@/components/titles/LocalizedTitle";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -28,6 +29,7 @@ interface WatchlistTitle {
   tmdb_id: number;
   media_type: "movie" | "tv";
   title: string;
+  original_title_label?: string | null;
   poster_path: string | null;
   year: string | null;
   genre: string | null;
@@ -339,12 +341,13 @@ function WatchlistCard({
 
       {/* ── Texto ── */}
       <Link href={slug} className="mt-2.5 block px-0.5">
-        <h3
-          className="line-clamp-2 text-[13px] font-[500] leading-[1.35] tracking-[-0.01em] text-[#e8e8f0] transition-colors duration-200 group-hover:text-[#f4f4fa]"
+        <LocalizedTitle
+          as="h3"
           title={item.title}
-        >
-          {item.title}
-        </h3>
+          originalTitle={item.original_title_label}
+          variant="poster"
+          className="line-clamp-2 text-[13px] font-[500] leading-[1.35] tracking-[-0.01em] text-[#e8e8f0] transition-colors duration-200 group-hover:text-[#f4f4fa]"
+        />
 
         {/* Meta */}
         <p className="mt-1 flex flex-wrap items-center gap-[5px] text-[11px] text-[#52526a] truncate">

@@ -1,13 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname } from "next/navigation";
 import { useState, useCallback } from "react";
 import {
   Home,
   Search,
   Film,
   Tv,
+  Sparkles,
   LogOut,
   User,
   Library,
@@ -24,6 +25,7 @@ const NAV_LINKS = [
   { href: "/buscar", label: "Buscar", icon: Search },
   { href: "/filmes", label: "Filmes", icon: Film },
   { href: "/series", label: "Séries", icon: Tv },
+  { href: "/sorteio", label: "Sorteio", icon: Sparkles },
   { href: "/profile", label: "Biblioteca", icon: Library },
 ];
 
@@ -42,7 +44,6 @@ export default function Sidebar() {
   const pathname = usePathname();
   const { user } = useAuth();
 
-  const router = useRouter();
   const [loginOpen, setLoginOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [mobileUserMenuOpen, setMobileUserMenuOpen] = useState(false);

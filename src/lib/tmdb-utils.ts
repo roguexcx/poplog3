@@ -10,6 +10,10 @@ export function getTitle(item: TMDBItem): string {
   return item.title ?? item.name ?? "Título desconhecido";
 }
 
+export function getOriginalTitle(item: TMDBItem): string | null {
+  return item.original_title ?? item.original_name ?? null;
+}
+
 export function getReleaseYear(item: TMDBItem): string {
   const date = item.release_date ?? item.first_air_date;
   return date ? date.slice(0, 4) : "----";

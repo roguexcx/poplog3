@@ -7,7 +7,8 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { useSearch } from "./useSearch";
-import { getPosterUrl, getRating, getReleaseYear, getTitle } from "@/lib/tmdb-utils";
+import LocalizedTitle from "@/components/titles/LocalizedTitle";
+import { getOriginalTitle, getPosterUrl, getRating, getReleaseYear, getTitle } from "@/lib/tmdb-utils";
 
 const MAX_VISIBLE = 5;
 
@@ -100,6 +101,7 @@ export default function SearchBar() {
           {!loading && visibleResults.map((item, index) => {
             const type = item.media_type ?? "movie";
             const title = getTitle(item);
+            const originalTitle = getOriginalTitle(item);
             const year = getReleaseYear(item);
             const rating = getRating(item);
             const posterUrl = getPosterUrl(item.poster_path, "w342");
@@ -129,7 +131,12 @@ export default function SearchBar() {
 
                 {/* Info */}
                 <div className="min-w-0 flex-1 py-1">
-                  <h3 className="line-clamp-1 text-[13px] font-semibold text-white/85">{title}</h3>
+                  <LocalizedTitle
+                    as="h3"
+                    title={title}
+                    originalTitle={originalTitle}
+                    variant="compact"
+                  />
                   <p className="mt-[3px] text-[11px] text-white/35">
                     {type === "movie" ? "Filme" : "Série"}
                     {year !== "----" ? ` · ${year}` : ""}

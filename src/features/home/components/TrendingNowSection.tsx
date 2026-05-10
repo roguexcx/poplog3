@@ -8,6 +8,7 @@ import Image from "next/image";
 import { ScrollRowArrows } from "@/components/ScrollRowArrows";
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
+import LocalizedTitle from "@/components/titles/LocalizedTitle";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -17,6 +18,7 @@ interface TrendingItem {
   id: number;
   media_type: "movie" | "tv";
   title_label: string;
+  original_title_label: string | null;
   poster_path: string | null;
   year: string | null;
   media_label: string;
@@ -31,6 +33,8 @@ interface RawTMDBItem {
   id: number;
   title?: string;
   name?: string;
+  original_title?: string;
+  original_name?: string;
   media_type: "movie" | "tv";
   poster_path: string | null;
   backdrop_path: string | null;
@@ -80,6 +84,7 @@ function toTrendingItem(raw: RawTMDBItem): TrendingItem {
     id: raw.id,
     media_type: raw.media_type,
     title_label: raw.title ?? raw.name ?? "Sem título",
+    original_title_label: raw.original_title ?? raw.original_name ?? null,
     poster_path: raw.poster_path,
     year,
     media_label: isMovie ? "Filme" : "Série",
@@ -344,12 +349,13 @@ function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
 
       {/* ── Texto (link independente) ── */}
       <Link href={slug} className="mt-2.5 block px-0.5">
-        <h3
-          className="line-clamp-2 text-[13px] font-[500] leading-[1.35] tracking-[-0.01em] text-[#e8e8f0] transition-colors duration-200 group-hover:text-[#f4f4fa]"
+        <LocalizedTitle
+          as="h3"
           title={item.title_label}
-        >
-          {item.title_label}
-        </h3>
+          originalTitle={item.original_title_label}
+          variant="poster"
+          className="line-clamp-2 text-[13px] font-[500] leading-[1.35] tracking-[-0.01em] text-[#e8e8f0] transition-colors duration-200 group-hover:text-[#f4f4fa]"
+        />
         <MetaLine item={item} />
       </Link>
 

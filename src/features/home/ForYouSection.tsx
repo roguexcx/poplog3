@@ -9,12 +9,14 @@ import SynopsisText from "@/features/home/components/SynopsisText";
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
 import { useUserData } from "@/context/UserDataContext";
+import LocalizedTitle from "@/components/titles/LocalizedTitle";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 type ForYouItem = {
   id: number;
   title_label: string;
+  original_title_label?: string | null;
   overview?: string;
   poster_path?: string | null;
   backdrop_path?: string | null;
@@ -203,16 +205,13 @@ function FeaturedForYouCard({ item }: { item: ForYouItem }) {
           )}
         </div>
 
-        <h3
-          className={[
-            "line-clamp-2 max-w-[360px] tracking-tight text-white drop-shadow-[0_4px_18px_rgba(0,0,0,0.75)] transition group-hover:text-sky-100",
-            isLongTitle
-              ? "text-[1.45rem] font-black leading-[1]"
-              : "text-[1.75rem] font-black leading-[1.04]",
-          ].join(" ")}
-        >
-          {item.title_label}
-        </h3>
+        <LocalizedTitle
+          as="h3"
+          title={item.title_label}
+          originalTitle={item.original_title_label}
+          variant="large"
+          className="max-w-[360px] drop-shadow-[0_4px_18px_rgba(0,0,0,0.75)] transition group-hover:text-sky-100"
+        />
 
         {item.genre_label && (
           <p className="mt-2 text-[12px] font-semibold text-zinc-300">{item.genre_label}</p>
@@ -274,17 +273,18 @@ function SmallForYouCard({ item }: { item: ForYouItem }) {
           </div>
         )}
 
-        <h3
+        <LocalizedTitle
+          as="h3"
+          title={item.title_label}
+          originalTitle={item.original_title_label}
+          variant="poster"
           className={[
             "min-h-[2.35rem] line-clamp-2 leading-tight tracking-tight text-white",
             item.title_label.length > 22
               ? "text-[0.9rem] font-extrabold"
               : "text-[1.05rem] font-black",
           ].join(" ")}
-          title={item.title_label}
-        >
-          {item.title_label}
-        </h3>
+        />
 
         <p className="mt-2 line-clamp-1 text-xs font-semibold text-zinc-300">
           {item.year ? `${item.year} · ` : ""}

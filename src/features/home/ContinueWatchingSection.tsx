@@ -7,6 +7,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import { createClient } from "@/lib/supabase/client";
 import { useUserData } from "@/context/UserDataContext";
+import LocalizedTitle from "@/components/titles/LocalizedTitle";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,7 @@ type SeasonListItem = {
 type TMDBDetail = {
   id: number;
   name?: string;
+  original_name?: string;
   poster_path?: string | null;
   backdrop_path?: string | null;
   seasons?: { season_number: number; episode_count: number; name: string }[];
@@ -219,6 +221,7 @@ function CardSkeleton() {
 
 function WatchingCard({ item }: { item: WatchingTitle }) {
   const title = item.tmdb?.name ?? `Série #${item.tmdb_id}`;
+  const originalTitle = item.tmdb?.original_name ?? null;
   const next = item.nextEpisode!;
   const watched = item.watchedEpisodes ?? 0;
   const total = item.totalEpisodes ?? 0;
@@ -262,14 +265,12 @@ function WatchingCard({ item }: { item: WatchingTitle }) {
       </div>
 
       <div className="absolute inset-x-0 bottom-0 p-5">
-        <h3
-          className={[
-            "line-clamp-2 leading-tight text-white",
-            title.length > 24 ? "text-[0.88rem] font-extrabold" : "text-[1.02rem] font-black",
-          ].join(" ")}
-        >
-          {title}
-        </h3>
+        <LocalizedTitle
+          as="h3"
+          title={title}
+          originalTitle={originalTitle}
+          variant="medium"
+        />
 
         <p className="mt-1 line-clamp-1 text-xs font-semibold text-zinc-300">
           S{next.season} · E{next.episode}

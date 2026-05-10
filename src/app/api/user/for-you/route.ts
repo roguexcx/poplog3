@@ -84,6 +84,10 @@ function getTitle(item: TMDBItem): string {
   return item.title ?? item.name ?? item.original_title ?? item.original_name ?? "Título sem nome";
 }
 
+function getOriginalTitle(item: TMDBItem): string | null {
+  return item.original_title ?? item.original_name ?? null;
+}
+
 function getSignalWeight(title: UserTitle): number {
   if (title.favorite) return 5;
   if (title.status === "watchlist") return 4;
@@ -202,6 +206,7 @@ async function normalizeForResponse(candidate: Candidate) {
     clean_poster_path: cleanPosterPath,
     backdrop_path: randomBackdropPath ?? item.backdrop_path,
     title_label: getTitle(item),
+    original_title_label: getOriginalTitle(item),
     year: item.release_date?.split("-")[0] ?? item.first_air_date?.split("-")[0] ?? null,
     media_label: mediaType === "tv" ? "Série" : "Filme",
     genre_label,

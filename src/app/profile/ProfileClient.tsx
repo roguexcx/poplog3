@@ -8,6 +8,7 @@ import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { type User } from "@supabase/supabase-js";
 import { scoreTitle, buildReason, type SeasonContext } from "@/lib/relevance-score";
+import LocalizedTitle from "@/components/titles/LocalizedTitle";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -15,6 +16,8 @@ type TMDBDetail = {
   id: number;
   title?: string;
   name?: string;
+  original_title?: string;
+  original_name?: string;
   poster_path?: string | null;
   backdrop_path?: string | null;
   release_date?: string;
@@ -46,9 +49,9 @@ type EnrichedTitle = {
   id: number;
   tmdb_id: number;
   media_type: "movie" | "tv";
-  status: "watchlist" | "watched" | "watching" | null;
+  status: "watchlist" | "watched" | "watching" | "fridge" | null;
   favorite: boolean;
-  fridge: boolean;
+  fridge?: boolean | null;
   created_at: string;
   watched_at?: string | null;
   tmdb: TMDBDetail | null;
@@ -76,6 +79,10 @@ function getTitle(t: Pick<TMDBDetail, "title" | "name">): string {
   return t.title ?? t.name ?? "Sem título";
 }
 
+function getOriginalTitle(t: Pick<TMDBDetail, "original_title" | "original_name">): string | null {
+  return t.original_title ?? t.original_name ?? null;
+}
+
 function getReleaseYear(t: Pick<TMDBDetail, "release_date" | "first_air_date">): string {
   return t.release_date?.slice(0, 4) ?? t.first_air_date?.slice(0, 4) ?? "";
 }
@@ -90,6 +97,10 @@ function getBackdropUrl(path?: string | null) {
 
 function daysSince(dateStr: string): number {
   return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86_400_000);
+}
+
+function isInFridge(title: Pick<EnrichedTitle, "fridge" | "status">): boolean {
+  return title.fridge === true || title.status === "fridge";
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -117,6 +128,7 @@ function PosterCard({
   showFridgeBadge?: boolean;
 }) {
   const title  = item.tmdb ? getTitle(item.tmdb) : `#${item.tmdb_id}`;
+  const originalTitle = item.tmdb ? getOriginalTitle(item.tmdb) : null;
   const year   = item.tmdb ? getReleaseYear(item.tmdb) : "";
   const poster = getPosterUrl(item.tmdb?.poster_path);
   const type   = item.media_type === "movie" ? "Filme" : "Série";
@@ -177,9 +189,12 @@ function PosterCard({
       </div>
 
       <div className="mt-2 px-0.5">
-        <p className="line-clamp-2 text-[12px] font-[500] leading-[1.35] tracking-[-0.01em] text-[#e0e0f0]" title={title}>
-          {title}
-        </p>
+        <LocalizedTitle
+          title={title}
+          originalTitle={originalTitle}
+          variant="poster"
+          className="line-clamp-2 text-[12px] font-[500] leading-[1.35] tracking-[-0.01em] text-[#e0e0f0]"
+        />
         <p className="mt-0.5 text-[10px] text-zinc-600">
           {showYear ? `${year} · ` : ""}{type}
         </p>
@@ -193,6 +208,7 @@ function PosterCard({
 function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
   const { title, reason, pill } = suggestion;
   const name     = title.tmdb ? getTitle(title.tmdb) : `#${title.tmdb_id}`;
+  const originalName = title.tmdb ? getOriginalTitle(title.tmdb) : null;
   const backdrop = getBackdropUrl(title.tmdb?.backdrop_path);
   const poster   = getPosterUrl(title.tmdb?.poster_path);
   const next     = title.nextEpisode;
@@ -247,9 +263,11 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
       </div>
 
       <div className="p-3">
-        <p className="text-[12px] font-black text-[#e8e8f0] line-clamp-1 leading-tight tracking-[-0.01em]">
-          {name}
-        </p>
+        <LocalizedTitle
+          title={name}
+          originalTitle={originalName}
+          variant="medium"
+        />
         <p className="mt-1 text-[10px] text-zinc-500 line-clamp-1 leading-relaxed">
           {reason}
         </p>
@@ -270,6 +288,7 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
 
 function ProgressCard({ item }: { item: EnrichedTitle }) {
   const name    = item.tmdb ? getTitle(item.tmdb) : `#${item.tmdb_id}`;
+  const originalName = item.tmdb ? getOriginalTitle(item.tmdb) : null;
   const poster  = getPosterUrl(item.tmdb?.poster_path);
   const next    = item.nextEpisode;
   const watched = item.watchedEpisodes ?? 0;
@@ -325,9 +344,13 @@ function ProgressCard({ item }: { item: EnrichedTitle }) {
             <div className="min-w-0">
               <Link
                 href={`/title/${item.media_type}/${item.tmdb_id}`}
-                className="line-clamp-2 text-[15px] font-black leading-tight tracking-tight text-white transition hover:text-sky-300"
+                className="transition hover:text-sky-300"
               >
-                {name}
+                <LocalizedTitle
+                  title={name}
+                  originalTitle={originalName}
+                  variant="medium"
+                />
               </Link>
               <p className="mt-1 line-clamp-1 text-[11px] font-semibold text-sky-400">
                 {isUpToDate ? "Aguardando próximo episódio" : seasonLabel}
@@ -588,9 +611,9 @@ export default function ProfileClient() {
 
   // ── Listas derivadas ──────────────────────────────────────────────────────
   const watched   = useMemo(() => applyFiltersAndSort(titles.filter((t) => t.status === "watched" || t.favorite)),  [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
-  const watchlist = useMemo(() => applyFiltersAndSort(titles.filter((t) => t.status === "watchlist" && !t.fridge)), [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+  const watchlist = useMemo(() => applyFiltersAndSort(titles.filter((t) => t.status === "watchlist" && !isInFridge(t))), [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
   const favorites = useMemo(() => applyFiltersAndSort(titles.filter((t) => t.favorite)),                             [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
-  const fridge    = useMemo(() => applyFiltersAndSort(titles.filter((t) => t.fridge === true)),                      [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+  const fridge    = useMemo(() => applyFiltersAndSort(titles.filter(isInFridge)),                                    [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ongoing = useMemo(() => {
     const list = titles.filter((t) => t.media_type === "tv" && t.status === "watching");
@@ -614,8 +637,8 @@ export default function ProfileClient() {
     const result: Suggestion[] = [];
 
     const suggOngoing   = titles.filter((t) => t.media_type === "tv" && t.status === "watching");
-    const suggWatchlist = titles.filter((t) => t.status === "watchlist" && !t.fridge);
-    const suggFridge    = titles.filter((t) => t.fridge === true);
+    const suggWatchlist = titles.filter((t) => t.status === "watchlist" && !isInFridge(t));
+    const suggFridge    = titles.filter(isInFridge);
 
     // Slots 1–3: séries em andamento com ep disponível
     const ongoingWithNext = suggOngoing
