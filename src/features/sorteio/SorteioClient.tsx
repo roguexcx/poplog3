@@ -42,7 +42,7 @@ type Filters = {
   vibe: VibeFilter;
   availability: AvailabilityFilter;
   allowWatched: boolean;
-  excludeWatchlist: boolean;
+  onlyNewForYou: boolean;
 };
 
 type Genre = { id: number; name: string };
@@ -87,7 +87,7 @@ const initialFilters: Filters = {
   vibe: "all",
   availability: "any",
   allowWatched: false,
-  excludeWatchlist: false,
+  onlyNewForYou: false,
 };
 
 const FATE_CARD_COUNT = 5;
@@ -276,14 +276,9 @@ function personalSourceMatches(title: EnrichedUserTitle, source: SourceFilter): 
   return true;
 }
 
-function isActiveWatchlistTitle(title?: EnrichedUserTitle): boolean {
-  return Boolean(title && title.status === "watchlist" && !title.fridge);
-}
-
 function candidateMatchesFilters(candidate: Candidate, filters: Filters, mode: Mode): boolean {
   const alreadyWatched = candidate.userTitle?.status === "watched";
   if (alreadyWatched && !filters.allowWatched) return false;
-  if (filters.excludeWatchlist && candidate.source === "personal" && isActiveWatchlistTitle(candidate.userTitle)) return false;
   if (candidate.source === "personal" && mode !== "discovery" && !personalSourceMatches(candidate.userTitle!, filters.source)) return false;
   if (filters.content === "movie" && candidate.mediaType !== "movie") return false;
   if (filters.content === "tv" && candidate.mediaType !== "tv") return false;
@@ -946,12 +941,17 @@ export default function SorteioClient() {
     [discoveryCandidates, filters],
   );
   const visibleCandidates = useMemo(
-    () => filters.source === "all" ? [...filteredPersonalCandidates, ...filteredDiscoveryCandidates] : filteredPersonalCandidates,
-    [filteredDiscoveryCandidates, filteredPersonalCandidates, filters.source],
+    () => {
+      if (filters.onlyNewForYou) return filteredDiscoveryCandidates;
+      return filters.source === "all"
+        ? [...filteredPersonalCandidates, ...filteredDiscoveryCandidates]
+        : filteredPersonalCandidates;
+    },
+    [filteredDiscoveryCandidates, filteredPersonalCandidates, filters.onlyNewForYou, filters.source],
   );
 
   const isLoading = personalLoading || discoveryLoading;
-  const filterKey = `${filters.source}|${filters.content}|${filters.duration}|${filters.vibe}|${filters.availability}|${filters.allowWatched}|${filters.excludeWatchlist}`;
+  const filterKey = `${filters.source}|${filters.content}|${filters.duration}|${filters.vibe}|${filters.availability}|${filters.allowWatched}|${filters.onlyNewForYou}`;
 
   useEffect(() => { revealedCardsRef.current = revealedCards; }, [revealedCards]);
   useEffect(() => { revealingIndexRef.current = revealingIndex; }, [revealingIndex]);
@@ -1015,8 +1015,8 @@ export default function SorteioClient() {
   function updateFilter<K extends keyof Filters>(key: K, value: Filters[K]) {
     setFilters((current) => {
       const next = { ...current, [key]: value };
-      if (key === "source" && value === "watchlist") next.excludeWatchlist = false;
-      if (key === "excludeWatchlist" && value === true && current.source === "watchlist") next.source = "all";
+      if (key === "source" && value !== "all") next.onlyNewForYou = false;
+      if (key === "onlyNewForYou" && value === true) next.source = "all";
       return next;
     });
     setResult(null);
@@ -1145,9 +1145,9 @@ export default function SorteioClient() {
                 <span className="rounded-full border border-white/[0.07] px-2 md:px-2.5 py-1 text-[8px] md:text-[9px] font-bold text-slate-600">
                   <span className="hidden sm:inline">Vistos </span>{filters.allowWatched ? "liberados" : "bloqueados"}
                 </span>
-                {filters.excludeWatchlist && (
+                {filters.onlyNewForYou && (
                   <span className="hidden rounded-full border border-sky-300/15 px-2.5 py-1 text-[9px] font-bold text-sky-400/55 sm:inline">
-                    Sem Watchlist
+                    So pra voce
                   </span>
                 )}
                 <ChevronDown className={["h-4 w-4 text-slate-600 transition-transform duration-300", filtersOpen ? "rotate-180" : ""].join(" ")} />
@@ -1180,16 +1180,16 @@ export default function SorteioClient() {
                     </button>
                     <button
                       type="button"
-                      onPointerDown={(e) => { e.preventDefault(); updateFilter("excludeWatchlist", !filters.excludeWatchlist); }}
-                      onClick={() => updateFilter("excludeWatchlist", !filters.excludeWatchlist)}
+                      onPointerDown={(e) => { e.preventDefault(); updateFilter("onlyNewForYou", !filters.onlyNewForYou); }}
+                      onClick={() => updateFilter("onlyNewForYou", !filters.onlyNewForYou)}
                       className={[
                         "ml-1.5 mt-1.5 rounded-full border px-3 py-2 text-[11px] font-bold transition-all duration-200 active:scale-95 md:mt-0 md:py-1.5",
-                        filters.excludeWatchlist
+                        filters.onlyNewForYou
                           ? "border-sky-300/25 bg-sky-300/10 text-sky-200"
                           : "border-white/[0.07] bg-white/[0.03] text-slate-400 hover:border-white/[0.14] hover:bg-white/[0.06] hover:text-slate-200",
                       ].join(" ")}
                     >
-                      {filters.excludeWatchlist ? "Watchlist excluida" : "Excluir Watchlist"}
+                      {filters.onlyNewForYou ? "So pra voce" : "So pra voce"}
                     </button>
                   </div>
                 </div>
@@ -1235,9 +1235,9 @@ export default function SorteioClient() {
             ].join(" ")}>
               Vistos {filters.allowWatched ? "permitidos" : "bloqueados"}
             </span>
-            {filters.excludeWatchlist && (
+            {filters.onlyNewForYou && (
               <span className="hidden rounded-full border border-sky-300/15 px-3 py-1.5 text-[10px] font-bold text-sky-400/50 sm:inline">
-                Watchlist excluida
+                Novo para voce
               </span>
             )}
             <div className="h-px w-6 md:w-8 bg-white/[0.06]" />
