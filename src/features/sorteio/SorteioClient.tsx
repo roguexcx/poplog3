@@ -279,6 +279,7 @@ function personalSourceMatches(title: EnrichedUserTitle, source: SourceFilter): 
 function candidateMatchesFilters(candidate: Candidate, filters: Filters, mode: Mode): boolean {
   const alreadyWatched = candidate.userTitle?.status === "watched";
   if (alreadyWatched && !filters.allowWatched) return false;
+  if (candidate.userTitle?.status === "abandoned") return false;
   if (candidate.source === "personal" && mode !== "discovery" && !personalSourceMatches(candidate.userTitle!, filters.source)) return false;
   if (filters.content === "movie" && candidate.mediaType !== "movie") return false;
   if (filters.content === "tv" && candidate.mediaType !== "tv") return false;

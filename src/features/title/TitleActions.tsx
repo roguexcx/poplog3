@@ -8,7 +8,7 @@ import type { TitleActionSeason } from "@/features/title/title-types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type Status = "watchlist" | "watched" | "watching" | "fridge" | null;
+type Status = "watchlist" | "watched" | "watching" | "fridge" | "abandoned" | null;
 
 type SeriesProgressEventDetail = {
   tmdbId: number;
@@ -110,6 +110,16 @@ function IconPlay() {
   );
 }
 
+function IconXCircle() {
+  return (
+    <svg viewBox="0 0 24 24" className="h-5 w-5 shrink-0" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <path d="m15 9-6 6" />
+      <path d="m9 9 6 6" />
+    </svg>
+  );
+}
+
 function IconChevron() {
   return (
     <svg viewBox="0 0 24 24" className="h-4 w-4 shrink-0" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round">
@@ -169,7 +179,7 @@ export default function TitleActions({
 
   const [userId, setUserId]                 = useState<string | null>(null);
   const [userTitle, setUserTitle]           = useState<UserTitle>({ status: null, favorite: false, fridge: false, watched_at: null });
-  const [loading, setLoading]               = useState<"watchlist" | "watched" | "conclude" | "favorite" | "fridge" | null>(null);
+  const [loading, setLoading]               = useState<"watchlist" | "watched" | "conclude" | "favorite" | "fridge" | "abandoned" | null>(null);
   const [initialLoading, setInitialLoading] = useState(true);
   const [showDatePicker, setShowDatePicker] = useState(false);
   const [showConfirm, setShowConfirm]       = useState(false);
@@ -359,6 +369,17 @@ export default function TitleActions({
     setLoading(null);
   }
 
+  async function handleAbandon() {
+    if (!requireAuth() || !isTv) return;
+    setLoading("abandoned");
+    if (isAbandoned) {
+      await save({ status: currentWatchedEpisodes > 0 ? "watching" : null, watched_at: null, fridge: false });
+    } else {
+      await save({ status: "abandoned", watched_at: null, fridge: false });
+    }
+    setLoading(null);
+  }
+
   async function handleWatched() {
     if (!requireAuth()) return;
     setLoading("watched");
@@ -460,11 +481,12 @@ export default function TitleActions({
 
   const isWatchlist = userTitle.status === "watchlist" && !userTitle.fridge;
   const isWatched   = userTitle.status === "watched";
+  const isAbandoned = userTitle.status === "abandoned";
   const isFridge    = userTitle.fridge || userTitle.status === "fridge";
   const isFavorite  = userTitle.favorite;
 
   const allWatched     = currentEpisodeCount > 0 && currentWatchedEpisodes >= currentEpisodeCount;
-  const watchingActive = isTv && (userTitle.status === "watching" || (currentWatchedEpisodes > 0 && !isWatched));
+  const watchingActive = isTv && !isAbandoned && (userTitle.status === "watching" || (currentWatchedEpisodes > 0 && !isWatched));
 
   if (initialLoading) {
     if (inline) {
@@ -552,6 +574,17 @@ export default function TitleActions({
             <IconStar filled={isFavorite} />
             <span>{loading === "favorite" ? "..." : isFavorite ? "Favorito" : "Favoritar"}</span>
           </button>
+
+          {isTv && (currentWatchedEpisodes > 0 || userTitle.status === "watching" || isAbandoned) && (
+            <button
+              onClick={handleAbandon}
+              disabled={loading === "abandoned"}
+              className={`${pillBase} ${isAbandoned ? "border-rose-400/45 bg-rose-400/12 text-rose-300 shadow-[0_0_14px_rgba(251,113,133,0.14)]" : "border-white/[0.06] bg-white/[0.02] text-zinc-500 hover:border-rose-400/20 hover:bg-rose-400/8 hover:text-rose-300"}`}
+            >
+              <IconXCircle />
+              <span>{loading === "abandoned" ? "..." : isAbandoned ? "Abandonada" : "Abandonar"}</span>
+            </button>
+          )}
 
           {/* Geladeira */}
           <button
@@ -897,6 +930,26 @@ export default function TitleActions({
             <span className="shrink-0 text-[10px] font-black uppercase tracking-widest text-amber-400">ativo</span>
           )}
         </button>
+
+        {isTv && (currentWatchedEpisodes > 0 || userTitle.status === "watching" || isAbandoned) && (
+          <button
+            onClick={handleAbandon}
+            disabled={loading === "abandoned"}
+            className={`group flex w-full items-center gap-3 rounded-2xl border px-4 py-3.5 text-sm font-bold transition duration-200
+              ${isAbandoned
+                ? "border-rose-400/45 bg-rose-400/12 text-rose-300 shadow-[0_0_14px_rgba(251,113,133,0.14)] hover:bg-rose-400/18"
+                : "border-white/[0.06] bg-white/[0.02] text-zinc-500 hover:border-rose-400/20 hover:bg-rose-400/8 hover:text-rose-300"
+              } disabled:cursor-not-allowed disabled:opacity-60`}
+          >
+            <IconXCircle />
+            <span className="flex-1 text-left">
+              {loading === "abandoned" ? "Salvando..." : isAbandoned ? "Série abandonada" : "Abandonar série"}
+            </span>
+            {isAbandoned && (
+              <span className="shrink-0 text-[10px] font-black uppercase tracking-widest text-rose-300">ativo</span>
+            )}
+          </button>
+        )}
 
         {/* Geladeira */}
         <button

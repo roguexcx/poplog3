@@ -49,7 +49,7 @@ type EnrichedTitle = {
   id: number;
   tmdb_id: number;
   media_type: "movie" | "tv";
-  status: "watchlist" | "watched" | "watching" | "fridge" | null;
+  status: "watchlist" | "watched" | "watching" | "fridge" | "abandoned" | null;
   favorite: boolean;
   fridge?: boolean | null;
   created_at: string;
@@ -63,7 +63,7 @@ type EnrichedTitle = {
   totalInCurrentSeason?: number;
 };
 
-type Tab        = "watched" | "watchlist" | "favorites" | "ongoing" | "fridge";
+type Tab        = "watched" | "watchlist" | "favorites" | "ongoing" | "fridge" | "abandoned";
 type FilterType = "all" | "movie" | "tv";
 type SortOrder  = "recent" | "az" | "rating";
 
@@ -447,7 +447,7 @@ export default function ProfileClient() {
 
   useEffect(() => {
     const tabFromUrl  = searchParams.get("tab");
-    const validTabs: Tab[] = ["ongoing", "watchlist", "watched", "favorites", "fridge"];
+    const validTabs: Tab[] = ["ongoing", "watchlist", "watched", "favorites", "fridge", "abandoned"];
     if (tabFromUrl && validTabs.includes(tabFromUrl as Tab)) {
       setActiveTab(tabFromUrl as Tab);
       setCurrentPage(1);
@@ -614,6 +614,7 @@ export default function ProfileClient() {
   const watchlist = useMemo(() => applyFiltersAndSort(titles.filter((t) => t.status === "watchlist" && !isInFridge(t))), [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
   const favorites = useMemo(() => applyFiltersAndSort(titles.filter((t) => t.favorite)),                             [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
   const fridge    = useMemo(() => applyFiltersAndSort(titles.filter(isInFridge)),                                    [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+  const abandoned = useMemo(() => applyFiltersAndSort(titles.filter((t) => t.status === "abandoned")),                [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ongoing = useMemo(() => {
     const list = titles.filter((t) => t.media_type === "tv" && t.status === "watching");
@@ -731,13 +732,15 @@ export default function ProfileClient() {
     { key: "watched",   label: "Assistidos",    count: watched.length   },
     { key: "favorites", label: "Favoritos",     count: favorites.length },
     { key: "fridge",    label: "Geladeira",     count: fridge.length    },
+    { key: "abandoned", label: "Abandonados",   count: abandoned.length },
   ];
 
   const activeItems =
     activeTab === "watched"   ? watched   :
     activeTab === "watchlist" ? watchlist :
     activeTab === "favorites" ? favorites :
-    activeTab === "ongoing"   ? ongoing   : fridge;
+    activeTab === "ongoing"   ? ongoing   :
+    activeTab === "fridge"    ? fridge    : abandoned;
 
   const ITEMS_PER_PAGE = activeTab === "ongoing" ? 10 : 14;
   const totalPages     = Math.max(1, Math.ceil(activeItems.length / ITEMS_PER_PAGE));
@@ -784,6 +787,7 @@ export default function ProfileClient() {
               { value: favorites.length, label: "favoritos"  },
               ...(ongoing.length > 0 ? [{ value: ongoing.length, label: "em andamento", accent: "text-sky-300" }] : []),
               ...(fridge.length > 0  ? [{ value: fridge.length,  label: "geladeira",    accent: "text-cyan-300" }] : []),
+              ...(abandoned.length > 0 ? [{ value: abandoned.length, label: "abandonados", accent: "text-rose-300" }] : []),
             ].map(({ value, label, accent }) => (
               <div key={label} className="text-center">
                 <p className={`text-xl font-black ${accent ?? ""}`}>{value}</p>
@@ -850,7 +854,9 @@ export default function ProfileClient() {
                 activeTab === t.key
                   ? t.key === "fridge"
                     ? "border-cyan-400 text-cyan-300"
-                    : "border-sky-400 text-sky-300"
+                    : t.key === "abandoned"
+                      ? "border-rose-400 text-rose-300"
+                      : "border-sky-400 text-sky-300"
                   : "border-transparent text-zinc-600 hover:text-zinc-300",
               ].join(" ")}
             >
@@ -860,6 +866,8 @@ export default function ProfileClient() {
                   "ml-2 rounded-full px-1.5 py-0.5 text-[9px] font-bold",
                   activeTab === t.key && t.key === "fridge"
                     ? "bg-cyan-400/20 text-cyan-400"
+                    : activeTab === t.key && t.key === "abandoned"
+                      ? "bg-rose-400/20 text-rose-300"
                     : activeTab === t.key
                       ? "bg-sky-400/20 text-sky-400"
                       : "bg-white/[0.07] text-zinc-500",
