@@ -527,14 +527,7 @@ function FateCardsStage({
           Tablet+: 5-column grid
         */}
         <div
-          className="
-            flex gap-3 overflow-x-auto overscroll-x-contain scroll-smooth
-            px-4 pb-3
-            snap-x snap-mandatory
-            md:grid md:grid-cols-5 md:gap-4 md:overflow-visible md:px-2 md:pb-0
-            lg:gap-5
-            [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]
-          "
+          className="no-scrollbar flex gap-3 overflow-x-auto overscroll-x-contain scroll-smooth px-4 pb-3 snap-x snap-mandatory md:grid md:grid-cols-5 md:gap-4 md:overflow-visible md:px-2 md:pb-0 lg:gap-5"
         >
           {visibleCards.map((candidate, index) => {
             const revealed = revealedCards[index];

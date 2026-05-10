@@ -3,6 +3,7 @@
 
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
+import { IconBookmark, IconCheck, IconStar } from "@/components/ui/icons";
 import type { TMDBTitleDetail } from "@/features/title/title-types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -45,44 +46,6 @@ const STATUS_LABELS: Record<string, string> = {
   "In Production": "Em produção",
   "Planned": "Planejada",
 };
-
-// ─── Icons ────────────────────────────────────────────────────────────────────
-
-function IconBookmark({ filled }: { filled: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      style={{ width: 13, height: 13 }}
-      fill={filled ? "currentColor" : "none"}
-      stroke="currentColor"
-      strokeWidth={2}
-    >
-      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-function IconCheck() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      style={{ width: 13, height: 13 }}
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2.5}
-    >
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
-  );
-}
-
-function IconStar() {
-  return (
-    <svg viewBox="0 0 24 24" style={{ width: 13, height: 13 }} fill="#f5c518">
-      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-    </svg>
-  );
-}
 
 // ─── Component ────────────────────────────────────────────────────────────────
 

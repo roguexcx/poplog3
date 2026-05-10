@@ -4,11 +4,12 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import type { ReactNode } from "react";
 
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
+import { CardActionButton } from "@/components/ui/CardActionButton";
+import { IconBookmark, IconCheck, IconStar } from "@/components/ui/icons";
 import type { TMDBItem, TMDBMediaType } from "@/types/tmdb";
 import {
   getOriginalTitle,
@@ -23,100 +24,6 @@ type Props = {
   item: TMDBItem;
   priority?: boolean;
 };
-
-// ─── Ícones ───────────────────────────────────────────────────────────────────
-
-function IconBookmark({ filled }: { filled: boolean }) {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-[13px] w-[13px]"
-      fill={filled ? "currentColor" : "none"}
-      stroke="currentColor"
-      strokeWidth={2.2}
-    >
-      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-function IconCheck() {
-  return (
-    <svg
-      viewBox="0 0 24 24"
-      className="h-[13px] w-[13px]"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2.4}
-    >
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
-  );
-}
-
-function IconStar() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-[9px] w-[9px]" fill="#fbbf24">
-      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-    </svg>
-  );
-}
-
-// ─── Botão de ação reutilizável ───────────────────────────────────────────────
-
-type ActionButtonProps = {
-  onClick: () => void;
-  disabled: boolean;
-  title: string;
-  active: boolean;
-  saving: boolean;
-  activeClass: string;
-  children: ReactNode;
-};
-
-function ActionButton({
-  onClick,
-  disabled,
-  title,
-  active,
-  saving,
-  activeClass,
-  children,
-}: ActionButtonProps) {
-  const unavailable = disabled || saving;
-
-  return (
-    <button
-      type="button"
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        if (unavailable) return;
-
-        onClick();
-      }}
-      title={saving ? "Salvando..." : title}
-      aria-busy={saving}
-      aria-disabled={unavailable}
-      className={[
-        "grid h-[30px] w-[30px] place-items-center rounded-full border backdrop-blur-[10px]",
-        "transition-[transform,background,border-color,box-shadow,opacity] duration-200",
-        saving ? "cursor-wait opacity-90" : "cursor-pointer hover:scale-110",
-        disabled && !saving ? "opacity-60" : "",
-        active
-          ? activeClass
-          : "border-white/[0.18] bg-black/[0.72] text-white/85 hover:border-violet-500/60 hover:shadow-[0_0_12px_rgba(139,92,246,0.3)]",
-      ].join(" ")}
-    >
-      {saving ? (
-        <span className="h-[12px] w-[12px] animate-spin rounded-full border border-current border-t-transparent" />
-      ) : (
-        children
-      )}
-    </button>
-  );
-}
 
 // ─── PosterCard ───────────────────────────────────────────────────────────────
 
@@ -190,7 +97,7 @@ export default function PosterCard({ item, priority = false }: Props) {
 
         {/* Botões de ação */}
         <div className="absolute left-2.5 top-2.5 z-20 flex flex-col gap-1.5">
-          <ActionButton
+          <CardActionButton
             onClick={watchlist.toggle}
             disabled={watchlist.loading || !watchlist.isLoggedIn}
             title={watchlist.inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
@@ -199,9 +106,9 @@ export default function PosterCard({ item, priority = false }: Props) {
             activeClass="border-sky-400/55 bg-sky-400/[0.18] text-sky-300 shadow-[0_0_10px_rgba(56,189,248,0.25)]"
           >
             <IconBookmark filled={watchlist.inWatchlist} />
-          </ActionButton>
+          </CardActionButton>
 
-          <ActionButton
+          <CardActionButton
             onClick={watched.toggle}
             disabled={watched.loading || !watched.isLoggedIn}
             title={watched.isWatched ? "Desmarcar como assistido" : "Já vi"}
@@ -210,7 +117,7 @@ export default function PosterCard({ item, priority = false }: Props) {
             activeClass="border-emerald-400/55 bg-emerald-400/[0.18] text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.25)]"
           >
             <IconCheck />
-          </ActionButton>
+          </CardActionButton>
         </div>
 
         {/* Rating */}

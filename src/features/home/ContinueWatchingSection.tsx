@@ -8,6 +8,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useUserData } from "@/context/UserDataContext";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
+import { getImageUrl } from "@/lib/tmdb-utils";
+import SectionHeader from "@/components/layout/SectionHeader";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -59,10 +61,6 @@ type WatchingTitle = {
 };
 
 // ─── Utilitários ──────────────────────────────────────────────────────────────
-
-function getImageUrl(path?: string | null, size = "w780"): string | null {
-  return path ? `https://image.tmdb.org/t/p/${size}${path}` : null;
-}
 
 function getContextLabel(
   watchedSeasonEpisodes: number,
@@ -331,21 +329,20 @@ export default function ContinueWatchingSection() {
 
   return (
     <section>
-      <div className="mb-5 flex items-end justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-black tracking-tight text-white">Continue assistindo</h2>
-          <p className="mt-1 text-sm text-zinc-400">Retome suas histórias em andamento.</p>
-        </div>
+      <SectionHeader
+        title="Continue assistindo"
+        subtitle="Retome suas histórias em andamento."
+        action={
+          <Link
+            href="/profile?tab=ongoing"
+            className="hidden text-xs font-bold text-sky-300 transition hover:text-white md:block"
+          >
+            Ver todos →
+          </Link>
+        }
+      />
 
-        <Link
-          href="/profile?tab=ongoing"
-          className="hidden text-xs font-bold text-sky-300 transition hover:text-white md:block"
-        >
-          Ver todos →
-        </Link>
-      </div>
-
-      <div className="-mx-6 flex gap-4 overflow-x-auto px-6 pb-4 pt-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:-mx-10 md:px-10">
+      <div className="no-scrollbar -mx-6 flex gap-4 overflow-x-auto px-6 pb-4 pt-3 md:-mx-10 md:px-10">
         {loading
           ? Array.from({ length: 5 }).map((_, i) => <CardSkeleton key={i} />)
           : items.map((item) => <WatchingCard key={item.id} item={item} />)}

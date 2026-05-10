@@ -9,6 +9,7 @@ import { createClient } from "@/lib/supabase/client";
 import { type User } from "@supabase/supabase-js";
 import { scoreTitle, buildReason, type SeasonContext } from "@/lib/relevance-score";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
+import { getImageUrl } from "@/lib/tmdb-utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -88,11 +89,11 @@ function getReleaseYear(t: Pick<TMDBDetail, "release_date" | "first_air_date">):
 }
 
 function getPosterUrl(path?: string | null) {
-  return path ? `https://image.tmdb.org/t/p/w342${path}` : null;
+  return getImageUrl(path, "w342");
 }
 
 function getBackdropUrl(path?: string | null) {
-  return path ? `https://image.tmdb.org/t/p/w780${path}` : null;
+  return getImageUrl(path, "w780");
 }
 
 function daysSince(dateStr: string): number {
@@ -809,10 +810,7 @@ export default function ProfileClient() {
             <p className="mb-4 text-[11px] font-black uppercase tracking-[0.35em] text-sky-300">
               Sugestões para hoje
             </p>
-            <div
-              className="flex gap-3 overflow-x-auto pb-3"
-              style={{ scrollbarWidth: "none", msOverflowStyle: "none" } as React.CSSProperties}
-            >
+            <div className="no-scrollbar flex gap-3 overflow-x-auto pb-3">
               {suggestions.map((s, i) => <SuggestionCard key={i} suggestion={s} />)}
               {/* Padding final para não cortar o último card */}
               <div className="shrink-0 w-1" />
@@ -841,10 +839,7 @@ export default function ProfileClient() {
         </div>
 
         {/* ── Abas ── */}
-        <div
-          className="mb-5 flex gap-0 overflow-x-auto border-b border-white/[0.07]"
-          style={{ scrollbarWidth: "none", msOverflowStyle: "none" } as React.CSSProperties}
-        >
+        <div className="no-scrollbar mb-5 flex gap-0 overflow-x-auto border-b border-white/[0.07]">
           {tabItems.map((t) => (
             <button
               key={t.key}

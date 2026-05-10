@@ -242,7 +242,7 @@ export default function BuscarClient() {
         </div>
 
         {/* Botões de categoria — filtro por genre_id real, não busca textual */}
-        <div className="mb-8 -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none]">
+        <div className="no-scrollbar mb-8 -mx-4 flex gap-2 overflow-x-auto px-4 pb-1">
           {CATEGORIES.map((cat) => (
             <button
               key={cat.label}

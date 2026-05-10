@@ -7,6 +7,9 @@ import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { useUserData } from "@/context/UserDataContext";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
+import { CardActionButton } from "@/components/ui/CardActionButton";
+import { IconCheck } from "@/components/ui/icons";
+import SectionHeader from "@/components/layout/SectionHeader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -150,51 +153,12 @@ const STATUS_BADGE: Record<StreamStatus, { label: string; border: string; bg: st
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
 
-function IconCheck() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-[13px] w-[13px]" fill="none"
-      stroke="currentColor" strokeWidth={2.4}>
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
-  );
-}
-
 function IconTrash() {
   return (
     <svg viewBox="0 0 24 24" className="h-[13px] w-[13px]" fill="none"
       stroke="currentColor" strokeWidth={2}>
       <path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6" />
     </svg>
-  );
-}
-
-// ─── ActionButton — igual ao TrendingNowSection ───────────────────────────────
-
-function ActionButton({
-  onClick, title, active, activeClass, children,
-}: {
-  onClick: (e: React.MouseEvent) => void;
-  title: string;
-  active: boolean;
-  activeClass: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className={[
-        "grid h-[30px] w-[30px] place-items-center rounded-full border backdrop-blur-[10px]",
-        "transition-[transform,opacity,background,border-color,box-shadow] duration-200",
-        "hover:scale-110",
-        active
-          ? activeClass
-          : "border-white/[0.18] bg-black/[0.72] text-white/85 hover:border-violet-500/60 hover:shadow-[0_0_12px_rgba(139,92,246,0.3)]",
-      ].join(" ")}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -228,9 +192,7 @@ function WatchlistCard({
   const THIS_YEAR    = String(new Date().getFullYear());
   const showYear     = item.year && item.year !== THIS_YEAR;
 
-  function dismiss(e: React.MouseEvent, action: "watched" | "remove") {
-    e.preventDefault();
-    e.stopPropagation();
+  function dismiss(action: "watched" | "remove") {
     if (action === "watched") setWatched(true);
     setDismissed(true);
     setTimeout(() => onDismiss(item.id, action), 280);
@@ -320,22 +282,26 @@ function WatchlistCard({
 
         {/* Action buttons — top left, visíveis no hover */}
         <div className="absolute left-2.5 top-2.5 z-30 flex flex-col gap-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-          <ActionButton
-            onClick={(e) => dismiss(e, "watched")}
+          <CardActionButton
+            onClick={() => dismiss("watched")}
+            disabled={false}
             title="Marcar como assistido"
             active={watchedActive}
+            saving={false}
             activeClass="border-emerald-400/55 bg-emerald-400/[0.18] text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.25)]"
           >
             <IconCheck />
-          </ActionButton>
-          <ActionButton
-            onClick={(e) => dismiss(e, "remove")}
+          </CardActionButton>
+          <CardActionButton
+            onClick={() => dismiss("remove")}
+            disabled={false}
             title="Remover da watchlist"
             active={false}
+            saving={false}
             activeClass=""
           >
             <IconTrash />
-          </ActionButton>
+          </CardActionButton>
         </div>
       </div>
 
@@ -487,49 +453,37 @@ export default function WatchlistVivaSection() {
   if (!loading && allTitles.length === 0) return null;
 
   return (
-    <section aria-labelledby="wl-viva-heading">
-      {/* Header */}
-      <div className="mb-5 flex items-end justify-between gap-4">
-        <div>
-          <h2
-            id="wl-viva-heading"
-            className="text-2xl font-black tracking-tight text-white"
+    <section>
+      <SectionHeader
+        title="Da sua watchlist"
+        subtitle={!loading && allTitles.length > 5 ? `${allTitles.length} títulos na lista` : undefined}
+        action={
+          <button
+            onClick={reshuffle}
+            disabled={loading || allTitles.length <= 5}
+            className={[
+              "flex items-center gap-2 rounded-full border px-4 py-1.5 backdrop-blur-[8px]",
+              "text-[10px] font-semibold uppercase tracking-[0.08em]",
+              "transition-[transform,background,border-color,box-shadow] duration-200 hover:scale-105",
+              "border-white/[0.18] bg-black/[0.72] text-white/60",
+              "hover:border-violet-500/40 hover:text-white/85",
+              "disabled:pointer-events-none disabled:opacity-30",
+            ].join(" ")}
+            aria-label="Sortear outros títulos"
           >
-            Da sua watchlist
-          </h2>
-          {!loading && allTitles.length > 5 && (
-            <p className="mt-1 text-sm text-zinc-400">
-              {allTitles.length} títulos na lista
-            </p>
-          )}
-        </div>
-
-        <button
-          onClick={reshuffle}
-          disabled={loading || allTitles.length <= 5}
-          className={[
-            "flex items-center gap-2 rounded-full border px-4 py-1.5 backdrop-blur-[8px]",
-            "text-[10px] font-semibold uppercase tracking-[0.08em]",
-            "transition-[transform,background,border-color,box-shadow] duration-200 hover:scale-105",
-            "border-white/[0.18] bg-black/[0.72] text-white/60",
-            "hover:border-violet-500/40 hover:text-white/85",
-            "disabled:pointer-events-none disabled:opacity-30",
-          ].join(" ")}
-          aria-label="Sortear outros títulos"
-        >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-            stroke="currentColor" strokeWidth={2.2}>
-            <path d="M1 4v6h6M23 20v-6h-6" />
-            <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15" />
-          </svg>
-          Sortear outros
-        </button>
-      </div>
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+              stroke="currentColor" strokeWidth={2.2}>
+              <path d="M1 4v6h6M23 20v-6h-6" />
+              <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15" />
+            </svg>
+            Sortear outros
+          </button>
+        }
+      />
 
       {/* Scroll horizontal no mobile, grid 5 colunas no desktop */}
       <div
-        className="-mx-4 flex gap-4 overflow-x-auto px-4 pb-2 [scrollbar-width:none] md:mx-0 md:grid md:grid-cols-5 md:overflow-visible md:px-0 md:pb-0"
-        style={{ msOverflowStyle: "none" } as React.CSSProperties}
+        className="no-scrollbar -mx-4 flex gap-4 overflow-x-auto px-4 pb-2 md:mx-0 md:grid md:grid-cols-5 md:overflow-visible md:px-0 md:pb-0"
       >
         {loading
           ? Array.from({ length: 5 }).map((_, i) => (

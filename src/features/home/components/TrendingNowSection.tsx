@@ -1,14 +1,18 @@
 // src/features/home/components/TrendingNowSection.tsx
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 
 import { ScrollRowArrows } from "@/components/ScrollRowArrows";
+import { CardActionButton } from "@/components/ui/CardActionButton";
+import { IconBookmark, IconCheck } from "@/components/ui/icons";
+import { useScrollRow } from "@/hooks/useScrollRow";
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
+import SectionHeader from "@/components/layout/SectionHeader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -99,76 +103,6 @@ async function fetchTrending(): Promise<TrendingItem[]> {
   if (!res.ok) return [];
   const json = await res.json();
   return (json.results ?? []).map(toTrendingItem);
-}
-
-// ─── Ícones ───────────────────────────────────────────────────────────────────
-
-function IconBookmark({ filled }: { filled: boolean }) {
-  return (
-    <svg viewBox="0 0 24 24" className="h-[13px] w-[13px]" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth={2.2}>
-      <path d="M19 21l-7-5-7 5V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2z" />
-    </svg>
-  );
-}
-
-function IconCheck() {
-  return (
-    <svg viewBox="0 0 24 24" className="h-[13px] w-[13px]" fill="none" stroke="currentColor" strokeWidth={2.4}>
-      <path d="M20 6 9 17l-5-5" />
-    </svg>
-  );
-}
-
-function ActionButton({
-  onClick,
-  disabled,
-  title,
-  active,
-  saving,
-  activeClass,
-  children,
-}: {
-  onClick: () => void;
-  disabled: boolean;
-  title: string;
-  active: boolean;
-  saving: boolean;
-  activeClass: string;
-  children: React.ReactNode;
-}) {
-  const unavailable = disabled || saving;
-
-  return (
-    <button
-      type="button"
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-
-        if (unavailable) return;
-
-        onClick();
-      }}
-      title={saving ? "Salvando..." : title}
-      aria-busy={saving}
-      aria-disabled={unavailable}
-      className={[
-        "grid h-[30px] w-[30px] place-items-center rounded-full border backdrop-blur-[10px]",
-        "transition-[transform,opacity,background,border-color,box-shadow] duration-200",
-        saving ? "cursor-wait opacity-90" : "cursor-pointer hover:scale-110",
-        disabled && !saving ? "opacity-60" : "",
-        active
-          ? activeClass
-          : "border-white/[0.18] bg-black/[0.72] text-white/85 hover:border-violet-500/60 hover:shadow-[0_0_12px_rgba(139,92,246,0.3)]",
-      ].join(" ")}
-    >
-      {saving ? (
-        <span className="h-[12px] w-[12px] animate-spin rounded-full border border-current border-t-transparent" />
-      ) : (
-        children
-      )}
-    </button>
-  );
 }
 
 // ─── Filter pills ─────────────────────────────────────────────────────────────
@@ -326,7 +260,7 @@ function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
           porque não há <Link> envolvendo eles.
         */}
         <div className="absolute left-2.5 top-2.5 z-30 flex flex-col gap-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-          <ActionButton
+          <CardActionButton
             onClick={watchlist.toggle}
             disabled={watchlist.loading || !watchlist.isLoggedIn}
             title={watchlist.inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
@@ -334,8 +268,8 @@ function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
             activeClass="border-sky-400/55 bg-sky-400/[0.18] text-sky-300 shadow-[0_0_10px_rgba(56,189,248,0.25)]"
           >
             <IconBookmark filled={watchlist.inWatchlist} />
-          </ActionButton>
-          <ActionButton
+          </CardActionButton>
+          <CardActionButton
             onClick={watched.toggle}
             disabled={watched.loading || !watched.isLoggedIn}
             title={watched.isWatched ? "Desmarcar como assistido" : "Já vi"}
@@ -343,7 +277,7 @@ function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
             activeClass="border-emerald-400/55 bg-emerald-400/[0.18] text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.25)]"
           >
             <IconCheck />
-          </ActionButton>
+          </CardActionButton>
         </div>
       </div>
 
@@ -369,33 +303,9 @@ export default function TrendingNowSection() {
   const [items, setItems]     = useState<TrendingItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter]   = useState<MediaFilter>("all");
-  const [canScrollLeft, setCanScrollLeft]   = useState(false);
-  const [canScrollRight, setCanScrollRight] = useState(false);
-  const rowRef = useRef<HTMLDivElement>(null);
 
-  const syncScroll = useCallback(() => {
-    const el = rowRef.current;
-    if (!el) return;
-    setCanScrollLeft(el.scrollLeft > 4);
-    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
-  }, []);
-
-  useEffect(() => {
-    const el = rowRef.current;
-    if (!el) return;
-    const r1 = requestAnimationFrame(() => requestAnimationFrame(syncScroll));
-    el.addEventListener("scroll", syncScroll, { passive: true });
-    const ro = new ResizeObserver(syncScroll);
-    ro.observe(el);
-    return () => {
-      cancelAnimationFrame(r1);
-      el.removeEventListener("scroll", syncScroll);
-      ro.disconnect();
-    };
-  }, [syncScroll, loading, filter]);
-
-  const doScrollLeft  = useCallback(() => rowRef.current?.scrollBy({ left: -640, behavior: "smooth" }), []);
-  const doScrollRight = useCallback(() => rowRef.current?.scrollBy({ left:  640, behavior: "smooth" }), []);
+  const { ref: rowRef, canScrollLeft, canScrollRight, scrollLeft: doScrollLeft, scrollRight: doScrollRight } =
+    useScrollRow({ step: 640 });
 
   useEffect(() => {
     fetchTrending().then((data) => { setItems(data); setLoading(false); });
@@ -405,26 +315,26 @@ export default function TrendingNowSection() {
 
   return (
     <section>
-      <div className="mb-5 flex items-end justify-between gap-4">
-        <div>
-          <h2 className="text-2xl font-black tracking-tight text-white">Em alta agora</h2>
-          <p className="mt-1 text-sm text-zinc-400">O que todo mundo está assistindo.</p>
-        </div>
-        <div className="flex items-center gap-3">
-          <FilterPills active={filter} onChange={setFilter} />
-          <div className="hidden md:flex">
-            <ScrollRowArrows
-              canScrollLeft={canScrollLeft}
-              canScrollRight={canScrollRight}
-              onLeft={doScrollLeft}
-              onRight={doScrollRight}
-            />
+      <SectionHeader
+        title="Em alta agora"
+        subtitle="O que todo mundo está assistindo."
+        action={
+          <div className="flex items-center gap-3">
+            <FilterPills active={filter} onChange={setFilter} />
+            <div className="hidden md:flex">
+              <ScrollRowArrows
+                canScrollLeft={canScrollLeft}
+                canScrollRight={canScrollRight}
+                onLeft={doScrollLeft}
+                onRight={doScrollRight}
+              />
+            </div>
           </div>
-        </div>
-      </div>
+        }
+      />
 
       {loading ? (
-        <div className="flex gap-4 overflow-x-auto pb-4 pt-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <div className="no-scrollbar flex gap-4 overflow-x-auto pb-4 pt-3">
           {Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)}
         </div>
       ) : visible.length === 0 ? (
@@ -432,7 +342,7 @@ export default function TrendingNowSection() {
       ) : (
         <div
           ref={rowRef}
-          className="flex gap-4 overflow-x-auto pb-4 pt-3 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="no-scrollbar flex gap-4 overflow-x-auto pb-4 pt-3"
         >
           {visible.map((item, idx) => (
             <TrendingCard key={item.id} item={item} rank={idx + 1} />
