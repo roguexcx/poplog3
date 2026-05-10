@@ -3,45 +3,10 @@
 import { NextResponse } from "next/server";
 import { tmdbFetch } from "@/lib/tmdb";
 import { getStreamingInfo, daysBetween } from "@/lib/streaming";
-import type { StreamStatus } from "@/lib/streaming";
+import { formatRuntimeLabel, translateGenreName } from "@/lib/domain-labels";
+import type { WatchlistLiveRawTitle as RawTitle, WatchlistLiveTitle as EnrichedTitle } from "@/types/api-contracts";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-
-type RawTitle = {
-  id: number;
-  tmdb_id: number;
-  media_type: "movie" | "tv";
-  title: string;
-  release_year: number | null;
-  created_at: string;
-  fridge: boolean;
-  stream_status: StreamStatus | null;
-  stream_status_checked_at: string | null;
-};
-
-type EnrichedTitle = {
-  id: number;
-  tmdb_id: number;
-  media_type: "movie" | "tv";
-  title: string;
-  original_title_label: string | null;
-  poster_path: string | null;
-  year: string | null;
-  genre: string | null;
-  runtime: number | null;
-  runtime_label: string | null;
-  seasons: number | null;
-  origin: "cinema" | "streaming";
-  release_date: string;
-  created_at: string;
-  stream_status: StreamStatus;
-  providers: { name: string; logo: string; type: "flatrate" | "rent" | "buy" }[];
-  estimated_platform: string | null;
-  estimated_month: string | null;
-  context_pool: string[];
-  fridge: boolean;
-  stream_status_updated: boolean;
-};
 
 type TMDBDetails = Record<string, unknown> & {
   id?: number;
@@ -91,14 +56,6 @@ function isStale(checkedAt: string | null, releaseDate: string): boolean {
   return daysSinceCheck >= 7;
 }
 
-function formatRuntime(minutes: number | null): string | null {
-  if (!minutes) return null;
-  if (minutes < 60) return `${minutes}min`;
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  return m > 0 ? `${h}h${m}min` : `${h}h`;
-}
-
 // ─── POST handler ─────────────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
@@ -128,7 +85,7 @@ export async function POST(request: Request) {
           const idCheck = validateTmdbId(tmdbReleaseDate, row.release_year);
 
           if (!idCheck.ok) {
-            const genre       = details.genres?.[0]?.name ?? null;
+            const genre       = translateGenreName(details.genres?.[0]?.name) ?? null;
             const releaseMonth = PT_MONTHS_LOCAL[new Date(releaseDate).getMonth()] ?? "";
             const safeContext = idCheck.reason === "id_mismatch"
               ? ["Aguardando confirmação de data", "Lançamento previsto"]
@@ -159,7 +116,7 @@ export async function POST(request: Request) {
             };
           }
 
-          const genre   = details.genres?.[0]?.name ?? null;
+          const genre   = translateGenreName(details.genres?.[0]?.name) ?? null;
           const seasons = row.media_type === "tv" ? (details.number_of_seasons ?? null) : null;
 
           const streaming = await getStreamingInfo(row.tmdb_id, row.media_type, {
@@ -201,7 +158,7 @@ export async function POST(request: Request) {
             year:                  releaseDate ? String(new Date(releaseDate).getFullYear()) : null,
             genre,
             runtime:               rawRuntime,
-            runtime_label:         formatRuntime(rawRuntime),
+            runtime_label:         formatRuntimeLabel(rawRuntime),
             seasons,
             origin:                streaming.origin,
             release_date:          releaseDate,

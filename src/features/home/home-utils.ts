@@ -1,22 +1,6 @@
 // src/features/home/home-utils.ts
 
-export const GENRE_TRANSLATIONS: Record<string, string> = {
-  "Sci-Fi & Fantasy": "Ficção científica e fantasia",
-  "Action & Adventure": "Ação e aventura",
-  Drama: "Drama",
-  Comedy: "Comédia",
-  Crime: "Crime",
-  Mystery: "Mistério",
-  Thriller: "Suspense",
-  Horror: "Terror",
-  Animation: "Animação",
-  Family: "Família",
-  Documentary: "Documentário",
-  Romance: "Romance",
-  Fantasy: "Fantasia",
-  Action: "Ação",
-  Adventure: "Aventura",
-};
+import { translateGenreName, parseYearLabel } from "@/lib/domain-labels";
 
 const HEADLINES: Record<string, [string, string, string][]> = {
   madrugada: [
@@ -68,7 +52,7 @@ export function translateGenres(
 ): string {
   return genres
     .slice(0, limit)
-    .map((g) => GENRE_TRANSLATIONS[g.name] ?? g.name)
+    .map((g) => translateGenreName(g.name) ?? g.name)
     .join(" • ");
 }
 
@@ -86,5 +70,5 @@ export function parseYear(
   releaseDate?: string | null,
   firstAirDate?: string | null,
 ): string | null {
-  return releaseDate?.split("-")[0] ?? firstAirDate?.split("-")[0] ?? null;
+  return parseYearLabel(releaseDate, firstAirDate);
 }

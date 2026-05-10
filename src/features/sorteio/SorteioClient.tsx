@@ -27,6 +27,7 @@ import { useWatchedToggle } from "@/hooks/useWatchedToggle";
 import { createClient } from "@/lib/supabase/client";
 import type { TMDBItem, TMDBMediaType } from "@/types/tmdb";
 import type { UserTitle } from "@/types/user";
+import { GENRE_LABEL_BY_ID, translateGenreName } from "@/lib/domain-labels";
 
 type Mode = "roulette" | "discovery" | "cards";
 type SourceFilter = "all" | "watchlist" | "fridge" | "watching" | "favorites" | "rewatch";
@@ -144,24 +145,6 @@ const vibeGenreIds: Record<Exclude<VibeFilter, "all">, number[]> = {
   dark: [27, 80, 53],
 };
 
-const genreLabelById: Record<number, string> = {
-  12: "Aventura", 14: "Fantasia", 16: "Animação", 18: "Drama",
-  27: "Terror", 28: "Ação", 35: "Comédia", 36: "História",
-  53: "Suspense", 80: "Crime", 99: "Documentário", 878: "Ficção científica",
-  9648: "Mistério", 10749: "Romance", 10751: "Família",
-};
-
-const genreNameTranslations: Record<string, string> = {
-  Action: "Ação", Adventure: "Aventura", Animation: "Animação", Comedy: "Comédia",
-  Crime: "Crime", Documentary: "Documentário", Drama: "Drama", Family: "Família",
-  Fantasy: "Fantasia", History: "História", Horror: "Terror", Mystery: "Mistério",
-  Romance: "Romance", "Science Fiction": "Ficção científica",
-  "Sci-Fi & Fantasy": "Ficção científica e fantasia", Soap: "Novela",
-  Thriller: "Suspense", War: "Guerra", Western: "Faroeste",
-  "Action & Adventure": "Ação e aventura", Kids: "Infantil", News: "Notícias",
-  Reality: "Reality", "Talk": "Talk show", "War & Politics": "Guerra e política",
-};
-
 const rejectedStorageKey = "poplog:sorteio:rejected";
 
 function getTitle(item: TMDBDetails | TMDBItem): string {
@@ -201,9 +184,9 @@ function formatRuntime(candidate: Candidate): string {
 }
 
 function getGenres(candidate: Candidate): string[] {
-  const genres = candidate.tmdb.genres?.map((g) => genreNameTranslations[g.name] ?? g.name).filter(Boolean) ?? [];
+  const genres = candidate.tmdb.genres?.map((g) => translateGenreName(g.name) ?? g.name).filter(Boolean) ?? [];
   if (genres.length > 0) return genres.slice(0, 3);
-  return (candidate.tmdb.genre_ids ?? []).map((id) => genreLabelById[id]).filter(Boolean).slice(0, 3);
+  return (candidate.tmdb.genre_ids ?? []).map((id) => GENRE_LABEL_BY_ID[id]).filter(Boolean).slice(0, 3);
 }
 
 function normalize(text?: string | null): string {
@@ -213,7 +196,7 @@ function normalize(text?: string | null): string {
 function hasGenre(candidate: Candidate, ids: number[], names: string[] = []): boolean {
   const genreIds = candidate.tmdb.genre_ids ?? [];
   const detailNames = candidate.tmdb.genres?.map((g) => normalize(g.name)) ?? [];
-  return ids.some((id) => genreIds.includes(id) || detailNames.includes(normalize(genreLabelById[id]))) ||
+  return ids.some((id) => genreIds.includes(id) || detailNames.includes(normalize(GENRE_LABEL_BY_ID[id]))) ||
     names.some((name) => detailNames.some((gn) => gn.includes(normalize(name))));
 }
 

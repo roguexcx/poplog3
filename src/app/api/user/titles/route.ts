@@ -2,15 +2,7 @@
 
 import { NextResponse } from "next/server";
 import { tmdbFetch } from "@/lib/tmdb";
-
-type RawTitle = {
-  id: string;
-  tmdb_id: number;
-  media_type: "movie" | "tv";
-  status: string | null;
-  favorite?: boolean;
-  created_at?: string;
-};
+import type { UserTitleInput, TmdbEnrichedTitle } from "@/types/api-contracts";
 
 export async function POST(request: Request) {
   try {
@@ -21,7 +13,7 @@ export async function POST(request: Request) {
     }
 
     const enrichedTitles = await Promise.all(
-      titles.map(async (title: RawTitle) => {
+      titles.map(async (title: UserTitleInput): Promise<TmdbEnrichedTitle> => {
         const mediaType = title.media_type === "tv" ? "tv" : "movie";
 
         try {

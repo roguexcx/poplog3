@@ -1,15 +1,8 @@
 // src/lib/title-utils.ts
 
-export const GENRE_NAMES: Record<number, string> = {
-  28: "Ação", 12: "Aventura", 16: "Animação", 35: "Comédia",
-  80: "Crime", 99: "Documentário", 18: "Drama", 10751: "Família",
-  14: "Fantasia", 36: "História", 27: "Terror", 10402: "Música",
-  9648: "Mistério", 10749: "Romance", 878: "Ficção científica",
-  10770: "Cinema TV", 53: "Thriller", 10752: "Guerra", 37: "Faroeste",
-  10759: "Ação & aventura", 10762: "Infantil", 10763: "Notícias",
-  10764: "Reality", 10765: "Sci-fi & fantasia", 10766: "Novela",
-  10767: "Talk show", 10768: "Guerra & política",
-};
+import { GENRE_LABEL_BY_ID, getContentTypeLabel as getMediaContentTypeLabel } from "@/lib/domain-labels";
+
+export const GENRE_NAMES = GENRE_LABEL_BY_ID;
 
 const KEYWORD_PHRASES: Record<string, string> = {
   "space travel": "Viagem espacial", "space mission": "Missão espacial",
@@ -42,27 +35,7 @@ const KEYWORD_WORDS: Record<string, string> = {
 };
 
 export function getContentTypeLabel(type: string, genreIds: number[] = []): string {
-  const genres = new Set(genreIds);
-
-  if (type === "movie") {
-    if (genres.has(99)) return "Documentário";
-    if (genres.has(16)) return "Animação";
-    if (genres.has(10770)) return "Filme para TV";
-    return "Filme";
-  }
-
-  if (type === "tv") {
-    if (genres.has(10764)) return "Reality";
-    if (genres.has(99)) return "Documentário";
-    if (genres.has(10766)) return "Novela";
-    if (genres.has(10767)) return "Talk show";
-    if (genres.has(10763)) return "Notícias";
-    if (genres.has(10762)) return "Infantil";
-    if (genres.has(16)) return "Série animada";
-    return "Série";
-  }
-
-  return "Título";
+  return getMediaContentTypeLabel(type, genreIds);
 }
 
 export function normalizeKeywordName(name: string): string {

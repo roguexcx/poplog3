@@ -12,7 +12,7 @@ type Props<K extends string> = {
   mediaType: TMDBMediaType;
   pageTitle: string;
   pageSubtitle: string;
-  filters: FilterDef<K>[];
+  filters: readonly FilterDef<K>[];
   defaultFilter: K;
 };
 
