@@ -79,9 +79,9 @@ export default function HeroSection({
         {/* Left: headline + search */}
         <div className="max-w-3xl">
           <p className="mb-7 text-[11px] font-bold uppercase leading-5 tracking-[0.38em] text-zinc-300">
-            Filmes e séries em uma curadoria
+            Descubra, salve e acompanhe
             <br />
-            pessoal, rápida e cinematográfica.
+            o que assistir.
           </p>
 
           <h1 className="max-w-3xl text-[3.2rem] font-black leading-[0.88] tracking-tight text-white sm:text-[4.1rem] md:text-[5.4rem]">

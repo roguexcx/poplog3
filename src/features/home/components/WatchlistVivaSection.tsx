@@ -1,7 +1,7 @@
 // src/features/home/components/WatchlistVivaSection.tsx
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
@@ -389,8 +389,14 @@ export default function WatchlistVivaSection() {
   const [visible, setVisible]     = useState<Array<WatchlistTitle & { _slot: WatchlistSlot }>>([]);
   const [loading, setLoading]     = useState(true);
 
+  // Carrega uma vez por montagem (F5/navegação). Marcar/desmarcar título não
+  // dispara re-fetch — `userTitles` está fora das dependências.
+  const didFetchRef = useRef(false);
+
   useEffect(() => {
     if (titlesLoading) return;
+    if (didFetchRef.current) return;
+    didFetchRef.current = true;
 
     const rows = userTitles.filter((t) => t.status === "watchlist") as WatchlistRow[];
 
@@ -440,7 +446,8 @@ export default function WatchlistVivaSection() {
     }
 
     load();
-  }, [userTitles, titlesLoading]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [titlesLoading]);
 
   function reshuffle() {
     setVisible(selectFive(allTitles));

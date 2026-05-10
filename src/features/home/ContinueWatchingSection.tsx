@@ -3,7 +3,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { createClient } from "@/lib/supabase/client";
 import { useUserData } from "@/context/UserDataContext";
@@ -299,13 +299,18 @@ export default function ContinueWatchingSection() {
   const [items, setItems] = useState<WatchingTitle[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const watchingRaw = useMemo(
-    () => titles.filter((t) => t.media_type === "tv" && t.status === "watching"),
-    [titles],
-  );
+  // Carrega uma vez por montagem (F5/navegação). Marcar/desmarcar título não
+  // dispara re-fetch — `titles` está intencionalmente fora das dependências.
+  const didFetchRef = useRef(false);
 
   useEffect(() => {
     if (titlesLoading) return;
+    if (didFetchRef.current) return;
+    didFetchRef.current = true;
+
+    const watchingRaw = titles.filter(
+      (t) => t.media_type === "tv" && t.status === "watching",
+    );
 
     if (watchingRaw.length === 0) {
       setItems([]);
@@ -317,7 +322,8 @@ export default function ContinueWatchingSection() {
     enrichWatching(watchingRaw, userId)
       .then(setItems)
       .finally(() => setLoading(false));
-  }, [watchingRaw, titlesLoading, userId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [titlesLoading, userId]);
 
   const hasItems = useMemo(() => items.length > 0, [items]);
   if (!loading && !hasItems) return null;

@@ -745,13 +745,13 @@ export default function ProfileClient() {
 
         {/* ── Cabeçalho ── */}
         <div className="mb-10 flex flex-col gap-5 border-b border-white/[0.07] pb-10 sm:flex-row sm:items-center sm:gap-8">
-          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-sky-400/[0.14] text-2xl font-black text-sky-300 ring-1 ring-sky-400/20">
+          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-sky-400/[0.14] text-2xl font-black text-sky-300 ring-1 ring-sky-400/20 sm:h-20 sm:w-20 sm:text-3xl">
             {displayName.charAt(0).toUpperCase()}
           </div>
 
           <div className="min-w-0 flex-1">
-            <h1 className="truncate text-2xl font-black tracking-tight">{displayName}</h1>
-            <p className="mt-0.5 text-sm text-zinc-500">{user?.email}</p>
+            <h1 className="truncate text-3xl font-black leading-tight tracking-tight sm:text-4xl">{displayName}</h1>
+            <p className="mt-1 text-sm text-zinc-500">{user?.email}</p>
           </div>
 
           <div className="flex flex-wrap items-center gap-6 sm:gap-8">
@@ -764,7 +764,7 @@ export default function ProfileClient() {
             ].map(({ value, label, accent }) => (
               <div key={label} className="text-center">
                 <p className={`text-xl font-black ${accent ?? ""}`}>{value}</p>
-                <p className="mt-0.5 text-[10px] uppercase tracking-[0.15em] text-zinc-600">{label}</p>
+                <p className="mt-1 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600">{label}</p>
               </div>
             ))}
             <Link
@@ -801,7 +801,7 @@ export default function ProfileClient() {
               onClick={() => { setFilterType(f); setCurrentPage(1); }}
               disabled={activeTab === "ongoing" && f !== "all"}
               className={[
-                "rounded-full border px-4 py-1.5 text-[11px] font-bold tracking-wide transition",
+                "rounded-full border px-4 py-2 text-sm font-bold transition",
                 filterType === f
                   ? "border-white bg-white text-black"
                   : "border-white/[0.12] text-zinc-500 hover:border-white/25 hover:text-zinc-200",
@@ -823,7 +823,7 @@ export default function ProfileClient() {
               key={t.key}
               onClick={() => { setActiveTab(t.key); setCurrentPage(1); }}
               className={[
-                "shrink-0 -mb-px border-b-2 px-3 py-3 text-[10px] font-black uppercase tracking-[0.15em] transition sm:px-5 sm:tracking-[0.2em]",
+                "shrink-0 -mb-px border-b-2 px-3 py-3 text-[11px] font-black uppercase tracking-[0.2em] transition sm:px-5",
                 activeTab === t.key
                   ? t.key === "fridge"
                     ? "border-cyan-400 text-cyan-300"

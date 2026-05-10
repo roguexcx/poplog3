@@ -72,53 +72,48 @@ export default function SeriesClient() {
   };
 
   return (
-    <main className="min-h-screen bg-[#020617] text-white">
-      {/* Hero */}
-      <div className="px-4 pt-8 sm:px-6 md:pt-12">
-        <h1 className="text-2xl font-black tracking-tight sm:text-3xl md:text-4xl">
-          Séries
-        </h1>
-        <p className="mt-1 text-sm text-zinc-500 sm:text-base">
-          Explore as melhores séries
-        </p>
-      </div>
+    <main className="min-h-screen bg-[#020617] pb-28 text-white md:pb-10">
+      <div className="mx-auto max-w-5xl px-4 pt-8 sm:px-6 md:py-12">
 
-      {/* Filtros com scroll horizontal */}
-      <div
-        className="mt-5 overflow-x-auto px-4 pb-1 sm:px-6"
-        style={{ scrollbarWidth: "none", msOverflowStyle: "none" } as React.CSSProperties}
-      >
-        <div className="flex gap-2" style={{ minWidth: "max-content" }}>
+        {/* Cabeçalho */}
+        <div className="mb-6">
+          <h1 className="text-2xl font-black tracking-tight sm:text-3xl md:text-4xl">
+            Séries
+          </h1>
+          <p className="mt-1 text-sm text-zinc-500 sm:text-base">
+            Explore as melhores séries
+          </p>
+        </div>
+
+        {/* Filtros — scroll horizontal sangrando até a borda no mobile */}
+        <div className="mb-8 -mx-4 flex gap-2 overflow-x-auto px-4 pb-1 [scrollbar-width:none] sm:-mx-6 sm:px-6">
           {FILTERS.map((f) => (
             <button
               key={f.key}
+              type="button"
               onClick={() => setFilter(f.key)}
-              className={`
-                rounded-full border px-4 py-2 text-sm font-bold whitespace-nowrap transition
-                ${
-                  filter === f.key
-                    ? "border-indigo-500 bg-indigo-500/20 text-indigo-300"
-                    : "border-white/10 text-zinc-500 hover:border-white/20 hover:text-zinc-300"
-                }
-              `}
+              className={[
+                "shrink-0 rounded-full border px-4 py-2 text-sm font-bold transition",
+                filter === f.key
+                  ? "border-indigo-500 bg-indigo-500/20 text-indigo-300"
+                  : "border-white/10 text-zinc-500 hover:border-white/20 hover:text-zinc-300",
+              ].join(" ")}
             >
               {f.label}
             </button>
           ))}
         </div>
-      </div>
 
-      {/* Grid */}
-      <div className="mx-auto max-w-[1560px] px-4 py-6 sm:px-6 lg:px-8">
+        {/* Grid */}
         {loading ? (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-            {Array.from({ length: 18 }).map((_, i) => (
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
+            {Array.from({ length: 15 }).map((_, i) => (
               <SkeletonCard key={i} />
             ))}
           </div>
         ) : (
           <>
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">
               {items.map((item, i) => (
                 <PosterCard
                   key={`tv-${item.id}`}
@@ -141,6 +136,7 @@ export default function SeriesClient() {
             )}
           </>
         )}
+
       </div>
     </main>
   );
