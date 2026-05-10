@@ -89,28 +89,37 @@ export default function LoginDrawer({ open, onClose }: LoginDrawerProps) {
         `}
       />
 
-      {/* Drawer panel — slides in from left edge of sidebar */}
+      {/* Drawer panel — fullscreen no mobile, drawer lateral no desktop */}
       <div
-        style={{
-          position: "fixed",
-          top: 0,
-          left: 200,
-          zIndex: 50,
-          height: "100vh",
-          width: 300,
-          backgroundColor: "rgba(10,10,18,0.99)",
-          borderRight: "1px solid rgba(255,255,255,0.06)",
-          boxShadow: "4px 0 40px rgba(0,0,0,0.6)",
-          backdropFilter: "blur(24px)",
-          transform: open ? "translateX(0)" : "translateX(-520px)",
-          transition: "transform 300ms cubic-bezier(0.32,0.72,0,1)",
-          display: "flex",
-          flexDirection: "column",
-        }}
+        className={[
+          "fixed z-50 flex flex-col",
+          // Mobile: fullscreen
+          "inset-0",
+          // Desktop: drawer lateral após a sidebar colapsada (80px)
+          "md:inset-auto md:top-0 md:left-20 md:h-screen md:w-[300px]",
+          "bg-[rgba(10,10,18,0.99)]",
+          "md:border-r md:border-white/[0.06]",
+          "md:shadow-[4px_0_40px_rgba(0,0,0,0.6)]",
+          "md:backdrop-blur-[24px]",
+          "transition-all duration-300",
+          open
+            ? "opacity-100 pointer-events-auto md:translate-x-0"
+            : "opacity-0 pointer-events-none md:-translate-x-full",
+        ].join(" ")}
       >
-        <div className="flex h-full flex-col px-8 py-10">
+        <div className="flex h-full flex-col px-8 py-10 overflow-y-auto">
+          {/* Botão fechar — visível apenas no mobile */}
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Fechar"
+            className="absolute right-4 top-4 flex h-9 w-9 items-center justify-center rounded-full border border-white/10 bg-white/5 text-zinc-400 transition hover:bg-white/10 hover:text-white md:hidden"
+          >
+            ✕
+          </button>
+
           {/* Header */}
-          <div className="mb-10">
+          <div className="mb-10 mt-4 md:mt-0">
             <div className="mb-1 flex items-center gap-2">
               <span className="h-[2px] w-6 bg-indigo-500" />
               <span className="text-[11px] font-semibold uppercase tracking-[0.2em] text-indigo-400">

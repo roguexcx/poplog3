@@ -18,13 +18,39 @@ export const GENRE_TRANSLATIONS: Record<string, string> = {
   Adventure: "Aventura",
 };
 
+const HEADLINES: Record<string, [string, string, string][]> = {
+  madrugada: [
+    ["Ainda acordado?", "Temos algo", "pra você."],
+    ["Insônia é melhor", "com um bom", "filme."],
+    ["Noite funda.", "Escolha algo", "marcante."],
+  ],
+  manha: [
+    ["Bom dia.", "O que vamos", "assistir hoje?"],
+    ["Café pronto?", "Falta escolher", "a série."],
+    ["Começa bem", "o dia com", "boa ficção."],
+  ],
+  tarde: [
+    ["Tarde livre?", "Aproveite com", "um bom filme."],
+    ["Descubra algo", "incrível para", "mais tarde."],
+    ["Relaxa.", "A curadoria", "chegou."],
+  ],
+  noite: [
+    ["Descubra o", "próximo título", "da sua noite."],
+    ["Pipoca pronta?", "Escolha o", "filme de hoje."],
+    ["Noite de", "cinema", "começa aqui."],
+  ],
+};
+
 export function getHeroHeadline(): [string, string, string] {
   const hour = new Date().getHours();
 
-  if (hour >= 5 && hour < 12) return ["Bom dia.", "O que vamos", "assistir hoje?"];
-  if (hour >= 12 && hour < 18) return ["Descubra algo", "incrível para", "mais tarde."];
-  if (hour >= 18 && hour < 24) return ["Descubra o", "próximo título", "da sua noite."];
-  return ["Ainda acordado?", "Temos algo", "pra você."];
+  let pool: [string, string, string][];
+  if (hour >= 6 && hour < 12)       pool = HEADLINES.manha;
+  else if (hour >= 12 && hour < 18)  pool = HEADLINES.tarde;
+  else if (hour >= 18 && hour < 24)  pool = HEADLINES.noite;
+  else                               pool = HEADLINES.madrugada;
+
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 export function translateGenres(

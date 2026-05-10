@@ -516,16 +516,21 @@ export default function WatchlistVivaSection() {
         </button>
       </div>
 
-      {/* Grid 5 colunas — mesmo ritmo visual do TrendingNowSection */}
-      <div className="grid grid-cols-5 gap-4">
+      {/* Scroll horizontal no mobile, grid 5 colunas no desktop */}
+      <div
+        className="-mx-4 flex gap-4 overflow-x-auto px-4 pb-2 [scrollbar-width:none] md:mx-0 md:grid md:grid-cols-5 md:overflow-visible md:px-0 md:pb-0"
+        style={{ msOverflowStyle: "none" } as React.CSSProperties}
+      >
         {loading
-          ? Array.from({ length: 5 }).map((_, i) => <SkeletonCard key={i} />)
+          ? Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="w-[160px] shrink-0 md:w-auto">
+                <SkeletonCard />
+              </div>
+            ))
           : visible.map((item) => (
-              <WatchlistCard
-                key={item.id}
-                item={item}
-                onDismiss={handleDismiss}
-              />
+              <div key={item.id} className="w-[160px] shrink-0 md:w-auto">
+                <WatchlistCard item={item} onDismiss={handleDismiss} />
+              </div>
             ))}
       </div>
     </section>

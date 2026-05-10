@@ -62,15 +62,15 @@ export default function HomeSection({
       <div
         ref={scrollRef}
         className="no-scrollbar overflow-x-auto scroll-smooth pb-2"
+        style={{ WebkitOverflowScrolling: "touch" } as React.CSSProperties}
       >
-        <div className="flex gap-4 px-[2px] md:gap-5">
+        <div className="flex gap-3 pl-1 pr-4 md:gap-5 md:pl-[2px] md:pr-[2px]">
           {items.map((item, index) => (
             <div
               key={`${item.media_type}-${item.id}`}
               className="
                 w-[148px]
                 shrink-0
-
                 sm:w-[160px]
                 md:w-[172px]
                 lg:w-[182px]
@@ -79,6 +79,7 @@ export default function HomeSection({
               <PosterCard item={item} priority={index < 5} />
             </div>
           ))}
+          <div className="w-1 shrink-0" />
         </div>
       </div>
     </section>

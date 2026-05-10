@@ -105,15 +105,6 @@ function IconFridge() {
   );
 }
 
-function IconShuffle() {
-  return (
-    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}>
-      <path d="M16 3h5v5M4 20 21 3" />
-      <path d="M21 16v5h-5M15 15l6 6M4 4l5 5" />
-    </svg>
-  );
-}
-
 // ─── PosterCard ───────────────────────────────────────────────────────────────
 
 function PosterCard({
@@ -823,13 +814,16 @@ export default function ProfileClient() {
         </div>
 
         {/* ── Abas ── */}
-        <div className="mb-5 flex gap-0 overflow-x-auto border-b border-white/[0.07]" style={{ scrollbarWidth: "none" } as React.CSSProperties}>
+        <div
+          className="mb-5 flex gap-0 overflow-x-auto border-b border-white/[0.07]"
+          style={{ scrollbarWidth: "none", msOverflowStyle: "none" } as React.CSSProperties}
+        >
           {tabItems.map((t) => (
             <button
               key={t.key}
               onClick={() => { setActiveTab(t.key); setCurrentPage(1); }}
               className={[
-                "shrink-0 -mb-px border-b-2 px-5 py-3 text-[10px] font-black uppercase tracking-[0.2em] transition",
+                "shrink-0 -mb-px border-b-2 px-3 py-3 text-[10px] font-black uppercase tracking-[0.15em] transition sm:px-5 sm:tracking-[0.2em]",
                 activeTab === t.key
                   ? t.key === "fridge"
                     ? "border-cyan-400 text-cyan-300"
@@ -946,18 +940,6 @@ export default function ProfileClient() {
           </div>
         )}
 
-        {/* Shuffle quando há mais de 6 sugestões possíveis (sem estado no client) */}
-        {!loading && activeItems.length > ITEMS_PER_PAGE && (
-          <div className="mt-8 flex justify-center">
-            <button
-              onClick={() => setCurrentPage(1)}
-              className="flex items-center gap-2 rounded-full border border-white/[0.12] bg-white/[0.04] px-5 py-2 text-[10px] font-bold uppercase tracking-[0.12em] text-zinc-500 transition hover:border-white/20 hover:text-zinc-300"
-            >
-              <IconShuffle />
-              Mais títulos
-            </button>
-          </div>
-        )}
 
       </div>
     </main>

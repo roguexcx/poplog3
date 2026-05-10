@@ -397,7 +397,7 @@ export default async function TitleDetailPage({ params }: Props) {
                 </span>
               </p>
             )}
-            <div className="mt-4 flex justify-center sm:justify-start">
+            <div className="mt-4 flex justify-center">
               <TitleActions
                 tmdbId={data.id}
                 mediaType={type as "movie" | "tv"}

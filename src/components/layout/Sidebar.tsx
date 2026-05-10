@@ -45,6 +45,7 @@ export default function Sidebar() {
   const router = useRouter();
   const [loginOpen, setLoginOpen] = useState(false);
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [mobileUserMenuOpen, setMobileUserMenuOpen] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
 
   const anchors = ROUTE_ANCHORS[pathname] ?? [];
@@ -267,7 +268,7 @@ export default function Sidebar() {
       {/* ════════════════════════════════════════════════════════════
           MOBILE BOTTOM NAV
       ════════════════════════════════════════════════════════════ */}
-      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/5 bg-[#09090f]/90 px-4 pb-[env(safe-area-inset-bottom,12px)] pt-2 backdrop-blur-xl md:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/5 bg-[#09090f]/90 px-2 pb-[env(safe-area-inset-bottom,8px)] pt-1.5 backdrop-blur-xl md:hidden">
         <div className="flex items-center justify-around">
           {NAV_LINKS.filter((l) => l.href !== "/profile").map((link) => {
             const active = pathname === link.href;
@@ -277,12 +278,12 @@ export default function Sidebar() {
                 key={link.href}
                 href={link.href}
                 className={`
-                  flex flex-col items-center gap-1 rounded-xl p-2 transition-colors
+                  flex min-h-[44px] min-w-[44px] flex-col items-center justify-center gap-1 rounded-xl px-2 transition-colors
                   ${active ? "text-indigo-300" : "text-zinc-300"}
                 `}
               >
                 <link.icon
-                  size={20}
+                  size={22}
                   className={active ? "stroke-[2.5px]" : "stroke-[1.9px]"}
                 />
                 <span className="text-[10px] font-bold uppercase tracking-tighter">
@@ -293,27 +294,72 @@ export default function Sidebar() {
           })}
 
           <button
-            onClick={() => user ? router.push("/profile") : setLoginOpen(true)}
-            className={`flex flex-col items-center gap-1 rounded-xl p-2 transition-colors ${
+            onClick={() => user ? setMobileUserMenuOpen(true) : setLoginOpen(true)}
+            className={`flex min-h-[44px] min-w-[44px] flex-col items-center justify-center gap-1 rounded-xl px-2 transition-colors ${
               pathname === "/profile" ? "text-indigo-300" : "text-zinc-300 hover:text-white"
             }`}
           >
-            {user ? (
-              <div className={`flex h-5 w-5 items-center justify-center rounded-full text-[10px] font-bold text-white ${
-                pathname === "/profile" ? "bg-indigo-400" : "bg-indigo-500"
-              }`}>
-                {avatarLetter}
-              </div>
-            ) : (
-              <User size={20} className="stroke-[1.9px]" />
-            )}
-
+            <Library
+              size={22}
+              className={pathname === "/profile" ? "stroke-[2.5px]" : "stroke-[1.9px]"}
+            />
             <span className="text-[10px] font-bold uppercase tracking-tighter">
-              {user ? "Biblioteca" : "Entrar"}
+              Biblioteca
             </span>
           </button>
         </div>
       </nav>
+
+      {/* Mobile user menu overlay */}
+      {mobileUserMenuOpen && user && (
+        <>
+          <div
+            className="fixed inset-0 z-[60] bg-black/60 md:hidden"
+            onClick={() => setMobileUserMenuOpen(false)}
+          />
+          <div className="fixed bottom-0 left-0 right-0 z-[70] rounded-t-3xl border-t border-white/10 bg-[#0e0e1a] px-4 pb-[env(safe-area-inset-bottom,24px)] pt-5 md:hidden">
+            <div className="mx-auto mb-5 h-1 w-10 rounded-full bg-white/20" />
+
+            <div className="mb-4 flex items-center gap-3 px-1">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-tr from-indigo-500 to-purple-500 text-sm font-bold text-white">
+                {avatarLetter}
+              </div>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-white">{displayName}</p>
+                <p className="truncate text-xs text-zinc-500">{user.email}</p>
+              </div>
+            </div>
+
+            <Link
+              href="/profile"
+              onClick={() => setMobileUserMenuOpen(false)}
+              className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-sm text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-white"
+            >
+              <Library size={18} />
+              Minha Biblioteca
+            </Link>
+
+            <Link
+              href="/settings"
+              onClick={() => setMobileUserMenuOpen(false)}
+              className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-sm text-zinc-300 transition-colors hover:bg-white/[0.06] hover:text-white"
+            >
+              <Settings size={18} />
+              Configurações
+            </Link>
+
+            <div className="mt-2 border-t border-white/5 pt-2">
+              <button
+                onClick={() => { handleLogout(); setMobileUserMenuOpen(false); }}
+                className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-sm text-red-400 transition-colors hover:bg-red-500/10"
+              >
+                <LogOut size={18} />
+                Sair da conta
+              </button>
+            </div>
+          </div>
+        </>
+      )}
 
       <LoginDrawer open={loginOpen} onClose={() => setLoginOpen(false)} />
     </>
