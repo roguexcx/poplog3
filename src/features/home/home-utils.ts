@@ -41,8 +41,17 @@ const HEADLINES: Record<string, [string, string, string][]> = {
   ],
 };
 
+/**
+ * Retorna a hora atual no fuso de Brasília (America/Sao_Paulo, UTC-3).
+ * Brasil não observa horário de verão desde 2019, então o offset é fixo.
+ * Usar `getUTCHours()` torna o resultado independente do fuso do servidor.
+ */
+function getBrasiliaHour(): number {
+  return (new Date().getUTCHours() - 3 + 24) % 24;
+}
+
 export function getHeroHeadline(): [string, string, string] {
-  const hour = new Date().getHours();
+  const hour = getBrasiliaHour();
 
   let pool: [string, string, string][];
   if (hour >= 6 && hour < 12)       pool = HEADLINES.manha;

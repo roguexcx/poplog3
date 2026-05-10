@@ -482,8 +482,8 @@ export default function TitleActions({
     const pillOff  = "border-white/10 bg-white/[0.04] text-zinc-300 hover:border-white/20 hover:bg-white/10 hover:text-white";
 
     return (
-      <div ref={seriesMenuRef}>
-        <div className="flex flex-wrap gap-2">
+      <div ref={seriesMenuRef} className="w-full">
+        <div className="flex flex-wrap justify-center gap-2 sm:justify-start">
 
           {/* Watchlist */}
           <button

@@ -848,33 +848,39 @@ export default function ProfileClient() {
           ))}
         </div>
 
-        {/* ── Controles de ordenação e paginação ── */}
-        <div className="mb-6 grid grid-cols-3 items-center">
-          <div />
+        {/* ── Controles de ordenação e paginação ──
+            Mobile: empilha (paginação centralizada em cima, sort embaixo).
+            Desktop (sm+): grid 3 colunas (vazio · paginação · sort) como antes. */}
+        <div className="mb-6 flex flex-col items-center gap-3 sm:grid sm:grid-cols-3 sm:items-center sm:gap-0">
+          <div className="hidden sm:block" />
 
-          {totalPages > 1 && (
+          {totalPages > 1 ? (
             <div className="flex items-center justify-center gap-3">
               <button
                 onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                 disabled={currentPage === 1}
-                className="rounded-full border border-white/[0.12] px-4 py-2 text-[11px] font-bold text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200 disabled:pointer-events-none disabled:opacity-25"
+                aria-label="Página anterior"
+                className="rounded-full border border-white/[0.12] px-3 py-2 text-[11px] font-bold text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200 disabled:pointer-events-none disabled:opacity-25 sm:px-4"
               >
                 ← Anterior
               </button>
-              <span className="text-[11px] font-bold text-zinc-600">
+              <span className="shrink-0 text-[11px] font-bold text-zinc-600">
                 {currentPage} / {totalPages}
               </span>
               <button
                 onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                 disabled={currentPage === totalPages}
-                className="rounded-full border border-white/[0.12] px-4 py-2 text-[11px] font-bold text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200 disabled:pointer-events-none disabled:opacity-25"
+                aria-label="Próxima página"
+                className="rounded-full border border-white/[0.12] px-3 py-2 text-[11px] font-bold text-zinc-400 transition hover:bg-white/[0.06] hover:text-zinc-200 disabled:pointer-events-none disabled:opacity-25 sm:px-4"
               >
                 Próxima →
               </button>
             </div>
+          ) : (
+            <div className="hidden sm:block" />
           )}
 
-          <div className="flex justify-end">
+          <div className="flex justify-center sm:justify-end">
             {activeTab !== "ongoing" && (
               <select
                 value={sortOrder}

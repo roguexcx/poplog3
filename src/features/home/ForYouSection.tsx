@@ -3,7 +3,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import SynopsisText from "@/features/home/components/SynopsisText";
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
@@ -337,8 +337,16 @@ export default function ForYouSection() {
   const [items, setItems] = useState<ForYouItem[]>([]);
   const [loading, setLoading] = useState(true);
 
+  // Faz fetch uma única vez por montagem do componente (F5 ou navegação que
+  // remonte). Marcar/desmarcar um título atualiza `titles` no contexto, mas
+  // intencionalmente NÃO disparamos re-fetch — `titles` está fora do array
+  // de dependências para evitar isso.
+  const didFetchRef = useRef(false);
+
   useEffect(() => {
     if (titlesLoading) return;
+    if (didFetchRef.current) return;
+    didFetchRef.current = true;
 
     if (titles.length === 0) {
       setLoading(false);
@@ -360,7 +368,8 @@ export default function ForYouSection() {
         }
       })
       .finally(() => setLoading(false));
-  }, [titles, titlesLoading]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [titlesLoading]);
 
   if (!loading && !featured && items.length === 0) return null;
 
