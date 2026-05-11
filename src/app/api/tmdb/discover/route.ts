@@ -8,6 +8,11 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { tmdbFetch } from "@/lib/tmdb";
+import {
+  getRandomTitleImagePath,
+  LOCALIZED_POSTER_RANDOMIZATION_LANGUAGES,
+  RANDOMIZATION_ENABLED,
+} from "@/lib/images";
 import type { TMDBItem, TMDBResponse } from "@/types/tmdb";
 
 const CACHE_HEADERS = {
@@ -46,10 +51,23 @@ export async function GET(request: NextRequest) {
       },
     );
 
-    const results = (data.results ?? []).map((item) => ({
+    const mediaType = media as "movie" | "tv";
+    const resultsWithMedia = (data.results ?? []).map((item) => ({
       ...item,
-      media_type: media as "movie" | "tv",
+      media_type: mediaType,
     }));
+
+    const results = (
+      await Promise.all(
+        resultsWithMedia.map(async (item) => {
+          if (!RANDOMIZATION_ENABLED) return item.poster_path ? item : null;
+          const posterPath = await getRandomTitleImagePath(mediaType, item.id, "poster", {
+            languages: LOCALIZED_POSTER_RANDOMIZATION_LANGUAGES,
+          });
+          return posterPath ? { ...item, poster_path: posterPath } : null;
+        }),
+      )
+    ).filter((item): item is TMDBItem & { media_type: "movie" | "tv" } => item !== null);
 
     return NextResponse.json(
       {

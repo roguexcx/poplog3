@@ -2,6 +2,7 @@
 
 import { NextResponse } from "next/server";
 import { tmdbFetch } from "@/lib/tmdb";
+import { getRandomTitleImagePath, RANDOMIZATION_ENABLED } from "@/lib/images";
 import { getStreamingInfo, daysBetween } from "@/lib/streaming";
 import { formatRuntimeLabel, translateGenreName } from "@/lib/domain-labels";
 import type { WatchlistLiveRawTitle as RawTitle, WatchlistLiveTitle as EnrichedTitle } from "@/types/api-contracts";
@@ -78,6 +79,9 @@ export async function POST(request: Request) {
           const details = await tmdbFetch<TMDBDetails>(endpoint, {
             append_to_response: "genres,production_companies",
           });
+          const posterPath = RANDOMIZATION_ENABLED
+            ? await getRandomTitleImagePath(row.media_type, row.tmdb_id, "poster")
+            : null;
 
           const tmdbReleaseDate = details.release_date ?? details.first_air_date ?? null;
           const releaseDate     = tmdbReleaseDate ?? fallbackRelease;
@@ -97,7 +101,7 @@ export async function POST(request: Request) {
               media_type:            row.media_type,
               title:                 details.title ?? details.name ?? row.title,
               original_title_label:  details.original_title ?? details.original_name ?? null,
-              poster_path:           details.poster_path ?? null,
+              poster_path:           posterPath ?? details.poster_path ?? null,
               year:                  row.release_year ? String(row.release_year) : null,
               genre,
               runtime:               null,
@@ -154,7 +158,7 @@ export async function POST(request: Request) {
             media_type:            row.media_type,
             title:                 details.title ?? details.name ?? row.title,
             original_title_label:  details.original_title ?? details.original_name ?? null,
-            poster_path:           details.poster_path ?? null,
+            poster_path:           posterPath ?? details.poster_path ?? null,
             year:                  releaseDate ? String(new Date(releaseDate).getFullYear()) : null,
             genre,
             runtime:               rawRuntime,

@@ -1,7 +1,6 @@
 // src/features/home/ForYouSection.tsx
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
@@ -12,7 +11,7 @@ import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
 import { useUserData } from "@/context/UserDataContext";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
-import { getImageUrl } from "@/lib/tmdb-utils";
+import TmdbImage from "@/components/images/TmdbImage";
 import SectionHeader from "@/components/layout/SectionHeader";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -88,7 +87,7 @@ function ForYouActions({ item }: { item: ForYouItem }) {
 // ─── FeaturedCard ─────────────────────────────────────────────────────────────
 
 function FeaturedForYouCard({ item }: { item: ForYouItem }) {
-  const backdropUrl = getImageUrl(item.backdrop_path, "w1280");
+  const backdropPath = item.backdrop_path ?? null;
   const rating = formatRating(item.vote_average);
   const isLongTitle = item.title_label.length > 24;
   const isLongOverview = (item.overview?.length ?? 0) > 140;
@@ -105,11 +104,13 @@ function FeaturedForYouCard({ item }: { item: ForYouItem }) {
 
       <ForYouActions item={item} />
 
-      {backdropUrl && (
+      {backdropPath && (
         <div className="absolute inset-0 overflow-hidden">
           <div className="absolute inset-y-0 -left-[0%] right-50 w-[120%] aspect-video lg:aspect-auto">
-            <Image
-              src={backdropUrl}
+            <TmdbImage
+              path={backdropPath}
+              kind="backdrop"
+              size="hero"
               alt={item.title_label}
               fill
               sizes="100vw"
@@ -173,10 +174,23 @@ function FeaturedForYouCard({ item }: { item: ForYouItem }) {
 // ─── SmallCard ────────────────────────────────────────────────────────────────
 
 function SmallForYouCard({ item }: { item: ForYouItem }) {
-  const image =
-    getImageUrl(item.clean_poster_path, "original") ??
-    getImageUrl(item.poster_path, "original") ??
-    getImageUrl(item.backdrop_path, "w1280");
+  // Prioriza: poster limpo (sem texto) > poster padrão > backdrop como fallback.
+  // Cada caso usa tamanho semântico em vez de "original" (que estoura o
+  // otimizador da Vercel em produção). "hero" (w780) é mais que suficiente
+  // para um card de 220px.
+  type ImagePick =
+    | { kind: "poster"; size: "hero"; path: string }
+    | { kind: "backdrop"; size: "hero"; path: string }
+    | null;
+
+  const pick: ImagePick =
+    item.clean_poster_path
+      ? { kind: "poster", size: "hero", path: item.clean_poster_path }
+      : item.poster_path
+        ? { kind: "poster", size: "hero", path: item.poster_path }
+        : item.backdrop_path
+          ? { kind: "backdrop", size: "hero", path: item.backdrop_path }
+          : null;
 
   const rating = formatRating(item.vote_average);
 
@@ -190,9 +204,11 @@ function SmallForYouCard({ item }: { item: ForYouItem }) {
 
       <ForYouActions item={item} />
 
-      {image && (
-        <Image
-          src={image}
+      {pick && (
+        <TmdbImage
+          path={pick.path}
+          kind={pick.kind}
+          size={pick.size}
           alt={item.title_label}
           fill
           sizes="220px"

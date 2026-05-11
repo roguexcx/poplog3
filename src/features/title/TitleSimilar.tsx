@@ -1,6 +1,7 @@
 // src/features/title/TitleSimilar.tsx
 
 import Link from "next/link";
+import { buildTmdbUrl } from "@/lib/images/url";
 import type { TMDBRelatedItem } from "@/features/title/title-types";
 
 type Props = {
@@ -46,11 +47,9 @@ export default function TitleSimilar({ items, mediaType }: Props) {
           const year = (item.release_date ?? item.first_air_date)?.slice(0, 4) ?? null;
           const itemMediaType = item.media_type ?? mediaType;
 
-          const imageUrl = item.poster_path
-            ? `https://image.tmdb.org/t/p/w342${item.poster_path}`
-            : item.backdrop_path
-            ? `https://image.tmdb.org/t/p/w780${item.backdrop_path}`
-            : null;
+          const imageUrl =
+            buildTmdbUrl("poster",   "card",   item.poster_path) ??
+            buildTmdbUrl("backdrop", "medium", item.backdrop_path);
 
           return (
             <Link

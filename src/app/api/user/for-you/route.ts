@@ -2,10 +2,18 @@
 
 import { NextResponse } from "next/server";
 import { tmdbFetch } from "@/lib/tmdb";
+import {
+  BACKDROP_RANDOMIZATION_LANGUAGES,
+  fetchTitleImages,
+  pickRandomImage,
+  RANDOMIZATION_ENABLED,
+} from "@/lib/images";
 
 // ─── Tipos locais ─────────────────────────────────────────────────────────────
 // TMDBItem aqui é mais rico que o global (genres, vote_count, etc.)
-// por isso mantemos tipos locais em vez de importar de tmdb-types
+// por isso mantemos tipos locais em vez de importar de tmdb-types.
+// Os tipos de imagens (TMDBImage/TMDBImagesResponse) agora vêm do
+// módulo central @/types/tmdb e são consumidos via @/lib/images.
 
 type MediaType = "movie" | "tv";
 type SeedReasonType = "favorite" | "watchlist" | "watched" | "watching" | "default";
@@ -18,20 +26,6 @@ type UserTitle = {
 };
 
 type TMDBGenre = { id: number; name: string };
-
-type TMDBImage = {
-  file_path: string;
-  iso_639_1?: string | null;
-  width?: number;
-  vote_average?: number;
-  vote_count?: number;
-};
-
-type TMDBImagesResponse = {
-  posters?: TMDBImage[];
-  backdrops?: TMDBImage[];
-  logos?: TMDBImage[];
-};
 
 type TMDBListResponse = {
   results?: TMDBItem[];
@@ -128,59 +122,39 @@ function shuffleArray<T>(array: T[]): T[] {
   return [...array].sort(() => Math.random() - 0.5);
 }
 
-// ─── Poster sem texto ─────────────────────────────────────────────────────────
+// ─── Imagens (poster + backdrop randomizados via módulo central) ──────────────
+//
+// Uma única chamada a `/images` por título, com cache de 24h.
+// "Para você" usa poster em inglês quando houver, com fallback para a rotação
+// normal de poster. O backdrop do card maior usa somente imagem sem idioma.
+// Quando RANDOMIZATION_ENABLED=false, pula o fetch e retorna os paths originais.
 
-async function getCleanPosterPath(mediaType: MediaType, id: number): Promise<string | null> {
-  try {
-    const data = await tmdbFetch<TMDBImagesResponse>(`/${mediaType}/${id}/images`, {
-      include_image_language: "null,pt,en",
-    });
-
-    const posters: TMDBImage[] = data.posters ?? [];
-
-    const best = posters
-      .filter((p) => p.file_path && p.iso_639_1 === null)
-      .sort((a, b) => {
-        const scoreA = (a.vote_average ?? 0) * 10 + (a.vote_count ?? 0) + (a.width ?? 0) / 100;
-        const scoreB = (b.vote_average ?? 0) * 10 + (b.vote_count ?? 0) + (b.width ?? 0) / 100;
-        return scoreB - scoreA;
-      });
-
-    return best[0]?.file_path ?? null;
-  } catch {
-    return null;
+async function resolveImagesForCandidate(
+  mediaType: MediaType,
+  item: TMDBItem,
+): Promise<{ cleanPosterPath: string | null; backdropPath: string | null }> {
+  if (!RANDOMIZATION_ENABLED) {
+    return {
+      cleanPosterPath: item.poster_path ?? null,
+      backdropPath:    item.backdrop_path ?? null,
+    };
   }
-}
 
-async function getRandomBackdropPath(mediaType: MediaType, id: number): Promise<string | null> {
-  try {
-    const data = await tmdbFetch<TMDBImagesResponse>(`/${mediaType}/${id}/images`, {
-      include_image_language: "null",
-    });
+  const images = await fetchTitleImages(mediaType, item.id);
 
-    const backdrops: TMDBImage[] = data.backdrops ?? [];
+  const poster = pickRandomImage(images.posters, {
+    // "Para você" uses English posters when variants are available.
+    languages: [null],
+  });
+  const backdrop = pickRandomImage(images.backdrops, {
+    // Backdrops/backgrounds stay textless across the site.
+    languages: BACKDROP_RANDOMIZATION_LANGUAGES,
+  });
 
-    if (backdrops.length === 0) {
-      const fallbackData = await tmdbFetch<TMDBImagesResponse>(`/${mediaType}/${id}/images`);
-      const fallbackBackdrops: TMDBImage[] = fallbackData.backdrops ?? [];
-
-      if (fallbackBackdrops.length === 0) return null;
-
-      return (
-        fallbackBackdrops.sort((a, b) => (b.vote_average ?? 0) - (a.vote_average ?? 0))[0]
-          ?.file_path ?? null
-      );
-    }
-
-    const bestPool = backdrops
-      .sort((a, b) => (b.vote_average ?? 0) - (a.vote_average ?? 0))
-      .slice(0, 10);
-
-    const chosen = bestPool[Math.floor(Math.random() * bestPool.length)];
-    return chosen?.file_path ?? null;
-  } catch {
-    return null;
-  }
+  return {
+    cleanPosterPath: poster?.file_path ?? null,
+    backdropPath:    backdrop?.file_path ?? null,
+  };
 }
 
 // ─── Normalização para resposta ───────────────────────────────────────────────
@@ -188,10 +162,7 @@ async function getRandomBackdropPath(mediaType: MediaType, id: number): Promise<
 async function normalizeForResponse(candidate: Candidate) {
   const { item, mediaType, seedReasonType, seedTitle } = candidate;
 
-  const [cleanPosterPath, randomBackdropPath] = await Promise.all([
-    getCleanPosterPath(mediaType, item.id),
-    getRandomBackdropPath(mediaType, item.id),
-  ]);
+  const { cleanPosterPath, backdropPath } = await resolveImagesForCandidate(mediaType, item);
 
   const genre_label =
     item.genre_ids
@@ -203,8 +174,9 @@ async function normalizeForResponse(candidate: Candidate) {
   return {
     ...item,
     media_type: mediaType,
+    poster_path: cleanPosterPath,
     clean_poster_path: cleanPosterPath,
-    backdrop_path: randomBackdropPath ?? item.backdrop_path,
+    backdrop_path: backdropPath,
     title_label: getTitle(item),
     original_title_label: getOriginalTitle(item),
     year: item.release_date?.split("-")[0] ?? item.first_air_date?.split("-")[0] ?? null,

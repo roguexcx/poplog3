@@ -1,6 +1,11 @@
 // src/app/api/search/route.ts
 
 import { NextResponse } from "next/server";
+import {
+  getRandomTitleImagePath,
+  LOCALIZED_POSTER_RANDOMIZATION_LANGUAGES,
+  RANDOMIZATION_ENABLED,
+} from "@/lib/images";
 
 // ─── Tipo local (específico desta rota, não vale exportar para tmdb-types) ────
 
@@ -119,6 +124,17 @@ function mergeResults(items: TMDBSearchItem[]): TMDBSearchItem[] {
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
+async function withLocalizedPoster(item: TMDBSearchItem): Promise<TMDBSearchItem | null> {
+  if (item.media_type !== "movie" && item.media_type !== "tv") return null;
+  if (!RANDOMIZATION_ENABLED) return item.poster_path ? item : null;
+
+  const posterPath = await getRandomTitleImagePath(item.media_type, item.id, "poster", {
+    languages: LOCALIZED_POSTER_RANDOMIZATION_LANGUAGES,
+  });
+
+  return posterPath ? { ...item, poster_path: posterPath } : null;
+}
+
 export async function GET(request: Request) {
   const query = new URL(request.url).searchParams.get("query")?.trim();
 
@@ -130,10 +146,14 @@ export async function GET(request: Request) {
       searchTMDB(query, "en-US"),
     ]);
 
-    const results = mergeResults([...ptResults, ...enResults])
+    const ranked = mergeResults([...ptResults, ...enResults])
       .filter((item) => item.media_type === "movie" || item.media_type === "tv")
       .filter((item) => item.poster_path)
       .sort((a, b) => getResultScore(b, query) - getResultScore(a, query))
+      .slice(0, 24);
+
+    const results = (await Promise.all(ranked.map(withLocalizedPoster)))
+      .filter((item): item is TMDBSearchItem => item !== null)
       .slice(0, 12);
 
     return NextResponse.json({ results });

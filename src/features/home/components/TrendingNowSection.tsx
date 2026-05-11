@@ -3,8 +3,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
 
+import TmdbImage from "@/components/images/TmdbImage";
 import { ScrollRowArrows } from "@/components/ScrollRowArrows";
 import { CardActionButton } from "@/components/ui/CardActionButton";
 import { IconBookmark, IconCheck } from "@/components/ui/icons";
@@ -172,8 +172,11 @@ function MetaLine({ item }: { item: TrendingItem }) {
 // Os botões ficam FORA de qualquer <Link>, sem stopPropagation necessário.
 
 function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
+  // TmdbImage já trata erro de runtime via onError + fallback,
+  // mas mantemos o state local para esconder o card e exibir
+  // o placeholder cinza com texto quando o path é nulo.
   const [imgErr, setImgErr] = useState(false);
-  const posterUrl = item.poster_path ? `https://image.tmdb.org/t/p/w342${item.poster_path}` : null;
+  const posterPath = item.poster_path;
   const isMovie = item.media_type === "movie";
   const slug = `/title/${item.media_type}/${item.id}`;
 
@@ -208,9 +211,11 @@ function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
               "after:transition-opacity after:duration-350 group-hover:after:opacity-100",
             ].join(" ")}
           >
-            {posterUrl && !imgErr ? (
-              <Image
-                src={posterUrl}
+            {posterPath && !imgErr ? (
+              <TmdbImage
+                path={posterPath}
+                kind="poster"
+                size="card"
                 alt={item.title_label}
                 fill
                 sizes="(max-width: 768px) 160px, 180px"

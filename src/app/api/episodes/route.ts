@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { tmdbFetch } from "@/lib/tmdb";
+import { normalizeEpisode } from "@/lib/series-normalization";
 
 type TMDBEpisode = {
   episode_number: number;
@@ -28,20 +29,9 @@ export async function GET(request: Request) {
       language: "pt-BR",
     })) as TMDBSeasonResponse;
 
-    const today = new Date();
-
-    const episodes = (data.episodes ?? []).map((episode) => {
-      const airDate = episode.air_date ? new Date(episode.air_date) : null;
-
-      return {
-        episode_number: episode.episode_number,
-        name: episode.name,
-        overview: episode.overview,
-        still_path: episode.still_path,
-        air_date: episode.air_date,
-        available: !airDate || airDate <= today,
-      };
-    });
+    const episodes = (data.episodes ?? [])
+      .map((episode) => normalizeEpisode(episode))
+      .filter((episode) => episode.status === "released" || episode.status === "scheduled");
 
     return NextResponse.json({ episodes });
   } catch {

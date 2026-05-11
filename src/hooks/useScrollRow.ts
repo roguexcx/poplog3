@@ -46,10 +46,29 @@ export function useScrollRow({
 
       const resizeObserver = new ResizeObserver(sync);
       resizeObserver.observe(el);
+      Array.from(el.children).forEach((child) => {
+        resizeObserver.observe(child);
+      });
+
+      const mutationObserver = new MutationObserver(() => {
+        Array.from(el.children).forEach((child) => {
+          resizeObserver.observe(child);
+        });
+        requestAnimationFrame(sync);
+      });
+
+      mutationObserver.observe(el, {
+        childList: true,
+        subtree: true,
+      });
+
+      window.addEventListener("resize", sync);
 
       return () => {
         cancelAnimationFrame(raf);
         el.removeEventListener("scroll", sync);
+        window.removeEventListener("resize", sync);
+        mutationObserver.disconnect();
         resizeObserver.disconnect();
       };
     }
@@ -89,14 +108,16 @@ export function useScrollRow({
       left: -step,
       behavior: "smooth",
     });
-  }, [step]);
+    window.setTimeout(sync, 350);
+  }, [step, sync]);
 
   const scrollRight = useCallback(() => {
     ref.current?.scrollBy({
       left: step,
       behavior: "smooth",
     });
-  }, [step]);
+    window.setTimeout(sync, 350);
+  }, [step, sync]);
 
   return {
     ref,

@@ -46,7 +46,12 @@ export default function MediaBrowseClient<K extends string>({
       else setLoadingMore(true);
 
       try {
-        const params = new URLSearchParams({ type, media: mediaType, page: String(pageNum) });
+        const params = new URLSearchParams({
+          type,
+          media: mediaType,
+          page: String(pageNum),
+          poster_language: "en_pt",
+        });
         const res = await fetch(`/api/tmdb/list?${params}`);
         if (!res.ok) return;
         const data = await res.json();

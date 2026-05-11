@@ -38,6 +38,8 @@ export interface TMDBEpisode {
   runtime: number | null;
   still_path: string | null;
   air_date: string | null;
+  status?: "released" | "scheduled" | "undated" | "hidden";
+  available?: boolean;
 }
 
 export interface TMDBStreamingProvider {
@@ -56,6 +58,9 @@ export interface TMDBSeason {
   poster_path: string | null;
   overview: string;
   episodes?: TMDBEpisode[];
+  status?: "released" | "scheduled" | "announced" | "hidden";
+  isVisible?: boolean;
+  isNavigable?: boolean;
 }
 
 export interface TMDBRelatedItem {

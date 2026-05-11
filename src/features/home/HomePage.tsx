@@ -11,71 +11,13 @@ import {
   translateGenres,
 } from "@/features/home/home-utils";
 
-import { tmdbFetch } from "@/lib/tmdb";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-
-import {
-  getBackdropUrl,
-  getMediaType,
-  getPosterUrl,
-  getTitle,
-} from "@/lib/tmdb-utils";
-
-type TMDBImage = {
-  file_path: string;
-  iso_639_1?: string | null;
-  width?: number;
-  vote_average?: number;
-  vote_count?: number;
-};
-
-type TMDBImagesResponse = {
-  backdrops?: TMDBImage[];
-  posters?: TMDBImage[];
-  logos?: TMDBImage[];
-};
+import { buildTmdbUrl } from "@/lib/images";
+import { getRandomTitleImagePath } from "@/lib/images/random";
+import { RANDOMIZATION_ENABLED } from "@/lib/images/config";
+import { getMediaType, getTitle } from "@/lib/tmdb-utils";
 
 export const dynamic = "force-dynamic";
-
-async function getRandomHeroBackdropPath(
-  mediaType: "movie" | "tv",
-  id: number,
-): Promise<string | null> {
-  try {
-    const data = (await tmdbFetch(`/${mediaType}/${id}/images`, {
-      include_image_language: "null",
-    })) as TMDBImagesResponse;
-
-    const backdrops: TMDBImage[] = data.backdrops ?? [];
-
-    const bestPool = backdrops
-      .filter((image) => image.file_path && image.iso_639_1 === null)
-      .sort((a, b) => {
-        const scoreA =
-          (a.vote_average ?? 0) * 10 +
-          (a.vote_count ?? 0) +
-          (a.width ?? 0) / 100;
-
-        const scoreB =
-          (b.vote_average ?? 0) * 10 +
-          (b.vote_count ?? 0) +
-          (b.width ?? 0) / 100;
-
-        return scoreB - scoreA;
-      })
-      .slice(0, 10);
-
-    if (bestPool.length === 0) {
-      return null;
-    }
-
-    const chosen = bestPool[Math.floor(Math.random() * bestPool.length)];
-
-    return chosen?.file_path ?? null;
-  } catch {
-    return null;
-  }
-}
 
 export default async function HomePage() {
   const supabase = await createSupabaseServerClient();
@@ -110,26 +52,33 @@ export default async function HomePage() {
 
   const featuredTypeLabel = featuredType === "tv" ? "as séries" : "os filmes";
 
+  // Carrega detalhes do título destacado + backdrop randomizado em paralelo.
+  // O backdrop usa o sistema central de randomização: somente imagens
+  // sem idioma (textless), com cache de 24h compartilhado.
   const [featuredDetails, randomHeroBackdropPath] = await Promise.all([
     featuredItem ? getFeaturedDetails(featuredType, featuredItem.id) : null,
-    featuredItem
-      ? getRandomHeroBackdropPath(featuredType, featuredItem.id)
-      : null,
+    featuredItem && RANDOMIZATION_ENABLED
+      ? getRandomTitleImagePath(featuredType, featuredItem.id, "backdrop")
+      : Promise.resolve<string | null>(null),
   ]);
 
   const featuredTitle = featuredItem
     ? getTitle(featuredItem)
     : "Destaque do momento";
 
+  // Backdrop do hero: usa tamanho "hero" (w1280) em vez de "original" —
+  // suficiente para tela cheia em qualquer device, sem estourar o limite
+  // do otimizador da Vercel em produção.
   const backdropUrl = featuredItem
-    ? getBackdropUrl(
-        randomHeroBackdropPath ?? featuredItem.backdrop_path,
-        "original",
+    ? buildTmdbUrl(
+        "backdrop",
+        "hero",
+        RANDOMIZATION_ENABLED ? randomHeroBackdropPath : featuredItem.backdrop_path,
       )
     : null;
 
   const posterUrl = featuredItem
-    ? getPosterUrl(featuredItem.poster_path, "w500")
+    ? buildTmdbUrl("poster", "detail", featuredItem.poster_path)
     : null;
 
   const year = parseYear(

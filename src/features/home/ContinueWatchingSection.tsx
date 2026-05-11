@@ -1,14 +1,13 @@
 // src/features/home/ContinueWatchingSection.tsx
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { createClient } from "@/lib/supabase/client";
 import { useUserData } from "@/context/UserDataContext";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
-import { getImageUrl } from "@/lib/tmdb-utils";
+import TmdbImage from "@/components/images/TmdbImage";
 import SectionHeader from "@/components/layout/SectionHeader";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -234,19 +233,32 @@ function WatchingCard({ item }: { item: WatchingTitle }) {
   const seasonTotalEpisodes = currentSeasonData?.eps.length ?? 0;
   const contextLabel = getContextLabel(watchedSeasonEpisodes, seasonTotalEpisodes, currentSeason);
 
-  const image =
-    getImageUrl(next.still_path, "w780") ??
-    getImageUrl(item.tmdb?.backdrop_path, "w780") ??
-    getImageUrl(item.tmdb?.poster_path, "w500");
+  // Prioriza: still do próximo ep > backdrop da série > poster.
+  // Cada um com tamanho semântico apropriado para um card de 285px.
+  type ImagePick =
+    | { kind: "still"; size: "large"; path: string }
+    | { kind: "backdrop"; size: "medium"; path: string }
+    | { kind: "poster"; size: "hero"; path: string }
+    | null;
+
+  const pick: ImagePick = next.still_path
+    ? { kind: "still", size: "large", path: next.still_path }
+    : item.tmdb?.backdrop_path
+      ? { kind: "backdrop", size: "medium", path: item.tmdb.backdrop_path }
+      : item.tmdb?.poster_path
+        ? { kind: "poster", size: "hero", path: item.tmdb.poster_path }
+        : null;
 
   return (
     <Link
       href={`/title/tv/${item.tmdb_id}?tab=episodes&season=${next.season}`}
       className="group relative h-[230px] w-[285px] shrink-0 overflow-hidden rounded-[1.6rem] border border-white/10 bg-white/[0.04] shadow-[0_18px_60px_rgba(0,0,0,0.38)] transition duration-300 hover:-translate-y-1 hover:border-sky-300/45 hover:shadow-[0_22px_80px_rgba(56,189,248,0.16)]"
     >
-      {image && (
-        <Image
-          src={image}
+      {pick && (
+        <TmdbImage
+          path={pick.path}
+          kind={pick.kind}
+          size={pick.size}
           alt={title}
           fill
           sizes="285px"

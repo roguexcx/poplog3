@@ -1,12 +1,12 @@
 // src/app/buscar/BuscarClient.tsx
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState, useCallback } from "react";
 import { Search } from "lucide-react";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
-import { getOriginalTitle, getPosterUrl, getRating, getReleaseYear, getTitle } from "@/lib/tmdb-utils";
+import TmdbImage from "@/components/images/TmdbImage";
+import { getOriginalTitle, getRating, getReleaseYear, getTitle } from "@/lib/tmdb-utils";
 import type { TMDBItem } from "@/types/tmdb";
 
 // ─── Mapeamento de categorias → genre_ids TMDB ────────────────────────────────
@@ -50,26 +50,27 @@ function ResultCard({ item, priority = false }: { item: TMDBItem; priority?: boo
   const originalTitle = getOriginalTitle(item);
   const year   = getReleaseYear(item);
   const rating = getRating(item);
-  const poster = getPosterUrl(item.poster_path, "w342");
+  const posterPath = item.poster_path ?? null;
 
   return (
     <Link href={`/title/${type}/${item.id}`} className="group block">
       <div className="relative overflow-hidden rounded-[14px] bg-zinc-900/60 ring-1 ring-white/[0.07] transition-[transform,ring-color] duration-300 group-hover:-translate-y-1 group-hover:ring-white/[0.18]">
-        {poster ? (
-          <Image
-            src={poster}
-            alt={title}
-            width={342}
-            height={513}
-            priority={priority}
-            loading={priority ? "eager" : "lazy"}
-            className="aspect-[2/3] w-full object-cover brightness-[0.90] transition duration-500 group-hover:scale-[1.04] group-hover:brightness-100"
-          />
-        ) : (
-          <div className="aspect-[2/3] w-full flex items-center justify-center bg-zinc-900 text-zinc-700 text-xs">
-            Sem poster
-          </div>
-        )}
+        <TmdbImage
+          path={posterPath}
+          kind="poster"
+          size="card"
+          alt={title}
+          width={342}
+          height={513}
+          priority={priority}
+          loading={priority ? "eager" : "lazy"}
+          className="aspect-[2/3] w-full object-cover brightness-[0.90] transition duration-500 group-hover:scale-[1.04] group-hover:brightness-100"
+          fallback={
+            <div className="aspect-[2/3] w-full flex items-center justify-center bg-zinc-900 text-zinc-700 text-xs">
+              Sem poster
+            </div>
+          }
+        />
         {rating && (
           <span className="absolute bottom-2 left-2 rounded-full border border-white/[0.15] bg-black/[0.75] px-2 py-0.5 text-[10px] font-black text-amber-400 backdrop-blur-[6px]">
             ⭐ {rating}
@@ -139,7 +140,7 @@ export default function BuscarClient() {
     setLoading(true);
     try {
       if (cat.type === "trending") {
-        const res = await fetch("/api/tmdb/list?type=trending");
+        const res = await fetch("/api/tmdb/list?type=trending&poster_language=en_pt");
         if (!res.ok) return;
         const data = await res.json();
         setResults(data.results ?? []);

@@ -1,9 +1,13 @@
 // src/app/title/[type]/[id]/page.tsx
 
-import Image from "next/image";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 import { tmdbFetch } from "@/lib/tmdb";
+import {
+  normalizeSeason,
+  normalizeSeriesSeasons,
+  type NormalizedSeason,
+} from "@/lib/series-normalization";
 import { getContentTypeLabel, normalizeKeywordName } from "@/lib/title-utils";
 import { getStreamingInfo } from "@/lib/streaming";
 import type { StreamingProvider } from "@/lib/streaming";
@@ -11,6 +15,8 @@ import TitleActions from "@/features/title/TitleActions";
 import TitleTabs from "@/features/title/TitleTabs";
 import MoreLikeThis from "@/features/title/MoreLikeThis";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
+import TmdbImage from "@/components/images/TmdbImage";
+import RandomTmdbImage from "@/components/images/RandomTmdbImage";
 import type {
   TMDBTitleDetail,
   TMDBSeason,
@@ -68,7 +74,7 @@ async function getSeasons(tvId: string, seasonNumbers: number[]): Promise<TMDBSe
           still_path: (ep.still_path as string) ?? null,
           air_date: (ep.air_date as string) ?? null,
         }));
-        return {
+        const season = {
           id: (data.id as number) ?? 0,
           season_number: data.season_number as number,
           name: (data.name as string) ?? `Temporada ${n}`,
@@ -78,6 +84,7 @@ async function getSeasons(tvId: string, seasonNumbers: number[]): Promise<TMDBSe
           overview: (data.overview as string) ?? "",
           episodes,
         } as TMDBSeason;
+        return normalizeSeason(season) as NormalizedSeason as TMDBSeason;
       } catch {
         return null;
       }
@@ -199,8 +206,10 @@ function ProviderChips({
             className="flex h-10 w-10 items-center justify-center rounded-xl border border-white/10 bg-white/[0.06] transition hover:scale-105 hover:border-sky-300/40"
           >
             {p.logo && (
-              <Image
-                src={`https://image.tmdb.org/t/p/w92${p.logo}`}
+              <TmdbImage
+                path={p.logo}
+                kind="logo"
+                size="medium"
                 alt={p.name}
                 width={28}
                 height={28}
@@ -291,6 +300,10 @@ export default async function TitleDetailPage({ params }: Props) {
       seasons = [...seasons, ...batchResults];
     }
   }
+  const seriesSchedule = type === "tv"
+    ? normalizeSeriesSeasons(seasons, data.status)
+    : null;
+  const visibleSeasons = (seriesSchedule?.visibleSeasons ?? seasons) as TMDBSeason[];
 
   const overviewContent = (
     <div className="space-y-10">
@@ -326,51 +339,68 @@ export default async function TitleDetailPage({ params }: Props) {
         sourceYear={sourceYear}
         mediaType={type as "movie" | "tv"}
       />
+
+      {seriesSchedule?.renewalNote && (
+        <section>
+          <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-zinc-400">
+            {seriesSchedule.renewalNote}
+          </div>
+        </section>
+      )}
     </div>
   );
 
   return (
     <main className="min-h-screen bg-[#020617] text-white">
 
-      {/* Hero — backdrop cinematográfico com camadas de gradiente */}
+      {/* Hero — backdrop cinematográfico com camadas de gradiente.
+          Usa "hero" (w1280) em vez de "original" (3–5 MB) para evitar
+          falhas no otimizador da Vercel em produção. O backdrop é
+          randomizado apenas entre variantes sem idioma do título (cache 24h). */}
       <div className="relative h-[48vh] min-h-[320px] overflow-hidden md:h-[54vh]">
-        {data.backdrop_path ? (
-          <Image
-            src={`https://image.tmdb.org/t/p/original${data.backdrop_path}`}
-            alt={title}
-            fill
-            priority
-            sizes="100vw"
-            className="object-cover object-center opacity-45"
-          />
-        ) : (
-          <div className="absolute inset-0 bg-[#020617]" />
-        )}
-        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(2,6,23,0.96)_0%,rgba(2,6,23,0.55)_40%,rgba(2,6,23,0.20)_70%,rgba(2,6,23,0.60)_100%)]" />
-        <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(2,6,23,0.70)_0%,transparent_28%,rgba(2,6,23,0.30)_58%,#020617_100%)]" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_68%_8%,rgba(56,189,248,0.18),transparent_38%)]" />
+        <RandomTmdbImage
+          mediaType={type as "movie" | "tv"}
+          tmdbId={data.id}
+          fallbackPath={data.backdrop_path}
+          kind="backdrop"
+          size="hero"
+          alt={title}
+          fill
+          priority
+          sizes="100vw"
+          className="object-cover object-center opacity-60"
+          fallback={<div className="absolute inset-0 bg-[#020617]" />}
+        />
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(2,6,23,0.90)_0%,rgba(2,6,23,0.46)_40%,rgba(2,6,23,0.12)_70%,rgba(2,6,23,0.48)_100%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(2,6,23,0.56)_0%,transparent_28%,rgba(2,6,23,0.18)_58%,#020617_100%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_68%_8%,rgba(56,189,248,0.12),transparent_38%)]" />
         <div className="absolute inset-0 opacity-[0.03] [background-image:radial-gradient(circle_at_center,white_1px,transparent_1px)] [background-size:24px_24px]" />
       </div>
 
       {/* Poster + título — sobrepõe o hero */}
       <div className="relative z-10 mx-auto -mt-40 max-w-7xl px-4 sm:px-6">
         <div className="flex flex-col items-center gap-6 sm:flex-row sm:items-end sm:gap-8">
-          {/* Poster */}
+          {/* Poster — randomizado entre variantes en/pt/null do título.
+              Tamanho "detail" (w500) é o sweet spot para um poster de
+              cabeçalho em desktop. */}
           <div className="w-36 shrink-0 overflow-hidden rounded-2xl border border-white/[0.12] shadow-[0_24px_80px_rgba(0,0,0,0.75)] sm:w-44 md:w-52">
-            {data.poster_path ? (
-              <Image
-                src={`https://image.tmdb.org/t/p/w500${data.poster_path}`}
-                alt={title}
-                width={500}
-                height={750}
-                priority
-                className="w-full object-cover"
-              />
-            ) : (
-              <div className="flex aspect-[2/3] items-center justify-center bg-white/5 text-sm text-zinc-500">
-                Sem poster
-              </div>
-            )}
+            <RandomTmdbImage
+              mediaType={type as "movie" | "tv"}
+              tmdbId={data.id}
+              fallbackPath={data.poster_path}
+              kind="poster"
+              size="detail"
+              alt={title}
+              width={500}
+              height={750}
+              priority
+              className="w-full object-cover"
+              fallback={
+                <div className="flex aspect-[2/3] items-center justify-center bg-white/5 text-sm text-zinc-500">
+                  Sem poster
+                </div>
+              }
+            />
           </div>
 
           {/* Info textual */}
@@ -404,7 +434,7 @@ export default async function TitleDetailPage({ params }: Props) {
                 mediaType={type as "movie" | "tv"}
                 title={title}
                 releaseYear={year ? parseInt(year) : null}
-                seasons={seasons}
+                seasons={visibleSeasons}
                 inline
               />
             </div>
@@ -429,8 +459,10 @@ export default async function TitleDetailPage({ params }: Props) {
                   <div className="overflow-hidden rounded-xl border border-sky-400/20 bg-sky-400/[0.08] p-4 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.12)]">
                     <div className="flex items-center gap-3">
                       {featuredProvider.logo && (
-                        <Image
-                          src={`https://image.tmdb.org/t/p/w185${featuredProvider.logo}`}
+                        <TmdbImage
+                          path={featuredProvider.logo}
+                          kind="logo"
+                          size="large"
                           alt={featuredProvider.name}
                           width={64}
                           height={64}
@@ -559,19 +591,20 @@ export default async function TitleDetailPage({ params }: Props) {
                 <div className="space-y-3">
                   {cast.map((person) => (
                     <div key={person.id} className="flex items-center gap-3">
-                      {person.profile_path ? (
-                        <Image
-                          src={`https://image.tmdb.org/t/p/w185${person.profile_path}`}
-                          alt={person.name}
-                          width={40}
-                          height={40}
-                          className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-white/10"
-                        />
-                      ) : (
-                        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/5 ring-1 ring-white/10 text-xs text-zinc-500">
-                          {person.name.charAt(0)}
-                        </div>
-                      )}
+                      <TmdbImage
+                        path={person.profile_path}
+                        kind="profile"
+                        size="medium"
+                        alt={person.name}
+                        width={40}
+                        height={40}
+                        className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-white/10"
+                        fallback={
+                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/5 ring-1 ring-white/10 text-xs text-zinc-500">
+                            {person.name.charAt(0)}
+                          </div>
+                        }
+                      />
                       <div className="min-w-0">
                         <p className="truncate text-xs font-bold text-zinc-200">{person.name}</p>
                         <p className="truncate text-[11px] text-zinc-500">{person.character}</p>
@@ -644,16 +677,22 @@ export default async function TitleDetailPage({ params }: Props) {
                 {/* Temporadas / Episódios (séries) */}
                 {type === "tv" && (
                   <>
-                    {data.number_of_seasons != null && (
+                    {seriesSchedule && seriesSchedule.visibleSeasons.length > 0 && (
                       <div>
                         <dt className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-600">Temporadas</dt>
-                        <dd className="mt-0.5 text-xs font-semibold text-zinc-300">{data.number_of_seasons}</dd>
+                        <dd className="mt-0.5 text-xs font-semibold text-zinc-300">{seriesSchedule.visibleSeasons.length}</dd>
                       </div>
                     )}
-                    {data.number_of_episodes != null && (
+                    {seriesSchedule && seriesSchedule.releasedEpisodes.length > 0 && (
                       <div>
                         <dt className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-600">Episódios</dt>
-                        <dd className="mt-0.5 text-xs font-semibold text-zinc-300">{data.number_of_episodes}</dd>
+                        <dd className="mt-0.5 text-xs font-semibold text-zinc-300">{seriesSchedule.releasedEpisodes.length}</dd>
+                      </div>
+                    )}
+                    {seriesSchedule?.renewalNote && (
+                      <div>
+                        <dt className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-600">Agenda</dt>
+                        <dd className="mt-0.5 text-xs font-semibold text-zinc-300">{seriesSchedule.renewalNote}</dd>
                       </div>
                     )}
                   </>
@@ -677,7 +716,7 @@ export default async function TitleDetailPage({ params }: Props) {
             <TitleTabs
               type={type}
               overviewContent={overviewContent}
-              seasons={seasons}
+              seasons={visibleSeasons}
               tmdbId={data.id}
               mediaType={type as "movie" | "tv"}
             />

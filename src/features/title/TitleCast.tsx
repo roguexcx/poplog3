@@ -1,5 +1,6 @@
 // src/features/title/TitleCast.tsx
 
+import { buildTmdbUrl } from "@/lib/images/url";
 import type { TMDBCastMember, TMDBCrewMember, TMDBTitleDetail } from "@/features/title/title-types";
 
 type Props = {
@@ -148,9 +149,7 @@ export default function TitleCast({ cast, director, createdBy, detail, mediaType
           <p style={SECTION_LABEL}>Elenco principal</p>
           <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
             {cast.map((member) => {
-              const avatarUrl = member.profile_path
-                ? `https://image.tmdb.org/t/p/w185${member.profile_path}`
-                : null;
+              const avatarUrl = buildTmdbUrl("profile", "medium", member.profile_path);
               return (
                 <div
                   key={member.id}

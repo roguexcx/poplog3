@@ -4,12 +4,23 @@
 import { useEffect, useState, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import Link from "next/link";
-import Image from "next/image";
 import { createClient } from "@/lib/supabase/client";
 import { type User } from "@supabase/supabase-js";
 import { scoreTitle, buildReason, type SeasonContext } from "@/lib/relevance-score";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
-import { getImageUrl } from "@/lib/tmdb-utils";
+import TmdbImage from "@/components/images/TmdbImage";
+import { buildTmdbUrl } from "@/lib/images/url";
+import {
+  buildWatchPlanningMetrics,
+  buildSeriesContinuationState,
+  getWatchPlanningBadges,
+  sortWatchPlanningItems,
+  withWatchPlanning,
+  formatWatchMinutes,
+  type WatchPlanningMetrics,
+  type WatchPlanningMode,
+  type WatchPlanningSort,
+} from "@/lib/watch-planning";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -25,8 +36,10 @@ type TMDBDetail = {
   first_air_date?: string;
   vote_average?: number;
   runtime?: number;
+  episode_run_time?: number[];
   overview?: string;
   popularity?: number;
+  status?: string;
   genres?: { id: number; name: string }[];
   seasons?: { season_number: number; episode_count: number; name: string }[];
 };
@@ -58,15 +71,21 @@ type EnrichedTitle = {
   tmdb: TMDBDetail | null;
   watchedEpisodes?: number;
   totalEpisodes?: number;
+  remainingEpisodes?: number;
   currentSeason?: number;
   nextEpisode?: NextEpisode | null;
   watchedInCurrentSeason?: number;
   totalInCurrentSeason?: number;
+  lastEpisodeWatchedAt?: string | null;
+  latestReleasedEpisodeAt?: string | null;
+  isContinuationComplete?: boolean;
+  watchPlan?: WatchPlanningMetrics;
 };
 
 type Tab        = "watched" | "watchlist" | "favorites" | "ongoing" | "fridge" | "abandoned";
 type FilterType = "all" | "movie" | "tv";
 type SortOrder  = "recent" | "az" | "rating";
+type PlannedTitle = EnrichedTitle & { watchPlan: WatchPlanningMetrics };
 
 type Suggestion = {
   title: EnrichedTitle;
@@ -86,14 +105,6 @@ function getOriginalTitle(t: Pick<TMDBDetail, "original_title" | "original_name"
 
 function getReleaseYear(t: Pick<TMDBDetail, "release_date" | "first_air_date">): string {
   return t.release_date?.slice(0, 4) ?? t.first_air_date?.slice(0, 4) ?? "";
-}
-
-function getPosterUrl(path?: string | null) {
-  return getImageUrl(path, "w342");
-}
-
-function getBackdropUrl(path?: string | null) {
-  return getImageUrl(path, "w780");
 }
 
 function daysSince(dateStr: string): number {
@@ -131,7 +142,7 @@ function PosterCard({
   const title  = item.tmdb ? getTitle(item.tmdb) : `#${item.tmdb_id}`;
   const originalTitle = item.tmdb ? getOriginalTitle(item.tmdb) : null;
   const year   = item.tmdb ? getReleaseYear(item.tmdb) : "";
-  const poster = getPosterUrl(item.tmdb?.poster_path);
+  const posterPath = item.tmdb?.poster_path ?? null;
   const type   = item.media_type === "movie" ? "Filme" : "Série";
   const rating = item.tmdb?.vote_average ? item.tmdb.vote_average.toFixed(1) : null;
   const THIS_YEAR = String(new Date().getFullYear());
@@ -160,21 +171,22 @@ function PosterCard({
           "before:[mask:linear-gradient(#fff_0_0)_content-box,linear-gradient(#fff_0_0)]",
         ].join(" ")}
       >
-        {poster ? (
-          <Image
-            src={poster}
-            alt={title}
-            width={342}
-            height={513}
-            priority={priority}
-            loading={priority ? "eager" : "lazy"}
-            className="aspect-[2/3] w-full object-cover brightness-[0.90] saturate-[1.05] transition duration-500 group-hover:scale-[1.04] group-hover:brightness-100"
-          />
-        ) : (
-          <div className="aspect-[2/3] w-full flex items-center justify-center bg-zinc-900 text-zinc-700 text-xs">
-            Sem poster
-          </div>
-        )}
+        <TmdbImage
+          path={posterPath}
+          kind="poster"
+          size="card"
+          alt={title}
+          width={342}
+          height={513}
+          priority={priority}
+          loading={priority ? "eager" : "lazy"}
+          className="aspect-[2/3] w-full object-cover brightness-[0.90] saturate-[1.05] transition duration-500 group-hover:scale-[1.04] group-hover:brightness-100"
+          fallback={
+            <div className="aspect-[2/3] w-full flex items-center justify-center bg-zinc-900 text-zinc-700 text-xs">
+              Sem poster
+            </div>
+          }
+        />
 
         {badge && (
           <span className={`absolute top-2 right-2 flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-black shadow-lg ${badge.cls}`}>
@@ -210,11 +222,28 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
   const { title, reason, pill } = suggestion;
   const name     = title.tmdb ? getTitle(title.tmdb) : `#${title.tmdb_id}`;
   const originalName = title.tmdb ? getOriginalTitle(title.tmdb) : null;
-  const backdrop = getBackdropUrl(title.tmdb?.backdrop_path);
-  const poster   = getPosterUrl(title.tmdb?.poster_path);
   const next     = title.nextEpisode;
-  const stillUrl = next?.still_path ? `https://image.tmdb.org/t/p/w300${next.still_path}` : null;
-  const image    = stillUrl ?? backdrop ?? poster;
+
+  // Prioriza still do próximo episódio > backdrop > poster.
+  // Cada caso usa o tamanho semântico apropriado (still:large=w300,
+  // backdrop:medium=w780, poster:hero=w780).
+  const stillPath    = next?.still_path ?? null;
+  const backdropPath = title.tmdb?.backdrop_path ?? null;
+  const posterPath   = title.tmdb?.poster_path ?? null;
+
+  type ImagePick =
+    | { kind: "still"; size: "large"; path: string }
+    | { kind: "backdrop"; size: "medium"; path: string }
+    | { kind: "poster"; size: "hero"; path: string }
+    | null;
+
+  const pick: ImagePick = stillPath
+    ? { kind: "still", size: "large", path: stillPath }
+    : backdropPath
+      ? { kind: "backdrop", size: "medium", path: backdropPath }
+      : posterPath
+        ? { kind: "poster", size: "hero", path: posterPath }
+        : null;
 
   const pillStyle = {
     watchlist: "border-sky-400/30 bg-sky-400/[0.12] text-sky-300",
@@ -243,14 +272,17 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
       ].join(" ")}
     >
       <div className="relative h-[100px] w-full overflow-hidden bg-zinc-900/80">
-        {image ? (
-          <Image
-            src={image}
+        {pick ? (
+          <TmdbImage
+            path={pick.path}
+            kind={pick.kind}
+            size={pick.size}
             alt={name}
             fill
             sizes="180px"
             loading="lazy"
             className="object-cover brightness-[0.88] saturate-[1.05] transition duration-500 group-hover:scale-[1.04] group-hover:brightness-100"
+            fallback={<div className="h-full w-full bg-zinc-900" />}
           />
         ) : (
           <div className="h-full w-full bg-zinc-900" />
@@ -290,19 +322,42 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
 function ProgressCard({ item }: { item: EnrichedTitle }) {
   const name    = item.tmdb ? getTitle(item.tmdb) : `#${item.tmdb_id}`;
   const originalName = item.tmdb ? getOriginalTitle(item.tmdb) : null;
-  const poster  = getPosterUrl(item.tmdb?.poster_path);
+  const posterPath = item.tmdb?.poster_path ?? null;
   const next    = item.nextEpisode;
-  const watched = item.watchedEpisodes ?? 0;
-  const total   = item.totalEpisodes ?? 0;
-  const pct     = total > 0 ? Math.min(100, Math.round((watched / total) * 100)) : 0;
-  const remaining  = Math.max(0, total - watched);
-  const isUpToDate = !next && total > 0 && watched >= total;
+  const plan = item.watchPlan ?? buildWatchPlanningMetrics({
+    id: item.id,
+    tmdbId: item.tmdb_id,
+    mediaType: item.media_type,
+    status: item.status,
+    runtime: item.tmdb?.runtime ?? null,
+    episodeRunTime: item.tmdb?.episode_run_time ?? null,
+    totalEpisodes: item.totalEpisodes ?? null,
+    watchedEpisodes: item.watchedEpisodes ?? null,
+    remainingEpisodes: item.remainingEpisodes ?? null,
+    nextEpisode: item.nextEpisode ?? null,
+    lastWatchedAt: item.lastEpisodeWatchedAt ?? item.watched_at ?? item.created_at,
+    latestReleasedEpisodeAt: item.latestReleasedEpisodeAt ?? null,
+    popularity: item.tmdb?.popularity ?? null,
+    voteAverage: item.tmdb?.vote_average ?? null,
+  });
+  const watched = plan.watchedEpisodes ?? 0;
+  const total   = plan.totalEpisodes ?? 0;
+  const pct     = plan.progressPercent ?? 0;
+  const remaining = plan.remainingEpisodes ?? 0;
+  const remainingTime = formatWatchMinutes(plan.remainingMinutes, plan.isRuntimeEstimated);
+  const badges = getWatchPlanningBadges(plan).slice(0, 4);
+  const isUpToDate = !next && total > 0 && remaining === 0;
 
   const seasonLabel = next
     ? `T${next.season}E${next.episode}${next.name ? ` · ${next.name}` : ""}`
     : item.currentSeason
       ? `Temporada ${item.currentSeason}`
       : "Em andamento";
+  const stateLabel = item.media_type === "movie"
+    ? "Filme em andamento"
+    : isUpToDate
+      ? "Aguardando próximo episódio"
+      : seasonLabel;
 
   const href = next
     ? `/title/${item.media_type}/${item.tmdb_id}?tab=episodes&season=${next.season}`
@@ -323,20 +378,21 @@ function ProgressCard({ item }: { item: EnrichedTitle }) {
           href={`/title/${item.media_type}/${item.tmdb_id}`}
           className="relative h-32 w-[86px] shrink-0 overflow-hidden rounded-2xl border border-white/[0.08] bg-zinc-900"
         >
-          {poster ? (
-            <Image
-              src={poster}
-              alt={name}
-              fill
-              sizes="86px"
-              loading="lazy"
-              className="object-cover transition duration-500 group-hover:scale-[1.04]"
-            />
-          ) : (
-            <div className="flex h-full w-full items-center justify-center text-[10px] text-zinc-700">
-              Sem poster
-            </div>
-          )}
+          <TmdbImage
+            path={posterPath}
+            kind="poster"
+            size="card"
+            alt={name}
+            fill
+            sizes="86px"
+            loading="lazy"
+            className="object-cover transition duration-500 group-hover:scale-[1.04]"
+            fallback={
+              <div className="flex h-full w-full items-center justify-center text-[10px] text-zinc-700">
+                Sem poster
+              </div>
+            }
+          />
         </Link>
 
         {/* Info */}
@@ -354,7 +410,7 @@ function ProgressCard({ item }: { item: EnrichedTitle }) {
                 />
               </Link>
               <p className="mt-1 line-clamp-1 text-[11px] font-semibold text-sky-400">
-                {isUpToDate ? "Aguardando próximo episódio" : seasonLabel}
+                {stateLabel}
               </p>
             </div>
             <span className="shrink-0 rounded-full border border-white/[0.10] bg-white/[0.06] px-2.5 py-1 text-[10px] font-black text-white/60">
@@ -365,7 +421,11 @@ function ProgressCard({ item }: { item: EnrichedTitle }) {
           <div className="mt-4">
             <div className="mb-1.5 flex items-center justify-between text-[10px] font-bold text-zinc-600">
               <span>Progresso</span>
-              <span>{watched}/{total || "?"} eps</span>
+              <span>
+                {item.media_type === "movie"
+                  ? (remainingTime ? `${remainingTime} restantes` : "tempo indisponivel")
+                  : total > 0 ? `${watched}/${total} eps` : "sem episodios validos"}
+              </span>
             </div>
             <div className="h-1.5 w-full overflow-hidden rounded-full bg-white/[0.08]">
               <div
@@ -375,10 +435,23 @@ function ProgressCard({ item }: { item: EnrichedTitle }) {
             </div>
           </div>
 
+          {badges.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-1.5">
+              {badges.map((badge) => (
+                <span
+                  key={badge}
+                  className="rounded-full border border-white/[0.08] bg-white/[0.045] px-2.5 py-1 text-[9px] font-black text-zinc-400"
+                >
+                  {badge}
+                </span>
+              ))}
+            </div>
+          )}
+
           <div className="mt-auto flex items-end justify-between gap-3 pt-4">
             {remaining > 0 ? (
               <span className="rounded-full border border-white/[0.09] bg-white/[0.04] px-3 py-1 text-[10px] font-black text-zinc-400">
-                Faltam {remaining} ep{remaining > 1 ? "s" : ""}
+                {remainingTime ? `${remainingTime} restantes` : `Faltam ${remaining} ep${remaining > 1 ? "s" : ""}`}
               </span>
             ) : isUpToDate ? (
               <span className="rounded-full border border-emerald-400/20 bg-emerald-400/[0.08] px-3 py-1 text-[10px] font-black text-emerald-400">
@@ -396,7 +469,7 @@ function ProgressCard({ item }: { item: EnrichedTitle }) {
                   : "border border-white/[0.09] bg-white/[0.04] text-zinc-500 hover:bg-white/[0.08] hover:text-zinc-300"
               }`}
             >
-              {next ? "▶ Próximo" : "Ver série"}
+              {next ? "▶ Próximo" : item.media_type === "movie" ? "Ver filme" : "Ver série"}
             </Link>
           </div>
         </div>
@@ -441,6 +514,8 @@ export default function ProfileClient() {
 
   const [filterType, setFilterType] = useState<FilterType>("all");
   const [sortOrder, setSortOrder]   = useState<SortOrder>("rating");
+  const [watchPlanMode, setWatchPlanMode] = useState<WatchPlanningMode>("hybrid");
+  const [watchPlanSort, setWatchPlanSort] = useState<WatchPlanningSort>("best_value");
   const [activeTab, setActiveTab]   = useState<Tab>("ongoing");
   const [currentPage, setCurrentPage] = useState(1);
 
@@ -504,6 +579,8 @@ export default function ProfileClient() {
           episode_number: number;
           name: string;
           still_path: string | null;
+          air_date: string | null;
+          runtime?: number | null;
           available: boolean;
         };
         type SeasonEps = { season: number; eps: AvailableEp[] };
@@ -539,42 +616,31 @@ export default function ProfileClient() {
         const enriched: EnrichedTitle[] = (json.titles ?? []).map((t: EnrichedTitle) => {
           if (t.media_type !== "tv" || t.status !== "watching") return t;
 
-          const seriesEps  = episodes.filter((e) => e.tmdb_id === t.tmdb_id);
+          const seriesEps = episodes.filter((e) => Number(e.tmdb_id) === Number(t.tmdb_id));
           const seasonList = seasonEpsMap.get(t.tmdb_id) ?? [];
+          const continuation = buildSeriesContinuationState(seasonList, seriesEps);
+          const nextEpisode = continuation.nextEpisode
+            ? {
+                season: continuation.nextEpisode.season,
+                episode: continuation.nextEpisode.episode_number,
+                name: continuation.nextEpisode.name ?? undefined,
+                still_path: continuation.nextEpisode.still_path ?? null,
+              }
+            : null;
 
-          const totalEpisodes = seasonList.reduce((acc, s) => acc + s.eps.length, 0);
-          const watchedEpisodes = seriesEps.filter((se) =>
-            seasonList.some(
-              (sl) => sl.season === se.season && sl.eps.some((ae) => ae.episode_number === se.episode),
-            ),
-          ).length;
-
-          let nextEpisode: NextEpisode | null = null;
-          for (const { season, eps } of seasonList) {
-            const watchedInSeason = new Set(
-              seriesEps.filter((e) => e.season === season).map((e) => e.episode),
-            );
-            const nextEp = eps.find((ep) => !watchedInSeason.has(ep.episode_number));
-            if (nextEp) {
-              nextEpisode = { season, episode: nextEp.episode_number, name: nextEp.name ?? undefined, still_path: nextEp.still_path ?? null };
-              break;
-            }
-          }
-
-          const currentSeason =
-            nextEpisode?.season ??
-            (seriesEps.length > 0 ? Math.max(...seriesEps.map((e) => e.season)) : 1);
-
-          const currentSeasonData      = seasonList.find((sl) => sl.season === currentSeason);
-          const totalInCurrentSeason   = currentSeasonData?.eps.length ?? 0;
-          const watchedInCurrentSeason = currentSeasonData
-            ? seriesEps.filter((se) =>
-                se.season === currentSeason &&
-                currentSeasonData.eps.some((ae) => ae.episode_number === se.episode),
-              ).length
-            : 0;
-
-          return { ...t, watchedEpisodes, totalEpisodes, currentSeason, nextEpisode, watchedInCurrentSeason, totalInCurrentSeason };
+          return {
+            ...t,
+            watchedEpisodes: continuation.watchedEpisodes,
+            totalEpisodes: continuation.totalEpisodes,
+            remainingEpisodes: continuation.remainingEpisodes,
+            currentSeason: continuation.currentSeason ?? undefined,
+            nextEpisode,
+            watchedInCurrentSeason: continuation.watchedInCurrentSeason,
+            totalInCurrentSeason: continuation.totalInCurrentSeason,
+            lastEpisodeWatchedAt: continuation.lastEpisodeWatchedAt,
+            latestReleasedEpisodeAt: continuation.latestReleasedEpisodeAt,
+            isContinuationComplete: continuation.isContinuationComplete,
+          };
         });
 
         if (mounted) { setTitles(enriched); setLoading(false); }
@@ -611,28 +677,37 @@ export default function ProfileClient() {
   }
 
   // ── Listas derivadas ──────────────────────────────────────────────────────
-  const watched   = useMemo(() => applyFiltersAndSort(titles.filter((t) => t.status === "watched" || t.favorite)),  [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+  const watched   = useMemo(() => applyFiltersAndSort(titles.filter((t) => t.status === "watched" || t.favorite || t.isContinuationComplete)),  [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
   const watchlist = useMemo(() => applyFiltersAndSort(titles.filter((t) => t.status === "watchlist" && !isInFridge(t))), [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
   const favorites = useMemo(() => applyFiltersAndSort(titles.filter((t) => t.favorite)),                             [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
   const fridge    = useMemo(() => applyFiltersAndSort(titles.filter(isInFridge)),                                    [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
   const abandoned = useMemo(() => applyFiltersAndSort(titles.filter((t) => t.status === "abandoned")),                [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const ongoing = useMemo(() => {
-    const list = titles.filter((t) => t.media_type === "tv" && t.status === "watching");
-    const withNext  = list.filter((t) => t.nextEpisode !== null);
-    const upToDate  = list.filter((t) => t.nextEpisode === null);
-    withNext.sort((a, b) => {
-      const ra = (a.totalEpisodes ?? 0) - (a.watchedEpisodes ?? 0);
-      const rb = (b.totalEpisodes ?? 0) - (b.watchedEpisodes ?? 0);
-      return ra - rb;
-    });
-    upToDate.sort((a, b) => {
-      const ra = (a.totalEpisodes ?? 0) - (a.watchedEpisodes ?? 0);
-      const rb = (b.totalEpisodes ?? 0) - (b.watchedEpisodes ?? 0);
-      return ra - rb;
-    });
-    return [...withNext, ...upToDate];
-  }, [titles]);
+  const ongoing = useMemo((): PlannedTitle[] => {
+    const list = titles
+      .filter((t) => t.status === "watching")
+      .filter((t) => !t.isContinuationComplete && t.nextEpisode !== null)
+      .filter((t) => filterType === "all" || t.media_type === filterType)
+      .map((t) => withWatchPlanning(t, {
+        id: t.id,
+        tmdbId: t.tmdb_id,
+        mediaType: t.media_type,
+        status: t.status,
+        title: t.tmdb ? getTitle(t.tmdb) : null,
+        runtime: t.tmdb?.runtime ?? null,
+        episodeRunTime: t.tmdb?.episode_run_time ?? null,
+        totalEpisodes: t.totalEpisodes ?? null,
+        watchedEpisodes: t.watchedEpisodes ?? null,
+        remainingEpisodes: t.remainingEpisodes ?? null,
+        nextEpisode: t.nextEpisode ?? null,
+        lastWatchedAt: t.lastEpisodeWatchedAt ?? t.watched_at ?? t.created_at,
+        latestReleasedEpisodeAt: t.latestReleasedEpisodeAt ?? null,
+        popularity: t.tmdb?.popularity ?? null,
+        voteAverage: t.tmdb?.vote_average ?? null,
+      }));
+
+    return sortWatchPlanningItems(list, watchPlanSort, watchPlanMode);
+  }, [titles, filterType, watchPlanMode, watchPlanSort]);
 
   // ── Sugestões para hoje ───────────────────────────────────────────────────
   const suggestions = useMemo((): Suggestion[] => {
@@ -717,13 +792,16 @@ export default function ProfileClient() {
   }, [titles]);
 
   // ── Backdrop do perfil ────────────────────────────────────────────────────
+  // Sorteia um backdrop entre os favoritos do usuário. Usa tamanho "hero"
+  // (w1280) em vez de "original" — suficiente para tela cheia e evita
+  // estourar o otimizador da Vercel em produção.
   const profileBackdrop = useMemo(() => {
     const backdrops = titles
       .filter((t) => t.favorite && t.tmdb?.backdrop_path)
       .map((t) => t.tmdb!.backdrop_path!)
       .filter(Boolean);
     if (!backdrops.length) return null;
-    return `https://image.tmdb.org/t/p/original${backdrops[Math.floor(Math.random() * backdrops.length)]}`;
+    return buildTmdbUrl("backdrop", "hero", backdrops[Math.floor(Math.random() * backdrops.length)]);
   }, [titles]);
 
   // ── Paginação ─────────────────────────────────────────────────────────────
@@ -748,7 +826,6 @@ export default function ProfileClient() {
   const paginatedItems = activeItems.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
   useEffect(() => { if (currentPage > totalPages) setCurrentPage(totalPages); }, [currentPage, totalPages]);
-  useEffect(() => { if (activeTab === "ongoing" && filterType !== "all") setFilterType("all"); }, [activeTab, filterType]);
 
   const displayName = user?.user_metadata?.username ?? user?.email?.split("@")[0] ?? "Usuário";
   if (!loading && !user) return null;
@@ -824,13 +901,11 @@ export default function ProfileClient() {
             <button
               key={f}
               onClick={() => { setFilterType(f); setCurrentPage(1); }}
-              disabled={activeTab === "ongoing" && f !== "all"}
               className={[
                 "rounded-full border px-4 py-2 text-sm font-bold transition",
                 filterType === f
                   ? "border-white bg-white text-black"
                   : "border-white/[0.12] text-zinc-500 hover:border-white/25 hover:text-zinc-200",
-                "disabled:pointer-events-none disabled:opacity-25",
               ].join(" ")}
             >
               {{ all: "Todos", movie: "Filmes", tv: "Séries" }[f]}
@@ -877,6 +952,47 @@ export default function ProfileClient() {
         {/* ── Controles de ordenação e paginação ──
             Mobile: empilha (paginação centralizada em cima, sort embaixo).
             Desktop (sm+): grid 3 colunas (vazio · paginação · sort) como antes. */}
+        {activeTab === "ongoing" && (
+          <div className="mb-5 flex flex-col gap-3 rounded-3xl border border-white/[0.08] bg-white/[0.035] p-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap gap-2">
+              {([
+                ["episodes", "Episódios"],
+                ["time", "Tempo restante"],
+                ["hybrid", "Inteligente"],
+              ] as const).map(([mode, label]) => (
+                <button
+                  key={mode}
+                  onClick={() => { setWatchPlanMode(mode); setCurrentPage(1); }}
+                  className={[
+                    "rounded-full border px-3.5 py-2 text-[11px] font-black transition",
+                    watchPlanMode === mode
+                      ? "border-sky-300 bg-sky-300 text-slate-950"
+                      : "border-white/[0.10] text-zinc-500 hover:border-white/25 hover:text-zinc-200",
+                  ].join(" ")}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <select
+              value={watchPlanSort}
+              onChange={(e) => { setWatchPlanSort(e.target.value as WatchPlanningSort); setCurrentPage(1); }}
+              className="rounded-full border border-white/[0.12] bg-transparent px-4 py-2 text-[11px] font-bold text-zinc-400 outline-none transition hover:border-white/20 hover:text-zinc-200"
+            >
+              <option value="best_value">Melhor custo-benefício</option>
+              <option value="finish_fastest">Terminar mais rápido</option>
+              <option value="fewest_episodes">Menos episódios restantes</option>
+              <option value="highest_progress">Maior porcentagem concluída</option>
+              <option value="stalled_longest">Mais tempo parado</option>
+              <option value="newest_episode">Episódio mais recente</option>
+              <option value="oldest_episode">Episódio mais antigo</option>
+              <option value="most_popular">Mais popular</option>
+              <option value="best_rated">Melhor avaliado</option>
+            </select>
+          </div>
+        )}
+
         <div className="mb-6 flex flex-col items-center gap-3 sm:grid sm:grid-cols-3 sm:items-center sm:gap-0">
           <div className="hidden sm:block" />
 
@@ -941,9 +1057,9 @@ export default function ProfileClient() {
               </>
             ) : activeTab === "ongoing" ? (
               <>
-                <p className="text-sm text-zinc-500">Nenhuma série em andamento.</p>
+                <p className="text-sm text-zinc-500">Nenhum título em andamento.</p>
                 <Link href="/" className="mt-4 inline-block text-xs font-bold text-sky-400 hover:text-sky-300">
-                  Explorar séries →
+                  Explorar títulos →
                 </Link>
               </>
             ) : (

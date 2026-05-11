@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import type { ReactNode } from "react";
+import { buildTmdbUrl } from "@/lib/images/url";
 import type { TMDBSeason } from "@/features/title/title-types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -226,14 +227,14 @@ function SeasonRow({
           textAlign: "left",
         }}
       >
-        {/* Thumbnail */}
+        {/* Thumbnail — w92 (poster:thumb) é suficiente para uma miniatura de 40px. */}
         <div
           style={{
             width: 40,
             height: 40,
             borderRadius: 6,
             background: season.poster_path
-              ? `url(https://image.tmdb.org/t/p/w92${season.poster_path}) center/cover`
+              ? `url(${buildTmdbUrl("poster", "thumb", season.poster_path)}) center/cover`
               : "rgba(255,255,255,0.06)",
             flexShrink: 0,
           }}

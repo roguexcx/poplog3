@@ -9,6 +9,11 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { tmdbFetch } from "@/lib/tmdb";
+import {
+  getRandomTitleImagePath,
+  LOCALIZED_POSTER_RANDOMIZATION_LANGUAGES,
+  RANDOMIZATION_ENABLED,
+} from "@/lib/images";
 import type { TMDBItem, TMDBResponse } from "@/types/tmdb";
 
 const CACHE_HEADERS = {
@@ -33,6 +38,31 @@ async function enrichTV(item: TMDBItem): Promise<TMDBItem> {
   } catch {
     return item;
   }
+}
+
+async function withRandomPoster(
+  item: TMDBItem,
+  fallbackMedia: "movie" | "tv" | null,
+  languages?: readonly (string | null)[],
+): Promise<TMDBItem> {
+  if (!RANDOMIZATION_ENABLED) return item;
+
+  const mediaType = item.media_type === "movie" || item.media_type === "tv"
+    ? item.media_type
+    : fallbackMedia;
+
+  if (!mediaType || !item.id) return item;
+
+  const posterPath = await getRandomTitleImagePath(
+    mediaType,
+    item.id,
+    "poster",
+    languages ? { languages } : {},
+  );
+  return {
+    ...item,
+    poster_path: posterPath ?? item.poster_path ?? null,
+  };
 }
 
 function tmdbEndpoint(
@@ -68,6 +98,9 @@ export async function GET(request: NextRequest) {
   const type = searchParams.get("type") ?? "";
   const media = searchParams.get("media");
   const page = Math.max(1, parseInt(searchParams.get("page") ?? "1", 10));
+  const posterLanguage = searchParams.get("poster_language");
+  const posterLanguages =
+    posterLanguage === "en_pt" ? LOCALIZED_POSTER_RANDOMIZATION_LANGUAGES : undefined;
 
   const endpoint = tmdbEndpoint(type, media);
 
@@ -89,6 +122,17 @@ export async function GET(request: NextRequest) {
       results = await Promise.all(
         results.map((item) => (item.media_type === "tv" ? enrichTV(item) : item)),
       );
+      results = await Promise.all(
+        results.map((item) => withRandomPoster(item, null, posterLanguages)),
+      );
+    } else if (media === "movie" || media === "tv") {
+      results = await Promise.all(
+        results.map((item) => withRandomPoster(item, media, posterLanguages)),
+      );
+    }
+
+    if (posterLanguage === "en_pt") {
+      results = results.filter((item) => item.poster_path);
     }
 
     return NextResponse.json(

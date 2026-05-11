@@ -2,10 +2,10 @@
 // src/features/title/MoreLikeThis.tsx
 
 import { useEffect, useState } from "react";
-import Image from "next/image";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
+import TmdbImage from "@/components/images/TmdbImage";
 import {
   GENRE_NAMES,
   getContentTypeLabel,
@@ -227,16 +227,25 @@ export default function MoreLikeThis({
             >
               <div className="relative aspect-[2/3] overflow-hidden bg-zinc-900">
                 {item.poster_path ? (
-                  <Image
-                    src={`https://image.tmdb.org/t/p/w342${item.poster_path}`}
+                  <TmdbImage
+                    path={item.poster_path}
+                    kind="poster"
+                    size="card"
                     alt={itemTitle}
                     width={342}
                     height={513}
                     className="h-full w-full object-cover transition duration-500 group-hover:scale-105"
+                    fallback={
+                      <div className="flex h-full items-center justify-center text-sm text-zinc-500">
+                        Sem imagem
+                      </div>
+                    }
                   />
                 ) : item.backdrop_path ? (
-                  <Image
-                    src={`https://image.tmdb.org/t/p/w780${item.backdrop_path}`}
+                  <TmdbImage
+                    path={item.backdrop_path}
+                    kind="backdrop"
+                    size="medium"
                     alt={itemTitle}
                     width={780}
                     height={439}

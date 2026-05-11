@@ -1,8 +1,14 @@
 // src/lib/tmdb-utils.ts
+//
+// Helpers de extração de metadados textuais de itens TMDB.
+//
+// As funções de imagem (`getImageUrl`, `getPosterUrl`, `getBackdropUrl`)
+// agora delegam ao módulo central `@/lib/images`. Mantidas aqui para
+// compatibilidade com call-sites legados — código novo deve importar
+// `buildTmdbUrl` de `@/lib/images` ou usar o componente <TmdbImage />.
 
 import type { TMDBItem, TMDBMediaType } from "@/types/tmdb";
-
-const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
+import { buildTmdbUrlLoose } from "@/lib/images/url";
 
 // ─── Texto ────────────────────────────────────────────────────────────────────
 
@@ -38,27 +44,38 @@ export function getMediaLabel(item: TMDBItem): string {
   return getMediaType(item) === "movie" ? "Filme" : "Série";
 }
 
-// ─── Imagens ──────────────────────────────────────────────────────────────────
+// ─── Imagens (delegam para @/lib/images) ──────────────────────────────────────
 
 /**
- * URL genérica para qualquer path de imagem TMDB.
- * Use getPosterUrl/getBackdropUrl quando o tipo for conhecido.
+ * @deprecated Use `buildTmdbUrl` de `@/lib/images` ou o componente
+ * `<TmdbImage />` em `@/components/images/TmdbImage`.
+ *
+ * Mantido para compatibilidade — agora delega ao builder central
+ * em vez de construir URLs manualmente.
  */
 export function getImageUrl(path?: string | null, size = "w780"): string | null {
-  if (!path) return null;
-  return `${TMDB_IMAGE_BASE}/${size}${path}`;
+  // Heurística: tamanhos começando com "h" são profile (h45, h632);
+  // resto cai em backdrop como default razoável de transição.
+  const kind = size.startsWith("h") ? "profile" : "backdrop";
+  return buildTmdbUrlLoose(kind, size, path);
 }
 
+/**
+ * @deprecated Use `buildTmdbUrl("poster", "card" | "detail" | "hero", path)`.
+ */
 export function getPosterUrl(
   path?: string | null,
   size: "w342" | "w500" | "w780" = "w500",
 ): string | null {
-  return getImageUrl(path, size);
+  return buildTmdbUrlLoose("poster", size, path);
 }
 
+/**
+ * @deprecated Use `buildTmdbUrl("backdrop", "medium" | "hero" | "full", path)`.
+ */
 export function getBackdropUrl(
   path?: string | null,
   size: "w780" | "w1280" | "original" = "w1280",
 ): string | null {
-  return getImageUrl(path, size);
+  return buildTmdbUrlLoose("backdrop", size, path);
 }

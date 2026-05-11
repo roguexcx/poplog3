@@ -1,7 +1,7 @@
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
+import TmdbImage from "@/components/images/TmdbImage";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bookmark,
@@ -160,9 +160,8 @@ function getYear(item: TMDBDetails | TMDBItem): string | null {
   return date ? date.slice(0, 4) : null;
 }
 
-function getImage(path?: string | null, size = "w780"): string | null {
-  return path ? `https://image.tmdb.org/t/p/${size}${path}` : null;
-}
+// `getImage` foi removido — todos os call-sites usam <TmdbImage /> com
+// tamanhos semânticos, que delega para o builder central em @/lib/images.
 
 function formatRating(value?: number): string | null {
   return typeof value === "number" && value > 0 ? value.toFixed(1) : null;
@@ -515,7 +514,7 @@ function FateCardsStage({
           {visibleCards.map((candidate, index) => {
             const revealed = revealedCards[index];
             const isRevealing = revealingIndex === index;
-            const poster = revealed ? getImage(revealed.tmdb.poster_path, "w500") : null;
+            const posterPath = revealed?.tmdb.poster_path ?? null;
 
             if (revealed) {
               return (
@@ -533,17 +532,16 @@ function FateCardsStage({
                   "
                   style={{ animation: "cardReveal 0.6s cubic-bezier(0.16,1,0.3,1) both" }}
                 >
-                  {poster ? (
-                    <Image
-                      src={poster}
-                      alt={revealed.title}
-                      fill
-                      sizes="(max-width: 768px) 42vw, 20vw"
-                      className="object-cover transition-transform duration-700 group-hover:scale-105"
-                    />
-                  ) : (
-                    <div className="flex h-full items-center justify-center bg-[#071426] text-[10px] text-slate-500">Sem imagem</div>
-                  )}
+                  <TmdbImage
+                    path={posterPath}
+                    kind="poster"
+                    size="detail"
+                    alt={revealed.title}
+                    fill
+                    sizes="(max-width: 768px) 42vw, 20vw"
+                    className="object-cover transition-transform duration-700 group-hover:scale-105"
+                    fallback={<div className="flex h-full items-center justify-center bg-[#071426] text-[10px] text-slate-500">Sem imagem</div>}
+                  />
 
                   {/* Top cyan line */}
                   <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#19D5FF]/60 to-transparent" />
@@ -694,8 +692,8 @@ function FateCardsStage({
 // ─── RevealedCardDetail ────────────────────────────────────────────────────────
 
 function RevealedCardDetail({ candidate, onClear }: { candidate: Candidate; onClear: () => void }) {
-  const backdrop = getImage(candidate.tmdb.backdrop_path, "w1280");
-  const poster = getImage(candidate.tmdb.poster_path, "w500");
+  const backdropPath = candidate.tmdb.backdrop_path ?? null;
+  const posterPath = candidate.tmdb.poster_path ?? null;
   const rating = formatRating(candidate.tmdb.vote_average);
   const genres = getGenres(candidate);
 
@@ -704,8 +702,16 @@ function RevealedCardDetail({ candidate, onClear }: { candidate: Candidate; onCl
       className="relative overflow-hidden rounded-2xl border border-white/[0.06] bg-[#050B1A]/80 backdrop-blur-xl"
       style={{ animation: "slideDown 0.5s cubic-bezier(0.16,1,0.3,1) both" }}
     >
-      {backdrop && (
-        <Image src={backdrop} alt="" fill sizes="100vw" className="object-cover opacity-[0.08] blur-sm saturate-150" />
+      {backdropPath && (
+        <TmdbImage
+          path={backdropPath}
+          kind="backdrop"
+          size="hero"
+          alt=""
+          fill
+          sizes="100vw"
+          className="object-cover opacity-[0.08] blur-sm saturate-150"
+        />
       )}
       <div className="absolute inset-0 bg-gradient-to-r from-[#020611]/95 via-[#050B1A]/90 to-[#071426]/80" />
       <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-[#19D5FF]/30 to-transparent" />
@@ -713,11 +719,16 @@ function RevealedCardDetail({ candidate, onClear }: { candidate: Candidate; onCl
       <div className="relative flex gap-4 p-4 md:gap-5 md:p-5">
         {/* Mini poster */}
         <div className="relative shrink-0 w-14 md:w-16 aspect-[2/3] overflow-hidden rounded-xl border border-[#19D5FF]/15 shadow-[0_0_20px_rgba(25,213,255,0.08)]">
-          {poster ? (
-            <Image src={poster} alt={candidate.title} fill sizes="64px" className="object-cover" />
-          ) : (
-            <div className="h-full bg-[#071426]" />
-          )}
+          <TmdbImage
+            path={posterPath}
+            kind="poster"
+            size="detail"
+            alt={candidate.title}
+            fill
+            sizes="64px"
+            className="object-cover"
+            fallback={<div className="h-full bg-[#071426]" />}
+          />
         </div>
 
         {/* Info */}

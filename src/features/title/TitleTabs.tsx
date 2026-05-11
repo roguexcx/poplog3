@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useCallback, Suspense } from "react";
 import { useSearchParams } from "next/navigation";
-import Image from "next/image";
+import TmdbImage from "@/components/images/TmdbImage";
 import { createClient } from "@/lib/supabase/client";
 import type { TMDBSeason, TMDBEpisode } from "@/features/title/title-types";
 
@@ -61,12 +61,21 @@ function formatRuntime(minutes: number | null): string {
 
 function getTotalEpisodes(seasons: TMDBSeason[]): number {
   return seasons.reduce((total, season) => {
-    return total + (season.episodes?.length ?? season.episode_count ?? 0);
+    return total + (season.episodes?.filter(isReleasedEpisode).length ?? 0);
   }, 0);
 }
 
 function emitSeriesProgressUpdate(detail: SeriesProgressEventDetail) {
   window.dispatchEvent(new CustomEvent("poplog:series-progress", { detail }));
+}
+
+function isReleasedEpisode(episode: TMDBEpisode): boolean {
+  if (episode.status === "released" || episode.available === true) return true;
+  if (!episode.air_date || !/^\d{4}-\d{2}-\d{2}$/.test(episode.air_date)) return false;
+
+  const today = new Date();
+  today.setHours(23, 59, 59, 999);
+  return new Date(`${episode.air_date}T12:00:00`).getTime() <= today.getTime();
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -161,8 +170,10 @@ function EpisodeRow({
         {/* Thumbnail */}
         <div className="relative h-[54px] w-24 shrink-0 overflow-hidden rounded-xl bg-white/5">
           {episode.still_path && isAvailable ? (
-            <Image
-              src={`https://image.tmdb.org/t/p/w300${episode.still_path}`}
+            <TmdbImage
+              path={episode.still_path}
+              kind="still"
+              size="large"
               alt={episode.name}
               fill
               sizes="96px"
@@ -363,13 +374,11 @@ function EpisodesTab({
         return;
       }
 
-      const todayMark = new Date();
-      todayMark.setHours(23, 59, 59, 999);
       const watchedAt = customEvent.detail.watchedAt ?? new Date().toISOString();
 
       const nextProgress = seasons.flatMap((season) =>
         (season.episodes ?? [])
-          .filter((ep) => (ep.air_date ? new Date(ep.air_date) <= todayMark : false))
+          .filter((ep) => ep.status === "released")
           .map((ep) => ({
             season: season.season_number,
             episode: ep.episode_number,
@@ -383,7 +392,7 @@ function EpisodesTab({
 
     window.addEventListener("poplog:series-bulk-progress", handleBulkProgressEvent);
     return () => window.removeEventListener("poplog:series-bulk-progress", handleBulkProgressEvent);
-  }, [tmdbId, seasons, episodeCount]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tmdbId, seasons, episodeCount]);
 
   const isWatched = useCallback(
     (season: number, ep: number) => progress.some((p) => p.season === season && p.episode === ep),
@@ -440,70 +449,73 @@ function EpisodesTab({
       { user_id: userId, tmdb_id: tmdbId, season, episode: ep, watched_at: iso },
       { onConflict: "user_id,tmdb_id,season,episode" },
     );
-    setProgress((prev) =>
-      prev.map((p) => p.season === season && p.episode === ep ? { ...p, watched_at: iso } : p),
-    );
+    const nextProgress = progress.some((p) => p.season === season && p.episode === ep)
+      ? progress.map((p) => p.season === season && p.episode === ep ? { ...p, watched_at: iso } : p)
+      : [...progress, { season, episode: ep, watched_at: iso }];
+    setProgress(nextProgress);
+    await syncSeriesProgress(nextProgress);
   }
 
   async function handleMarkSeason(season: TMDBSeason, mark: boolean) {
     if (!userId || !season.episodes) return;
     setMarkingAll(true);
 
-    const todayMark = new Date();
-    todayMark.setHours(23, 59, 59, 999);
-    const availableToMark = season.episodes.filter((ep) =>
-      ep.air_date ? new Date(ep.air_date) <= todayMark : false
-    );
+    const availableToMark = season.episodes.filter(isReleasedEpisode);
 
-    if (mark) {
-      const now  = new Date().toISOString();
-      const rows = availableToMark.map((ep) => ({
-        user_id:    userId,
-        tmdb_id:    tmdbId,
-        season:     season.season_number,
-        episode:    ep.episode_number,
-        watched_at: now,
-      }));
-      await supabase
-        .from("episode_progress")
-        .upsert(rows, { onConflict: "user_id,tmdb_id,season,episode" });
-
-      const nextProgress = [
-        ...progress.filter((p) => p.season !== season.season_number),
-        ...availableToMark.map((ep) => ({
-          season:     season.season_number,
-          episode:    ep.episode_number,
-          watched_at: now,
-        })),
-      ];
-      setProgress(nextProgress);
-      await syncSeriesProgress(nextProgress);
-    } else {
-      await supabase
+    try {
+      const deleteResult = await supabase
         .from("episode_progress")
         .delete()
         .eq("user_id", userId)
         .eq("tmdb_id", tmdbId)
         .eq("season", season.season_number);
 
-      const nextProgress = progress.filter((p) => p.season !== season.season_number);
-      setProgress(nextProgress);
-      await syncSeriesProgress(nextProgress);
-    }
+      if (deleteResult.error) throw deleteResult.error;
 
-    setMarkingAll(false);
+      if (mark && availableToMark.length > 0) {
+        const now  = new Date().toISOString();
+        const rows = availableToMark.map((ep) => ({
+          user_id:    userId,
+          tmdb_id:    tmdbId,
+          season:     season.season_number,
+          episode:    ep.episode_number,
+          watched_at: now,
+        }));
+
+        const insertResult = await supabase.from("episode_progress").insert(rows);
+        if (insertResult.error) throw insertResult.error;
+
+        const nextProgress = [
+          ...progress.filter((p) => p.season !== season.season_number),
+          ...availableToMark.map((ep) => ({
+            season:     season.season_number,
+            episode:    ep.episode_number,
+            watched_at: now,
+          })),
+        ];
+        setProgress(nextProgress);
+        await syncSeriesProgress(nextProgress);
+      } else {
+        const nextProgress = progress.filter((p) => p.season !== season.season_number);
+        setProgress(nextProgress);
+        await syncSeriesProgress(nextProgress);
+      }
+    } finally {
+      setMarkingAll(false);
+    }
   }
 
   if (!seasons.length) {
-    return <p className="text-sm text-zinc-500">Nenhuma temporada disponível.</p>;
+    return (
+      <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-zinc-500">
+        Nenhuma temporada com calendário confirmado.
+      </div>
+    );
   }
 
-  const today = new Date();
-  today.setHours(23, 59, 59, 999);
-
   const seasonEps    = currentSeason?.episodes ?? [];
-  const availableEps = seasonEps.filter((ep) => ep.air_date ? new Date(ep.air_date) <= today : false);
-  const futureEps    = seasonEps.filter((ep) => ep.air_date ? new Date(ep.air_date) > today : true);
+  const availableEps = seasonEps.filter(isReleasedEpisode);
+  const futureEps    = seasonEps.filter((ep) => ep.status === "scheduled");
 
   const watchedInSeason = availableEps.filter((ep) => isWatched(activeSeason, ep.episode_number)).length;
   const totalInSeason   = availableEps.length;
@@ -521,12 +533,8 @@ function EpisodesTab({
       {/* Seletor de temporada */}
       <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 no-scrollbar sm:mx-0 sm:flex-wrap sm:px-0">
         {seasons.map((season) => {
-          const todayCheck = new Date();
-          todayCheck.setHours(23, 59, 59, 999);
-          const sAvailable = (season.episodes ?? []).filter((ep) =>
-            ep.air_date ? new Date(ep.air_date) <= todayCheck : false
-          ).length;
-          const sTotal   = sAvailable || (season.episodes?.length ?? season.episode_count);
+          const sAvailable = (season.episodes ?? []).filter(isReleasedEpisode).length;
+          const sTotal   = sAvailable;
           const sWatched = progress.filter((p) => p.season === season.season_number).length;
           const sDone    = sAvailable > 0 && sWatched >= sAvailable;
           return (
@@ -620,7 +628,7 @@ function EpisodesTab({
       {currentSeason?.episodes && (
         <div className="space-y-2">
           {currentSeason.episodes.map((ep) => {
-            const epAvailable = ep.air_date ? new Date(ep.air_date) <= today : false;
+            const epAvailable = ep.status === "released";
             return (
               <EpisodeRow
                 key={ep.id}

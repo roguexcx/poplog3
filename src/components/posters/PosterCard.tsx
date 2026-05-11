@@ -2,19 +2,18 @@
 
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
+import TmdbImage from "@/components/images/TmdbImage";
 import { CardActionButton } from "@/components/ui/CardActionButton";
 import { IconBookmark, IconCheck, IconStar } from "@/components/ui/icons";
 import type { TMDBItem, TMDBMediaType } from "@/types/tmdb";
 import {
   getOriginalTitle,
   getMediaLabel,
-  getPosterUrl,
   getRating,
   getReleaseYear,
   getTitle,
@@ -32,7 +31,7 @@ export default function PosterCard({ item, priority = false }: Props) {
   const originalTitle = getOriginalTitle(item);
   const year = getReleaseYear(item);
   const rating = getRating(item);
-  const posterUrl = getPosterUrl(item.poster_path, "w500");
+  const posterPath = item.poster_path ?? null;
 
   const type: TMDBMediaType = item.media_type === "tv" ? "tv" : "movie";
   const mediaLabel = getMediaLabel({ ...item, media_type: type });
@@ -70,20 +69,21 @@ export default function PosterCard({ item, priority = false }: Props) {
               "after:transition-opacity after:duration-350 group-hover:after:opacity-100",
             ].join(" ")}
           >
-            {posterUrl ? (
-              <Image
-                src={posterUrl}
-                alt={title}
-                fill
-                priority={priority}
-                sizes="(max-width: 768px) 150px, 180px"
-                className="object-cover brightness-[0.92] saturate-[1.05] transition-[transform,filter] duration-[600ms] ease-[cubic-bezier(0.25,0.46,0.45,0.94)] group-hover:scale-[1.04] group-hover:brightness-100 group-hover:saturate-110"
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center bg-[#0e0e1a] text-[11px] text-[#3a3a55]">
-                Sem imagem
-              </div>
-            )}
+            <TmdbImage
+              path={posterPath}
+              kind="poster"
+              size="detail"
+              alt={title}
+              fill
+              priority={priority}
+              sizes="(max-width: 768px) 150px, 180px"
+              className="object-cover brightness-[0.92] saturate-[1.05] transition-[transform,filter] duration-[600ms] ease-[cubic-bezier(0.25,0.46,0.45,0.94)] group-hover:scale-[1.04] group-hover:brightness-100 group-hover:saturate-110"
+              fallback={
+                <div className="flex h-full items-center justify-center bg-[#0e0e1a] text-[11px] text-[#3a3a55]">
+                  Sem imagem
+                </div>
+              }
+            />
 
             <div className="pointer-events-none absolute inset-0 z-[2] bg-gradient-to-t from-black/70 via-transparent to-black/25" />
             <div className="pointer-events-none absolute inset-0 z-[3] bg-[radial-gradient(ellipse_at_50%_110%,rgba(99,102,241,0.22),transparent_65%)] opacity-0 transition-opacity duration-500 group-hover:opacity-100" />

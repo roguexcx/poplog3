@@ -36,3 +36,25 @@ export type TMDBDetails = {
   number_of_seasons?: number;
   episode_run_time?: number[];
 };
+
+// ─── Imagens ─────────────────────────────────────────────────────────────────
+// Resposta do endpoint /{movie|tv}/{id}/images do TMDB.
+
+export interface TMDBImage {
+  file_path: string;
+  iso_639_1?: string | null;
+  width?: number;
+  height?: number;
+  vote_average?: number;
+  vote_count?: number;
+  aspect_ratio?: number;
+}
+
+export interface TMDBImagesResponse {
+  id?: number;
+  backdrops?: TMDBImage[];
+  posters?: TMDBImage[];
+  logos?: TMDBImage[];
+  stills?: TMDBImage[];
+  profiles?: TMDBImage[];
+}

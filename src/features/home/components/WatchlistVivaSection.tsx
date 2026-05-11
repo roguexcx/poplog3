@@ -3,7 +3,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import Image from "next/image";
+import TmdbImage from "@/components/images/TmdbImage";
 import { createClient } from "@/lib/supabase/client";
 import { useUserData } from "@/context/UserDataContext";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
@@ -176,9 +176,7 @@ function WatchlistCard({
   const [watchedActive, setWatched] = useState(false);
 
   const slug        = `/title/${item.media_type}/${item.tmdb_id}`;
-  const posterUrl   = item.poster_path
-    ? `https://image.tmdb.org/t/p/w342${item.poster_path}`
-    : null;
+  const posterPath  = item.poster_path ?? null;
 
   // Provider: flatrate (assinatura) > rent (aluguel) > buy (compra)
   const flatrateProvider = item.providers.find((p) => p.type === "flatrate") ?? null;
@@ -226,9 +224,11 @@ function WatchlistCard({
               "after:transition-opacity after:duration-350 group-hover:after:opacity-100",
             ].join(" ")}
           >
-            {posterUrl && !imgErr ? (
-              <Image
-                src={posterUrl}
+            {posterPath && !imgErr ? (
+              <TmdbImage
+                path={posterPath}
+                kind="poster"
+                size="card"
                 alt={item.title}
                 fill
                 sizes="(max-width: 768px) 160px, 220px"
@@ -248,8 +248,10 @@ function WatchlistCard({
             {/* Badge inferior — plataforma ou status */}
             {mainProvider ? (
               <div className="absolute bottom-2.5 left-2.5 z-20 flex items-center gap-1.5 rounded-[5px] border border-white/[0.18] bg-black/[0.72] px-[7px] py-[3px] backdrop-blur-[8px]">
-                <Image
-                  src={`https://image.tmdb.org/t/p/original${mainProvider.logo}`}
+                <TmdbImage
+                  path={mainProvider.logo}
+                  kind="logo"
+                  size="small"
                   alt={mainProvider.name}
                   width={13}
                   height={13}

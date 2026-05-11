@@ -4,6 +4,7 @@
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
 import { IconBookmark, IconCheck, IconStar } from "@/components/ui/icons";
+import TmdbImage from "@/components/images/TmdbImage";
 import type { TMDBTitleDetail } from "@/features/title/title-types";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -64,12 +65,9 @@ export default function TitleHero({ detail, mediaType }: Props) {
   const watchlist = useWatchlistToggle({ tmdbId: detail.id, mediaType, title, releaseYear });
   const watched = useWatchedToggle({ tmdbId: detail.id, mediaType, title, releaseYear });
 
-  const backdropUrl = detail.backdrop_path
-    ? `https://image.tmdb.org/t/p/w1280${detail.backdrop_path}`
-    : null;
-  const posterUrl = detail.poster_path
-    ? `https://image.tmdb.org/t/p/w342${detail.poster_path}`
-    : null;
+  // Paths cruas — a construção de URL fica no <TmdbImage /> via builder central.
+  const backdropPath = detail.backdrop_path ?? null;
+  const posterPath = detail.poster_path ?? null;
 
   const runtime =
     mediaType === "movie"
@@ -121,10 +119,19 @@ export default function TitleHero({ detail, mediaType }: Props) {
 
   return (
     <div className="relative w-full overflow-hidden" style={{ minHeight: 420 }}>
-      {/* Backdrop */}
-      {backdropUrl ? (
+      {/* Backdrop — w1280 (hero) é suficiente para tela cheia em qualquer device. */}
+      {backdropPath ? (
         <div className="absolute inset-0">
-          <img src={backdropUrl} alt="" className="h-full w-full object-cover" />
+          <TmdbImage
+            path={backdropPath}
+            kind="backdrop"
+            size="hero"
+            alt=""
+            fill
+            sizes="100vw"
+            className="object-cover"
+            priority
+          />
         </div>
       ) : (
         <div className="absolute inset-0" style={{ background: "#0a0a16" }} />
@@ -164,10 +171,10 @@ export default function TitleHero({ detail, mediaType }: Props) {
             alignItems: "flex-end",
           }}
         >
-          {/* Poster */}
-          {posterUrl && (
+          {/* Poster — "card" (w342) é mais que suficiente para um poster de 110px. */}
+          {posterPath && (
             <div
-              className="hidden sm:block flex-shrink-0"
+              className="hidden sm:block flex-shrink-0 relative"
               style={{
                 width: 110,
                 aspectRatio: "2/3",
@@ -178,7 +185,15 @@ export default function TitleHero({ detail, mediaType }: Props) {
                 background: "#0e0e1a",
               }}
             >
-              <img src={posterUrl} alt={title} className="h-full w-full object-cover" />
+              <TmdbImage
+                path={posterPath}
+                kind="poster"
+                size="card"
+                alt={title}
+                fill
+                sizes="110px"
+                className="object-cover"
+              />
             </div>
           )}
 

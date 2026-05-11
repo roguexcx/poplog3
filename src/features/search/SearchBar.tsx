@@ -1,14 +1,14 @@
 // src/features/search/SearchBar.tsx
 "use client";
 
-import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import { useSearch } from "./useSearch";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
-import { getOriginalTitle, getPosterUrl, getRating, getReleaseYear, getTitle } from "@/lib/tmdb-utils";
+import TmdbImage from "@/components/images/TmdbImage";
+import { getOriginalTitle, getRating, getReleaseYear, getTitle } from "@/lib/tmdb-utils";
 
 const MAX_VISIBLE = 5;
 
@@ -104,7 +104,7 @@ export default function SearchBar() {
             const originalTitle = getOriginalTitle(item);
             const year = getReleaseYear(item);
             const rating = getRating(item);
-            const posterUrl = getPosterUrl(item.poster_path, "w342");
+            const posterPath = item.poster_path ?? null;
             const isActive = index === activeIndex;
 
             return (
@@ -122,11 +122,16 @@ export default function SearchBar() {
               >
                 {/* Poster */}
                 <div className="relative h-[72px] w-12 shrink-0 overflow-hidden rounded-lg bg-white/[0.05]">
-                  {posterUrl ? (
-                    <Image src={posterUrl} alt={title} fill sizes="48px" className="object-cover opacity-90" />
-                  ) : (
-                    <div className="flex h-full w-full items-center justify-center text-[10px] text-white/20">—</div>
-                  )}
+                  <TmdbImage
+                    path={posterPath}
+                    kind="poster"
+                    size="card"
+                    alt={title}
+                    fill
+                    sizes="48px"
+                    className="object-cover opacity-90"
+                    fallback={<div className="flex h-full w-full items-center justify-center text-[10px] text-white/20">—</div>}
+                  />
                 </div>
 
                 {/* Info */}
