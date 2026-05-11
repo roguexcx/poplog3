@@ -1,6 +1,9 @@
 // src/app/api/search/route.ts
 
 import { NextResponse } from "next/server";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getUserFeedbackMap } from "@/lib/personalization/feedback";
+import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
 import {
   getRandomTitleImagePath,
   LOCALIZED_POSTER_RANDOMIZATION_LANGUAGES,
@@ -141,6 +144,8 @@ export async function GET(request: Request) {
   if (!query) return NextResponse.json({ results: [] });
 
   try {
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
     const [ptResults, enResults] = await Promise.all([
       searchTMDB(query, "pt-BR"),
       searchTMDB(query, "en-US"),
@@ -152,9 +157,19 @@ export async function GET(request: Request) {
       .sort((a, b) => getResultScore(b, query) - getResultScore(a, query))
       .slice(0, 24);
 
-    const results = (await Promise.all(ranked.map(withLocalizedPoster)))
+    let results = (await Promise.all(ranked.map(withLocalizedPoster)))
       .filter((item): item is TMDBSearchItem => item !== null)
       .slice(0, 12);
+
+    if (user) {
+      const feedbackMap = await getUserFeedbackMap(user.id, supabase);
+      results = applyUserFeedbackScoring(results, {
+        userId: user.id,
+        feedbackMap,
+        context: "search",
+        preserveOrder: true,
+      });
+    }
 
     return NextResponse.json({ results });
   } catch (error) {

@@ -7,10 +7,11 @@ import Link from "next/link";
 import TmdbImage from "@/components/images/TmdbImage";
 import { ScrollRowArrows } from "@/components/ScrollRowArrows";
 import { CardActionButton } from "@/components/ui/CardActionButton";
-import { IconBookmark, IconCheck } from "@/components/ui/icons";
+import { IconBookmark, IconCheck, IconX } from "@/components/ui/icons";
 import { useScrollRow } from "@/hooks/useScrollRow";
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
+import { useUserFeedbackToggle } from "@/hooks/useUserFeedbackToggle";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import SectionHeader from "@/components/layout/SectionHeader";
 
@@ -29,6 +30,9 @@ interface TrendingItem {
   season_label: string | null;
   is_new: boolean;
   new_label: string | null;
+  userFeedback?: {
+    notInterested?: boolean;
+  };
 }
 
 // ─── API ─────────────────────────────────────────────────────────────────────
@@ -46,6 +50,9 @@ interface RawTMDBItem {
   first_air_date?: string;
   last_air_date?: string | null;
   number_of_seasons?: number | null;
+  userFeedback?: {
+    notInterested?: boolean;
+  };
 }
 
 const DAYS_NEW = 90;
@@ -95,6 +102,7 @@ function toTrendingItem(raw: RawTMDBItem): TrendingItem {
     season_label,
     is_new,
     new_label,
+    userFeedback: raw.userFeedback,
   };
 }
 
@@ -188,6 +196,12 @@ function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
   };
   const watchlist = useWatchlistToggle(sharedProps);
   const watched   = useWatchedToggle(sharedProps);
+  const feedback  = useUserFeedbackToggle({
+    tmdbId: item.id,
+    mediaType: item.media_type,
+    source: "trending",
+    initialNotInterested: Boolean(item.userFeedback?.notInterested),
+  });
 
   return (
     <article className="group relative shrink-0 w-[160px] md:w-[180px]">
@@ -282,6 +296,15 @@ function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
             activeClass="border-emerald-400/55 bg-emerald-400/[0.18] text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.25)]"
           >
             <IconCheck />
+          </CardActionButton>
+          <CardActionButton
+            onClick={feedback.toggleNotInterested}
+            disabled={feedback.loading || !feedback.isLoggedIn}
+            title={feedback.notInterested ? "Remover sem interesse" : "Não tenho interesse"}
+            active={feedback.notInterested} saving={feedback.saving}
+            activeClass="border-rose-400/55 bg-rose-400/[0.18] text-rose-300 shadow-[0_0_10px_rgba(251,113,133,0.22)]"
+          >
+            <IconX />
           </CardActionButton>
         </div>
       </div>

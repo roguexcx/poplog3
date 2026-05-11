@@ -4,6 +4,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
+import { useUserFeedbackToggle } from "@/hooks/useUserFeedbackToggle";
 import type { TitleActionSeason } from "@/features/title/title-types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -188,6 +189,11 @@ export default function TitleActions({
   const [seriesProgress, setSeriesProgress] = useState({ episodeCount: 0, watchedEpisodes: 0 });
 
   const seriesMenuRef = useRef<HTMLDivElement>(null);
+  const feedback = useUserFeedbackToggle({
+    tmdbId,
+    mediaType,
+    source: "title_actions",
+  });
 
   useEffect(() => {
     if (!showSeriesMenu) return;
@@ -273,6 +279,16 @@ export default function TitleActions({
       fridge: normalizedStatus === "watchlist" ? draft.fridge : false,
     };
     setUserTitle(next);
+
+    if (next.favorite || next.status === "watchlist" || next.status === "watched" || next.status === "watching") {
+      await supabase
+        .from("user_title_feedback")
+        .delete()
+        .eq("user_id", userId)
+        .eq("tmdb_id", tmdbId)
+        .eq("media_type", mediaType)
+        .in("feedback_type", ["not_interested", "disliked", "hidden"]);
+    }
 
     await supabase.from("user_titles").upsert({
       user_id:      userId,
@@ -484,6 +500,7 @@ export default function TitleActions({
   const isAbandoned = userTitle.status === "abandoned";
   const isFridge    = userTitle.fridge || userTitle.status === "fridge";
   const isFavorite  = userTitle.favorite;
+  const isNotInterested = feedback.notInterested;
 
   const allWatched     = currentEpisodeCount > 0 && currentWatchedEpisodes >= currentEpisodeCount;
   const watchingActive = isTv && !isAbandoned && (userTitle.status === "watching" || (currentWatchedEpisodes > 0 && !isWatched));
@@ -594,6 +611,15 @@ export default function TitleActions({
           >
             <IconFridge filled={isFridge} />
             <span>{loading === "fridge" ? "..." : isFridge ? "Na geladeira" : "Geladeira"}</span>
+          </button>
+
+          <button
+            onClick={feedback.toggleNotInterested}
+            disabled={feedback.loading || feedback.saving || !feedback.isLoggedIn}
+            className={`${pillBase} ${isNotInterested ? "border-rose-400/45 bg-rose-400/12 text-rose-300 shadow-[0_0_14px_rgba(251,113,133,0.14)]" : "border-white/[0.06] bg-white/[0.02] text-zinc-500 hover:border-rose-400/20 hover:bg-rose-400/8 hover:text-rose-300"}`}
+          >
+            <IconXCircle />
+            <span>{feedback.saving ? "..." : isNotInterested ? "Ignorado" : "Não tenho interesse"}</span>
           </button>
 
         </div>
@@ -967,6 +993,24 @@ export default function TitleActions({
           </span>
           {isFridge && (
             <span className="shrink-0 text-[10px] font-black uppercase tracking-widest text-cyan-400">ativo</span>
+          )}
+        </button>
+
+        <button
+          onClick={feedback.toggleNotInterested}
+          disabled={feedback.loading || feedback.saving || !feedback.isLoggedIn}
+          className={`group flex w-full items-center gap-3 rounded-2xl border px-4 py-3.5 text-sm font-bold transition duration-200
+            ${isNotInterested
+              ? "border-rose-400/45 bg-rose-400/12 text-rose-300 shadow-[0_0_14px_rgba(251,113,133,0.14)] hover:bg-rose-400/18"
+              : "border-white/[0.06] bg-white/[0.02] text-zinc-500 hover:border-rose-400/20 hover:bg-rose-400/8 hover:text-rose-300"
+            } disabled:cursor-not-allowed disabled:opacity-60`}
+        >
+          <IconXCircle />
+          <span className="flex-1 text-left">
+            {feedback.saving ? "Salvando..." : isNotInterested ? "Ignorado" : "Não tenho interesse"}
+          </span>
+          {isNotInterested && (
+            <span className="shrink-0 text-[10px] font-black uppercase tracking-widest text-rose-300">ativo</span>
           )}
         </button>
 

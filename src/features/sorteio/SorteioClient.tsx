@@ -300,6 +300,7 @@ function weightedPick(candidates: Candidate[], filters: Filters, lastKey: string
   if (pool.length === 0) return null;
   const weighted = pool.map((c) => {
     let score = 10 + availabilityScore(c, filters.availability);
+    score += Math.max(-160, Math.min(c.tmdb.personalScore ?? 0, 10_000) - 10_000);
     if (c.nextEpisode) score += 4;
     if (c.userTitle?.fridge) score += 2;
     if (c.userTitle?.favorite) score += 1;
@@ -419,7 +420,7 @@ async function fetchDiscoveryCandidates(filters: Filters, personalKeys: Set<stri
   const rejected = loadRejectedKeys();
   const genres = chooseDiscoveryGenres(filters);
   const page = String(1 + Math.floor(Math.random() * 3));
-  const responses = await Promise.all(mediaTypes.flatMap((media) => genres.slice(0, 2).map((genre) => fetchJson<{ results?: TMDBItem[] }>(`/api/tmdb/discover?genre=${genre}&media=${media}&page=${page}`))));
+  const responses = await Promise.all(mediaTypes.flatMap((media) => genres.slice(0, 2).map((genre) => fetchJson<{ results?: TMDBItem[] }>(`/api/tmdb/discover?genre=${genre}&media=${media}&page=${page}&context=oracle`))));
   const seen = new Set<string>();
   return responses.flatMap((r) => r?.results ?? []).map(itemToDiscoveryCandidate)
     .filter((c) => { if (seen.has(c.key)) return false; seen.add(c.key); return !personalKeys.has(c.key) && !rejected.has(c.key); })

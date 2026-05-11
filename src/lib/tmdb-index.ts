@@ -31,6 +31,15 @@ export type TmdbPerson = {
   tv_credits?: { cast?: TMDBItem[]; crew?: TMDBItem[] };
 };
 
+type CreditItem = TMDBItem & {
+  character?: string;
+  job?: string;
+  department?: string;
+  order?: number;
+  episode_count?: number;
+  vote_count?: number;
+};
+
 export type TmdbStudio = {
   id: number;
   name: string;
@@ -91,6 +100,92 @@ export function uniqueTitles(items: TMDBItem[], fallbackMedia?: IndexedMediaType
     });
 }
 
+const TV_CONTEXT_GENRES = new Set([10763, 10764, 10767]);
+const CREATIVE_JOBS = new Set([
+  "Creator",
+  "Director",
+  "Screenplay",
+  "Story",
+  "Teleplay",
+  "Writer",
+]);
+
+function normalizedCreditText(value: string | null | undefined): string {
+  return (value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function isSelfAppearance(item: CreditItem): boolean {
+  const character = normalizedCreditText(item.character);
+  if (!character) return false;
+  return /\b(self|himself|herself|guest|host|presenter|entrevistado|entrevistada)\b/.test(character);
+}
+
+function isContextProgram(item: CreditItem): boolean {
+  return item.media_type === "tv" && (item.genre_ids ?? []).some((genreId) => TV_CONTEXT_GENRES.has(genreId));
+}
+
+function getPrimaryCareerPool(person: TmdbPerson, cast: CreditItem[], crew: CreditItem[]): CreditItem[] {
+  const department = person.known_for_department;
+  if (department === "Acting") {
+    const acted = cast.filter((item) => !isSelfAppearance(item) && !isContextProgram(item));
+    return acted.length >= 6 ? acted : cast;
+  }
+
+  if (department === "Directing") {
+    const directed = crew.filter((item) => item.job === "Director" || item.job === "Creator");
+    return directed.length >= 4 ? directed : crew.filter((item) => item.department === "Directing");
+  }
+
+  if (department === "Writing") {
+    const written = crew.filter((item) => item.department === "Writing" || CREATIVE_JOBS.has(item.job ?? ""));
+    return written.length >= 4 ? written : crew;
+  }
+
+  if (department === "Production") {
+    const produced = crew.filter((item) => item.department === "Production");
+    return produced.length >= 4 ? produced : crew;
+  }
+
+  const sameDepartment = crew.filter((item) => item.department === department);
+  return sameDepartment.length >= 4 ? sameDepartment : uniqueTitles([...cast, ...crew]) as CreditItem[];
+}
+
+function careerScore(item: CreditItem, person: TmdbPerson): number {
+  const popularity = item.popularity ?? 0;
+  const rating = item.vote_average ?? 0;
+  const votes = item.vote_count ?? 0;
+  const order = typeof item.order === "number" ? item.order : 99;
+  const episodeCount = item.episode_count ?? 0;
+  const department = person.known_for_department;
+
+  let score = popularity + rating * 8 + Math.min(votes / 500, 12);
+
+  if (item.media_type === "movie") score += 10;
+  if (department === "Acting") {
+    if (order <= 2) score += 36;
+    else if (order <= 5) score += 24;
+    else if (order <= 10) score += 10;
+    if (episodeCount > 1) score += Math.min(episodeCount, 80) * 0.45;
+    if (isSelfAppearance(item)) score -= 95;
+    if (isContextProgram(item)) score -= 80;
+    if (!item.character) score -= 18;
+  } else {
+    if (item.department === department) score += 35;
+    if (CREATIVE_JOBS.has(item.job ?? "")) score += 28;
+    if (item.job === "Director" || item.job === "Creator") score += 18;
+    if (isContextProgram(item)) score -= 28;
+  }
+
+  return score;
+}
+
+function sortByCareerRelevance(items: CreditItem[], person: TmdbPerson) {
+  return [...items].sort((a, b) => careerScore(b, person) - careerScore(a, person));
+}
+
 export async function fetchGenreName(media: IndexedMediaType, id: number): Promise<string> {
   const data = await tmdbFetch<{ genres: TmdbGenre[] }>(`/genre/${media}/list`, {}, 60 * 60 * 24);
   return data.genres.find((genre) => genre.id === id)?.name ?? "Gênero";
@@ -130,18 +225,20 @@ export async function fetchPersonIndex(id: number) {
   const cast = uniqueTitles([
     ...(person.movie_credits?.cast ?? []).map((item) => ({ ...item, media_type: "movie" as const })),
     ...(person.tv_credits?.cast ?? []).map((item) => ({ ...item, media_type: "tv" as const })),
-  ]);
+  ]) as CreditItem[];
   const crew = uniqueTitles([
     ...(person.movie_credits?.crew ?? []).map((item) => ({ ...item, media_type: "movie" as const })),
     ...(person.tv_credits?.crew ?? []).map((item) => ({ ...item, media_type: "tv" as const })),
-  ]);
-  const all = uniqueTitles([...cast, ...crew]);
+  ]) as CreditItem[];
+  const all = uniqueTitles([...cast, ...crew]) as CreditItem[];
+  const careerPool = getPrimaryCareerPool(person, cast, crew);
+
   return {
     person,
-    knownFor: [...all].sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0)).slice(0, 18),
+    knownFor: sortByCareerRelevance(careerPool.length ? careerPool : all, person).slice(0, 18),
     recent: sortByRelease(all).slice(0, 24),
-    cast,
-    crew,
+    cast: sortByCareerRelevance(cast, { ...person, known_for_department: "Acting" }),
+    crew: sortByCareerRelevance(crew, person),
   };
 }
 

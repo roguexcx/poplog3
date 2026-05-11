@@ -79,9 +79,20 @@ type EnrichedTitle = {
   latestReleasedEpisodeAt?: string | null;
   isContinuationComplete?: boolean;
   watchPlan?: WatchPlanningMetrics;
+  ignoredFeedbackId?: string;
+  ignoredSource?: string | null;
 };
 
-type Tab        = "watched" | "watchlist" | "favorites" | "ongoing" | "fridge" | "abandoned";
+type FeedbackRow = {
+  id: string;
+  tmdb_id: number;
+  media_type: "movie" | "tv";
+  feedback_type: "not_interested";
+  source: string | null;
+  created_at: string;
+};
+
+type Tab        = "watched" | "watchlist" | "favorites" | "ongoing" | "fridge" | "abandoned" | "ignored";
 type FilterType = "all" | "movie" | "tv";
 type SortOrder  = "smart" | "popular" | "shortest" | "longest" | "newest_release" | "oldest_release" | "recent" | "az" | "rating";
 type PlannedTitle = EnrichedTitle & { watchPlan: WatchPlanningMetrics };
@@ -241,10 +252,14 @@ function PosterCard({
   item,
   priority = false,
   showFridgeBadge = false,
+  showIgnoredBadge = false,
+  onRemoveIgnored,
 }: {
   item: EnrichedTitle;
   priority?: boolean;
   showFridgeBadge?: boolean;
+  showIgnoredBadge?: boolean;
+  onRemoveIgnored?: (item: EnrichedTitle) => void;
 }) {
   const title  = item.tmdb ? getTitle(item.tmdb) : `#${item.tmdb_id}`;
   const originalTitle = item.tmdb ? getOriginalTitle(item.tmdb) : null;
@@ -257,6 +272,8 @@ function PosterCard({
 
   const badge = showFridgeBadge
     ? { icon: <IconFridge />, cls: "border border-cyan-400/30 bg-cyan-400/[0.14] text-cyan-300" }
+    : showIgnoredBadge
+      ? { label: "×", cls: "border border-rose-400/30 bg-rose-400/[0.16] text-rose-300" }
     : item.favorite
       ? { label: "★", cls: "bg-amber-400/90 text-amber-900 border-0" }
       : item.status === "watched"
@@ -266,7 +283,8 @@ function PosterCard({
           : null;
 
   return (
-    <Link href={`/title/${item.media_type}/${item.tmdb_id}`} className="group block">
+    <div className="group block">
+      <Link href={`/title/${item.media_type}/${item.tmdb_id}`} className="block">
       <div
         className={[
           "relative overflow-hidden rounded-[14px] bg-zinc-900/60 ring-1 ring-white/[0.07]",
@@ -319,7 +337,17 @@ function PosterCard({
           {showYear ? `${year} · ` : ""}{type}
         </p>
       </div>
-    </Link>
+      </Link>
+      {onRemoveIgnored && (
+        <button
+          type="button"
+          onClick={() => onRemoveIgnored(item)}
+          className="mt-2 w-full rounded-full border border-rose-400/20 bg-rose-400/[0.08] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.14em] text-rose-300 transition hover:bg-rose-400/[0.14] hover:text-rose-200"
+        >
+          Remover dos ignorados
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -613,6 +641,7 @@ function SkeletonProgress() {
 export default function ProfileClient() {
   const [user, setUser]       = useState<User | null>(null);
   const [titles, setTitles]   = useState<EnrichedTitle[]>([]);
+  const [ignoredTitles, setIgnoredTitles] = useState<EnrichedTitle[]>([]);
   const [loading, setLoading] = useState(true);
 
   const [filterType, setFilterType] = useState<FilterType>("all");
@@ -625,7 +654,7 @@ export default function ProfileClient() {
 
   useEffect(() => {
     const tabFromUrl  = searchParams.get("tab");
-    const validTabs: Tab[] = ["ongoing", "watchlist", "watched", "favorites", "fridge", "abandoned"];
+    const validTabs: Tab[] = ["ongoing", "watchlist", "watched", "favorites", "fridge", "abandoned", "ignored"];
     if (tabFromUrl && validTabs.includes(tabFromUrl as Tab)) {
       setActiveTab(tabFromUrl as Tab);
       setCurrentPage(1);
@@ -652,11 +681,19 @@ export default function ProfileClient() {
 
     async function fetchTitles() {
       try {
-        const { data: rawTitles, error } = await supabase
+        const [{ data: rawTitles, error }, { data: feedbackRows }] = await Promise.all([
+          supabase
           .from("user_titles")
           .select("*")
           .eq("user_id", user!.id)
-          .order("created_at", { ascending: false });
+            .order("created_at", { ascending: false }),
+          supabase
+            .from("user_title_feedback")
+            .select("id, tmdb_id, media_type, feedback_type, source, created_at")
+            .eq("user_id", user!.id)
+            .eq("feedback_type", "not_interested")
+            .order("created_at", { ascending: false }),
+        ]);
 
         if (error || !rawTitles || !mounted) return;
 
@@ -675,6 +712,26 @@ export default function ProfileClient() {
 
         if (!res.ok || !mounted) return;
         const json = await res.json();
+        const rawIgnored = ((feedbackRows ?? []) as FeedbackRow[]).map((feedback) => ({
+          id: feedback.id,
+          user_id: user!.id,
+          tmdb_id: feedback.tmdb_id,
+          media_type: feedback.media_type,
+          status: null,
+          favorite: false,
+          created_at: feedback.created_at,
+          ignoredFeedbackId: feedback.id,
+          ignoredSource: feedback.source,
+        }));
+
+        const ignoredRes = rawIgnored.length > 0
+          ? await fetch("/api/user/titles", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ titles: rawIgnored }),
+            })
+          : null;
+        const ignoredJson = ignoredRes?.ok ? await ignoredRes.json() : { titles: [] };
 
         // ── Busca eps disponíveis por série em andamento ───────────────────
         type AvailableEp = {
@@ -745,7 +802,22 @@ export default function ProfileClient() {
           };
         });
 
-        if (mounted) { setTitles(enriched); setLoading(false); }
+        const ignoredEnriched: EnrichedTitle[] = (ignoredJson.titles ?? []).map((title: EnrichedTitle) => {
+          const feedback = rawIgnored.find((item) => item.tmdb_id === title.tmdb_id && item.media_type === title.media_type);
+          return {
+            ...title,
+            status: null,
+            favorite: false,
+            ignoredFeedbackId: feedback?.ignoredFeedbackId,
+            ignoredSource: feedback?.ignoredSource ?? null,
+          };
+        });
+
+        if (mounted) {
+          setTitles(enriched);
+          setIgnoredTitles(ignoredEnriched);
+          setLoading(false);
+        }
       } catch {
         if (mounted) setLoading(false);
       }
@@ -757,6 +829,7 @@ export default function ProfileClient() {
       .channel("profile-titles-sync")
       .on("postgres_changes", { event: "*", schema: "public", table: "user_titles"     }, () => { if (mounted) fetchTitles(); })
       .on("postgres_changes", { event: "*", schema: "public", table: "episode_progress"}, () => { if (mounted) fetchTitles(); })
+      .on("postgres_changes", { event: "*", schema: "public", table: "user_title_feedback"}, () => { if (mounted) fetchTitles(); })
       .subscribe();
 
     return () => { mounted = false; supabase.removeChannel(channel); };
@@ -789,12 +862,36 @@ export default function ProfileClient() {
     return filtered;
   }
 
+  async function handleRemoveIgnored(item: EnrichedTitle) {
+    if (!user) return;
+
+    setIgnoredTitles((current) =>
+      current.filter((title) => !(title.tmdb_id === item.tmdb_id && title.media_type === item.media_type)),
+    );
+
+    const response = await fetch("/api/user/feedback", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tmdb_id: item.tmdb_id,
+        media_type: item.media_type,
+        feedback_type: "not_interested",
+        source: "profile_ignored",
+      }),
+    });
+
+    if (!response.ok) {
+      setIgnoredTitles((current) => [item, ...current]);
+    }
+  }
+
   // ── Listas derivadas ──────────────────────────────────────────────────────
   const watched   = useMemo(() => applyFiltersAndSort(titles.filter((t) => t.status === "watched" || t.favorite || t.isContinuationComplete)),  [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
   const watchlist = useMemo(() => applyFiltersAndSort(titles.filter((t) => t.status === "watchlist" && !isInFridge(t))), [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
   const favorites = useMemo(() => applyFiltersAndSort(titles.filter((t) => t.favorite)),                             [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
   const fridge    = useMemo(() => applyFiltersAndSort(titles.filter(isInFridge)),                                    [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
   const abandoned = useMemo(() => applyFiltersAndSort(titles.filter((t) => t.status === "abandoned")),                [titles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
+  const ignored   = useMemo(() => applyFiltersAndSort(ignoredTitles),                                                 [ignoredTitles, filterType, sortOrder]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const ongoing = useMemo((): PlannedTitle[] => {
     const list = titles
@@ -1001,6 +1098,7 @@ export default function ProfileClient() {
     { key: "favorites", label: "Favoritos",     count: favorites.length },
     { key: "fridge",    label: "Geladeira",     count: fridge.length    },
     { key: "abandoned", label: "Abandonados",   count: abandoned.length },
+    { key: "ignored",   label: "Ignorados",     count: ignored.length   },
   ];
 
   const activeItems =
@@ -1008,7 +1106,8 @@ export default function ProfileClient() {
     activeTab === "watchlist" ? watchlist :
     activeTab === "favorites" ? favorites :
     activeTab === "ongoing"   ? ongoing   :
-    activeTab === "fridge"    ? fridge    : abandoned;
+    activeTab === "fridge"    ? fridge    :
+    activeTab === "ignored"   ? ignored   : abandoned;
 
   const ITEMS_PER_PAGE = activeTab === "ongoing" ? 6 : 14;
   const totalPages     = Math.max(1, Math.ceil(activeItems.length / ITEMS_PER_PAGE));
@@ -1211,7 +1310,7 @@ export default function ProfileClient() {
                 activeTab === t.key
                   ? t.key === "fridge"
                     ? "border-cyan-400 text-cyan-300"
-                    : t.key === "abandoned"
+                    : t.key === "abandoned" || t.key === "ignored"
                       ? "border-rose-400 text-rose-300"
                       : "border-sky-400 text-sky-300"
                   : "border-transparent text-zinc-600 hover:text-zinc-300",
@@ -1223,7 +1322,7 @@ export default function ProfileClient() {
                   "ml-2 rounded-full px-1.5 py-0.5 text-[9px] font-bold",
                   activeTab === t.key && t.key === "fridge"
                     ? "bg-cyan-400/20 text-cyan-400"
-                    : activeTab === t.key && t.key === "abandoned"
+                    : activeTab === t.key && (t.key === "abandoned" || t.key === "ignored")
                       ? "bg-rose-400/20 text-rose-300"
                     : activeTab === t.key
                       ? "bg-sky-400/20 text-sky-400"
@@ -1325,6 +1424,11 @@ export default function ProfileClient() {
                 <p className="text-sm text-zinc-500">Sua geladeira está vazia.</p>
                 <p className="mt-1 text-xs text-zinc-700">Coloque séries e filmes aqui quando quiser guardar pra depois.</p>
               </>
+            ) : activeTab === "ignored" ? (
+              <>
+                <p className="text-sm text-zinc-500">Nenhum titulo ignorado.</p>
+                <p className="mt-1 text-xs text-zinc-700">Quando marcar algo como sem interesse, ele aparece aqui para voce desfazer depois.</p>
+              </>
             ) : activeTab === "ongoing" ? (
               <>
                 <p className="text-sm text-zinc-500">Nenhum título em andamento.</p>
@@ -1353,6 +1457,8 @@ export default function ProfileClient() {
                 item={item}
                 priority={index === 0}
                 showFridgeBadge={activeTab === "fridge"}
+                showIgnoredBadge={activeTab === "ignored"}
+                onRemoveIgnored={activeTab === "ignored" ? handleRemoveIgnored : undefined}
               />
             ))}
           </div>

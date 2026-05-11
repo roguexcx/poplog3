@@ -3,6 +3,7 @@
 
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
+import { useUserFeedbackToggle } from "@/hooks/useUserFeedbackToggle";
 import { IconBookmark, IconCheck, IconStar } from "@/components/ui/icons";
 import TmdbImage from "@/components/images/TmdbImage";
 import type { TMDBTitleDetail } from "@/features/title/title-types";
@@ -64,6 +65,11 @@ export default function TitleHero({ detail, mediaType }: Props) {
 
   const watchlist = useWatchlistToggle({ tmdbId: detail.id, mediaType, title, releaseYear });
   const watched = useWatchedToggle({ tmdbId: detail.id, mediaType, title, releaseYear });
+  const feedback = useUserFeedbackToggle({
+    tmdbId: detail.id,
+    mediaType,
+    source: "title_page",
+  });
 
   // Paths cruas — a construção de URL fica no <TmdbImage /> via builder central.
   const backdropPath = detail.backdrop_path ?? null;
@@ -100,7 +106,7 @@ export default function TitleHero({ detail, mediaType }: Props) {
     : null;
 
   const isLoading = watchlist.loading || watched.loading;
-  const isSaving = watchlist.saving || watched.saving;
+  const isSaving = watchlist.saving || watched.saving || feedback.saving;
 
   const btnBase = {
     borderRadius: "8px",
@@ -360,6 +366,21 @@ export default function TitleHero({ detail, mediaType }: Props) {
                   >
                     <IconCheck />
                     {watched.saving ? "..." : "Assistido"}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={feedback.toggleNotInterested}
+                    disabled={feedback.loading || feedback.saving || !feedback.isLoggedIn}
+                    style={{
+                      ...btnBase,
+                      background: feedback.notInterested ? "rgba(225,80,110,0.18)" : "rgba(255,255,255,0.06)",
+                      color: feedback.notInterested ? "#fb7185" : "rgba(255,255,255,0.62)",
+                      borderColor: feedback.notInterested ? "rgba(225,80,110,0.35)" : "rgba(255,255,255,0.12)",
+                      opacity: feedback.loading ? 0.5 : 1,
+                    }}
+                  >
+                    {feedback.saving ? "..." : feedback.notInterested ? "Sem interesse" : "Não tenho interesse"}
                   </button>
                 </>
               )}

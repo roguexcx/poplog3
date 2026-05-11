@@ -18,6 +18,21 @@ function getSupabase() {
   return createClient();
 }
 
+async function neutralizeNegativeFeedback(
+  userId: string,
+  tmdbId: number,
+  mediaType: MediaType,
+) {
+  const supabase = getSupabase();
+  await supabase
+    .from("user_title_feedback")
+    .delete()
+    .eq("user_id", userId)
+    .eq("tmdb_id", tmdbId)
+    .eq("media_type", mediaType)
+    .in("feedback_type", ["not_interested", "disliked", "hidden"]);
+}
+
 // ─── Queries ──────────────────────────────────────────────────────────────────
 
 export async function getUserTitles(userId: string): Promise<UserTitle[]> {
@@ -94,6 +109,10 @@ export async function toggleWatchlist({
 
     return false;
   }
+
+  await neutralizeNegativeFeedback(userId, tmdbId, mediaType);
+
+  await neutralizeNegativeFeedback(userId, tmdbId, mediaType);
 
   const { error } = await supabase.from("user_titles").insert({
     user_id: userId,
@@ -195,6 +214,8 @@ export async function toggleWatched({
   }
 
   if (existingRow) {
+    await neutralizeNegativeFeedback(userId, tmdbId, mediaType);
+
     const { error } = await supabase
       .from("user_titles")
       .update({

@@ -36,3 +36,19 @@ export function IconStar() {
     </svg>
   );
 }
+
+export function IconX() {
+  return (
+    <svg
+      viewBox="0 0 24 24"
+      className="h-[13px] w-[13px]"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeWidth={2.4}
+    >
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </svg>
+  );
+}

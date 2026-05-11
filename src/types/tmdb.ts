@@ -17,6 +17,12 @@ export interface TMDBItem {
   popularity?: number;
   genre_ids?: number[];
   number_of_seasons?: number | null;
+  personalScore?: number;
+  feedbackPenaltyApplied?: number;
+  userFeedback?: {
+    notInterested?: boolean;
+    activeTypes?: string[];
+  };
 }
 
 export interface TMDBResponse<T> {

@@ -9,6 +9,9 @@
 
 import { type NextRequest, NextResponse } from "next/server";
 import { tmdbFetch } from "@/lib/tmdb";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getUserFeedbackMap } from "@/lib/personalization/feedback";
+import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
 import {
   getRandomTitleImagePath,
   LOCALIZED_POSTER_RANDOMIZATION_LANGUAGES,
@@ -112,6 +115,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
     const data = await tmdbFetch<TMDBResponse<TMDBItem>>(endpoint, { page });
     let results = data.results ?? [];
 
@@ -135,6 +140,16 @@ export async function GET(request: NextRequest) {
       results = results.filter((item) => item.poster_path);
     }
 
+    if (user) {
+      const feedbackMap = await getUserFeedbackMap(user.id, supabase);
+      results = applyUserFeedbackScoring(results, {
+        userId: user.id,
+        feedbackMap,
+        context: type === "trending" ? "trending" : "home",
+        mediaType: media === "movie" || media === "tv" ? media : undefined,
+      });
+    }
+
     return NextResponse.json(
       {
         results,
@@ -142,7 +157,7 @@ export async function GET(request: NextRequest) {
         total_pages: data.total_pages,
         total_results: data.total_results,
       },
-      { headers: CACHE_HEADERS },
+      { headers: user ? undefined : CACHE_HEADERS },
     );
   } catch (error) {
     console.error(`Erro em /api/tmdb/list?type=${type}&media=${media}:`, error);

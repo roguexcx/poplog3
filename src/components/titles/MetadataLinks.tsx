@@ -6,6 +6,16 @@ export type GenreLink = { id: number; name: string };
 export type PersonLink = { id: number; name: string; subtitle?: string | null; image?: string | null };
 export type StudioLink = { id: number; name: string; kind: StudioKind; logo?: string | null };
 
+function uniquePeople(people: PersonLink[]): PersonLink[] {
+  const seen = new Set<string>();
+  return people.filter((person) => {
+    const key = `${person.id}:${person.name}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
 export function GenreChips({ genres, media }: { genres: GenreLink[]; media: IndexedMediaType }) {
   return (
     <div className="flex flex-wrap gap-2">
@@ -23,10 +33,12 @@ export function GenreChips({ genres, media }: { genres: GenreLink[]; media: Inde
 }
 
 export function InlinePeopleLinks({ people }: { people: PersonLink[] }) {
+  const unique = uniquePeople(people);
+
   return (
     <>
-      {people.map((person, index) => (
-        <span key={person.id}>
+      {unique.map((person, index) => (
+        <span key={`${person.id}-${person.name}-${index}`}>
           {index > 0 && ", "}
           <Link href={personHref(person.id)} className="font-bold text-zinc-300 transition hover:text-sky-200">
             {person.name}
@@ -38,10 +50,12 @@ export function InlinePeopleLinks({ people }: { people: PersonLink[] }) {
 }
 
 export function PeopleList({ people }: { people: PersonLink[] }) {
+  const unique = uniquePeople(people);
+
   return (
     <div className="space-y-3">
-      {people.map((person) => (
-        <Link key={person.id} href={personHref(person.id)} className="flex items-center gap-3 rounded-xl transition hover:bg-white/[0.04]">
+      {unique.map((person, index) => (
+        <Link key={`${person.id}-${person.name}-${index}`} href={personHref(person.id)} className="flex items-center gap-3 rounded-xl transition hover:bg-white/[0.04]">
           <TmdbImage
             path={person.image ?? null}
             kind="profile"

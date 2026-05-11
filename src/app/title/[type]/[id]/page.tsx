@@ -11,6 +11,7 @@ import {
 import { getContentTypeLabel, normalizeKeywordName } from "@/lib/title-utils";
 import { getStreamingInfo } from "@/lib/streaming";
 import type { StreamingProvider } from "@/lib/streaming";
+import { findOfficialTrailerOnYouTube } from "@/lib/youtube-trailer";
 import TitleActions from "@/features/title/TitleActions";
 import TitleTabs from "@/features/title/TitleTabs";
 import MoreLikeThis from "@/features/title/MoreLikeThis";
@@ -96,24 +97,68 @@ async function getSeasons(tvId: string, seasonNumbers: number[]): Promise<TMDBSe
   return results.filter((s): s is TMDBSeason => s !== null);
 }
 
-async function getTrailerKey(type: string, id: string): Promise<string | null> {
-  type VideoResult = { site: string; type: string; key: string };
+async function getTrailerKey(type: "movie" | "tv", id: string, title: string, year?: string | null): Promise<string | null> {
+  type VideoResult = { site: string; type: string; key: string; official?: boolean; name?: string; iso_639_1?: string };
 
-  function pick(results: VideoResult[]): string | null {
-    const yt = results.filter((v) => v.site === "YouTube");
-    return (yt.find((v) => v.type === "Trailer") ?? yt.find((v) => v.type === "Teaser"))?.key ?? null;
+  function normalizeVideoText(value: string | null | undefined): string {
+    return (value ?? "")
+      .toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
+  }
+
+  function isFanVideo(video: VideoResult): boolean {
+    const name = normalizeVideoText(video.name);
+    return [
+      "dublagem caseira",
+      "dublagem de fa",
+      "fan dub",
+      "fandub",
+      "fanmade",
+      "redublado",
+      "trailer fan",
+      "parodia",
+    ].some((term) => name.includes(normalizeVideoText(term)));
+  }
+
+  function pickByPreference(results: VideoResult[], preference: "dubbed" | "subtitled" | "english"): string | null {
+    const yt = results
+      .filter((v) => v.site === "YouTube")
+      .filter((v) => v.type === "Trailer" || v.type === "Teaser")
+      .filter((v) => !isFanVideo(v));
+
+    const matchesPreference = (video: VideoResult) => {
+      const name = normalizeVideoText(video.name);
+      if (preference === "dubbed") return name.includes("dublado");
+      if (preference === "subtitled") return name.includes("legendado") || name.includes("subtitulado");
+      return video.iso_639_1 === "en" || name.includes("official trailer");
+    };
+
+    return (
+      yt.find((v) => v.type === "Trailer" && v.official && matchesPreference(v))?.key ??
+      yt.find((v) => v.type === "Trailer" && matchesPreference(v))?.key ??
+      yt.find((v) => v.type === "Teaser" && v.official && matchesPreference(v))?.key ??
+      yt.find((v) => v.type === "Teaser" && matchesPreference(v))?.key ??
+      null
+    );
   }
 
   try {
     const ptBR = await tmdbFetch<{ results: VideoResult[] }>(`/${type}/${id}/videos`, { language: "pt-BR" });
-    const key = pick(ptBR.results ?? []);
-    if (key) return key;
+    const dubbedKey = pickByPreference(ptBR.results ?? [], "dubbed");
+    if (dubbedKey) return dubbedKey;
+
+    const subtitledKey = pickByPreference(ptBR.results ?? [], "subtitled");
+    if (subtitledKey) return subtitledKey;
 
     const fallback = await tmdbFetch<{ results: VideoResult[] }>(`/${type}/${id}/videos`);
-    return pick(fallback.results ?? []);
+    const englishKey = pickByPreference(fallback.results ?? [], "english");
+    if (englishKey) return englishKey;
   } catch {
-    return null;
+    // Continua para a busca no YouTube quando o TMDB nao tiver video util.
   }
+
+  return findOfficialTrailerOnYouTube({ title, year, mediaType: type });
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -251,7 +296,7 @@ export default async function TitleDetailPage({ params }: Props) {
     .slice(0, 3);
   const cast       = (data.credits?.cast ?? []).slice(0, 8);
   const creators   = data.created_by ?? [];
-  const trailerKey = await getTrailerKey(type, id);
+  const trailerKey = await getTrailerKey(type, id, title, year);
   const franchise: TmdbCollection | null =
     type === "movie" && data.belongs_to_collection?.id
       ? await fetchCollectionUniverse(data.belongs_to_collection.id, data.id)

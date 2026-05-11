@@ -6,9 +6,10 @@ import { useEffect, useRef, useState } from "react";
 
 import SynopsisText from "@/features/home/components/SynopsisText";
 import { CardActionButton } from "@/components/ui/CardActionButton";
-import { IconBookmark, IconCheck, IconStar } from "@/components/ui/icons";
+import { IconBookmark, IconCheck, IconStar, IconX } from "@/components/ui/icons";
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
+import { useUserFeedbackToggle } from "@/hooks/useUserFeedbackToggle";
 import { useUserData } from "@/context/UserDataContext";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import TmdbImage from "@/components/images/TmdbImage";
@@ -30,6 +31,9 @@ type ForYouItem = {
   media_label?: string;
   genre_label?: string | null;
   reason?: string;
+  userFeedback?: {
+    notInterested?: boolean;
+  };
 };
 
 // ─── Utilitários ──────────────────────────────────────────────────────────────
@@ -56,6 +60,12 @@ function ForYouActions({ item }: { item: ForYouItem }) {
 
   const watchlist = useWatchlistToggle(shared);
   const watched = useWatchedToggle(shared);
+  const feedback = useUserFeedbackToggle({
+    tmdbId: item.id,
+    mediaType: item.media_type,
+    source: "for_you",
+    initialNotInterested: Boolean(item.userFeedback?.notInterested),
+  });
 
   return (
     <div className="absolute right-2.5 top-2.5 z-40 flex gap-1.5">
@@ -79,6 +89,17 @@ function ForYouActions({ item }: { item: ForYouItem }) {
         activeClass="border-emerald-400/55 bg-emerald-400/[0.18] text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.25)]"
       >
         <IconCheck />
+      </CardActionButton>
+
+      <CardActionButton
+        onClick={feedback.toggleNotInterested}
+        disabled={feedback.loading || !feedback.isLoggedIn}
+        title={feedback.notInterested ? "Remover sem interesse" : "Não tenho interesse"}
+        active={feedback.notInterested}
+        saving={feedback.saving}
+        activeClass="border-rose-400/55 bg-rose-400/[0.18] text-rose-300 shadow-[0_0_10px_rgba(251,113,133,0.22)]"
+      >
+        <IconX />
       </CardActionButton>
     </div>
   );

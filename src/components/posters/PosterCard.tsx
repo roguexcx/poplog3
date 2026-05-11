@@ -6,10 +6,11 @@ import Link from "next/link";
 
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
+import { useUserFeedbackToggle } from "@/hooks/useUserFeedbackToggle";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import TmdbImage from "@/components/images/TmdbImage";
 import { CardActionButton } from "@/components/ui/CardActionButton";
-import { IconBookmark, IconCheck, IconStar } from "@/components/ui/icons";
+import { IconBookmark, IconCheck, IconStar, IconX } from "@/components/ui/icons";
 import type { TMDBItem, TMDBMediaType } from "@/types/tmdb";
 import {
   getOriginalTitle,
@@ -47,6 +48,12 @@ export default function PosterCard({ item, priority = false }: Props) {
 
   const watchlist = useWatchlistToggle(sharedProps);
   const watched = useWatchedToggle(sharedProps);
+  const feedback = useUserFeedbackToggle({
+    tmdbId: item.id,
+    mediaType: type,
+    source: "poster_card",
+    initialNotInterested: Boolean(item.userFeedback?.notInterested),
+  });
 
   return (
     <article className="group block">
@@ -117,6 +124,17 @@ export default function PosterCard({ item, priority = false }: Props) {
             activeClass="border-emerald-400/55 bg-emerald-400/[0.18] text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.25)]"
           >
             <IconCheck />
+          </CardActionButton>
+
+          <CardActionButton
+            onClick={feedback.toggleNotInterested}
+            disabled={feedback.loading || !feedback.isLoggedIn}
+            title={feedback.notInterested ? "Remover sem interesse" : "Não tenho interesse"}
+            active={feedback.notInterested}
+            saving={feedback.saving}
+            activeClass="border-rose-400/55 bg-rose-400/[0.18] text-rose-300 shadow-[0_0_10px_rgba(251,113,133,0.22)]"
+          >
+            <IconX />
           </CardActionButton>
         </div>
 

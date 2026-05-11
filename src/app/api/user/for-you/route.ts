@@ -2,6 +2,9 @@
 
 import { NextResponse } from "next/server";
 import { tmdbFetch } from "@/lib/tmdb";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getUserFeedbackMap } from "@/lib/personalization/feedback";
+import { scoreTitleForUser } from "@/lib/personalization/scoring";
 import {
   BACKDROP_RANDOMIZATION_LANGUAGES,
   fetchTitleImages,
@@ -190,6 +193,9 @@ async function normalizeForResponse(candidate: Candidate) {
 
 export async function POST(request: Request) {
   try {
+    const supabase = await createSupabaseServerClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    const feedbackMap = user ? await getUserFeedbackMap(user.id, supabase) : undefined;
     const { titles } = await request.json();
 
     if (!Array.isArray(titles) || titles.length === 0) {
@@ -266,7 +272,31 @@ export async function POST(request: Request) {
       }
     }
 
-    const allCandidates = [...candidateMap.values()].sort((a, b) => b.score - a.score);
+    const allCandidates = [...candidateMap.values()]
+      .map((candidate, index) => {
+        const scoredItem = scoreTitleForUser(
+          {
+            ...candidate.item,
+            media_type: candidate.mediaType,
+            personalScore: candidate.score,
+          },
+          index,
+          {
+            userId: user?.id,
+            feedbackMap,
+            context: "for_you",
+            mediaType: candidate.mediaType,
+            getBaseScore: () => candidate.score,
+          },
+        );
+
+        return {
+          ...candidate,
+          item: scoredItem,
+          score: scoredItem.personalScore ?? candidate.score,
+        };
+      })
+      .sort((a, b) => b.score - a.score);
     const movieCandidates = allCandidates.filter((c) => c.mediaType === "movie");
     const tvCandidates = allCandidates.filter((c) => c.mediaType === "tv");
 
