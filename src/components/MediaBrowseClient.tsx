@@ -3,7 +3,9 @@
 // Componente genérico de listagem paginada de filmes ou séries.
 
 import { useState, useEffect, useCallback } from "react";
+import Link from "next/link";
 import PosterCard from "@/components/posters/PosterCard";
+import { genreHref } from "@/lib/tmdb-index";
 import type { TMDBItem, TMDBMediaType } from "@/types/tmdb";
 
 type FilterDef<K extends string> = { key: K; label: string };
@@ -14,6 +16,7 @@ type Props<K extends string> = {
   pageSubtitle: string;
   filters: readonly FilterDef<K>[];
   defaultFilter: K;
+  genres?: readonly { id: number; name: string }[];
 };
 
 function SkeletonCard() {
@@ -32,6 +35,7 @@ export default function MediaBrowseClient<K extends string>({
   pageSubtitle,
   filters,
   defaultFilter,
+  genres = [],
 }: Props<K>) {
   const [filter, setFilter] = useState<K>(defaultFilter);
   const [items, setItems] = useState<TMDBItem[]>([]);
@@ -71,9 +75,7 @@ export default function MediaBrowseClient<K extends string>({
   );
 
   useEffect(() => {
-    setPage(1);
-    setItems([]);
-    fetchItems(filter, 1);
+    void Promise.resolve().then(() => fetchItems(filter, 1));
   }, [filter, fetchItems]);
 
   function handleLoadMore() {
@@ -98,7 +100,10 @@ export default function MediaBrowseClient<K extends string>({
             <button
               key={f.key}
               type="button"
-              onClick={() => setFilter(f.key)}
+              onClick={() => {
+                setPage(1);
+                setFilter(f.key);
+              }}
               className={[
                 "shrink-0 rounded-full border px-4 py-2 text-sm font-bold transition",
                 filter === f.key
@@ -110,6 +115,25 @@ export default function MediaBrowseClient<K extends string>({
             </button>
           ))}
         </div>
+
+        {genres.length > 0 && (
+          <div className="mb-8">
+            <p className="mb-3 text-[10px] font-black uppercase tracking-[0.28em] text-sky-300">
+              Explorar por gênero
+            </p>
+            <div className="-mx-4 flex gap-2 overflow-x-auto px-4 pb-1 no-scrollbar sm:-mx-6 sm:px-6">
+              {genres.map((genre) => (
+                <Link
+                  key={genre.id}
+                  href={genreHref(mediaType, genre.id)}
+                  className="shrink-0 rounded-full border border-white/10 bg-white/[0.035] px-4 py-2 text-xs font-bold text-zinc-400 transition hover:border-sky-300/35 hover:bg-sky-300/[0.10] hover:text-sky-100"
+                >
+                  {genre.name}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
 
         {loading ? (
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5">

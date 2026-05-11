@@ -15,8 +15,11 @@ import TitleActions from "@/features/title/TitleActions";
 import TitleTabs from "@/features/title/TitleTabs";
 import MoreLikeThis from "@/features/title/MoreLikeThis";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
+import FranchiseUniverse from "@/components/titles/FranchiseUniverse";
+import { GenreChips, InlinePeopleLinks, PeopleList, StudioLinks } from "@/components/titles/MetadataLinks";
 import TmdbImage from "@/components/images/TmdbImage";
 import RandomTmdbImage from "@/components/images/RandomTmdbImage";
+import { fetchCollectionUniverse, type TmdbCollection } from "@/lib/tmdb-index";
 import type {
   TMDBTitleDetail,
   TMDBSeason,
@@ -240,7 +243,7 @@ export default async function TitleDetailPage({ params }: Props) {
   const rating        = typeof data.vote_average === "number" ? data.vote_average.toFixed(1) : null;
   const genreIds      = getGenreIds(data);
   const contentTypeLabel = getContentTypeLabel(type, genreIds);
-  const genres: string[] = (data.genres ?? []).map((g) => g.name);
+  const genres = data.genres ?? [];
 
   const directors  = (data.credits?.crew ?? []).filter((p) => p.job === "Director");
   const writers    = (data.credits?.crew ?? [])
@@ -249,6 +252,10 @@ export default async function TitleDetailPage({ params }: Props) {
   const cast       = (data.credits?.cast ?? []).slice(0, 8);
   const creators   = data.created_by ?? [];
   const trailerKey = await getTrailerKey(type, id);
+  const franchise: TmdbCollection | null =
+    type === "movie" && data.belongs_to_collection?.id
+      ? await fetchCollectionUniverse(data.belongs_to_collection.id, data.id)
+      : null;
 
   const candidates      = getCandidates(data);
   const sourceGenreIds  = genreIds;
@@ -340,6 +347,8 @@ export default async function TitleDetailPage({ params }: Props) {
         mediaType={type as "movie" | "tv"}
       />
 
+      <FranchiseUniverse collection={franchise} />
+
       {seriesSchedule?.renewalNote && (
         <section>
           <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-zinc-400">
@@ -423,9 +432,7 @@ export default async function TitleDetailPage({ params }: Props) {
             {directors.length > 0 && (
               <p className="mt-2 text-sm text-zinc-500">
                 Direção{" "}
-                <span className="font-bold text-zinc-300">
-                  {directors.map((d) => d.name).join(", ")}
-                </span>
+                <InlinePeopleLinks people={directors.map((d) => ({ id: d.id, name: d.name }))} />
               </p>
             )}
             <div className="mt-4 flex justify-center sm:justify-start">
@@ -571,16 +578,7 @@ export default async function TitleDetailPage({ params }: Props) {
             {genres.length > 0 && (
               <SidebarCard>
                 <SidebarLabel>Gêneros</SidebarLabel>
-                <div className="flex flex-wrap gap-2">
-                  {genres.map((g) => (
-                    <span
-                      key={g}
-                      className="rounded-full border border-white/10 bg-black/25 px-3 py-1 text-xs font-semibold text-zinc-300 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-md"
-                    >
-                      {g}
-                    </span>
-                  ))}
-                </div>
+                <GenreChips genres={genres} media={type as "movie" | "tv"} />
               </SidebarCard>
             )}
 
@@ -588,30 +586,32 @@ export default async function TitleDetailPage({ params }: Props) {
             {cast.length > 0 && (
               <SidebarCard>
                 <SidebarLabel>Elenco</SidebarLabel>
-                <div className="space-y-3">
-                  {cast.map((person) => (
-                    <div key={person.id} className="flex items-center gap-3">
-                      <TmdbImage
-                        path={person.profile_path}
-                        kind="profile"
-                        size="medium"
-                        alt={person.name}
-                        width={40}
-                        height={40}
-                        className="h-9 w-9 shrink-0 rounded-full object-cover ring-1 ring-white/10"
-                        fallback={
-                          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white/5 ring-1 ring-white/10 text-xs text-zinc-500">
-                            {person.name.charAt(0)}
-                          </div>
-                        }
-                      />
-                      <div className="min-w-0">
-                        <p className="truncate text-xs font-bold text-zinc-200">{person.name}</p>
-                        <p className="truncate text-[11px] text-zinc-500">{person.character}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                <PeopleList people={cast.map((person) => ({
+                  id: person.id,
+                  name: person.name,
+                  subtitle: person.character,
+                  image: person.profile_path,
+                }))} />
+              </SidebarCard>
+            )}
+
+            {((data.production_companies?.length ?? 0) > 0 || (data.networks?.length ?? 0) > 0) && (
+              <SidebarCard>
+                <SidebarLabel>Estúdio</SidebarLabel>
+                <StudioLinks studios={[
+                  ...(data.production_companies ?? []).slice(0, 5).map((studio) => ({
+                    id: studio.id,
+                    name: studio.name,
+                    kind: "company" as const,
+                    logo: studio.logo_path ?? null,
+                  })),
+                  ...(data.networks ?? []).slice(0, 5).map((network) => ({
+                    id: network.id,
+                    name: network.name,
+                    kind: "network" as const,
+                    logo: network.logo_path ?? null,
+                  })),
+                ]} />
               </SidebarCard>
             )}
 
@@ -625,7 +625,7 @@ export default async function TitleDetailPage({ params }: Props) {
                   <div>
                     <dt className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-600">Direção</dt>
                     <dd className="mt-0.5 text-xs font-semibold text-zinc-300">
-                      {directors.map((d) => d.name).join(", ")}
+                      <InlinePeopleLinks people={directors.map((d) => ({ id: d.id, name: d.name }))} />
                     </dd>
                   </div>
                 )}
@@ -635,7 +635,7 @@ export default async function TitleDetailPage({ params }: Props) {
                   <div>
                     <dt className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-600">Criação</dt>
                     <dd className="mt-0.5 text-xs font-semibold text-zinc-300">
-                      {creators.map((c) => c.name).join(", ")}
+                      <InlinePeopleLinks people={creators.map((c) => ({ id: c.id, name: c.name }))} />
                     </dd>
                   </div>
                 )}
@@ -645,7 +645,7 @@ export default async function TitleDetailPage({ params }: Props) {
                   <div>
                     <dt className="text-[10px] font-black uppercase tracking-[0.25em] text-zinc-600">Roteiro</dt>
                     <dd className="mt-0.5 text-xs font-semibold text-zinc-300">
-                      {writers.map((w) => w.name).join(", ")}
+                      <InlinePeopleLinks people={writers.map((w) => ({ id: w.id, name: w.name }))} />
                     </dd>
                   </div>
                 )}

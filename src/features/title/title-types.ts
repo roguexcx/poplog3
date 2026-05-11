@@ -18,6 +18,7 @@ export interface TMDBCrewMember {
   name: string;
   job: string;
   department: string;
+  profile_path?: string | null;
 }
 
 export interface TMDBVideo {
@@ -124,9 +125,15 @@ export interface TMDBTitleDetail {
     results?: Array<{ id: number; name: string }>;
   };
   production_countries?: Array<{ iso_3166_1: string; name: string }>;
-  production_companies?: Array<{ id: number; name: string }>;
+  production_companies?: Array<{ id: number; name: string; logo_path?: string | null }>;
   budget?: number;
   revenue?: number;
+  belongs_to_collection?: {
+    id: number;
+    name: string;
+    poster_path: string | null;
+    backdrop_path: string | null;
+  } | null;
   // appended responses
   credits?: {
     cast: TMDBCastMember[];

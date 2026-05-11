@@ -95,6 +95,7 @@ export type WatchPlanningItem<T> = T & {
 const DEFAULT_EPISODE_MINUTES = 45;
 const DEFAULT_MOVIE_MINUTES = 110;
 const FINISH_TODAY_LIMIT_MINUTES = 240;
+const NEW_EPISODE_WINDOW_DAYS = 14;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
@@ -121,6 +122,11 @@ function daysSinceDate(value: string | null | undefined): number | null {
   const time = new Date(value).getTime();
   if (Number.isNaN(time)) return null;
   return Math.max(0, Math.floor((Date.now() - time) / 86_400_000));
+}
+
+function isRecentDate(value: string | null | undefined, windowDays: number): boolean {
+  const days = daysSinceDate(value);
+  return days !== null && days <= windowDays;
 }
 
 export function buildSeriesContinuationState<T extends WatchAvailableEpisodeInput>(
@@ -341,7 +347,12 @@ export function buildWatchPlanningMetrics(input: WatchPlanningInput): WatchPlann
   const totalMinutes = totalEpisodes > 0 && runtime.minutes ? totalEpisodes * runtime.minutes : null;
   const watchedMinutes = runtime.minutes ? watchedEpisodes * runtime.minutes : null;
   const remainingMinutes = remainingEpisodes !== null && runtime.minutes ? remainingEpisodes * runtime.minutes : null;
-  const hasNewEpisode = Boolean(input.nextEpisode && remainingEpisodes !== null && remainingEpisodes > 0);
+  const hasNewEpisode = Boolean(
+    input.nextEpisode &&
+    remainingEpisodes !== null &&
+    remainingEpisodes > 0 &&
+    isRecentDate(latestReleasedEpisodeAt, NEW_EPISODE_WINDOW_DAYS),
+  );
 
   const base: WatchPlanningMetrics = {
     id: input.id,
@@ -447,18 +458,15 @@ export function formatStalledTime(days: number | null): string | null {
 
 export function getWatchPlanningBadges(metrics: WatchPlanningMetrics): string[] {
   const badges: string[] = [];
+  const remainingLabel = formatWatchMinutes(metrics.remainingMinutes, metrics.isRuntimeEstimated);
 
   if (metrics.remainingEpisodes !== null && metrics.remainingEpisodes > 0) {
-    badges.push(`faltam ${metrics.remainingEpisodes} ep${metrics.remainingEpisodes === 1 ? "" : "s"}`);
+    const episodeLabel = metrics.remainingEpisodes === 1 ? "1 episódio" : `${metrics.remainingEpisodes} episódios`;
+    const prefix = metrics.remainingEpisodes <= 3 ? "Falta apenas" : "Faltam";
+    badges.push(`${prefix} ${episodeLabel}${remainingLabel ? ` (${remainingLabel})` : ""}`);
+  } else if (remainingLabel && (metrics.remainingMinutes ?? 0) > 0) {
+    badges.push(`Faltam ${remainingLabel}`);
   }
-
-  const remainingLabel = formatWatchMinutes(metrics.remainingMinutes, metrics.isRuntimeEstimated);
-  if (remainingLabel && (metrics.remainingMinutes ?? 0) > 0) badges.push(`${remainingLabel} restantes`);
-
-  if (metrics.progressPercent !== null) badges.push(`${metrics.progressPercent}% concluído`);
-
-  const stalled = formatStalledTime(metrics.daysStalled);
-  if (stalled) badges.push(`parado há ${stalled}`);
 
   if (metrics.hasNewEpisode) badges.push("episódio novo disponível");
   if (metrics.canFinishToday) badges.push("dá pra terminar hoje");

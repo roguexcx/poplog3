@@ -13,6 +13,7 @@ import {
   User,
   Library,
   Settings,
+  CalendarDays,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { createClient } from "@/lib/supabase/client";
@@ -26,6 +27,7 @@ const NAV_LINKS = [
   { href: "/filmes", label: "Filmes", icon: Film },
   { href: "/series", label: "Séries", icon: Tv },
   { href: "/sorteio", label: "Sorteio", icon: Sparkles },
+  { href: "/agenda", label: "Agenda", icon: CalendarDays },
   { href: "/profile", label: "Biblioteca", icon: Library },
 ];
 

@@ -8,7 +8,11 @@ const FILTERS = [
   { key: "top_rated",  label: "Melhores avaliadas" },
 ] as const;
 
-export default function SeriesClient() {
+type Props = {
+  genres?: readonly { id: number; name: string }[];
+};
+
+export default function SeriesClient({ genres = [] }: Props) {
   return (
     <MediaBrowseClient
       mediaType="tv"
@@ -16,6 +20,7 @@ export default function SeriesClient() {
       pageSubtitle="Explore as melhores séries"
       filters={FILTERS}
       defaultFilter="popular"
+      genres={genres}
     />
   );
 }

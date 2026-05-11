@@ -18,7 +18,6 @@ import {
   withWatchPlanning,
   formatWatchMinutes,
   type WatchPlanningMetrics,
-  type WatchPlanningMode,
   type WatchPlanningSort,
 } from "@/lib/watch-planning";
 
@@ -84,8 +83,26 @@ type EnrichedTitle = {
 
 type Tab        = "watched" | "watchlist" | "favorites" | "ongoing" | "fridge" | "abandoned";
 type FilterType = "all" | "movie" | "tv";
-type SortOrder  = "recent" | "az" | "rating";
+type SortOrder  = "smart" | "popular" | "shortest" | "longest" | "newest_release" | "oldest_release" | "recent" | "az" | "rating";
 type PlannedTitle = EnrichedTitle & { watchPlan: WatchPlanningMetrics };
+type SelectOption<T extends string> = { value: T; label: string };
+type ProfileStats = {
+  totalWatchedMinutes: number;
+  movieWatchedMinutes: number;
+  tvWatchedMinutes: number;
+  watchedTitles: number;
+  watchedMoviesThisMonth: number;
+  averageRating: number | null;
+  averageDuration: number | null;
+  favoriteCount: number;
+  watchlistCount: number;
+  ongoingCount: number;
+  completedSeriesCount: number;
+  abandonedSeriesCount: number;
+  dominantType: string;
+  topGenres: Array<{ name: string; count: number }>;
+  habitSignals: string[];
+};
 
 type Suggestion = {
   title: EnrichedTitle;
@@ -113,6 +130,96 @@ function daysSince(dateStr: string): number {
 
 function isInFridge(title: Pick<EnrichedTitle, "fridge" | "status">): boolean {
   return title.fridge === true || title.status === "fridge";
+}
+
+const filterOptions: SelectOption<FilterType>[] = [
+  { value: "all", label: "Todos" },
+  { value: "movie", label: "Filmes" },
+  { value: "tv", label: "Séries" },
+];
+
+const librarySortOptions: SelectOption<SortOrder>[] = [
+  { value: "smart", label: "Inteligente" },
+  { value: "popular", label: "Popularidade" },
+  { value: "shortest", label: "Mais curto" },
+  { value: "longest", label: "Mais longo" },
+  { value: "newest_release", label: "Mais novo" },
+  { value: "oldest_release", label: "Mais antigo" },
+  { value: "rating", label: "Melhor avaliado" },
+  { value: "recent", label: "Adicionado recentemente" },
+  { value: "az", label: "Título" },
+];
+
+const watchPlanSortOptions: SelectOption<WatchPlanningSort>[] = [
+  { value: "best_value", label: "Inteligente" },
+  { value: "finish_fastest", label: "Tempo restante" },
+  { value: "fewest_episodes", label: "Episódios restantes" },
+  { value: "highest_progress", label: "Maior progresso" },
+  { value: "newest_episode", label: "Episódio mais recente" },
+  { value: "oldest_episode", label: "Episódio mais antigo" },
+  { value: "most_popular", label: "Mais popular" },
+  { value: "best_rated", label: "Melhor avaliado" },
+];
+
+function getWatchPlanMode(sort: WatchPlanningSort) {
+  if (sort === "fewest_episodes") return "episodes";
+  if (sort === "finish_fastest") return "time";
+  return "hybrid";
+}
+
+function getReleaseTime(title: EnrichedTitle): number | null {
+  const date = title.tmdb?.release_date ?? title.tmdb?.first_air_date ?? null;
+  if (!date) return null;
+  const time = new Date(date).getTime();
+  return Number.isFinite(time) ? time : null;
+}
+
+function getEstimatedDuration(title: EnrichedTitle): number | null {
+  if (title.media_type === "movie") return title.tmdb?.runtime ?? null;
+
+  const totalEpisodes = title.totalEpisodes ?? title.tmdb?.seasons?.reduce((sum, season) => {
+    if (season.season_number <= 0) return sum;
+    return sum + (season.episode_count ?? 0);
+  }, 0) ?? null;
+  const runtimes = title.tmdb?.episode_run_time?.filter((runtime) => runtime > 0) ?? [];
+  const averageRuntime = runtimes.length > 0
+    ? runtimes.reduce((sum, runtime) => sum + runtime, 0) / runtimes.length
+    : 45;
+
+  return totalEpisodes && totalEpisodes > 0 ? totalEpisodes * averageRuntime : null;
+}
+
+function compareNullable(a: number | null, b: number | null, direction: "asc" | "desc" = "asc") {
+  if (a === null && b === null) return 0;
+  if (a === null) return 1;
+  if (b === null) return -1;
+  return direction === "asc" ? a - b : b - a;
+}
+
+function formatStatMinutes(minutes: number | null): string {
+  if (!minutes || minutes <= 0) return "0min";
+  const hours = Math.floor(minutes / 60);
+  const mins = Math.round(minutes % 60);
+  if (hours <= 0) return `${mins}min`;
+  return mins > 0 ? `${hours}h${String(mins).padStart(2, "0")}` : `${hours}h`;
+}
+
+function isThisMonth(date: string | null | undefined): boolean {
+  if (!date) return false;
+  const value = new Date(date);
+  const now = new Date();
+  return value.getFullYear() === now.getFullYear() && value.getMonth() === now.getMonth();
+}
+
+function scoreLibraryTitle(title: EnrichedTitle): number {
+  const popularity = title.tmdb?.popularity ?? 0;
+  const rating = title.tmdb?.vote_average ?? 0;
+  const duration = getEstimatedDuration(title);
+  const releaseTime = getReleaseTime(title);
+  const durationBoost = duration === null ? 0 : Math.max(0, 1 - Math.min(duration, 900) / 900) * 12;
+  const recencyBoost = releaseTime === null ? 0 : Math.max(0, Math.min(10, (releaseTime - Date.UTC(2010, 0, 1)) / 31_536_000_000));
+
+  return scoreTitle(title) + popularity * 0.35 + rating * 4 + durationBoost + recencyBoost;
 }
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -265,7 +372,7 @@ function SuggestionCard({ suggestion }: { suggestion: Suggestion }) {
     <Link
       href={href}
       className={[
-        "group relative flex-shrink-0 w-[180px] overflow-hidden rounded-2xl",
+        "group relative min-w-0 overflow-hidden rounded-2xl",
         "border border-white/[0.08] bg-white/[0.04] backdrop-blur-sm",
         "transition duration-300 hover:-translate-y-1 hover:border-white/[0.15]",
         "hover:shadow-[0_12px_40px_rgba(0,0,0,0.55)]",
@@ -449,11 +556,7 @@ function ProgressCard({ item }: { item: EnrichedTitle }) {
           )}
 
           <div className="mt-auto flex items-end justify-between gap-3 pt-4">
-            {remaining > 0 ? (
-              <span className="rounded-full border border-white/[0.09] bg-white/[0.04] px-3 py-1 text-[10px] font-black text-zinc-400">
-                {remainingTime ? `${remainingTime} restantes` : `Faltam ${remaining} ep${remaining > 1 ? "s" : ""}`}
-              </span>
-            ) : isUpToDate ? (
+            {isUpToDate ? (
               <span className="rounded-full border border-emerald-400/20 bg-emerald-400/[0.08] px-3 py-1 text-[10px] font-black text-emerald-400">
                 Em dia
               </span>
@@ -513,8 +616,7 @@ export default function ProfileClient() {
   const [loading, setLoading] = useState(true);
 
   const [filterType, setFilterType] = useState<FilterType>("all");
-  const [sortOrder, setSortOrder]   = useState<SortOrder>("rating");
-  const [watchPlanMode, setWatchPlanMode] = useState<WatchPlanningMode>("hybrid");
+  const [sortOrder, setSortOrder]   = useState<SortOrder>("smart");
   const [watchPlanSort, setWatchPlanSort] = useState<WatchPlanningSort>("best_value");
   const [activeTab, setActiveTab]   = useState<Tab>("ongoing");
   const [currentPage, setCurrentPage] = useState(1);
@@ -664,14 +766,25 @@ export default function ProfileClient() {
   function applyFiltersAndSort(list: EnrichedTitle[]) {
     let filtered = list;
     if (filterType !== "all") filtered = filtered.filter((t) => t.media_type === filterType);
-    if (sortOrder === "az") {
-      filtered = [...filtered].sort((a, b) => {
-        const ta = a.tmdb ? getTitle(a.tmdb) : "";
-        const tb = b.tmdb ? getTitle(b.tmdb) : "";
-        return ta.localeCompare(tb, "pt-BR");
-      });
+
+    if (sortOrder === "smart") {
+      filtered = [...filtered].sort((a, b) => scoreLibraryTitle(b) - scoreLibraryTitle(a));
+    } else if (sortOrder === "popular") {
+      filtered = [...filtered].sort((a, b) => (b.tmdb?.popularity ?? 0) - (a.tmdb?.popularity ?? 0));
+    } else if (sortOrder === "shortest") {
+      filtered = [...filtered].sort((a, b) => compareNullable(getEstimatedDuration(a), getEstimatedDuration(b)));
+    } else if (sortOrder === "longest") {
+      filtered = [...filtered].sort((a, b) => compareNullable(getEstimatedDuration(a), getEstimatedDuration(b), "desc"));
+    } else if (sortOrder === "newest_release") {
+      filtered = [...filtered].sort((a, b) => compareNullable(getReleaseTime(a), getReleaseTime(b), "desc"));
+    } else if (sortOrder === "oldest_release") {
+      filtered = [...filtered].sort((a, b) => compareNullable(getReleaseTime(a), getReleaseTime(b)));
+    } else if (sortOrder === "az") {
+      filtered = [...filtered].sort((a, b) => (a.tmdb ? getTitle(a.tmdb) : "").localeCompare(b.tmdb ? getTitle(b.tmdb) : "", "pt-BR"));
     } else if (sortOrder === "rating") {
-      filtered = [...filtered].sort((a, b) => (b.tmdb?.vote_average ?? 0) - (a.tmdb?.vote_average ?? 0));
+      filtered = [...filtered].sort((a, b) => compareNullable(a.tmdb?.vote_average ?? null, b.tmdb?.vote_average ?? null, "desc"));
+    } else {
+      filtered = [...filtered].sort((a, b) => compareNullable(new Date(a.created_at).getTime(), new Date(b.created_at).getTime(), "desc"));
     }
     return filtered;
   }
@@ -687,7 +800,6 @@ export default function ProfileClient() {
     const list = titles
       .filter((t) => t.status === "watching")
       .filter((t) => !t.isContinuationComplete && t.nextEpisode !== null)
-      .filter((t) => filterType === "all" || t.media_type === filterType)
       .map((t) => withWatchPlanning(t, {
         id: t.id,
         tmdbId: t.tmdb_id,
@@ -706,8 +818,8 @@ export default function ProfileClient() {
         voteAverage: t.tmdb?.vote_average ?? null,
       }));
 
-    return sortWatchPlanningItems(list, watchPlanSort, watchPlanMode);
-  }, [titles, filterType, watchPlanMode, watchPlanSort]);
+    return sortWatchPlanningItems(list, watchPlanSort, getWatchPlanMode(watchPlanSort));
+  }, [titles, watchPlanSort]);
 
   // ── Sugestões para hoje ───────────────────────────────────────────────────
   const suggestions = useMemo((): Suggestion[] => {
@@ -795,13 +907,90 @@ export default function ProfileClient() {
   // Sorteia um backdrop entre os favoritos do usuário. Usa tamanho "hero"
   // (w1280) em vez de "original" — suficiente para tela cheia e evita
   // estourar o otimizador da Vercel em produção.
-  const profileBackdrop = useMemo(() => {
-    const backdrops = titles
+  const favoriteBackdrops = useMemo(() => {
+    const paths = titles
       .filter((t) => t.favorite && t.tmdb?.backdrop_path)
       .map((t) => t.tmdb!.backdrop_path!)
       .filter(Boolean);
-    if (!backdrops.length) return null;
-    return buildTmdbUrl("backdrop", "hero", backdrops[Math.floor(Math.random() * backdrops.length)]);
+    return Array.from(new Set(paths)).map((path) => buildTmdbUrl("backdrop", "hero", path));
+  }, [titles]);
+
+  const profileBackdrop = favoriteBackdrops[0] ?? null;
+  const heroCycleSeconds = Math.max(favoriteBackdrops.length, 1) * 9;
+  const heroVisiblePercent = 100 / Math.max(favoriteBackdrops.length, 1);
+
+  const profileStats = useMemo<ProfileStats>(() => {
+    const watchedBase = titles.filter((t) => t.status === "watched" || t.isContinuationComplete);
+    const watchedForTime = titles.filter((t) => t.status === "watched" || t.isContinuationComplete || t.status === "watching");
+    const getWatchedMinutesForTitle = (title: EnrichedTitle) => {
+      return title.status === "watching"
+        ? buildWatchPlanningMetrics({
+            id: title.id,
+            tmdbId: title.tmdb_id,
+            mediaType: title.media_type,
+            status: title.status,
+            runtime: title.tmdb?.runtime ?? null,
+            episodeRunTime: title.tmdb?.episode_run_time ?? null,
+            totalEpisodes: title.totalEpisodes ?? null,
+            watchedEpisodes: title.watchedEpisodes ?? null,
+            remainingEpisodes: title.remainingEpisodes ?? null,
+            nextEpisode: title.nextEpisode ?? null,
+            lastWatchedAt: title.lastEpisodeWatchedAt ?? title.watched_at ?? title.created_at,
+            latestReleasedEpisodeAt: title.latestReleasedEpisodeAt ?? null,
+            popularity: title.tmdb?.popularity ?? null,
+            voteAverage: title.tmdb?.vote_average ?? null,
+          }).watchedMinutes
+        : getEstimatedDuration(title);
+    };
+    const totalWatchedMinutes = Math.round(watchedForTime.reduce((sum, title) => sum + (getWatchedMinutesForTitle(title) ?? 0), 0));
+    const movieWatchedMinutes = Math.round(watchedForTime
+      .filter((title) => title.media_type === "movie")
+      .reduce((sum, title) => sum + (getWatchedMinutesForTitle(title) ?? 0), 0));
+    const tvWatchedMinutes = Math.round(watchedForTime
+      .filter((title) => title.media_type === "tv")
+      .reduce((sum, title) => sum + (getWatchedMinutesForTitle(title) ?? 0), 0));
+    const rated = titles.map((title) => title.tmdb?.vote_average ?? null).filter((rating): rating is number => rating !== null && rating > 0);
+    const durations = titles.map(getEstimatedDuration).filter((duration): duration is number => duration !== null && duration > 0);
+    const genreCounts = new Map<string, number>();
+    titles.forEach((title) => {
+      title.tmdb?.genres?.forEach((genre) => genreCounts.set(genre.name, (genreCounts.get(genre.name) ?? 0) + 1));
+    });
+    const topGenres = [...genreCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([name, count]) => ({ name, count }));
+    const movieCount = titles.filter((title) => title.media_type === "movie").length;
+    const tvCount = titles.filter((title) => title.media_type === "tv").length;
+    const dominantType = tvCount > movieCount ? "Séries" : movieCount > tvCount ? "Filmes" : "Filmes e séries";
+    const averageDuration = durations.length
+      ? Math.round(durations.reduce((sum, duration) => sum + duration, 0) / durations.length)
+      : null;
+    const averageRating = rated.length
+      ? Number((rated.reduce((sum, rating) => sum + rating, 0) / rated.length).toFixed(1))
+      : null;
+    const habitSignals = [
+      topGenres[0] ? `Seu gênero mais recorrente é ${topGenres[0].name}.` : "Ainda faltam gêneros suficientes para ler seu padrão.",
+      dominantType === "Séries" ? "Você tende a acompanhar narrativas em capítulos." : dominantType === "Filmes" ? "Seu consumo puxa mais para sessões fechadas." : "Seu perfil equilibra filmes e séries.",
+      averageDuration ? `Sua duração média por título é ${formatStatMinutes(averageDuration)}.` : "A duração média aparece quando houver mais títulos com runtime.",
+    ];
+
+    return {
+      totalWatchedMinutes,
+      movieWatchedMinutes,
+      tvWatchedMinutes,
+      watchedTitles: watchedBase.length,
+      watchedMoviesThisMonth: watchedBase.filter((title) => title.media_type === "movie" && isThisMonth(title.watched_at)).length,
+      averageRating,
+      averageDuration,
+      favoriteCount: titles.filter((title) => title.favorite).length,
+      watchlistCount: titles.filter((title) => title.status === "watchlist" && !isInFridge(title)).length,
+      ongoingCount: titles.filter((title) => title.status === "watching" && title.media_type === "tv").length,
+      completedSeriesCount: watchedBase.filter((title) => title.media_type === "tv").length,
+      abandonedSeriesCount: titles.filter((title) => title.status === "abandoned" && title.media_type === "tv").length,
+      dominantType,
+      topGenres,
+      habitSignals,
+    };
   }, [titles]);
 
   // ── Paginação ─────────────────────────────────────────────────────────────
@@ -821,7 +1010,7 @@ export default function ProfileClient() {
     activeTab === "ongoing"   ? ongoing   :
     activeTab === "fridge"    ? fridge    : abandoned;
 
-  const ITEMS_PER_PAGE = activeTab === "ongoing" ? 10 : 14;
+  const ITEMS_PER_PAGE = activeTab === "ongoing" ? 6 : 14;
   const totalPages     = Math.max(1, Math.ceil(activeItems.length / ITEMS_PER_PAGE));
   const paginatedItems = activeItems.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
 
@@ -848,36 +1037,74 @@ export default function ProfileClient() {
       <div className="relative z-10 mx-auto max-w-7xl px-4 py-8 sm:px-6">
 
         {/* ── Cabeçalho ── */}
-        <div className="mb-10 flex flex-col gap-5 border-b border-white/[0.07] pb-10 sm:flex-row sm:items-center sm:gap-8">
-          <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-sky-400/[0.14] text-2xl font-black text-sky-300 ring-1 ring-sky-400/20 sm:h-20 sm:w-20 sm:text-3xl">
-            {displayName.charAt(0).toUpperCase()}
-          </div>
+        <div className="relative mb-10 overflow-hidden rounded-[1.5rem] border border-white/[0.08] bg-white/[0.035] px-5 py-6 shadow-[0_18px_70px_rgba(0,0,0,0.35)] sm:px-7 sm:py-8">
+          {favoriteBackdrops.length > 0 && (
+            <>
+              <style>{`
+                @keyframes profile-hero-fade {
+                  0%, 100% { opacity: 0; }
+                  4% { opacity: 0.45; }
+                  ${Math.max(6, heroVisiblePercent - 4)}% { opacity: 0.45; }
+                  ${heroVisiblePercent}% { opacity: 0; }
+                }
+              `}</style>
+              {favoriteBackdrops.map((backdrop, index) => (
+                <div
+                  key={backdrop}
+                  className="absolute inset-0 bg-cover bg-center opacity-0"
+                  style={{
+                    backgroundImage: `url(${backdrop})`,
+                    animation: favoriteBackdrops.length > 1 ? `profile-hero-fade ${heroCycleSeconds}s infinite` : undefined,
+                    animationDelay: favoriteBackdrops.length > 1 ? `${index * 9}s` : undefined,
+                    opacity: favoriteBackdrops.length === 1 ? 0.45 : undefined,
+                  }}
+                />
+              ))}
+              <div className="absolute inset-0 bg-gradient-to-r from-[#020617] via-[#020617]/88 to-[#020617]/55" />
+              <div className="absolute inset-0 bg-gradient-to-t from-[#020617] via-transparent to-transparent" />
+            </>
+          )}
 
-          <div className="min-w-0 flex-1">
-            <h1 className="truncate text-3xl font-black leading-tight tracking-tight sm:text-4xl">{displayName}</h1>
-            <p className="mt-1 text-sm text-zinc-500">{user?.email}</p>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-6 sm:gap-8">
-            {[
-              { value: watched.length,   label: "assistidos" },
-              { value: watchlist.length, label: "watchlist"  },
-              { value: favorites.length, label: "favoritos"  },
-              ...(ongoing.length > 0 ? [{ value: ongoing.length, label: "em andamento", accent: "text-sky-300" }] : []),
-              ...(fridge.length > 0  ? [{ value: fridge.length,  label: "geladeira",    accent: "text-cyan-300" }] : []),
-              ...(abandoned.length > 0 ? [{ value: abandoned.length, label: "abandonados", accent: "text-rose-300" }] : []),
-            ].map(({ value, label, accent }) => (
-              <div key={label} className="text-center">
-                <p className={`text-xl font-black ${accent ?? ""}`}>{value}</p>
-                <p className="mt-1 text-[10px] font-black uppercase tracking-[0.2em] text-zinc-600">{label}</p>
+          <div className="relative grid gap-6 lg:grid-cols-[1fr_390px] lg:items-end">
+            <div className="flex flex-col gap-5 sm:flex-row sm:items-center">
+              <div className="flex h-16 w-16 shrink-0 items-center justify-center rounded-full bg-sky-400/[0.16] text-2xl font-black text-sky-200 ring-1 ring-sky-300/25 backdrop-blur sm:h-20 sm:w-20 sm:text-3xl">
+                {displayName.charAt(0).toUpperCase()}
               </div>
-            ))}
-            <Link
-              href="/settings"
-              className="shrink-0 rounded-full border border-white/[0.12] bg-white/[0.04] px-4 py-2 text-xs font-bold text-zinc-400 transition hover:bg-white/[0.08] hover:text-zinc-200"
-            >
-              ⚙ Configurações
-            </Link>
+
+              <div className="min-w-0 flex-1">
+                <p className="mb-2 text-[10px] font-black uppercase tracking-[0.3em] text-sky-300">Biblioteca pessoal</p>
+                <h1 className="truncate text-3xl font-black leading-tight tracking-tight sm:text-5xl">{displayName}</h1>
+                <p className="mt-2 text-sm text-zinc-400">{user?.email}</p>
+                <div className="mt-5 flex flex-wrap items-center gap-2">
+                  <a
+                    href="#estatisticas"
+                    className="rounded-full border border-sky-300/25 bg-sky-300/[0.12] px-4 py-2 text-xs font-black text-sky-100 transition hover:bg-sky-300/[0.20]"
+                  >
+                    Ver estatísticas
+                  </a>
+                  <Link
+                    href="/settings"
+                    className="rounded-full border border-white/[0.12] bg-white/[0.05] px-4 py-2 text-xs font-bold text-zinc-300 transition hover:bg-white/[0.10] hover:text-white"
+                  >
+                    Configurações
+                  </Link>
+                </div>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:grid-cols-2">
+              {[
+                { value: formatStatMinutes(profileStats.totalWatchedMinutes), label: "tempo visto", accent: "text-sky-200" },
+                { value: profileStats.watchedTitles, label: "assistidos" },
+                { value: profileStats.favoriteCount, label: "favoritos", accent: "text-amber-200" },
+                { value: profileStats.ongoingCount, label: "em andamento", accent: "text-cyan-200" },
+              ].map(({ value, label, accent }) => (
+                <div key={label} className="rounded-xl border border-white/[0.08] bg-black/25 px-3 py-3 backdrop-blur">
+                  <p className={`text-xl font-black ${accent ?? "text-white"}`}>{value}</p>
+                  <p className="mt-1 text-[9px] font-black uppercase tracking-[0.18em] text-zinc-500">{label}</p>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -887,34 +1114,94 @@ export default function ProfileClient() {
             <p className="mb-4 text-[11px] font-black uppercase tracking-[0.35em] text-sky-300">
               Sugestões para hoje
             </p>
-            <div className="no-scrollbar flex gap-3 overflow-x-auto pb-3">
+            <div className="grid w-full grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
               {suggestions.map((s, i) => <SuggestionCard key={i} suggestion={s} />)}
-              {/* Padding final para não cortar o último card */}
-              <div className="shrink-0 w-1" />
             </div>
           </div>
         )}
 
-        {/* ── Filtro de tipo ── */}
-        <div className="mb-4 flex items-center gap-2">
-          {(["all", "movie", "tv"] as FilterType[]).map((f) => (
-            <button
-              key={f}
-              onClick={() => { setFilterType(f); setCurrentPage(1); }}
-              className={[
-                "rounded-full border px-4 py-2 text-sm font-bold transition",
-                filterType === f
-                  ? "border-white bg-white text-black"
-                  : "border-white/[0.12] text-zinc-500 hover:border-white/25 hover:text-zinc-200",
-              ].join(" ")}
-            >
-              {{ all: "Todos", movie: "Filmes", tv: "Séries" }[f]}
-            </button>
-          ))}
-        </div>
-
         {/* ── Abas ── */}
-        <div className="no-scrollbar mb-5 flex gap-0 overflow-x-auto border-b border-white/[0.07]">
+        <section className="hidden" aria-hidden="true">
+          <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-[11px] font-black uppercase tracking-[0.35em] text-sky-300">Estatísticas</p>
+              <h2 className="mt-2 text-2xl font-black tracking-tight text-white">Hábitos gerais</h2>
+            </div>
+            <p className="max-w-2xl text-sm leading-relaxed text-zinc-500">
+              Uma leitura compacta do seu consumo no POPLOG, usando seus títulos, favoritos, gêneros e progresso.
+            </p>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              {[
+                { label: "Tempo geral", value: formatStatMinutes(profileStats.totalWatchedMinutes), detail: "filmes + séries" },
+                { label: "Tempo em filmes", value: formatStatMinutes(profileStats.movieWatchedMinutes), detail: "sessões fechadas" },
+                { label: "Tempo em séries", value: formatStatMinutes(profileStats.tvWatchedMinutes), detail: "episódios vistos" },
+                { label: "Filmes no mês", value: profileStats.watchedMoviesThisMonth, detail: "marcados como vistos" },
+                { label: "Nota média", value: profileStats.averageRating ? profileStats.averageRating.toFixed(1) : "N/D", detail: "base TMDB" },
+                { label: "Duração média", value: profileStats.averageDuration ? formatStatMinutes(profileStats.averageDuration) : "N/D", detail: "por título" },
+                { label: "Watchlist", value: profileStats.watchlistCount, detail: "na fila" },
+                { label: "Favoritos", value: profileStats.favoriteCount, detail: "sinais fortes" },
+                { label: "Séries ativas", value: profileStats.ongoingCount, detail: "em andamento" },
+                { label: "Abandonadas", value: profileStats.abandonedSeriesCount, detail: "séries pausadas" },
+              ].map((stat) => (
+                <div key={stat.label} className="rounded-xl border border-white/[0.08] bg-white/[0.035] p-4">
+                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-600">{stat.label}</p>
+                  <p className="mt-2 text-2xl font-black text-white">{stat.value}</p>
+                  <p className="mt-1 text-[11px] font-semibold text-zinc-500">{stat.detail}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="rounded-xl border border-white/[0.08] bg-white/[0.035] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[9px] font-black uppercase tracking-[0.22em] text-zinc-600">Leitura POPLOG</p>
+                  <p className="mt-2 text-lg font-black text-white">{profileStats.dominantType}</p>
+                </div>
+                <span className="rounded-full border border-sky-300/20 bg-sky-300/[0.10] px-3 py-1 text-[10px] font-black text-sky-200">
+                  Personalização
+                </span>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {profileStats.topGenres.length > 0 ? profileStats.topGenres.map((genre) => (
+                  <span key={genre.name} className="rounded-full border border-white/[0.10] bg-white/[0.05] px-3 py-1 text-[10px] font-black text-zinc-300">
+                    {genre.name} · {genre.count}
+                  </span>
+                )) : (
+                  <span className="rounded-full border border-white/[0.10] bg-white/[0.05] px-3 py-1 text-[10px] font-black text-zinc-500">
+                    Gêneros insuficientes
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-5 space-y-2">
+                {profileStats.habitSignals.map((signal) => (
+                  <p key={signal} className="rounded-lg border border-white/[0.06] bg-black/20 px-3 py-2 text-xs font-semibold leading-relaxed text-zinc-400">
+                    {signal}
+                  </p>
+                ))}
+              </div>
+
+              <div className="mt-5 grid grid-cols-3 gap-2 border-t border-white/[0.07] pt-4">
+                {[
+                  { label: "Finalizadas", value: profileStats.completedSeriesCount },
+                  { label: "Assistidos", value: profileStats.watchedTitles },
+                  { label: "Tipo", value: profileStats.dominantType },
+                ].map((item) => (
+                  <div key={item.label}>
+                    <p className="text-base font-black text-zinc-100">{item.value}</p>
+                    <p className="mt-1 text-[9px] font-black uppercase tracking-[0.14em] text-zinc-600">{item.label}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <div className="no-scrollbar mb-5 flex justify-start gap-0 overflow-x-auto border-b border-white/[0.07] sm:justify-center">
           {tabItems.map((t) => (
             <button
               key={t.key}
@@ -949,49 +1236,44 @@ export default function ProfileClient() {
           ))}
         </div>
 
-        {/* ── Controles de ordenação e paginação ──
-            Mobile: empilha (paginação centralizada em cima, sort embaixo).
-            Desktop (sm+): grid 3 colunas (vazio · paginação · sort) como antes. */}
-        {activeTab === "ongoing" && (
-          <div className="mb-5 flex flex-col gap-3 rounded-3xl border border-white/[0.08] bg-white/[0.035] p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap gap-2">
-              {([
-                ["episodes", "Episódios"],
-                ["time", "Tempo restante"],
-                ["hybrid", "Inteligente"],
-              ] as const).map(([mode, label]) => (
-                <button
-                  key={mode}
-                  onClick={() => { setWatchPlanMode(mode); setCurrentPage(1); }}
-                  className={[
-                    "rounded-full border px-3.5 py-2 text-[11px] font-black transition",
-                    watchPlanMode === mode
-                      ? "border-sky-300 bg-sky-300 text-slate-950"
-                      : "border-white/[0.10] text-zinc-500 hover:border-white/25 hover:text-zinc-200",
-                  ].join(" ")}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+        {/* ── Filtros e ordenação ── */}
+        <div className="mb-5 flex flex-wrap items-center justify-center gap-2">
+          {activeTab !== "ongoing" && (
+            <label className="flex min-w-0 items-center gap-2">
+              <span className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-600">Tipo</span>
+              <select
+                value={filterType}
+                onChange={(e) => { setFilterType(e.target.value as FilterType); setCurrentPage(1); }}
+                className="h-9 rounded-full border border-white/[0.12] bg-[#07111f] px-3 text-[11px] font-bold text-zinc-200 outline-none transition hover:border-white/25 focus:border-sky-300/60 sm:min-w-32"
+              >
+                {filterOptions.map((option) => (
+                  <option key={option.value} value={option.value} className="bg-zinc-950 text-zinc-100">
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
 
+          <label className="flex min-w-0 items-center gap-2">
+            <span className="text-[10px] font-black uppercase tracking-[0.18em] text-zinc-600">Ordenar</span>
             <select
-              value={watchPlanSort}
-              onChange={(e) => { setWatchPlanSort(e.target.value as WatchPlanningSort); setCurrentPage(1); }}
-              className="rounded-full border border-white/[0.12] bg-transparent px-4 py-2 text-[11px] font-bold text-zinc-400 outline-none transition hover:border-white/20 hover:text-zinc-200"
+              value={activeTab === "ongoing" ? watchPlanSort : sortOrder}
+              onChange={(e) => {
+                if (activeTab === "ongoing") setWatchPlanSort(e.target.value as WatchPlanningSort);
+                else setSortOrder(e.target.value as SortOrder);
+                setCurrentPage(1);
+              }}
+              className="h-9 rounded-full border border-white/[0.12] bg-[#07111f] px-3 text-[11px] font-bold text-zinc-200 outline-none transition hover:border-white/25 focus:border-sky-300/60 sm:min-w-52"
             >
-              <option value="best_value">Melhor custo-benefício</option>
-              <option value="finish_fastest">Terminar mais rápido</option>
-              <option value="fewest_episodes">Menos episódios restantes</option>
-              <option value="highest_progress">Maior porcentagem concluída</option>
-              <option value="stalled_longest">Mais tempo parado</option>
-              <option value="newest_episode">Episódio mais recente</option>
-              <option value="oldest_episode">Episódio mais antigo</option>
-              <option value="most_popular">Mais popular</option>
-              <option value="best_rated">Melhor avaliado</option>
+              {(activeTab === "ongoing" ? watchPlanSortOptions : librarySortOptions).map((option) => (
+                <option key={option.value} value={option.value} className="bg-zinc-950 text-zinc-100">
+                  {option.label}
+                </option>
+              ))}
             </select>
-          </div>
-        )}
+          </label>
+        </div>
 
         <div className="mb-6 flex flex-col items-center gap-3 sm:grid sm:grid-cols-3 sm:items-center sm:gap-0">
           <div className="hidden sm:block" />
@@ -1022,19 +1304,7 @@ export default function ProfileClient() {
             <div className="hidden sm:block" />
           )}
 
-          <div className="flex justify-center sm:justify-end">
-            {activeTab !== "ongoing" && (
-              <select
-                value={sortOrder}
-                onChange={(e) => { setSortOrder(e.target.value as SortOrder); setCurrentPage(1); }}
-                className="rounded-full border border-white/[0.12] bg-transparent px-4 py-2 text-[11px] font-bold text-zinc-400 outline-none transition hover:border-white/20 hover:text-zinc-200"
-              >
-                <option value="rating">Avaliação</option>
-                <option value="recent">Recentes</option>
-                <option value="az">Título</option>
-              </select>
-            )}
-          </div>
+          <div className="hidden sm:block" />
         </div>
 
         {/* ── Conteúdo da aba ── */}
@@ -1088,6 +1358,85 @@ export default function ProfileClient() {
           </div>
         )}
 
+        <section id="estatisticas" className="mt-12 scroll-mt-6 border-t border-white/[0.07] pt-10">
+          <div className="mb-4 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
+            <div>
+              <p className="text-[11px] font-black uppercase tracking-[0.35em] text-sky-300">Estatísticas</p>
+              <h2 className="mt-2 text-2xl font-black tracking-tight text-white">Hábitos gerais</h2>
+            </div>
+            <p className="max-w-2xl text-sm leading-relaxed text-zinc-500">
+              Uma leitura compacta do seu consumo no POPLOG, usando seus títulos, favoritos, gêneros e progresso.
+            </p>
+          </div>
+
+          <div className="grid gap-3 lg:grid-cols-[1.1fr_0.9fr]">
+            <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+              {[
+                { label: "Tempo geral", value: formatStatMinutes(profileStats.totalWatchedMinutes), detail: "filmes + séries" },
+                { label: "Tempo em filmes", value: formatStatMinutes(profileStats.movieWatchedMinutes), detail: "sessões fechadas" },
+                { label: "Tempo em séries", value: formatStatMinutes(profileStats.tvWatchedMinutes), detail: "episódios vistos" },
+                { label: "Filmes no mês", value: profileStats.watchedMoviesThisMonth, detail: "marcados como vistos" },
+                { label: "Nota média", value: profileStats.averageRating ? profileStats.averageRating.toFixed(1) : "N/D", detail: "base TMDB" },
+                { label: "Duração média", value: profileStats.averageDuration ? formatStatMinutes(profileStats.averageDuration) : "N/D", detail: "por título" },
+                { label: "Watchlist", value: profileStats.watchlistCount, detail: "na fila" },
+                { label: "Favoritos", value: profileStats.favoriteCount, detail: "sinais fortes" },
+                { label: "Séries ativas", value: profileStats.ongoingCount, detail: "em andamento" },
+                { label: "Abandonadas", value: profileStats.abandonedSeriesCount, detail: "séries pausadas" },
+              ].map((stat) => (
+                <div key={stat.label} className="rounded-xl border border-white/[0.08] bg-white/[0.035] p-4">
+                  <p className="text-[9px] font-black uppercase tracking-[0.18em] text-zinc-600">{stat.label}</p>
+                  <p className="mt-2 text-2xl font-black text-white">{stat.value}</p>
+                  <p className="mt-1 text-[11px] font-semibold text-zinc-500">{stat.detail}</p>
+                </div>
+              ))}
+            </div>
+
+            <div className="rounded-xl border border-white/[0.08] bg-white/[0.035] p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-[9px] font-black uppercase tracking-[0.22em] text-zinc-600">Leitura POPLOG</p>
+                  <p className="mt-2 text-lg font-black text-white">{profileStats.dominantType}</p>
+                </div>
+                <span className="rounded-full border border-sky-300/20 bg-sky-300/[0.10] px-3 py-1 text-[10px] font-black text-sky-200">
+                  Personalização
+                </span>
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {profileStats.topGenres.length > 0 ? profileStats.topGenres.map((genre) => (
+                  <span key={genre.name} className="rounded-full border border-white/[0.10] bg-white/[0.05] px-3 py-1 text-[10px] font-black text-zinc-300">
+                    {genre.name} · {genre.count}
+                  </span>
+                )) : (
+                  <span className="rounded-full border border-white/[0.10] bg-white/[0.05] px-3 py-1 text-[10px] font-black text-zinc-500">
+                    Gêneros insuficientes
+                  </span>
+                )}
+              </div>
+
+              <div className="mt-5 space-y-2">
+                {profileStats.habitSignals.map((signal) => (
+                  <p key={signal} className="rounded-lg border border-white/[0.06] bg-black/20 px-3 py-2 text-xs font-semibold leading-relaxed text-zinc-400">
+                    {signal}
+                  </p>
+                ))}
+              </div>
+
+              <div className="mt-5 grid grid-cols-3 gap-2 border-t border-white/[0.07] pt-4">
+                {[
+                  { label: "Finalizadas", value: profileStats.completedSeriesCount },
+                  { label: "Assistidos", value: profileStats.watchedTitles },
+                  { label: "Tipo", value: profileStats.dominantType },
+                ].map((item) => (
+                  <div key={item.label}>
+                    <p className="text-base font-black text-zinc-100">{item.value}</p>
+                    <p className="mt-1 text-[9px] font-black uppercase tracking-[0.14em] text-zinc-600">{item.label}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
 
       </div>
     </main>

@@ -9,7 +9,11 @@ const FILTERS = [
   { key: "now_playing", label: "Nos cinemas"         },
 ] as const;
 
-export default function FilmesClient() {
+type Props = {
+  genres?: readonly { id: number; name: string }[];
+};
+
+export default function FilmesClient({ genres = [] }: Props) {
   return (
     <MediaBrowseClient
       mediaType="movie"
@@ -17,6 +21,7 @@ export default function FilmesClient() {
       pageSubtitle="Explore os melhores filmes"
       filters={FILTERS}
       defaultFilter="popular"
+      genres={genres}
     />
   );
 }
