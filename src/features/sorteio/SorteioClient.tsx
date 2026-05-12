@@ -12,6 +12,7 @@ import {
   Info,
   Play,
   RefreshCcw,
+  Settings2,
   Shuffle,
   Snowflake,
   Sparkles,
@@ -84,22 +85,18 @@ type Candidate = {
 const initialFilters: Filters = {
   source: "all",
   content: "all",
-  duration: "all",
+  duration: "movieNight",
   vibe: "all",
   availability: "any",
   allowWatched: false,
-  onlyNewForYou: false,
+  onlyNewForYou: true,
 };
 
 const FATE_CARD_COUNT = 5;
 
 const sourceOptions: { value: SourceFilter; label: string }[] = [
-  { value: "all", label: "Todos" },
-  { value: "watchlist", label: "Watchlist" },
-  { value: "fridge", label: "Geladeira" },
-  { value: "watching", label: "Em andamento" },
-  { value: "favorites", label: "Favoritos" },
-  { value: "rewatch", label: "Reassistir" },
+  { value: "all", label: "Novo pra voce" },
+  { value: "watchlist", label: "Watchlist leve" },
 ];
 
 const contentOptions: { value: ContentFilter; label: string }[] = [
@@ -261,6 +258,7 @@ function personalSourceMatches(title: EnrichedUserTitle, source: SourceFilter): 
 function candidateMatchesFilters(candidate: Candidate, filters: Filters, mode: Mode): boolean {
   const alreadyWatched = candidate.userTitle?.status === "watched";
   if (alreadyWatched && !filters.allowWatched) return false;
+  if (candidate.userTitle?.fridge || candidate.userTitle?.status === "fridge") return false;
   if (candidate.userTitle?.status === "abandoned") return false;
   if (candidate.source === "personal" && mode !== "discovery" && !personalSourceMatches(candidate.userTitle!, filters.source)) return false;
   if (filters.content === "movie" && candidate.mediaType !== "movie") return false;
@@ -271,10 +269,14 @@ function candidateMatchesFilters(candidate: Candidate, filters: Filters, mode: M
   if (filters.vibe !== "all") { const ids = vibeGenreIds[filters.vibe]; if (!hasGenre(candidate, ids)) return false; }
   if (filters.duration === "quick") {
     const runtime = candidate.tmdb.runtime ?? candidate.tmdb.episode_run_time?.[0] ?? null;
-    if (candidate.mediaType === "movie" && runtime && runtime > 110) return false;
-    if (candidate.mediaType === "tv" && !candidate.nextEpisode && runtime && runtime > 50) return false;
+    if (candidate.mediaType === "movie" && runtime && runtime > 100) return false;
+    if (candidate.mediaType === "tv" && !candidate.nextEpisode && runtime && runtime > 35) return false;
   }
-  if (filters.duration === "movieNight" && candidate.mediaType === "movie") { const runtime = candidate.tmdb.runtime; if (runtime && runtime > 160) return false; }
+  if (filters.duration === "movieNight") {
+    const runtime = candidate.tmdb.runtime ?? candidate.tmdb.episode_run_time?.[0] ?? null;
+    if (candidate.mediaType === "movie" && runtime && (runtime < 80 || runtime > 155)) return false;
+    if (candidate.mediaType === "tv" && !candidate.nextEpisode && runtime && runtime > 60) return false;
+  }
   if (filters.duration === "shortSeries") { if (candidate.mediaType !== "tv") return false; if ((candidate.tmdb.number_of_seasons ?? 99) > 1 && !candidate.nextEpisode) return false; }
   if (filters.duration === "deepDive") {
     const runtime = candidate.tmdb.runtime ?? 0;
@@ -295,7 +297,7 @@ function availabilityScore(candidate: Candidate, filter: AvailabilityFilter): nu
   return status ? 2 : 0;
 }
 
-function weightedPick(candidates: Candidate[], filters: Filters, lastKey: string | null): Candidate | null {
+function weightedPick(candidates: Candidate[], filters: Filters, lastKey: string | null, surprise = false): Candidate | null {
   const pool = candidates.filter((c) => c.key !== lastKey || candidates.length === 1);
   if (pool.length === 0) return null;
   const weighted = pool.map((c) => {
@@ -304,6 +306,8 @@ function weightedPick(candidates: Candidate[], filters: Filters, lastKey: string
     if (c.nextEpisode) score += 4;
     if (c.userTitle?.fridge) score += 2;
     if (c.userTitle?.favorite) score += 1;
+    if (c.source === "discovery") score += surprise ? 34 : 12;
+    if (c.userTitle?.status === "watchlist") score += surprise ? -14 : 2;
     score += Math.min(c.tmdb.vote_average ?? 0, 9) / 3;
     return { candidate: c, score };
   }).sort((a, b) => b.score - a.score);
@@ -311,11 +315,11 @@ function weightedPick(candidates: Candidate[], filters: Filters, lastKey: string
   return top[Math.floor(Math.random() * top.length)]?.candidate ?? weighted[0]?.candidate ?? null;
 }
 
-function buildFateCards(candidates: Candidate[], filters: Filters, lastKey: string | null): (Candidate | null)[] {
+function buildFateCards(candidates: Candidate[], filters: Filters, lastKey: string | null, surprise = false): (Candidate | null)[] {
   const used = new Set<string>();
   return Array.from({ length: FATE_CARD_COUNT }).map((_, i) => {
     const pool = candidates.filter((c) => !used.has(c.key));
-    const picked = weightedPick(pool, filters, i === 0 ? lastKey : null);
+    const picked = weightedPick(pool, filters, i === 0 ? lastKey : null, surprise);
     if (!picked) return null;
     used.add(picked.key);
     return picked;
@@ -479,6 +483,101 @@ function FilterGroup<T extends string>({
 }
 
 // ─── FateCardsStage ────────────────────────────────────────────────────────────
+
+function getSourceSummary(filters: Filters): string {
+  return filters.onlyNewForYou || filters.source === "all" ? "✨ Novo pra voce" : "🍿 Watchlist leve";
+}
+
+function getContentSummary(content: ContentFilter): string {
+  if (content === "movie") return "🎬 Filmes";
+  if (content === "tv") return "📺 Series";
+  if (content === "miniseries") return "📺 Minisséries";
+  if (content === "animation") return "✨ Animacoes";
+  if (content === "documentary") return "🎞 Documentarios";
+  return "🎬 Filmes & Series";
+}
+
+function getDurationSummary(duration: DurationFilter): string {
+  if (duration === "quick") return "⚡ Rapido";
+  if (duration === "deepDive") return "🌌 Longo";
+  return "🍿 Medio";
+}
+
+function FilterSummary({ filters }: { filters: Filters }) {
+  return (
+    <div className="flex flex-wrap items-center justify-center gap-x-2 gap-y-1 text-center text-[10px] font-bold text-slate-500 sm:text-[11px]">
+      <span>{getSourceSummary(filters)}</span>
+      <span className="text-white/15">•</span>
+      <span>{getContentSummary(filters.content)}</span>
+      <span className="text-white/15">•</span>
+      <span>{getDurationSummary(filters.duration)}</span>
+    </div>
+  );
+}
+
+function RefinementDrawer({
+  open,
+  filters,
+  onClose,
+  updateFilter,
+}: {
+  open: boolean;
+  filters: Filters;
+  onClose: () => void;
+  updateFilter: <K extends keyof Filters>(key: K, value: Filters[K]) => void;
+}) {
+  if (!open) return null;
+
+  return (
+    <div className="fixed inset-0 z-50">
+      <button
+        type="button"
+        aria-label="Fechar refinamento"
+        onClick={onClose}
+        className="absolute inset-0 bg-[#020611]/70 backdrop-blur-sm"
+      />
+      <aside
+        className="absolute right-0 top-0 h-full w-full max-w-[420px] overflow-y-auto border-l border-white/[0.08] bg-[#050B1A]/92 px-5 py-5 shadow-[0_0_80px_rgba(0,0,0,0.72)] backdrop-blur-2xl sm:px-6"
+        style={{ animation: "drawerIn 0.32s cubic-bezier(0.16,1,0.3,1) both" }}
+      >
+        <div className="mb-6 flex items-start justify-between gap-4">
+          <div>
+            <p className="text-[9px] font-black uppercase tracking-[0.32em] text-[#19D5FF]/55">Oraculo</p>
+            <h2 className="mt-2 text-2xl font-black tracking-tight text-white">Refinar Cartas</h2>
+            <p className="mt-2 text-xs leading-5 text-slate-500">Ajustes leves para orientar a mesa sem quebrar o misterio.</p>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-white/[0.08] bg-white/[0.04] text-slate-400 transition hover:bg-white/[0.08] hover:text-white"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        <div className="space-y-7">
+          <FilterGroup label="Tipo de conteudo" options={contentOptions} value={filters.content} onChange={(v) => updateFilter("content", v)} />
+          <FilterGroup label="Origem das cartas" options={sourceOptions} value={filters.source} onChange={(v) => updateFilter("source", v)} />
+          <FilterGroup label="Duracao" options={[
+            { value: "quick", label: "Rapido" },
+            { value: "movieNight", label: "Medio" },
+            { value: "deepDive", label: "Longo" },
+          ]} value={filters.duration} onChange={(v) => updateFilter("duration", v)} />
+
+          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.025] p-4">
+            <p className="mb-3 text-[9px] font-black uppercase tracking-[0.28em] text-[#19D5FF]/45">Regras automaticas</p>
+            <div className="space-y-2 text-xs font-semibold leading-5 text-slate-500">
+              <p>Vistos bloqueados por padrao.</p>
+              <p>Geladeira fora da mesa.</p>
+              <p>Repeticao excessiva evitada.</p>
+              <p>Descoberta e variedade com prioridade.</p>
+            </div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  );
+}
 
 function FateCardsStage({
   candidates,
@@ -892,6 +991,7 @@ export default function SorteioClient() {
   const [revealedCards, setRevealedCards] = useState<Record<number, Candidate>>({});
   const [revealingIndex, setRevealingIndex] = useState<number | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
+  const [surprisePulse, setSurprisePulse] = useState(false);
   const drawTokenRef = useRef(0);
   const revealedCardsRef = useRef<Record<number, Candidate>>({});
   const revealingIndexRef = useRef<number | null>(null);
@@ -932,6 +1032,12 @@ export default function SorteioClient() {
   const visibleCandidates = useMemo(
     () => {
       if (filters.onlyNewForYou) return filteredDiscoveryCandidates;
+      if (filters.source === "watchlist") {
+        return [
+          ...filteredDiscoveryCandidates,
+          ...filteredPersonalCandidates.filter((candidate) => candidate.userTitle?.status === "watchlist"),
+        ];
+      }
       return filters.source === "all"
         ? [...filteredPersonalCandidates, ...filteredDiscoveryCandidates]
         : filteredPersonalCandidates;
@@ -959,9 +1065,28 @@ export default function SorteioClient() {
     setCardSlots(buildFateCards(visibleCandidates, filters, lastKey));
     setRevealedCards({});
     revealedCardsRef.current = {};
-    revealedCardsRef.current = {};
     setResult(null);
   }, [filters, lastKey, visibleCandidates]);
+
+  const surpriseMe = useCallback(async () => {
+    setSurprisePulse(true);
+    const discoveryFilters = {
+      ...filters,
+      source: "all" as SourceFilter,
+      onlyNewForYou: true,
+      allowWatched: false,
+      vibe: "all" as VibeFilter,
+      availability: "any" as AvailabilityFilter,
+    };
+    setFilters(discoveryFilters);
+    const freshDiscovery = await fetchDiscoveryCandidates(discoveryFilters, personalKeys);
+    setDiscoveryCandidates(freshDiscovery);
+    setCardSlots(buildFateCards(freshDiscovery, discoveryFilters, lastKey, true));
+    setRevealedCards({});
+    revealedCardsRef.current = {};
+    setResult(null);
+    window.setTimeout(() => setSurprisePulse(false), 700);
+  }, [filters, lastKey, personalKeys]);
 
   useEffect(() => {
     queueMicrotask(() => {
@@ -1004,7 +1129,8 @@ export default function SorteioClient() {
   function updateFilter<K extends keyof Filters>(key: K, value: Filters[K]) {
     setFilters((current) => {
       const next = { ...current, [key]: value };
-      if (key === "source" && value !== "all") next.onlyNewForYou = false;
+      if (key === "source" && value === "all") next.onlyNewForYou = true;
+      if (key === "source" && value === "watchlist") next.onlyNewForYou = false;
       if (key === "onlyNewForYou" && value === true) next.source = "all";
       return next;
     });
@@ -1033,7 +1159,18 @@ export default function SorteioClient() {
           0%   { background-position: -200% 0; }
           100% { background-position:  200% 0; }
         }
+        @keyframes drawerIn {
+          from { opacity: 0; transform: translateX(18px); }
+          to   { opacity: 1; transform: translateX(0); }
+        }
       `}</style>
+
+      <RefinementDrawer
+        open={filtersOpen}
+        filters={filters}
+        onClose={() => setFiltersOpen(false)}
+        updateFilter={updateFilter}
+      />
 
       <main className="relative min-h-screen overflow-hidden text-white"
         style={{ background: "linear-gradient(160deg, #020611 0%, #050B1A 40%, #071426 100%)" }}>
@@ -1075,16 +1212,26 @@ export default function SorteioClient() {
               </div>
 
               {/* Shuffle — compact on mobile */}
-              <button
-                type="button"
-                onClick={shuffleFateCards}
-                style={{ animation: "fadeIn 0.7s ease 0.3s both" }}
-                className="inline-flex items-center gap-2 rounded-full border border-[#19D5FF]/25 bg-[#19D5FF]/8 px-4 py-2 md:px-5 md:py-2.5 text-[11px] font-black text-[#19D5FF] transition-all duration-200 hover:bg-[#19D5FF]/15 active:scale-95 hover:shadow-[0_0_24px_rgba(25,213,255,0.15)]"
-              >
-                <Shuffle className="h-3.5 w-3.5 md:h-4 md:w-4" />
-                <span className="hidden sm:inline">Nova mesa</span>
-                <span className="sm:hidden">Embaralhar</span>
-              </button>
+              <div className="flex shrink-0 items-center gap-2" style={{ animation: "fadeIn 0.7s ease 0.3s both" }}>
+                <button
+                  type="button"
+                  onClick={shuffleFateCards}
+                  className="inline-flex items-center gap-2 rounded-full border border-[#19D5FF]/25 bg-[#19D5FF]/8 px-3 py-2 text-[11px] font-black text-[#19D5FF] transition-all duration-200 hover:bg-[#19D5FF]/15 hover:shadow-[0_0_24px_rgba(25,213,255,0.15)] active:scale-95 md:px-5 md:py-2.5"
+                >
+                  <Shuffle className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                  <span className="hidden sm:inline">Nova mesa</span>
+                  <span className="sm:hidden">Mesa</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setFiltersOpen(true)}
+                  className="inline-flex items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.035] px-3 py-2 text-[11px] font-black text-slate-400 transition-all duration-200 hover:border-[#19D5FF]/20 hover:bg-white/[0.06] hover:text-slate-200 active:scale-95 md:px-4 md:py-2.5"
+                >
+                  <Settings2 className="h-3.5 w-3.5 md:h-4 md:w-4" />
+                  <span className="hidden md:inline">Refinar Cartas</span>
+                  <span className="md:hidden">Refinar</span>
+                </button>
+              </div>
             </div>
 
             {/* Title block */}
@@ -1123,7 +1270,24 @@ export default function SorteioClient() {
           </header>
 
           {/* ── Filters ──────────────────────────────────────────────────── */}
-          <div className="mb-6 md:mb-10" style={{ animation: "fadeIn 0.7s ease 0.35s both" }}>
+          <div className="mb-6 flex flex-col items-center gap-3 md:mb-9" style={{ animation: "fadeIn 0.7s ease 0.35s both" }}>
+            <button
+              type="button"
+              onClick={surpriseMe}
+              disabled={isLoading}
+              className={[
+                "inline-flex min-h-11 items-center justify-center rounded-full border border-[#19D5FF]/35 bg-[#19D5FF]/14 px-6 py-3 text-sm font-black text-[#DDFBFF] transition-all duration-300",
+                "shadow-[0_0_28px_rgba(25,213,255,0.12)] hover:bg-[#19D5FF]/20 hover:shadow-[0_0_36px_rgba(25,213,255,0.18)] active:scale-95 disabled:cursor-wait disabled:opacity-55",
+                surprisePulse ? "scale-[1.02]" : "",
+              ].join(" ")}
+            >
+              🍿 Surpreenda-me
+            </button>
+            <FilterSummary filters={filters} />
+          </div>
+
+          {false && (
+          <div className="hidden" aria-hidden="true">
             <button
               type="button"
               onClick={() => setFiltersOpen((prev) => !prev)}
@@ -1185,6 +1349,7 @@ export default function SorteioClient() {
               </div>
             )}
           </div>
+          )}
 
           {/* ── Divider with label ────────────────────────────────────────── */}
           <div className="flex items-center gap-3 md:gap-4 mb-6 md:mb-10" style={{ animation: "fadeIn 0.7s ease 0.4s both" }}>

@@ -1,4 +1,3 @@
-import { tmdbFetch } from "@/lib/tmdb";
 import type { TMDBItem, TMDBMediaType, TMDBResponse } from "@/types/tmdb";
 
 export type IndexedMediaType = TMDBMediaType;
@@ -39,6 +38,16 @@ type CreditItem = TMDBItem & {
   episode_count?: number;
   vote_count?: number;
 };
+
+async function fetchTmdb<T>(
+  endpoint: string,
+  params: Record<string, string | number | boolean | undefined | null> = {},
+  revalidate?: number,
+  language?: string | null,
+): Promise<T> {
+  const { tmdbFetch } = await import("@/lib/tmdb");
+  return tmdbFetch<T>(endpoint, params, revalidate, language);
+}
 
 export type TmdbStudio = {
   id: number;
@@ -187,18 +196,18 @@ function sortByCareerRelevance(items: CreditItem[], person: TmdbPerson) {
 }
 
 export async function fetchGenreName(media: IndexedMediaType, id: number): Promise<string> {
-  const data = await tmdbFetch<{ genres: TmdbGenre[] }>(`/genre/${media}/list`, {}, 60 * 60 * 24);
+  const data = await fetchTmdb<{ genres: TmdbGenre[] }>(`/genre/${media}/list`, {}, 60 * 60 * 24);
   return data.genres.find((genre) => genre.id === id)?.name ?? "Gênero";
 }
 
 export async function fetchGenreList(media: IndexedMediaType): Promise<TmdbGenre[]> {
-  const data = await tmdbFetch<{ genres: TmdbGenre[] }>(`/genre/${media}/list`, {}, 60 * 60 * 24);
+  const data = await fetchTmdb<{ genres: TmdbGenre[] }>(`/genre/${media}/list`, {}, 60 * 60 * 24);
   return data.genres ?? [];
 }
 
 export async function fetchGenreTitles(media: IndexedMediaType, id: number, page = 1) {
   const endpoint = media === "tv" ? "/discover/tv" : "/discover/movie";
-  const data = await tmdbFetch<TMDBResponse<TMDBItem>>(endpoint, {
+  const data = await fetchTmdb<TMDBResponse<TMDBItem>>(endpoint, {
     page,
     with_genres: id,
     sort_by: "popularity.desc",
@@ -212,14 +221,14 @@ export async function fetchGenreTitles(media: IndexedMediaType, id: number, page
 }
 
 export async function fetchCollectionUniverse(collectionId: number, currentId?: number) {
-  const data = await tmdbFetch<TmdbCollection>(`/collection/${collectionId}`, {}, 60 * 60 * 12);
+  const data = await fetchTmdb<TmdbCollection>(`/collection/${collectionId}`, {}, 60 * 60 * 12);
   const parts = sortByRelease(uniqueTitles(data.parts ?? [], "movie"), "asc")
     .filter((item) => item.id !== currentId);
   return { ...data, parts };
 }
 
 export async function fetchPersonIndex(id: number) {
-  const person = await tmdbFetch<TmdbPerson>(`/person/${id}`, {
+  const person = await fetchTmdb<TmdbPerson>(`/person/${id}`, {
     append_to_response: "movie_credits,tv_credits",
   }, 60 * 60 * 12);
   const cast = uniqueTitles([
@@ -244,13 +253,13 @@ export async function fetchPersonIndex(id: number) {
 
 export async function fetchStudioIndex(kind: StudioKind, id: number, media: IndexedMediaType | "all" = "all", page = 1) {
   const studio = kind === "company"
-    ? await tmdbFetch<TmdbStudio>(`/company/${id}`, {}, 60 * 60 * 24)
+    ? await fetchTmdb<TmdbStudio>(`/company/${id}`, {}, 60 * 60 * 24)
     : { id, name: "Estúdio", logo_path: null } as TmdbStudio;
 
   async function discover(target: IndexedMediaType) {
     const endpoint = target === "tv" ? "/discover/tv" : "/discover/movie";
     const key = kind === "network" && target === "tv" ? "with_networks" : "with_companies";
-    const data = await tmdbFetch<TMDBResponse<TMDBItem>>(endpoint, {
+    const data = await fetchTmdb<TMDBResponse<TMDBItem>>(endpoint, {
       page,
       [key]: id,
       sort_by: "popularity.desc",

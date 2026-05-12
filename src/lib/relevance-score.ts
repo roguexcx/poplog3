@@ -8,9 +8,20 @@
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+import type {
+  StreamStatus,
+  StreamingAvailabilityResult,
+  StreamingAvailabilityStatus,
+} from "@/lib/streaming";
+
 export type ScorableTitle = {
   tmdb_id: number;
   media_type: "movie" | "tv";
+  stream_status?: StreamStatus | StreamingAvailabilityStatus | null;
+  streamingAvailability?: Pick<
+    StreamingAvailabilityResult,
+    "streamStatus" | "legacyStreamStatus" | "confidenceScore" | "availableInCountry" | "availableAbroad"
+  > | null;
   tmdb: {
     release_date?: string;
     first_air_date?: string;
@@ -34,6 +45,7 @@ const WEIGHTS = {
 } as const;
 
 const CINEMA_TO_DIGITAL = { min: 31, max: 45 } as const;
+const ESTIMATED_AVAILABILITY_MAX = 30;
 
 // ─── Helpers internos ─────────────────────────────────────────────────────────
 
@@ -47,15 +59,56 @@ function getDayOfYear(): number {
   return Math.floor((now.getTime() - start.getTime()) / 86_400_000);
 }
 
-function availabilityScore(title: ScorableTitle): number {
-  if (title.media_type === "tv") return WEIGHTS.tvAvailable;
+function scoreKnownAvailability(status: StreamStatus | StreamingAvailabilityStatus, confidenceScore = 50): number {
+  const confidenceMultiplier = Math.max(0.25, Math.min(confidenceScore, 100) / 100);
+  switch (status) {
+    case "available_subscription":
+    case "available_free":
+    case "streaming":
+    case "confirmado":
+      return Math.round(WEIGHTS.available * confidenceMultiplier);
+    case "available_rent":
+    case "available_buy":
+      return Math.round(42 * confidenceMultiplier);
+    case "available_abroad":
+      return Math.round(WEIGHTS.grayZone * confidenceMultiplier);
+    case "cinema_now":
+    case "cinemas":
+    case "upcoming":
+      return WEIGHTS.cinemaOnly;
+    case "digital_expected":
+    case "recently_released":
+    case "chegando":
+      return Math.round(WEIGHTS.grayZone * confidenceMultiplier);
+    case "unavailable":
+    case "unknown":
+    default:
+      return 0;
+  }
+}
+
+function estimatedAvailabilityScore(title: ScorableTitle): number {
   const dateStr = title.tmdb?.release_date ?? title.tmdb?.first_air_date ?? null;
-  if (!dateStr) return WEIGHTS.grayZone;
+  if (!dateStr) return Math.min(WEIGHTS.grayZone, ESTIMATED_AVAILABILITY_MAX);
   const days = daysSince(dateStr);
   if (days < 0)                        return WEIGHTS.notReleased;
   if (days < CINEMA_TO_DIGITAL.min)    return WEIGHTS.cinemaOnly;
-  if (days < CINEMA_TO_DIGITAL.max)    return WEIGHTS.grayZone;
-  return WEIGHTS.available;
+  if (days < CINEMA_TO_DIGITAL.max)    return Math.min(WEIGHTS.grayZone, ESTIMATED_AVAILABILITY_MAX);
+  return ESTIMATED_AVAILABILITY_MAX;
+}
+
+function availabilityScore(title: ScorableTitle): number {
+  if (title.streamingAvailability) {
+    return scoreKnownAvailability(
+      title.streamingAvailability.streamStatus,
+      title.streamingAvailability.confidenceScore,
+    );
+  }
+  if (title.stream_status) {
+    return scoreKnownAvailability(title.stream_status, 45);
+  }
+  if (title.media_type === "tv") return Math.min(WEIGHTS.tvAvailable, ESTIMATED_AVAILABILITY_MAX);
+  return estimatedAvailabilityScore(title);
 }
 
 function recencyScore(title: ScorableTitle): number {

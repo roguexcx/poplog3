@@ -1,6 +1,7 @@
 // src/app/api/search/route.ts
 
 import { NextResponse } from "next/server";
+import { tmdbFetch } from "@/lib/tmdb";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
 import { getUserFeedbackMap } from "@/lib/personalization/feedback";
 import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
@@ -28,25 +29,17 @@ type TMDBSearchItem = {
   first_air_date?: string;
 };
 
-// ─── TMDB fetch local (precisa de include_adult e page, fora do tmdbFetch padrão) ─
-
-const TMDB_BASE_URL = "https://api.themoviedb.org/3";
-
 async function searchTMDB(query: string, language: "pt-BR" | "en-US"): Promise<TMDBSearchItem[]> {
-  const apiKey = process.env.TMDB_API_KEY;
-  if (!apiKey) throw new Error("TMDB_API_KEY não configurada");
-
-  const url = new URL(`${TMDB_BASE_URL}/search/multi`);
-  url.searchParams.set("api_key", apiKey);
-  url.searchParams.set("query", query);
-  url.searchParams.set("language", language);
-  url.searchParams.set("include_adult", "false");
-  url.searchParams.set("page", "1");
-
-  const res = await fetch(url.toString(), { next: { revalidate: 60 } });
-  if (!res.ok) throw new Error(`Erro TMDB: ${res.status}`);
-
-  const data = await res.json();
+  const data = await tmdbFetch<{ results?: TMDBSearchItem[] }>(
+    "/search/multi",
+    {
+      query,
+      include_adult: false,
+      page: 1,
+    },
+    60,
+    language,
+  );
   return (data.results ?? []) as TMDBSearchItem[];
 }
 
