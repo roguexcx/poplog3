@@ -66,7 +66,7 @@ export default function TitleScoreCard({ ratings }: TitleScoreCardProps) {
   const tone = score !== null ? scoreTone(score) : null;
   const votes = formatVotes(ratings.imdbVotes);
 
-  const visibleRatings: VisibleRating[] = [
+  const rawRatings: (VisibleRating | null)[] = [
     typeof ratings.imdbRating === "number"
       ? {
           label: "IMDb",
@@ -99,7 +99,10 @@ export default function TitleScoreCard({ ratings }: TitleScoreCardProps) {
           suffix: "/10",
         }
       : null,
-  ].filter((item): item is VisibleRating => item !== null);
+  ];
+  const visibleRatings: VisibleRating[] = rawRatings.filter(
+    (item): item is VisibleRating => item !== null
+  );
 
   if (score === null && visibleRatings.length === 0) {
     return null;

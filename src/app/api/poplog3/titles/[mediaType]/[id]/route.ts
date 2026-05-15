@@ -9,7 +9,7 @@ import { getAvailability } from "@/server/cache/availability-cache";
 import { getExternalIds } from "@/server/cache/external-ids-cache";
 import { computeUserSeriesProgress } from "@/server/episodes/episode-progress-service";
 import { getUserTitleStatus } from "@/server/library/library-service";
-import { syncAvailability } from "@/server/sync/sync-availability";
+import { syncAvailability, type TmdbPayloadWithWatch } from "@/server/sync/sync-availability";
 import { syncOmdbRatings } from "@/server/sync/sync-omdb-ratings";
 import { syncTmdbTitle } from "@/server/sync/sync-tmdb-title";
 
@@ -53,7 +53,7 @@ function uniqueNames(names: Array<string | null | undefined>, limit = 4) {
   ).slice(0, limit);
 }
 
-function isValidSeason(season: PoplogTitleDetails["seasons"][number]) {
+function isValidSeason(season: NonNullable<PoplogTitleDetails["seasons"]>[number]) {
   if (typeof season.season_number !== "number" || season.season_number <= 0) {
     return false;
   }
@@ -277,7 +277,7 @@ export async function GET(
         tmdbId: id,
         mediaType,
         country,
-        tmdbPayload: synced.rawPayload ?? null,
+        tmdbPayload: (synced.rawPayload ?? null) as TmdbPayloadWithWatch | null,
         imdbId,
         force: refresh,
       });

@@ -35,7 +35,7 @@ type TmdbWatchProvidersPayload = {
   >;
 };
 
-type TmdbPayloadWithWatch = {
+export type TmdbPayloadWithWatch = {
   ["watch/providers"]?: TmdbWatchProvidersPayload;
 };
 

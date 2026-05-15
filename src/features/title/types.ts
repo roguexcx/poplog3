@@ -57,6 +57,7 @@ export type TitleEpisodeStub = {
   episode_number?: number | null;
   season_number?: number | null;
   name?: string | null;
+  episode_type?: string | null;
 };
 
 export type TitleSeasonInfo = {
@@ -77,7 +78,16 @@ export type TitleRatings = {
 };
 
 export type TitleUserState = {
-
+  status?: string | null;
+  rating?: number | null;
+  watched?: boolean;
+  watching?: boolean;
+  inWatchlist?: boolean;
+  favorite?: boolean;
+  liked?: boolean;
+  disliked?: boolean;
+  isAuthenticated?: boolean;
+};
 
 export type TitleCompany = {
   id: number;

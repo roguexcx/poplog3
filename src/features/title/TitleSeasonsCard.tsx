@@ -98,7 +98,7 @@ export default function TitleSeasonsCard({ title }: TitleSeasonsCardProps) {
 
             {hasNext && (
               <StatusBadge
-                variant="info"
+                variant="new-episode"
                 label="Novo episódio"
                 size="xs"
               />
@@ -106,7 +106,7 @@ export default function TitleSeasonsCard({ title }: TitleSeasonsCardProps) {
 
             {isFinale && (
               <StatusBadge
-                variant="danger"
+                variant="in-season"
                 label="Final de temporada"
                 size="xs"
               />

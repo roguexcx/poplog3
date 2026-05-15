@@ -3,6 +3,14 @@ import Link from "next/link";
 import { TmdbImage } from "@/components/images/TmdbImage";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";
 
+const STATUS_BADGE: Record<string, string> = {
+  watching:  "border-violet-400/30 bg-violet-500/75 text-violet-100",
+  watchlist: "border-teal-400/25 bg-teal-600/60 text-teal-100",
+  watched:   "border-white/[0.12] bg-black/55 text-white/72",
+  abandoned: "border-rose-500/25 bg-rose-900/60 text-rose-200",
+  fridge:    "border-amber-400/25 bg-amber-900/50 text-amber-200",
+};
+
 type LibraryPosterCardProps = {
   item: Poplog3UserLibraryItem;
   priority?: boolean;
@@ -39,7 +47,7 @@ export default function LibraryPosterCard({
 
             <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_115%,rgba(99,102,241,0.28),transparent_58%)] opacity-0 transition duration-500 group-hover:opacity-100" />
 
-            <div className="absolute left-3 top-3 rounded-full border border-white/[0.12] bg-black/55 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-white/78 backdrop-blur-md">
+            <div className={`absolute left-3 top-3 rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] backdrop-blur-md ${STATUS_BADGE[item.status] ?? STATUS_BADGE.watched}`}>
               {formatStatus(item.status)}
             </div>
 

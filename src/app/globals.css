@@ -12,6 +12,7 @@
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --font-sans: var(--font-sans-fallback);
+  --font-display: var(--font-sans-fallback);
   --font-mono: var(--font-mono-fallback);
 }
 

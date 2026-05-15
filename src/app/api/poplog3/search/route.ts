@@ -3,7 +3,7 @@ import { filterValidTitles } from "@/server/utils/filter-valid-titles";
 import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import { normalizeTmdbTitle } from "@/server/normalizers/tmdb-title";
 import { upsertCachedTitle } from "@/server/cache/title-cache";
-import type { TmdbTitleSummary } from "@/server/api-clients/tmdb/types";
+import type { TmdbMediaType, TmdbTitleSummary } from "@/server/api-clients/tmdb/types";
 
 type SearchMediaType = "all" | "movie" | "tv";
 
@@ -158,7 +158,7 @@ export async function GET(request: NextRequest) {
     const normalizedTitles = rawTitles.map((item) =>
       normalizeTmdbTitle({
         ...item,
-        media_type: item.media_type ?? mediaType,
+        media_type: (item.media_type ?? mediaType) as TmdbMediaType,
       })
     );
 

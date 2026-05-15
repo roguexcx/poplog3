@@ -174,7 +174,7 @@ function LibraryToolbar({
   onPageChange,
 }: LibraryToolbarProps) {
   return (
-    <div className="sticky top-0 z-30 -mx-4 border-y border-white/[0.06] bg-[#020617]/86 px-4 py-3 backdrop-blur-2xl sm:-mx-6 sm:px-6 md:-mx-8 md:px-8 md:py-4 lg:-mx-10 lg:px-10">
+    <div className="sticky top-0 z-30 -mx-4 border-y border-white/[0.06] bg-black/80 px-4 py-3 backdrop-blur-2xl sm:-mx-6 sm:px-6 md:-mx-8 md:px-8 md:py-4 lg:-mx-10 lg:px-10">
       <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-3 md:gap-4">
         <LibraryTabs activeTab={activeTab} onChange={onTabChange} stats={stats} />
 
@@ -184,7 +184,7 @@ function LibraryToolbar({
               value={sortBy}
               onChange={(event) => onSortChange(event.target.value as SortBy)}
               style={{ colorScheme: "dark" }}
-              className="h-10 w-full max-w-[260px] appearance-none rounded-full border border-white/[0.1] bg-[#020617] px-4 text-center text-xs font-semibold text-zinc-100 outline-none transition hover:border-white/[0.18] focus:border-indigo-300/40 sm:text-left [&_option]:bg-[#020617] [&_option]:text-zinc-100"
+              className="h-10 w-full max-w-[260px] appearance-none rounded-full border border-white/[0.08] bg-white/[0.035] px-4 text-center text-xs font-semibold text-white/80 outline-none transition hover:border-white/[0.16] focus:border-indigo-300/40 sm:text-left [&_option]:bg-[#020617] [&_option]:text-zinc-100"
             >
               <option value="release-desc">Lançamento mais recente</option>
               <option value="recent">Adicionados recentemente</option>

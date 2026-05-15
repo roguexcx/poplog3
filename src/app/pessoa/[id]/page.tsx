@@ -227,7 +227,7 @@ export default async function PessoaPage({ params }: PessoaPageProps) {
           <section className="space-y-5">
             <SectionHeader
               title="Conhecido por"
-              description="Principais trabalhos da carreira."
+              subtitle="Principais trabalhos da carreira."
             />
             <TitleGrid titles={data.knownFor} />
           </section>
@@ -237,7 +237,7 @@ export default async function PessoaPage({ params }: PessoaPageProps) {
           <section className="space-y-5">
             <SectionHeader
               title="Atuação"
-              description="Filmes e séries com personagens creditados."
+              subtitle="Filmes e séries com personagens creditados."
             />
             <TitleGrid titles={data.acting} />
           </section>
@@ -245,7 +245,7 @@ export default async function PessoaPage({ params }: PessoaPageProps) {
 
         {data.directing?.length ? (
           <section className="space-y-5">
-            <SectionHeader title="Direção" description="Projetos dirigidos." />
+            <SectionHeader title="Direção" subtitle="Projetos dirigidos." />
             <TitleGrid titles={data.directing} />
           </section>
         ) : null}
@@ -254,7 +254,7 @@ export default async function PessoaPage({ params }: PessoaPageProps) {
           <section className="space-y-5">
             <SectionHeader
               title="Criação"
-              description="Projetos criados ou escritos."
+              subtitle="Projetos criados ou escritos."
             />
             <TitleGrid titles={data.creating} />
           </section>
@@ -264,7 +264,7 @@ export default async function PessoaPage({ params }: PessoaPageProps) {
           <section className="space-y-5 opacity-60">
             <SectionHeader
               title="Participações"
-              description="Especiais, documentários, reality shows e aparições de menor prioridade."
+              subtitle="Especiais, documentários, reality shows e aparições de menor prioridade."
             />
             <TitleGrid titles={data.appearances.slice(0, 12)} />
           </section>
