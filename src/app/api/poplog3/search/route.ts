@@ -1,0 +1,213 @@
+import { NextRequest, NextResponse } from "next/server";
+import { filterValidTitles } from "@/server/utils/filter-valid-titles";
+import { tmdbFetch } from "@/server/api-clients/tmdb/client";
+import { normalizeTmdbTitle } from "@/server/normalizers/tmdb-title";
+import { upsertCachedTitle } from "@/server/cache/title-cache";
+import type { TmdbTitleSummary } from "@/server/api-clients/tmdb/types";
+
+type SearchMediaType = "all" | "movie" | "tv";
+
+type TmdbPersonSummary = {
+  id: number;
+  name?: string;
+  original_name?: string;
+  profile_path?: string | null;
+  known_for_department?: string | null;
+  popularity?: number;
+  media_type?: "person";
+  known_for?: TmdbTitleSummary[];
+};
+
+type TmdbSearchItem = TmdbTitleSummary | TmdbPersonSummary;
+
+type PoplogSearchPerson = {
+  tmdb_id: number;
+  name: string;
+  profile_path: string | null;
+  known_for_department: string | null;
+  popularity: number;
+  known_for: ReturnType<typeof normalizeTmdbTitle>[];
+  href: string;
+};
+
+function parseMediaType(value: string | null): SearchMediaType {
+  if (value === "movie" || value === "tv") return value;
+  return "all";
+}
+
+function parsePage(value: string | null): number {
+  const page = Number(value);
+
+  if (!Number.isFinite(page) || page < 1) {
+    return 1;
+  }
+
+  return Math.floor(page);
+}
+
+function parseGenre(value: string | null): number | undefined {
+  if (!value) return undefined;
+
+  const genre = Number(value);
+
+  if (!Number.isFinite(genre)) {
+    return undefined;
+  }
+
+  return Math.floor(genre);
+}
+
+function isPerson(item: TmdbSearchItem): item is TmdbPersonSummary {
+  return item.media_type === "person";
+}
+
+function isTitle(item: TmdbSearchItem): item is TmdbTitleSummary {
+  const mediaType = item.media_type;
+
+  return mediaType === "movie" || mediaType === "tv" || !mediaType;
+}
+
+function normalizePerson(item: TmdbPersonSummary): PoplogSearchPerson | null {
+  const name = item.name ?? item.original_name;
+
+  if (!item.id || !name) return null;
+
+  const knownFor = (item.known_for ?? [])
+    .filter((knownItem) => {
+      const mediaType = knownItem.media_type;
+
+      return mediaType === "movie" || mediaType === "tv";
+    })
+    .map((knownItem) =>
+      normalizeTmdbTitle({
+        ...knownItem,
+        media_type: knownItem.media_type,
+      })
+    );
+
+  return {
+    tmdb_id: item.id,
+    name,
+    profile_path: item.profile_path ?? null,
+    known_for_department: item.known_for_department ?? null,
+    popularity: item.popularity ?? 0,
+    known_for: filterValidTitles(knownFor).slice(0, 4),
+    href: `/pessoa/${item.id}`,
+  };
+}
+
+export async function GET(request: NextRequest) {
+  const searchParams = request.nextUrl.searchParams;
+
+  const query = searchParams.get("q")?.trim();
+  const mediaType = parseMediaType(searchParams.get("type"));
+  const page = parsePage(searchParams.get("page"));
+  const genre = parseGenre(searchParams.get("genre"));
+
+  if (!query) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Missing search query. Use ?q=",
+      },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const endpoint =
+      mediaType === "all" ? "/search/multi" : `/search/${mediaType}`;
+
+    const data = await tmdbFetch<{
+      page: number;
+      total_pages: number;
+      total_results: number;
+      results: TmdbSearchItem[];
+    }>(endpoint, {
+      params: {
+        query,
+        include_adult: false,
+        page,
+      },
+    });
+
+    const rawPeople =
+      mediaType === "all" ? data.results.filter(isPerson) : [];
+
+    const people = rawPeople
+      .map(normalizePerson)
+      .filter((person): person is PoplogSearchPerson => Boolean(person))
+      .sort((a, b) => b.popularity - a.popularity)
+      .slice(0, 8);
+
+    const rawTitles = data.results.filter((item) => {
+      if (!isTitle(item)) return false;
+
+      const itemMediaType = item.media_type ?? mediaType;
+
+      if (itemMediaType !== "movie" && itemMediaType !== "tv") return false;
+
+      if (genre) {
+        const genreIds = item.genre_ids ?? [];
+        return genreIds.includes(genre);
+      }
+
+      return true;
+    }) as TmdbTitleSummary[];
+
+    const normalizedTitles = rawTitles.map((item) =>
+      normalizeTmdbTitle({
+        ...item,
+        media_type: item.media_type ?? mediaType,
+      })
+    );
+
+    const titles = filterValidTitles(normalizedTitles);
+
+    await Promise.all(
+      titles.map(async (title) => {
+        const rawTitle = rawTitles.find((item) => {
+          const rawMediaType = item.media_type ?? mediaType;
+
+          return item.id === title.tmdb_id && rawMediaType === title.media_type;
+        });
+
+        if (!rawTitle) return;
+
+        try {
+          await upsertCachedTitle(title, rawTitle);
+        } catch (cacheError) {
+          console.warn(
+            `[poplog3/search] falha ao cachear ${title.media_type}/${title.tmdb_id}:`,
+            cacheError instanceof Error ? cacheError.message : cacheError
+          );
+        }
+      })
+    );
+
+    return NextResponse.json({
+      ok: true,
+      query,
+      type: mediaType,
+      genre,
+      page: data.page ?? page,
+      totalPages: data.total_pages ?? 1,
+      totalResults: data.total_results ?? titles.length + people.length,
+      count: titles.length,
+      peopleCount: people.length,
+      results: titles,
+      people,
+    });
+  } catch (error) {
+    console.error("[poplog3/search]", error);
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Failed to search titles",
+        details: error instanceof Error ? error.message : String(error),
+      },
+      { status: 500 }
+    );
+  }
+}

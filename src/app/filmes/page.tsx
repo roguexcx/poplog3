@@ -1,13 +1,11 @@
-import type { Metadata } from "next";
-import FilmesClient from "./FilmesClient";
-import { fetchGenreList } from "@/lib/tmdb-index";
+import CleanPage from "@/components/layout/CleanPage";
 
-export const metadata: Metadata = {
-  title: "Filmes — POPLOG",
-  description: "Explore os melhores filmes no Poplog.",
-};
-
-export default async function FilmesPage() {
-  const genres = await fetchGenreList("movie");
-  return <FilmesClient genres={genres} />;
+export default function FilmesPage() {
+  return (
+    <CleanPage
+      eyebrow="Filmes"
+      title="Catalogo pausado."
+      description="Esta area esta pronta para receber uma nova integracao isolada de filmes."
+    />
+  );
 }

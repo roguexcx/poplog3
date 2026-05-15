@@ -1,13 +1,11 @@
-import type { Metadata } from "next";
-import SeriesClient from "./SeriesClient";
-import { fetchGenreList } from "@/lib/tmdb-index";
+import CleanPage from "@/components/layout/CleanPage";
 
-export const metadata: Metadata = {
-  title: "Séries — POPLOG",
-  description: "Explore as melhores séries no Poplog.",
-};
-
-export default async function SeriesPage() {
-  const genres = await fetchGenreList("tv");
-  return <SeriesClient genres={genres} />;
+export default function SeriesPage() {
+  return (
+    <CleanPage
+      eyebrow="Series"
+      title="Catalogo pausado."
+      description="Esta area esta pronta para receber uma nova integracao isolada de series."
+    />
+  );
 }

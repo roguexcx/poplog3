@@ -1,97 +1,275 @@
-import type { Metadata } from "next";
-import { notFound } from "next/navigation";
-import IndexedTitleGrid from "@/components/titles/IndexedTitleGrid";
-import TmdbImage from "@/components/images/TmdbImage";
-import { fetchPersonIndex } from "@/lib/tmdb-index";
+import Image from "next/image";
+import Link from "next/link";
+import { headers } from "next/headers";
 
-type Props = {
-  params: Promise<{ id: string }>;
+import PosterCard from "@/components/ui/PosterCard";
+import EmptyState from "@/components/ui/EmptyState";
+import SectionHeader from "@/components/ui/SectionHeader";
+
+type PersonTitle = {
+  tmdb_id: number;
+  media_type: "movie" | "tv";
+  title: string;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+  release_date?: string | null;
+  first_air_date?: string | null;
+  vote_average?: number | null;
+  popularity?: number | null;
+  overview?: string | null;
 };
 
-export async function generateMetadata({ params }: Props): Promise<Metadata> {
-  const { id } = await params;
-  const personId = Number(id);
-  if (!personId) return { title: "Pessoa — POPLOG" };
-  const { person } = await fetchPersonIndex(personId);
-  return {
-    title: `${person.name} — POPLOG`,
-    description: person.biography || `Filmografia e principais trabalhos de ${person.name}.`,
+type PersonResponse = {
+  ok: boolean;
+
+  person: {
+    tmdb_id: number;
+    name: string;
+    biography?: string | null;
+    birthday?: string | null;
+    deathday?: string | null;
+    place_of_birth?: string | null;
+    known_for_department?: string | null;
+    popularity?: number;
+    profile_path?: string | null;
+
+    external_ids?: {
+      imdb_id?: string | null;
+      instagram_id?: string | null;
+      twitter_id?: string | null;
+      tiktok_id?: string | null;
+    };
+
+    images?: {
+      file_path: string;
+    }[];
   };
+
+  knownFor: PersonTitle[];
+  acting: PersonTitle[];
+  directing: PersonTitle[];
+  creating: PersonTitle[];
+  appearances: PersonTitle[];
+};
+
+type PessoaPageProps = {
+  params: Promise<{
+    id: string;
+  }>;
+};
+
+function imageUrl(path?: string | null, size = "w500") {
+  if (!path) return null;
+  return `https://image.tmdb.org/t/p/${size}${path}`;
 }
 
-export default async function PersonIndexPage({ params }: Props) {
-  const { id } = await params;
-  const personId = Number(id);
-  if (!personId) notFound();
+function getYear(title: PersonTitle) {
+  const date = title.release_date ?? title.first_air_date;
+  if (!date) return undefined;
 
-  const { person, knownFor, recent, cast, crew } = await fetchPersonIndex(personId);
+  const year = new Date(date).getFullYear();
+  return Number.isFinite(year) ? year : undefined;
+}
+
+function TitleGrid({ titles }: { titles: PersonTitle[] }) {
+  if (!titles.length) return null;
 
   return (
-    <main className="min-h-screen bg-[#020617] pb-24 text-white">
-      <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_top_left,rgba(56,189,248,0.12),transparent_36%),radial-gradient(circle_at_80%_0%,rgba(99,102,241,0.08),transparent_32%)]" />
-      <div className="relative mx-auto max-w-7xl px-4 py-8 sm:px-6 md:py-12">
-        <header className="mb-10 grid gap-6 md:grid-cols-[180px_1fr] md:items-end">
-          <div className="relative aspect-[2/3] w-40 overflow-hidden rounded-2xl border border-white/[0.10] bg-white/[0.04] shadow-[0_24px_80px_rgba(0,0,0,0.55)] md:w-full">
-            <TmdbImage
-              path={person.profile_path ?? null}
-              kind="profile"
-              size="large"
-              alt={person.name}
-              fill
-              priority
-              sizes="180px"
-              className="object-cover"
-              fallback={<div className="h-full w-full bg-white/[0.04]" />}
+    <div className="grid grid-cols-2 gap-x-4 gap-y-8 md:grid-cols-4 lg:grid-cols-6">
+      {titles.map((title) => (
+        <PosterCard
+          key={`${title.media_type}-${title.tmdb_id}`}
+          href={`/title/${title.media_type}/${title.tmdb_id}`}
+          mediaType={title.media_type}
+          title={title.title}
+          posterPath={title.poster_path}
+          fallbackPath={title.backdrop_path}
+          year={getYear(title)}
+        />
+      ))}
+    </div>
+  );
+}
+
+export default async function PessoaPage({ params }: PessoaPageProps) {
+  const { id } = await params;
+
+  const headersList = await headers();
+  const host = headersList.get("host");
+  const protocol = process.env.NODE_ENV === "production" ? "https" : "http";
+
+  const response = await fetch(
+    `${protocol}://${host}/api/poplog3/people/${id}`,
+    {
+      next: {
+        revalidate: 3600,
+      },
+    }
+  );
+
+  if (!response.ok) {
+    return (
+      <EmptyState
+        title="Pessoa não encontrada."
+        description="Não foi possível carregar os dados."
+      />
+    );
+  }
+
+  const data: PersonResponse = await response.json();
+
+  if (!data.ok || !data.person) {
+    return (
+      <EmptyState
+        title="Pessoa não encontrada."
+        description="Não foi possível carregar os dados."
+      />
+    );
+  }
+
+  const person = data.person;
+  const profileImage = imageUrl(person.profile_path, "w780");
+
+  const shortBiography =
+    person.biography && person.biography.length > 560
+      ? `${person.biography.slice(0, 560).trim()}...`
+      : person.biography;
+
+  return (
+    <div className="relative min-h-screen overflow-hidden">
+      <div className="pointer-events-none fixed inset-0 -z-10 bg-[#030712]" />
+      <div className="pointer-events-none fixed left-1/2 top-0 -z-10 h-[440px] w-[760px] -translate-x-1/2 rounded-full bg-indigo-500/12 blur-[130px]" />
+      <div className="pointer-events-none fixed bottom-0 right-0 -z-10 h-[320px] w-[420px] rounded-full bg-cyan-500/8 blur-[110px]" />
+
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-8 px-4 py-5 pb-20 md:px-6">
+        <section className="relative overflow-hidden rounded-[28px] border border-white/[0.08] bg-white/[0.035] p-4 shadow-2xl shadow-black/25 backdrop-blur-2xl md:p-5">
+          <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_20%,rgba(99,102,241,0.18),transparent_28%),radial-gradient(circle_at_85%_20%,rgba(6,182,212,0.1),transparent_24%)]" />
+
+          <div className="relative grid gap-5 lg:grid-cols-[180px_1fr]">
+            <div className="relative aspect-[2/3] overflow-hidden rounded-[22px] border border-white/[0.08] bg-white/[0.04]">
+              {profileImage ? (
+                <Image
+                  src={profileImage}
+                  alt={person.name}
+                  fill
+                  priority
+                  className="object-cover"
+                />
+              ) : (
+                <div className="flex h-full items-center justify-center text-white/35">
+                  Sem imagem
+                </div>
+              )}
+            </div>
+
+            <div className="flex flex-col justify-center">
+              <div className="mb-3 flex items-center gap-3 text-[11px] font-semibold uppercase tracking-[0.22em] text-indigo-200/75">
+                <span className="h-px w-8 bg-indigo-300/65" />
+                Pessoa
+              </div>
+
+              <h1 className="max-w-4xl text-3xl font-black tracking-[-0.055em] text-white md:text-5xl">
+                {person.name}
+              </h1>
+
+              {person.known_for_department ? (
+                <p className="mt-2 text-sm font-medium text-white/55">
+                  {person.known_for_department}
+                </p>
+              ) : null}
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {person.birthday ? (
+                  <div className="rounded-full border border-white/[0.08] bg-white/[0.035] px-3 py-1.5 text-xs text-white/65">
+                    Nascimento: {person.birthday}
+                  </div>
+                ) : null}
+
+                {person.place_of_birth ? (
+                  <div className="rounded-full border border-white/[0.08] bg-white/[0.035] px-3 py-1.5 text-xs text-white/65">
+                    {person.place_of_birth}
+                  </div>
+                ) : null}
+              </div>
+
+              {shortBiography ? (
+                <p className="mt-4 max-w-4xl text-sm leading-6 text-white/55">
+                  {shortBiography}
+                </p>
+              ) : null}
+
+              <div className="mt-5 flex flex-wrap gap-2">
+                {person.external_ids?.imdb_id ? (
+                  <Link
+                    href={`https://www.imdb.com/name/${person.external_ids.imdb_id}`}
+                    target="_blank"
+                    className="rounded-full border border-white/[0.08] bg-white/[0.04] px-4 py-2 text-xs font-semibold text-white/70 transition hover:bg-white/[0.08]"
+                  >
+                    IMDb
+                  </Link>
+                ) : null}
+
+                {person.external_ids?.instagram_id ? (
+                  <Link
+                    href={`https://instagram.com/${person.external_ids.instagram_id}`}
+                    target="_blank"
+                    className="rounded-full border border-white/[0.08] bg-white/[0.04] px-4 py-2 text-xs font-semibold text-white/70 transition hover:bg-white/[0.08]"
+                  >
+                    Instagram
+                  </Link>
+                ) : null}
+              </div>
+            </div>
+          </div>
+        </section>
+
+        {data.knownFor?.length ? (
+          <section className="space-y-5">
+            <SectionHeader
+              title="Conhecido por"
+              description="Principais trabalhos da carreira."
             />
-          </div>
-          <div>
-            <p className="text-[11px] font-black uppercase tracking-[0.36em] text-sky-300">
-              Elenco / direção
-            </p>
-            <h1 className="mt-2 text-4xl font-black tracking-tight sm:text-6xl">{person.name}</h1>
-            <div className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-sm font-semibold text-zinc-500">
-              {person.known_for_department && <span>{person.known_for_department}</span>}
-              {person.place_of_birth && <span>· {person.place_of_birth}</span>}
-            </div>
-            {person.biography && (
-              <p className="mt-5 line-clamp-4 max-w-3xl text-sm leading-relaxed text-zinc-400">
-                {person.biography}
-              </p>
-            )}
-          </div>
-        </header>
-
-        <div className="space-y-12">
-          <section>
-            <h2 className="mb-4 text-[11px] font-black uppercase tracking-[0.35em] text-sky-300">
-              Principais trabalhos
-            </h2>
-            <IndexedTitleGrid items={knownFor} />
+            <TitleGrid titles={data.knownFor} />
           </section>
+        ) : null}
 
-          <section>
-            <h2 className="mb-4 text-[11px] font-black uppercase tracking-[0.35em] text-sky-300">
-              Recentes
-            </h2>
-            <IndexedTitleGrid items={recent} />
+        {data.acting?.length ? (
+          <section className="space-y-5">
+            <SectionHeader
+              title="Atuação"
+              description="Filmes e séries com personagens creditados."
+            />
+            <TitleGrid titles={data.acting} />
           </section>
+        ) : null}
 
-          <section className="grid gap-6 lg:grid-cols-2">
-            <div>
-              <h2 className="mb-4 text-[11px] font-black uppercase tracking-[0.35em] text-zinc-500">
-                Como elenco
-              </h2>
-              <IndexedTitleGrid items={cast.slice(0, 12)} columns="compact" />
-            </div>
-            <div>
-              <h2 className="mb-4 text-[11px] font-black uppercase tracking-[0.35em] text-zinc-500">
-                Direção / equipe
-              </h2>
-              <IndexedTitleGrid items={crew.slice(0, 12)} columns="compact" />
-            </div>
+        {data.directing?.length ? (
+          <section className="space-y-5">
+            <SectionHeader title="Direção" description="Projetos dirigidos." />
+            <TitleGrid titles={data.directing} />
           </section>
-        </div>
+        ) : null}
+
+        {data.creating?.length ? (
+          <section className="space-y-5">
+            <SectionHeader
+              title="Criação"
+              description="Projetos criados ou escritos."
+            />
+            <TitleGrid titles={data.creating} />
+          </section>
+        ) : null}
+
+        {data.appearances?.length ? (
+          <section className="space-y-5 opacity-60">
+            <SectionHeader
+              title="Participações"
+              description="Especiais, documentários, reality shows e aparições de menor prioridade."
+            />
+            <TitleGrid titles={data.appearances.slice(0, 12)} />
+          </section>
+        ) : null}
       </div>
-    </main>
+    </div>
   );
 }

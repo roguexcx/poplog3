@@ -1,20 +1,27 @@
 import type { Metadata } from "next";
-import "./globals.css";
 import Sidebar from "@/components/layout/Sidebar";
+import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Poplog",
-  description: "Sua curadoria pessoal de filmes e séries.",
+  title: "POPLOG",
+  description:
+    "Descubra, organize e acompanhe filmes e séries em uma experiência pessoal.",
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default function RootLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return (
     <html lang="pt-BR" className="dark antialiased">
-      <body className="min-h-screen bg-[#080810] text-zinc-100 selection:bg-indigo-500/30">
+      <body>
         <Sidebar />
 
-        <main className="min-h-screen transition-[margin] duration-300 ease-in-out md:ml-20 md:peer-hover/sidebar:ml-60">
-          <div className="layout-content pb-24 md:pb-0">{children}</div>
+        <main className="relative min-h-dvh transition-[margin] duration-300 ease-in-out md:ml-20 md:peer-hover/sidebar:ml-64">
+          <div className="min-h-dvh px-4 pb-24 pt-4 sm:px-6 md:px-8 md:pb-8 md:pt-6 lg:px-10">
+            {children}
+          </div>
         </main>
       </body>
     </html>

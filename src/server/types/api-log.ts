@@ -1,0 +1,17 @@
+export type ApiLogEntry = {
+  api: "tmdb" | "omdb" | "watchmode" | "movieofthenight";
+
+  endpoint: string;
+
+  success: boolean;
+
+  status?: number;
+
+  response_time_ms?: number;
+
+  cache_hit?: boolean;
+
+  created_at: string;
+
+  error_message?: string;
+};

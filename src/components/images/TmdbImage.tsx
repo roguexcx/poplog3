@@ -1,57 +1,54 @@
-// src/components/images/TmdbImage.tsx
-"use client";
+import Image from "next/image";
 
-import Image, { type ImageProps } from "next/image";
-import { useState, type ReactNode } from "react";
-
-import { buildTmdbUrlLoose } from "@/lib/images/url";
-import type { ImageKind } from "@/lib/images/sizes";
-
-export type TmdbImageProps = Omit<ImageProps, "src" | "alt"> & {
-  /** TMDB path (e.g. `/abc.jpg`). May be null/undefined — in that case `fallback` is rendered. */
-  path: string | null | undefined;
-  /** Alt text (required). Pass `""` for purely decorative images. */
-  alt: string;
-  /** Semantic image kind (poster, backdrop, profile, still, logo). */
-  kind: ImageKind;
-  /**
-   * Semantic size for this context (e.g. `"card"`, `"hero"`, `"detail"`).
-   * See `IMAGE_SIZES` in `@/lib/images/sizes` for the full table per kind.
-   * The builder also accepts raw TMDB size codes (`"w342"`, `"original"`)
-   * for compatibility with call-sites still being migrated.
-   */
-  size: string;
-  /** Node rendered when `path` is nullish or the image errors at runtime. */
-  fallback?: ReactNode;
+type TmdbImageProps = {
+  path: string | null;
+  fallbackPath?: string | null;
+  size?: "w300" | "w500" | "w780" | "original";
+  alt?: string;
+  className?: string;
+  priority?: boolean;
+  fallbackLabel?: string;
 };
 
-/**
- * next/image wrapper integrated with the central TMDB image system.
- *
- * - Accepts optional `path` — when nullish, renders `fallback` (default: null).
- * - Auto-fallback on runtime errors via `onError`.
- * - All other props (lazy-load, sizes, srcset, fill, priority, etc.) pass
- *   through to next/image via the spread.
- */
-export default function TmdbImage({
-  path,
-  kind,
-  size,
-  alt,
-  fallback = null,
-  ...rest
-}: TmdbImageProps) {
-  const [errored, setErrored] = useState(false);
+const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
 
-  const src = buildTmdbUrlLoose(kind, size, path);
-  if (!src || errored) return <>{fallback}</>;
+function normalizePath(path: string | null | undefined) {
+  if (!path) return null;
+  return path.startsWith("/") ? path : `/${path}`;
+}
+
+export function TmdbImage({
+  path,
+  fallbackPath = null,
+  size = "w500",
+  alt = "",
+  className = "",
+  priority = false,
+  fallbackLabel = "Sem imagem",
+}: TmdbImageProps) {
+  const imagePath = normalizePath(path) ?? normalizePath(fallbackPath);
+
+  if (!imagePath) {
+    return (
+      <div
+        className={`flex h-full w-full items-center justify-center bg-gradient-to-br from-zinc-900 via-zinc-950 to-black p-4 text-center text-xs font-semibold uppercase tracking-[0.18em] text-white/35 ${className}`}
+      >
+        {fallbackLabel}
+      </div>
+    );
+  }
+
+  const src = `${TMDB_IMAGE_BASE}/${size}${imagePath}`;
 
   return (
     <Image
       src={src}
       alt={alt}
-      onError={() => setErrored(true)}
-      {...rest}
+      fill
+      priority={priority}
+      unoptimized
+      sizes="(max-width: 768px) 50vw, (max-width: 1280px) 20vw, 16vw"
+      className={className}
     />
   );
 }

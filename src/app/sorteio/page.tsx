@@ -1,8 +1,11 @@
-import SorteioClient from "@/features/sorteio/SorteioClient";
-
-export const dynamic = "force-dynamic";
-export const revalidate = 0;
+import CleanPage from "@/components/layout/CleanPage";
 
 export default function SorteioPage() {
-  return <SorteioClient />;
+  return (
+    <CleanPage
+      eyebrow="Sorteio"
+      title="Motor de sugestoes removido."
+      description="O espaco visual fica preservado para reconstruir o fluxo do zero."
+    />
+  );
 }

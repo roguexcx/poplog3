@@ -1,172 +1,71 @@
-// src/app/api/search/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import { filterValidTitles } from "@/server/utils/filter-valid-titles";
+import { tmdbFetch } from "@/server/api-clients/tmdb/client";
+import { normalizeTmdbTitle } from "@/server/normalizers/tmdb-title";
+import { upsertCachedTitle } from "@/server/cache/title-cache";
+import type { TmdbTitleSummary } from "@/server/api-clients/tmdb/types";
 
-import { NextResponse } from "next/server";
-import { tmdbFetch } from "@/lib/tmdb";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { getUserFeedbackMap } from "@/lib/personalization/feedback";
-import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
-import {
-  getRandomTitleImagePath,
-  LOCALIZED_POSTER_RANDOMIZATION_LANGUAGES,
-  RANDOMIZATION_ENABLED,
-} from "@/lib/images";
+export async function GET(request: NextRequest) {
+  const searchParams = request.nextUrl.searchParams;
+  const query = searchParams.get("q")?.trim();
 
-// ─── Tipo local (específico desta rota, não vale exportar para tmdb-types) ────
-
-type TMDBSearchItem = {
-  id: number;
-  media_type: "movie" | "tv" | string;
-  title?: string;
-  name?: string;
-  original_title?: string;
-  original_name?: string;
-  poster_path?: string | null;
-  backdrop_path?: string | null;
-  popularity?: number;
-  vote_average?: number;
-  vote_count?: number;
-  release_date?: string;
-  first_air_date?: string;
-};
-
-async function searchTMDB(query: string, language: "pt-BR" | "en-US"): Promise<TMDBSearchItem[]> {
-  const data = await tmdbFetch<{ results?: TMDBSearchItem[] }>(
-    "/search/multi",
-    {
-      query,
-      include_adult: false,
-      page: 1,
-    },
-    60,
-    language,
-  );
-  return (data.results ?? []) as TMDBSearchItem[];
-}
-
-// ─── Scoring ──────────────────────────────────────────────────────────────────
-
-function normalizeText(value?: string): string {
-  return (
-    value
-      ?.toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .trim() ?? ""
-  );
-}
-
-function getYear(item: TMDBSearchItem): number {
-  const date = item.release_date ?? item.first_air_date;
-  const year = date?.slice(0, 4);
-  return year ? Number(year) : 0;
-}
-
-function getTitleScore(item: TMDBSearchItem, query: string): number {
-  const q = normalizeText(query);
-  if (!q) return 0;
-
-  const titles = [item.title, item.name, item.original_title, item.original_name]
-    .map(normalizeText)
-    .filter(Boolean);
-
-  if (titles.some((t) => t === q)) return 120;
-  if (titles.some((t) => t.startsWith(q))) return 100;
-  if (titles.some((t) => t.includes(q))) return 70;
-  return 0;
-}
-
-function getResultScore(item: TMDBSearchItem, query: string): number {
-  const year = getYear(item);
-  return (
-    getTitleScore(item, query) +
-    Math.min(item.popularity ?? 0, 100) +
-    Math.min((item.vote_count ?? 0) / 100, 80) +
-    (item.poster_path ? 12 : 0) +
-    (item.backdrop_path ? 8 : 0) +
-    (year >= 2010 ? Math.min((year - 2010) * 1.5, 30) : 0)
-  );
-}
-
-// ─── Merge de resultados pt-BR + en-US ────────────────────────────────────────
-
-function mergeResults(items: TMDBSearchItem[]): TMDBSearchItem[] {
-  const map = new Map<string, TMDBSearchItem>();
-
-  for (const item of items) {
-    const key = `${item.media_type}-${item.id}`;
-    const existing = map.get(key);
-
-    if (!existing) {
-      map.set(key, item);
-      continue;
-    }
-
-    map.set(key, {
-      ...existing,
-      ...item,
-      title: existing.title ?? item.title,
-      name: existing.name ?? item.name,
-      original_title: existing.original_title ?? item.original_title,
-      original_name: existing.original_name ?? item.original_name,
-      poster_path: existing.poster_path ?? item.poster_path,
-      backdrop_path: existing.backdrop_path ?? item.backdrop_path,
-      popularity: Math.max(existing.popularity ?? 0, item.popularity ?? 0),
-      vote_count: Math.max(existing.vote_count ?? 0, item.vote_count ?? 0),
-    });
+  if (!query) {
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Missing search query. Use ?q=",
+      },
+      { status: 400 }
+    );
   }
 
-  return Array.from(map.values());
-}
-
-// ─── Handler ──────────────────────────────────────────────────────────────────
-
-async function withLocalizedPoster(item: TMDBSearchItem): Promise<TMDBSearchItem | null> {
-  if (item.media_type !== "movie" && item.media_type !== "tv") return null;
-  if (!RANDOMIZATION_ENABLED) return item.poster_path ? item : null;
-
-  const posterPath = await getRandomTitleImagePath(item.media_type, item.id, "poster", {
-    languages: LOCALIZED_POSTER_RANDOMIZATION_LANGUAGES,
-  });
-
-  return posterPath ? { ...item, poster_path: posterPath } : null;
-}
-
-export async function GET(request: Request) {
-  const query = new URL(request.url).searchParams.get("query")?.trim();
-
-  if (!query) return NextResponse.json({ results: [] });
-
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
-    const [ptResults, enResults] = await Promise.all([
-      searchTMDB(query, "pt-BR"),
-      searchTMDB(query, "en-US"),
-    ]);
+    const data = await tmdbFetch<{
+      results: TmdbTitleSummary[];
+    }>("/search/multi", {
+      params: {
+        query,
+        include_adult: false,
+        page: 1,
+      },
+    });
 
-    const ranked = mergeResults([...ptResults, ...enResults])
-      .filter((item) => item.media_type === "movie" || item.media_type === "tv")
-      .filter((item) => item.poster_path)
-      .sort((a, b) => getResultScore(b, query) - getResultScore(a, query))
-      .slice(0, 24);
+    const titles = filterValidTitles(
+      data.results.map((item) => normalizeTmdbTitle(item))
+    );
 
-    let results = (await Promise.all(ranked.map(withLocalizedPoster)))
-      .filter((item): item is TMDBSearchItem => item !== null)
-      .slice(0, 12);
+    // Cache é best-effort no search — não queremos quebrar o resultado da
+    // busca se uma persistência específica falhar.
+    await Promise.all(
+      titles.map(async (title, index) => {
+        try {
+          await upsertCachedTitle(title, data.results[index]);
+        } catch (cacheError) {
+          console.warn(
+            `[poplog3/search] falha ao cachear ${title.media_type}/${title.tmdb_id}:`,
+            cacheError instanceof Error ? cacheError.message : cacheError
+          );
+        }
+      })
+    );
 
-    if (user) {
-      const feedbackMap = await getUserFeedbackMap(user.id, supabase);
-      results = applyUserFeedbackScoring(results, {
-        userId: user.id,
-        feedbackMap,
-        context: "search",
-        preserveOrder: true,
-      });
-    }
-
-    return NextResponse.json({ results });
+    return NextResponse.json({
+      ok: true,
+      query,
+      count: titles.length,
+      results: titles,
+    });
   } catch (error) {
-    console.error("Erro na busca:", error);
-    return NextResponse.json({ error: "Erro ao buscar no TMDB", results: [] }, { status: 500 });
+    console.error("[poplog3/search]", error);
+
+    return NextResponse.json(
+      {
+        ok: false,
+        error: "Failed to search TMDB",
+        details:
+          error instanceof Error ? error.message : String(error),
+      },
+      { status: 500 }
+    );
   }
 }

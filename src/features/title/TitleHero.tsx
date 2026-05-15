@@ -1,393 +1,247 @@
-// src/features/title/TitleHero.tsx
-"use client";
+import Image from "next/image";
 
-import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
-import { useWatchedToggle } from "@/hooks/useWatchedToggle";
-import { useUserFeedbackToggle } from "@/hooks/useUserFeedbackToggle";
-import { IconBookmark, IconCheck, IconStar } from "@/components/ui/icons";
-import TmdbImage from "@/components/images/TmdbImage";
-import type { TMDBTitleDetail } from "@/features/title/title-types";
+import {
+  availabilityStateToBadgeVariant,
+  formatAvailabilityState,
+} from "@/lib/series";
+import StatusBadge from "@/components/ui/StatusBadge";
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+import TitleActions from "./TitleActions";
+import type { TitlePageData } from "./types";
 
-function getDetailTitle(d: TMDBTitleDetail): string {
-  return d.title ?? d.name ?? "Título desconhecido";
+type TitleHeroProps = {
+  title: TitlePageData;
+};
+
+function formatRuntime(minutes?: number | null) {
+  if (!minutes) return null;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (!h) return `${m}min`;
+  if (!m) return `${h}h`;
+  return `${h}h ${m}min`;
 }
 
-function getReleaseYear(d: TMDBTitleDetail): string | null {
-  const date = d.release_date ?? d.first_air_date;
-  return date ? date.slice(0, 4) : null;
-}
-
-function daysSinceRelease(d: TMDBTitleDetail): number | null {
-  const date = d.release_date ?? d.first_air_date;
-  if (!date) return null;
-  const diff = Math.floor((Date.now() - new Date(date).getTime()) / 86400000);
-  return diff >= 0 ? diff : null;
-}
-
-function getCertification(d: TMDBTitleDetail, mediaType: "movie" | "tv"): string | null {
-  if (mediaType === "movie") {
-    const br = d.release_dates?.results.find((r) => r.iso_3166_1 === "BR");
-    return br?.release_dates?.find((rd) => rd.certification)?.certification ?? null;
+function formatYearSpan(t: TitlePageData) {
+  if (t.mediaType === "movie") {
+    return t.year ?? null;
   }
-  return d.content_ratings?.results.find((r) => r.iso_3166_1 === "BR")?.rating ?? null;
+  const startYear =
+    t.firstAirDate?.slice(0, 4) ??
+    (typeof t.year === "number" ? String(t.year) : t.year);
+  const endYear = t.lastAirDate?.slice(0, 4);
+  if (!startYear) return null;
+  if (endYear && endYear !== startYear) return `${startYear} – ${endYear}`;
+  return startYear;
 }
 
-function formatRuntime(min: number | undefined): string | null {
-  if (!min) return null;
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return h > 0 ? `${h}h${m > 0 ? ` ${m}min` : ""}` : `${m}min`;
+function pad2(n: number) {
+  return String(n).padStart(2, "0");
 }
 
-const STATUS_LABELS: Record<string, string> = {
-  "Ended": "Encerrada",
-  "Returning Series": "Em andamento",
-  "Canceled": "Cancelada",
-  "In Production": "Em produção",
-  "Planned": "Planejada",
-};
-
-// ─── Component ────────────────────────────────────────────────────────────────
-
-type Props = {
-  detail: TMDBTitleDetail;
-  mediaType: "movie" | "tv";
-};
-
-export default function TitleHero({ detail, mediaType }: Props) {
-  const title = getDetailTitle(detail);
-  const year = getReleaseYear(detail);
-  const days = daysSinceRelease(detail);
-  const certification = getCertification(detail, mediaType);
-  const releaseYear = year ? Number(year) : null;
-
-  const watchlist = useWatchlistToggle({ tmdbId: detail.id, mediaType, title, releaseYear });
-  const watched = useWatchedToggle({ tmdbId: detail.id, mediaType, title, releaseYear });
-  const feedback = useUserFeedbackToggle({
-    tmdbId: detail.id,
-    mediaType,
-    source: "title_page",
-  });
-
-  // Paths cruas — a construção de URL fica no <TmdbImage /> via builder central.
-  const backdropPath = detail.backdrop_path ?? null;
-  const posterPath = detail.poster_path ?? null;
-
-  const runtime =
-    mediaType === "movie"
-      ? formatRuntime(detail.runtime)
-      : detail.episode_run_time?.[0]
-      ? formatRuntime(detail.episode_run_time[0])
-      : null;
-
-  const rating =
-    typeof detail.vote_average === "number" ? detail.vote_average.toFixed(1) : null;
-  const voteCount = detail.vote_count ?? 0;
-  const genres = detail.genres?.slice(0, 4) ?? [];
-  const seasons = detail.number_of_seasons;
-  const statusLabel = detail.status ? (STATUS_LABELS[detail.status] ?? detail.status) : null;
-
-  // Badge: só mostra se lançado hoje ou ontem (genuinamente novo)
-  const releaseBadge =
-    days !== null && days >= 0 && days <= 1
-      ? {
-          label: days === 0 ? "Lançado hoje" : "Lançado ontem",
-          bg: "rgba(220,150,50,0.12)",
-          color: "#e09050",
-          border: "rgba(220,150,50,0.25)",
-        }
-      : null;
-
-  // Badge de status do usuário
-  const userBadge = watched.isWatched
-    ? { label: "✓ Assistido", bg: "rgba(90,160,90,0.15)", color: "#6abf6a", border: "rgba(90,160,90,0.3)" }
+export default function TitleHero({ title }: TitleHeroProps) {
+  const runtime = formatRuntime(title.runtime);
+  const yearSpan = formatYearSpan(title);
+  const stateLabel = title.availabilityState
+    ? formatAvailabilityState(title.availabilityState)
     : null;
+  const stateVariant = title.availabilityState
+    ? availabilityStateToBadgeVariant(title.availabilityState)
+    : "neutral";
 
-  const isLoading = watchlist.loading || watched.loading;
-  const isSaving = watchlist.saving || watched.saving || feedback.saving;
+  const poplogScore =
+    typeof title.ratings?.poplogScore === "number"
+      ? title.ratings.poplogScore
+      : null;
+  const tmdbScore =
+    typeof title.voteAverage === "number" ? title.voteAverage : null;
 
-  const btnBase = {
-    borderRadius: "8px",
-    padding: "8px 18px",
-    fontSize: "12px",
-    fontWeight: 500 as const,
-    cursor: "pointer",
-    transition: "opacity 0.15s",
-    display: "flex",
-    alignItems: "center",
-    gap: "5px",
-    border: "0.5px solid",
-    whiteSpace: "nowrap" as const,
-    lineHeight: 1,
-  };
+  const progress = title.userSeriesProgress ?? null;
+  const watchedCount = progress?.watchedCount ?? 0;
+  const totalEpisodes = progress?.totalEpisodes ?? null;
+  const hasProgress = title.mediaType === "tv" && watchedCount > 0;
+  const isComplete =
+    hasProgress &&
+    typeof totalEpisodes === "number" &&
+    watchedCount >= totalEpisodes;
+  const progressPct =
+    typeof totalEpisodes === "number" && totalEpisodes > 0
+      ? Math.min(100, Math.round((watchedCount / totalEpisodes) * 100))
+      : null;
+  const nextEpUser = progress?.nextEpisode ?? null;
 
   return (
-    <div className="relative w-full overflow-hidden" style={{ minHeight: 420 }}>
-      {/* Backdrop — w1280 (hero) é suficiente para tela cheia em qualquer device. */}
-      {backdropPath ? (
-        <div className="absolute inset-0">
-          <TmdbImage
-            path={backdropPath}
-            kind="backdrop"
-            size="hero"
+    <section className="relative isolate min-h-[88vh] overflow-hidden">
+      {title.backdropUrl && (
+        <div className="absolute inset-0 -z-10">
+          <Image
+            src={title.backdropUrl}
             alt=""
             fill
-            sizes="100vw"
-            className="object-cover"
             priority
+            quality={100}
+            sizes="100vw"
+            className="object-cover object-center brightness-[0.78] contrast-[1.08] saturate-[1.18]"
           />
         </div>
-      ) : (
-        <div className="absolute inset-0" style={{ background: "#0a0a16" }} />
       )}
 
-      {/* Overlay 1: global darkening */}
-      <div className="absolute inset-0" style={{ background: "rgba(0,0,0,0.55)" }} />
-
-      {/* Overlay 2: horizontal gradient */}
       <div
-        className="absolute inset-0"
-        style={{
-          background:
-            "linear-gradient(to right, rgba(8,10,18,0.98) 30%, rgba(8,10,18,0.5) 70%, rgba(8,10,18,0.15) 100%)",
-        }}
+        className="absolute inset-0 -z-10 bg-[radial-gradient(circle_at_15%_30%,rgba(34,211,238,0.16),transparent_42%),radial-gradient(circle_at_85%_70%,rgba(244,114,182,0.12),transparent_38%)]"
+        aria-hidden
+      />
+      <div
+        className="absolute inset-0 -z-10 bg-gradient-to-b from-zinc-950/65 via-zinc-950/55 to-zinc-950/95"
+        aria-hidden
+      />
+      <div
+        className="absolute inset-y-0 left-0 -z-10 w-[55%] bg-gradient-to-r from-zinc-950/85 via-zinc-950/55 to-transparent"
+        aria-hidden
+      />
+      <div
+        className="absolute inset-x-0 bottom-0 -z-10 h-40 bg-gradient-to-t from-zinc-950 to-transparent"
+        aria-hidden
       />
 
-      {/* Overlay 3: vertical fade to page background */}
-      <div
-        className="absolute inset-0"
-        style={{
-          background:
-            "linear-gradient(to top, rgba(8,10,18,1) 0%, rgba(8,10,18,0.45) 30%, transparent 65%)",
-        }}
-      />
-
-      {/* Main content — bottom-aligned, same max-width as page sections */}
-      <div className="relative z-10 flex items-end" style={{ minHeight: 420 }}>
-        <div
-          style={{
-            maxWidth: 1100,
-            margin: "0 auto",
-            width: "100%",
-            padding: "0 24px 32px",
-            display: "flex",
-            gap: 24,
-            alignItems: "flex-end",
-          }}
-        >
-          {/* Poster — "card" (w342) é mais que suficiente para um poster de 110px. */}
-          {posterPath && (
-            <div
-              className="hidden sm:block flex-shrink-0 relative"
-              style={{
-                width: 110,
-                aspectRatio: "2/3",
-                borderRadius: 10,
-                overflow: "hidden",
-                boxShadow: "0 8px 32px rgba(0,0,0,0.6)",
-                border: "1px solid rgba(255,255,255,0.1)",
-                background: "#0e0e1a",
-              }}
-            >
-              <TmdbImage
-                path={posterPath}
-                kind="poster"
-                size="card"
-                alt={title}
-                fill
-                sizes="110px"
-                className="object-cover"
-              />
-            </div>
-          )}
-
-          {/* Info block */}
-          <div className="flex min-w-0 flex-col gap-2.5 pb-1">
-            {/* Badges — só aparecem se tiverem conteúdo relevante */}
-            {(userBadge || releaseBadge) && (
-              <div className="flex flex-wrap items-center gap-2">
-                {userBadge && (
-                  <span
-                    style={{
-                      background: userBadge.bg,
-                      color: userBadge.color,
-                      border: `0.5px solid ${userBadge.border}`,
-                      borderRadius: 20,
-                      fontSize: 11,
-                      padding: "3px 10px",
-                    }}
-                  >
-                    {userBadge.label}
-                  </span>
-                )}
-                {releaseBadge && (
-                  <span
-                    style={{
-                      background: releaseBadge.bg,
-                      color: releaseBadge.color,
-                      border: `0.5px solid ${releaseBadge.border}`,
-                      borderRadius: 20,
-                      fontSize: 11,
-                      padding: "3px 10px",
-                    }}
-                  >
-                    {releaseBadge.label}
-                  </span>
-                )}
-              </div>
-            )}
-
-            {/* Metadata */}
-            <div
-              className="flex flex-wrap items-center gap-x-1.5 gap-y-1"
-              style={{ fontSize: 12, color: "rgba(255,255,255,0.45)" }}
-            >
-              {year && <span>{year}</span>}
-              <span>·</span>
-              <span>{mediaType === "movie" ? "Filme" : "Série"}</span>
-              {mediaType === "tv" && seasons != null && (
-                <>
-                  <span>·</span>
-                  <span>{seasons} {seasons === 1 ? "temporada" : "temporadas"}</span>
-                </>
+      <div className="relative mx-auto flex min-h-[88vh] w-full max-w-[1600px] flex-col justify-end gap-8 px-5 pb-12 pt-28 sm:px-8 sm:pb-16 sm:pt-32 md:px-12 md:pb-20 lg:px-16">
+        <div className="grid min-w-0 items-end gap-8 md:grid-cols-[260px_minmax(0,1fr)] md:gap-10 xl:grid-cols-[300px_minmax(0,1fr)]">
+          <div className="relative hidden md:block">
+            <div className="absolute -inset-3 -z-10 rounded-[2rem] bg-gradient-to-br from-cyan-300/20 via-indigo-400/12 to-fuchsia-400/14 opacity-70 blur-2xl" />
+            <div className="overflow-hidden rounded-[1.5rem] border border-white/[0.10] bg-zinc-900/70 shadow-[0_28px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl">
+              {title.posterUrl ? (
+                <Image
+                  src={title.posterUrl}
+                  alt={title.title}
+                  width={640}
+                  height={960}
+                  className="aspect-[2/3] w-full object-cover"
+                />
+              ) : (
+                <div className="grid aspect-[2/3] w-full place-items-center text-xs uppercase tracking-[0.2em] text-white/40">
+                  Sem poster
+                </div>
               )}
+            </div>
+          </div>
+
+          <div className="min-w-0">
+            <div className="mb-4 flex flex-wrap items-center gap-2 sm:mb-5 sm:gap-2.5">
+              <span className="rounded-full border border-white/[0.10] bg-white/[0.06] px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-white/72 backdrop-blur-md">
+                {title.mediaType === "movie" ? "Filme" : "Série"}
+              </span>
+
+              {stateLabel && stateLabel !== "—" && (
+                <StatusBadge variant={stateVariant} label={stateLabel} size="sm" />
+              )}
+
+              {yearSpan && (
+                <span className="rounded-full border border-white/[0.10] bg-white/[0.04] px-3 py-1 text-[11px] font-semibold text-white/70 backdrop-blur-md">
+                  {yearSpan}
+                </span>
+              )}
+
               {runtime && (
-                <>
-                  <span>·</span>
-                  <span>{mediaType === "tv" ? `~${runtime}/ep` : runtime}</span>
-                </>
+                <span className="rounded-full border border-white/[0.10] bg-white/[0.04] px-3 py-1 text-[11px] font-semibold text-white/70 backdrop-blur-md">
+                  {runtime}
+                </span>
               )}
-              {certification && (
-                <>
-                  <span>·</span>
-                  <span>{certification}</span>
-                </>
-              )}
-              {statusLabel && (
-                <>
-                  <span>·</span>
-                  <span>{statusLabel}</span>
-                </>
+
+              {typeof title.numberOfSeasons === "number" &&
+                title.numberOfSeasons > 0 && (
+                  <span className="rounded-full border border-white/[0.10] bg-white/[0.04] px-3 py-1 text-[11px] font-semibold text-white/70 backdrop-blur-md">
+                    {title.numberOfSeasons}{" "}
+                    {title.numberOfSeasons === 1 ? "temporada" : "temporadas"}
+                  </span>
+                )}
+
+              {poplogScore !== null ? (
+                <span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-[11px] font-black tracking-[-0.01em] text-cyan-100 backdrop-blur-md">
+                  <span className="text-[8px] font-black uppercase tracking-[0.2em] text-cyan-200/80">
+                    POPLOG
+                  </span>
+                  <span>{poplogScore.toFixed(1)}</span>
+                </span>
+              ) : (
+                tmdbScore !== null && (
+                  <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/22 bg-amber-400/12 px-3 py-1 text-[11px] font-black text-amber-100 backdrop-blur-md">
+                    <span aria-hidden>★</span>
+                    {tmdbScore.toFixed(1)}
+                  </span>
+                )
               )}
             </div>
 
-            {/* Title */}
-            <h1 style={{ fontSize: 32, fontWeight: 600, color: "#fff", lineHeight: 1.1, margin: 0 }}>
-              {title}
+            <h1 className="break-words text-[clamp(1.875rem,5vw,4.25rem)] font-black leading-[0.98] tracking-[-0.04em] text-white">
+              {title.title}
             </h1>
 
-            {/* Genre pills */}
-            {genres.length > 0 && (
-              <div className="flex flex-wrap items-center gap-1.5">
-                {genres.map((g) => (
-                  <span
-                    key={g.id}
-                    style={{
-                      fontSize: 11,
-                      padding: "3px 10px",
-                      borderRadius: 20,
-                      border: "0.5px solid rgba(255,255,255,0.15)",
-                      background: "rgba(255,255,255,0.06)",
-                      color: "rgba(255,255,255,0.6)",
-                    }}
-                  >
-                    {g.name}
-                  </span>
-                ))}
-              </div>
+            {title.originalTitle && title.originalTitle !== title.title && (
+              <p className="mt-2 break-words text-sm font-medium tracking-[-0.01em] text-white/45 sm:text-base">
+                {title.originalTitle}
+              </p>
             )}
 
-            {/* Rating */}
-            {rating && (
-              <div className="flex items-center gap-1.5">
-                <IconStar />
-                <span style={{ fontSize: 15, fontWeight: 600, color: "#fff" }}>{rating}</span>
-                <span style={{ fontSize: 11, color: "rgba(255,255,255,0.4)" }}>
-                  / 10 · {voteCount.toLocaleString("pt-BR")} votos
+            {title.tagline && (
+              <p className="mt-3 max-w-3xl break-words text-sm italic leading-relaxed text-white/55 sm:text-base">
+                &ldquo;{title.tagline}&rdquo;
+              </p>
+            )}
+
+            {title.genres && title.genres.length > 0 && (
+              <p className="mt-4 text-xs font-bold uppercase tracking-[0.18em] text-white/45 sm:text-[13px]">
+                {title.genres.slice(0, 4).join(" · ")}
+              </p>
+            )}
+
+            {title.overview && (
+              <p className="mt-5 max-w-3xl text-[15px] leading-[1.65] text-white/72 sm:mt-6 sm:text-base sm:leading-[1.7]">
+                {title.overview}
+              </p>
+            )}
+
+            {hasProgress && (
+              <div className="mt-6 inline-flex max-w-full items-center gap-3 rounded-2xl border border-cyan-300/22 bg-cyan-500/[0.08] px-3 py-2.5 backdrop-blur-md sm:gap-4 sm:px-4 sm:py-3">
+                <span className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200/80">
+                  {isComplete ? "Concluída" : "Continuar"}
                 </span>
+
+                {nextEpUser && !isComplete && (
+                  <span className="text-[13px] font-bold tracking-[-0.01em] text-white/92">
+                    Próximo: S{pad2(nextEpUser.seasonNumber)}E
+                    {pad2(nextEpUser.episodeNumber)}
+                  </span>
+                )}
+
+                {typeof totalEpisodes === "number" && (
+                  <span className="text-[11px] font-semibold text-white/55">
+                    {watchedCount}/{totalEpisodes}
+                  </span>
+                )}
+
+                {progressPct !== null && (
+                  <span
+                    className="relative h-1 w-24 overflow-hidden rounded-full bg-white/[0.08] sm:w-32"
+                    aria-hidden
+                  >
+                    <span
+                      className="absolute inset-y-0 left-0 bg-gradient-to-r from-cyan-300/90 via-indigo-300/90 to-fuchsia-300/90"
+                      style={{ width: `${progressPct}%` }}
+                    />
+                  </span>
+                )}
               </div>
             )}
 
-            {/* Action buttons */}
-            <div className="mt-1 flex flex-wrap items-center gap-2">
-              {watched.isWatched ? (
-                /* Já assistiu — destaque no "Assistido", clicar remove */
-                <button
-                  type="button"
-                  onClick={watched.toggle}
-                  disabled={isLoading || isSaving}
-                  style={{
-                    ...btnBase,
-                    background: "rgba(90,160,90,0.2)",
-                    color: "#6abf6a",
-                    borderColor: "rgba(90,160,90,0.4)",
-                    opacity: isLoading ? 0.5 : 1,
-                  }}
-                >
-                  <IconCheck />
-                  {isSaving ? "..." : "Assistido"}
-                </button>
-              ) : (
-                /* Não assistiu — "Quero ver" como primário, "Assistido" como secundário */
-                <>
-                  <button
-                    type="button"
-                    onClick={watchlist.toggle}
-                    disabled={isLoading || isSaving || !watchlist.isLoggedIn}
-                    style={{
-                      ...btnBase,
-                      background: watchlist.inWatchlist
-                        ? "rgba(80,130,210,0.2)"
-                        : "rgba(120,100,220,0.85)",
-                      color: watchlist.inWatchlist ? "#6a9fdf" : "#fff",
-                      borderColor: watchlist.inWatchlist
-                        ? "rgba(80,130,210,0.35)"
-                        : "transparent",
-                      opacity: isLoading ? 0.5 : 1,
-                    }}
-                  >
-                    <IconBookmark filled={watchlist.inWatchlist} />
-                    {isSaving ? "..." : watchlist.inWatchlist ? "Na lista" : "Quero ver"}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={watched.toggle}
-                    disabled={watched.loading || !watched.isLoggedIn}
-                    style={{
-                      ...btnBase,
-                      background: "rgba(255,255,255,0.08)",
-                      color: "rgba(255,255,255,0.75)",
-                      borderColor: "rgba(255,255,255,0.15)",
-                      opacity: watched.loading ? 0.5 : 1,
-                    }}
-                  >
-                    <IconCheck />
-                    {watched.saving ? "..." : "Assistido"}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={feedback.toggleNotInterested}
-                    disabled={feedback.loading || feedback.saving || !feedback.isLoggedIn}
-                    style={{
-                      ...btnBase,
-                      background: feedback.notInterested ? "rgba(225,80,110,0.18)" : "rgba(255,255,255,0.06)",
-                      color: feedback.notInterested ? "#fb7185" : "rgba(255,255,255,0.62)",
-                      borderColor: feedback.notInterested ? "rgba(225,80,110,0.35)" : "rgba(255,255,255,0.12)",
-                      opacity: feedback.loading ? 0.5 : 1,
-                    }}
-                  >
-                    {feedback.saving ? "..." : feedback.notInterested ? "Sem interesse" : "Não tenho interesse"}
-                  </button>
-                </>
-              )}
+            <div className="mt-7 sm:mt-9">
+              <TitleActions
+                tmdbId={title.id}
+                mediaType={title.mediaType}
+                initialState={title.userState}
+              />
             </div>
           </div>
         </div>
       </div>
-    </div>
+    </section>
   );
 }

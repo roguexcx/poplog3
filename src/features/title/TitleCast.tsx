@@ -1,223 +1,160 @@
-// src/features/title/TitleCast.tsx
+"use client";
 
-import { buildTmdbUrl } from "@/lib/images/url";
-import type { TMDBCastMember, TMDBCrewMember, TMDBTitleDetail } from "@/features/title/title-types";
+import Image from "next/image";
+import Link from "next/link";
+import { useEffect, useRef, useState } from "react";
 
-type Props = {
-  cast: TMDBCastMember[];
-  director: TMDBCrewMember | null;
-  createdBy: { id: number; name: string; profile_path: string | null } | null;
-  detail: TMDBTitleDetail;
-  mediaType: "movie" | "tv";
+import SectionHeader from "@/components/ui/SectionHeader";
+
+import type { TitleCastMember } from "./types";
+
+type TitleCastProps = {
+  cast?: TitleCastMember[];
 };
 
-const LANG_LABELS: Record<string, string> = {
-  en: "Inglês",
-  pt: "Português",
-  es: "Espanhol",
-  fr: "Francês",
-  de: "Alemão",
-  ja: "Japonês",
-  ko: "Coreano",
-  zh: "Chinês",
-  it: "Italiano",
-  ru: "Russo",
-  ar: "Árabe",
-  hi: "Hindi",
-  tr: "Turco",
-  sv: "Sueco",
-  da: "Dinamarquês",
-  nl: "Holandês",
-  pl: "Polonês",
-};
+const SCROLL_AMOUNT = 480;
 
-function formatRuntime(min: number | undefined): string | null {
-  if (!min) return null;
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-  return h > 0 ? `${h}h${m > 0 ? ` ${m}min` : ""}` : `${m}min`;
-}
+export default function TitleCast({ cast }: TitleCastProps) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
 
-const SECTION_LABEL = {
-  fontSize: 11,
-  fontWeight: 500,
-  textTransform: "uppercase",
-  letterSpacing: "0.05em",
-  color: "rgba(255,255,255,0.35)",
-  marginBottom: 10,
-};
+  useEffect(() => {
+    const el = trackRef.current;
+    if (!el) return;
 
-const ROW_LABEL = {
-  fontSize: 11,
-  color: "rgba(255,255,255,0.3)",
-  minWidth: 110,
-};
+    const update = () => {
+      setCanScrollLeft(el.scrollLeft > 2);
+      setCanScrollRight(
+        el.scrollLeft + el.clientWidth < el.scrollWidth - 2
+      );
+    };
 
-const ROW_VALUE = {
-  fontSize: 11,
-  color: "rgba(255,255,255,0.65)",
-  fontWeight: 500,
-  flex: 1,
-};
+    update();
+    el.addEventListener("scroll", update, { passive: true });
 
-export default function TitleCast({ cast, director, createdBy, detail, mediaType }: Props) {
-  const hasCast = cast.length > 0;
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
 
-  const runtime =
-    mediaType === "movie"
-      ? formatRuntime(detail.runtime)
-      : detail.episode_run_time?.[0]
-      ? formatRuntime(detail.episode_run_time[0])
-      : null;
+    return () => {
+      el.removeEventListener("scroll", update);
+      ro.disconnect();
+    };
+  }, [cast]);
 
-  const releaseDate =
-    mediaType === "movie"
-      ? detail.release_date ?? null
-      : detail.first_air_date ?? null;
+  if (!cast || cast.length === 0) return null;
 
-  const country = detail.production_countries?.[0]?.name ?? null;
-  const language = detail.original_language
-    ? (LANG_LABELS[detail.original_language] ?? detail.original_language.toUpperCase())
-    : null;
-  const companies = detail.production_companies
-    ?.slice(0, 3)
-    .map((c) => c.name)
-    .join(", ") ?? null;
-
-  const STATUS_LABELS: Record<string, string> = {
-    "Ended": "Encerrada",
-    "Returning Series": "Em andamento",
-    "Canceled": "Cancelada",
-    "In Production": "Em produção",
-    "Released": "Lançado",
-  };
-  const statusLabel = detail.status
-    ? (STATUS_LABELS[detail.status] ?? detail.status)
-    : null;
-
-  const rows: Array<{ label: string; value: string | null }> = [
-    {
-      label: mediaType === "movie" ? "Direção" : "Criação",
-      value:
-        mediaType === "movie"
-          ? director?.name ?? null
-          : createdBy?.name ?? null,
-    },
-    { label: "País", value: country },
-    { label: "Idioma original", value: language },
-    { label: "Produtoras", value: companies },
-    {
-      label: "Lançamento",
-      value: releaseDate
-        ? new Date(releaseDate).toLocaleDateString("pt-BR", { year: "numeric", month: "long", day: "numeric" })
-        : null,
-    },
-    {
-      label: mediaType === "movie" ? "Duração" : "Duração/ep",
-      value: runtime,
-    },
-    {
-      label: "Temporadas",
-      value: mediaType === "tv" && detail.number_of_seasons != null
-        ? String(detail.number_of_seasons)
-        : null,
-    },
-    {
-      label: "Episódios",
-      value: mediaType === "tv" && detail.number_of_episodes != null
-        ? String(detail.number_of_episodes)
-        : null,
-    },
-    { label: "Status", value: statusLabel },
-  ].filter((r) => r.value !== null && r.value !== "");
-
-  if (!hasCast && rows.length === 0) return null;
+  function scrollBy(direction: "left" | "right") {
+    const el = trackRef.current;
+    if (!el) return;
+    el.scrollBy({
+      left: direction === "left" ? -SCROLL_AMOUNT : SCROLL_AMOUNT,
+      behavior: "smooth",
+    });
+  }
 
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: hasCast ? "1fr 1fr" : "1fr",
-        gap: 24,
-        alignItems: "start",
-      }}
-      className="max-sm:grid-cols-1"
-    >
-      {/* Cast */}
-      {hasCast && (
-        <div>
-          <p style={SECTION_LABEL}>Elenco principal</p>
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
-            {cast.map((member) => {
-              const avatarUrl = buildTmdbUrl("profile", "medium", member.profile_path);
-              return (
-                <div
-                  key={member.id}
-                  style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 4, width: 48 }}
-                >
-                  <div
-                    style={{
-                      width: 44,
-                      height: 44,
-                      borderRadius: "50%",
-                      background: avatarUrl
-                        ? `url(${avatarUrl}) center/cover`
-                        : "rgba(255,255,255,0.07)",
-                      border: "0.5px solid rgba(255,255,255,0.1)",
-                      flexShrink: 0,
-                    }}
-                  />
-                  <p
-                    style={{
-                      fontSize: 10,
-                      color: "rgba(255,255,255,0.55)",
-                      textAlign: "center",
-                      margin: 0,
-                      lineHeight: 1.3,
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    {member.name}
-                  </p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+    <section className="flex flex-col gap-4 sm:gap-5">
+      <SectionHeader
+        eyebrow="Elenco principal"
+        title="Quem dá vida a esta história"
+        accent="indigo"
+      />
 
-      {/* Technical details */}
-      {rows.length > 0 && (
-        <div>
-          <p style={SECTION_LABEL}>Detalhes</p>
-          <div
-            style={{
-              background: "rgba(255,255,255,0.02)",
-              border: "0.5px solid rgba(255,255,255,0.06)",
-              borderRadius: 10,
-              overflow: "hidden",
-            }}
-          >
-            {rows.map((row, i) => (
-              <div
-                key={row.label}
-                style={{
-                  display: "flex",
-                  gap: 12,
-                  padding: "9px 14px",
-                  borderBottom:
-                    i < rows.length - 1
-                      ? "0.5px solid rgba(255,255,255,0.05)"
-                      : "none",
-                }}
-              >
-                <span style={ROW_LABEL}>{row.label}</span>
-                <span style={ROW_VALUE}>{row.value}</span>
-              </div>
-            ))}
-          </div>
+      <div className="relative">
+        {/* Gradiente esquerdo + seta */}
+        {canScrollLeft && (
+          <>
+            <div
+              className="pointer-events-none absolute inset-y-0 left-0 z-[2] w-12 bg-gradient-to-r from-zinc-950 via-zinc-950/65 to-transparent"
+              aria-hidden
+            />
+            <button
+              type="button"
+              onClick={() => scrollBy("left")}
+              aria-label="Rolar elenco para a esquerda"
+              className="absolute left-1 top-1/2 z-[3] grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-white/[0.14] bg-black/72 text-white/85 shadow-[0_12px_36px_rgba(0,0,0,0.45)] backdrop-blur-md transition hover:border-white/[0.28] hover:bg-black/82 hover:text-white"
+            >
+              <span className="text-base leading-none" aria-hidden>
+                ‹
+              </span>
+            </button>
+          </>
+        )}
+
+        {/* Gradiente direito + seta */}
+        {canScrollRight && (
+          <>
+            <div
+              className="pointer-events-none absolute inset-y-0 right-0 z-[2] w-12 bg-gradient-to-l from-zinc-950 via-zinc-950/65 to-transparent"
+              aria-hidden
+            />
+            <button
+              type="button"
+              onClick={() => scrollBy("right")}
+              aria-label="Rolar elenco para a direita"
+              className="absolute right-1 top-1/2 z-[3] grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-white/[0.14] bg-black/72 text-white/85 shadow-[0_12px_36px_rgba(0,0,0,0.45)] backdrop-blur-md transition hover:border-white/[0.28] hover:bg-black/82 hover:text-white"
+            >
+              <span className="text-base leading-none" aria-hidden>
+                ›
+              </span>
+            </button>
+          </>
+        )}
+
+        <div
+          ref={trackRef}
+          className="-mx-1 flex gap-3 overflow-x-auto scroll-smooth px-1 pb-2 sm:gap-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {cast.map((person) => (
+            <Link
+              key={person.id}
+              href={`/pessoa/${person.id}`}
+              className="group relative flex w-[120px] shrink-0 flex-col sm:w-[140px]"
+            >
+              <article className="relative">
+                <div className="relative overflow-hidden rounded-[1.1rem] border border-white/[0.08] bg-white/[0.04] shadow-[0_14px_42px_rgba(0,0,0,0.36)] transition duration-300 group-hover:-translate-y-1 group-hover:border-white/[0.16] group-hover:bg-white/[0.07]">
+                  <div className="relative aspect-[3/4] overflow-hidden bg-white/[0.04]">
+                    {person.photoUrl ? (
+                      <Image
+                        src={person.photoUrl}
+                        alt={person.name}
+                        fill
+                        unoptimized
+                        sizes="160px"
+                        className="object-cover brightness-[0.92] saturate-[1.06] transition duration-500 group-hover:scale-[1.04] group-hover:brightness-100"
+                      />
+                    ) : (
+                      <div className="grid h-full w-full place-items-center bg-gradient-to-br from-zinc-900 to-zinc-950 text-[10px] uppercase tracking-[0.2em] text-white/35">
+                        Sem foto
+                      </div>
+                    )}
+                    <div
+                      className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/72 via-black/12 to-transparent"
+                      aria-hidden
+                    />
+                    <div
+                      className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_115%,rgba(99,102,241,0.30),transparent_58%)] opacity-0 transition duration-500 group-hover:opacity-100"
+                      aria-hidden
+                    />
+                  </div>
+                </div>
+
+                <div className="px-1 pt-3">
+                  <p className="line-clamp-1 text-[13px] font-semibold tracking-[-0.01em] text-white/92 transition group-hover:text-white">
+                    {person.name}
+                  </p>
+                  {person.character && (
+                    <p className="mt-0.5 line-clamp-1 text-[11px] text-white/45">
+                      {person.character}
+                    </p>
+                  )}
+                </div>
+              </article>
+            </Link>
+          ))}
         </div>
-      )}
-    </div>
+      </div>
+    </section>
   );
 }

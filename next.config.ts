@@ -2,15 +2,22 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   images: {
-    // TMDB is already an optimized CDN. Re-optimizing via Vercel
-    // adds failure modes (size limits on `original` backdrops,
-    // quota of 1000 images/month on Hobby, cold-start timeouts).
-    // With `unoptimized: true` next/image still does lazy-load,
-    // srcset and sizes — only re-encoding is skipped.
-    unoptimized: true,
     remotePatterns: [
-      { protocol: "https", hostname: "image.tmdb.org", pathname: "/t/p/**" },
+      {
+        protocol: "https",
+        hostname: "image.tmdb.org",
+        pathname: "/t/p/**",
+      },
+      {
+        protocol: "https",
+        hostname: "www.themoviedb.org",
+        pathname: "/t/p/**",
+      },
     ],
+    // TMDB já entrega variantes pré-otimizadas (w185, w342, w500, original).
+    // Não precisamos repassar pelo otimizador do next/image — economiza
+    // tempo de CPU no servidor e evita o bloqueio que ocorreu antes.
+    unoptimized: true,
   },
 };
 

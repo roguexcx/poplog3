@@ -1,16 +1,27 @@
-import type { Metadata } from "next";
-import { Suspense } from "react";
-import BuscarClient from "./BuscarClient";
+import SearchPageView from "@/features/search/SearchPageView";
 
-export const metadata: Metadata = {
-  title: "Buscar — POPLOG",
-  description: "Busque filmes e séries no Poplog.",
+type BuscarPageProps = {
+  searchParams?: Promise<{
+    q?: string;
+    type?: string;
+    page?: string;
+  }>;
 };
 
-export default function BuscarPage() {
+export default async function BuscarPage({
+  searchParams,
+}: BuscarPageProps) {
+  const params = await searchParams;
+
+  const query = params?.q?.trim() ?? "";
+  const type = params?.type ?? "all";
+  const page = Number(params?.page ?? "1");
+
   return (
-    <Suspense fallback={null}>
-      <BuscarClient />
-    </Suspense>
+    <SearchPageView
+      initialQuery={query}
+      initialType={type}
+      initialPage={page}
+    />
   );
 }
