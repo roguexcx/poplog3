@@ -81,11 +81,12 @@ export async function getUserProviderPreferences(): Promise<ProviderPreferenceIn
   );
 
   const favoriteProviderIds = preferences
-    .map((preference) => providerMap.get(preference.provider_id))
-    .filter((id): id is number => typeof id === "number");
+  .map((preference) => providerMap.get(preference.provider_id))
+  .filter((id): id is number => typeof id === "number")
+  .map((id) => String(id));
 
   return {
-    region: preferences[0]?.country ?? "BR",
+    region: preferences[0]?.country === "US" ? "US" : "BR",
     favoriteProviderIds,
     hiddenProviderIds: [],
     onlyFavorites: false,

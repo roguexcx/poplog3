@@ -3,8 +3,6 @@ import type { MotnTitleResponse } from "@/server/api-clients/movieofthenight/typ
 import { watchmodeFetch } from "@/server/api-clients/watchmode/client";
 import type { WatchmodeSource } from "@/server/api-clients/watchmode/types";
 
-import { buildAvailabilityProviders } from "@/server/streaming/availability-service";
-
 import {
   getAvailability,
   isAvailabilityFresh,
@@ -45,20 +43,15 @@ export type SyncAvailabilityInput = {
   tmdbId: number;
   mediaType: MediaType;
   country?: string;
-  /** Payload TMDB completo já em memoria (do sync-tmdb-title). */
   tmdbPayload?: TmdbPayloadWithWatch | null;
-  /** IMDb id pra fallback Watchmode. */
   imdbId?: string | null;
-  /** Forca refetch ignorando frescor. */
   force?: boolean;
-  /** Janela de frescor em dias. Default 7. */
   maxAgeDays?: number;
 };
 
 export type SyncAvailabilityResult = {
   source: AvailabilitySource | "cache" | "none";
   rows: AvailabilityRow[];
-  /** Por que cada source nao retornou nada (debug). */
   diagnostics: {
     tmdb: "ok" | "empty" | "not_attempted";
     watchmode: "ok" | "empty" | "failed" | "not_attempted";
@@ -85,8 +78,10 @@ function tmdbCategoryToType(category: string): AvailabilityType | null {
 
 function motnTypeToAvailabilityType(t: string | undefined): AvailabilityType | null {
   if (!t) return null;
+
   switch (t) {
     case "subscription":
+    case "addon":
       return "streaming";
     case "rent":
       return "rent";
@@ -94,17 +89,14 @@ function motnTypeToAvailabilityType(t: string | undefined): AvailabilityType | n
       return "buy";
     case "free":
       return "free";
-    case "addon":
-      return "streaming";
     default:
       return null;
   }
 }
 
-function watchmodeTypeToAvailabilityType(
-  t: string | undefined
-): AvailabilityType | null {
+function watchmodeTypeToAvailabilityType(t: string | undefined): AvailabilityType | null {
   if (!t) return null;
+
   switch (t) {
     case "sub":
     case "subscription":
@@ -148,15 +140,18 @@ function extractTmdbRows(
   for (const category of ["flatrate", "rent", "buy", "free", "ads"] as const) {
     const items = bucket[category];
     if (!items || items.length === 0) continue;
-    const t = tmdbCategoryToType(category);
-    if (!t) continue;
+
+    const availabilityType = tmdbCategoryToType(category);
+    if (!availabilityType) continue;
+
     for (const entry of items) {
       if (!entry.provider_name) continue;
+
       rows.push({
         providerName: entry.provider_name,
         providerLogoPath: entry.logo_path ?? null,
         tmdbProviderId: entry.provider_id ?? null,
-        availabilityType: t,
+        availabilityType,
         rawPayload: entry,
       });
     }
@@ -180,34 +175,38 @@ async function fetchWatchmodeRows(
 }>> {
   const titleKey = imdbId ?? `${mediaType === "tv" ? "tv" : "movie"}-${tmdbId}`;
 
-  // Watchmode aceita imdb_id direto OU tmdb_id no formato 'movie-XXX' / 'tv-XXX'.
   const data = await watchmodeFetch<{ sources?: WatchmodeSource[] }>(
     `/title/${titleKey}/sources/?regions=${country}`
   );
 
   const sources = data.sources ?? [];
-  return sources
-    .filter((s) => !country || s.region === country)
-    .map((s) => {
-      const t = watchmodeTypeToAvailabilityType(s.type);
-      if (!t) return null;
-      return {
-        providerName: s.name ?? "Desconhecido",
-        providerLogoPath: null,
-        tmdbProviderId: null,
-        availabilityType: t,
-        deepLink: s.web_url ?? null,
-        rawPayload: s,
-      };
-    })
-    .filter(Boolean) as Array<{
+
+    const rows: Array<{
     providerName: string;
     providerLogoPath: string | null;
     tmdbProviderId: number | null;
     availabilityType: AvailabilityType;
     deepLink: string | null;
     rawPayload: WatchmodeSource;
-  }>;
+  }> = [];
+
+  for (const source of sources) {
+    if (country && source.region !== country) continue;
+
+    const availabilityType = watchmodeTypeToAvailabilityType(source.type);
+    if (!availabilityType) continue;
+
+    rows.push({
+      providerName: source.name ?? "Desconhecido",
+      providerLogoPath: null,
+      tmdbProviderId: null,
+      availabilityType,
+      deepLink: source.web_url ?? null,
+      rawPayload: source,
+    });
+  }
+
+  return rows;
 }
 
 async function fetchMotnRows(
@@ -224,8 +223,9 @@ async function fetchMotnRows(
   rawPayload: unknown;
 }>> {
   const motnType = mediaType === "movie" ? "movie" : "series";
+
   const data = await motnFetch<MotnTitleResponse>(
-    `/shows/${motnType}/tmdb/${tmdbId === undefined ? "" : tmdbId}?country=${country.toLowerCase()}`
+    `/shows/${motnType}/tmdb/${tmdbId}?country=${country.toLowerCase()}`
   );
 
   const options =
@@ -233,21 +233,8 @@ async function fetchMotnRows(
     data.streamingOptions?.[country] ??
     [];
 
-  return options
-    .map((opt) => {
-      const t = motnTypeToAvailabilityType(opt.type);
-      if (!t) return null;
-      return {
-        providerName: opt.service?.name ?? opt.service?.id ?? "Desconhecido",
-        providerLogoPath: null,
-        tmdbProviderId: null,
-        availabilityType: t,
-        deepLink: opt.link ?? null,
-        quality: opt.quality ?? null,
-        rawPayload: opt,
-      };
-    })
-    .filter(Boolean) as Array<{
+
+    const rows: Array<{
     providerName: string;
     providerLogoPath: string | null;
     tmdbProviderId: number | null;
@@ -255,19 +242,26 @@ async function fetchMotnRows(
     deepLink: string | null;
     quality: string | null;
     rawPayload: unknown;
-  }>;
+  }> = [];
+
+  for (const option of options) {
+    const availabilityType = motnTypeToAvailabilityType(option.type);
+    if (!availabilityType) continue;
+
+    rows.push({
+      providerName: option.service?.name ?? option.service?.id ?? "Desconhecido",
+      providerLogoPath: null,
+      tmdbProviderId: null,
+      availabilityType,
+      deepLink: option.link ?? null,
+      quality: option.quality ?? null,
+      rawPayload: option,
+    });
+  }
+
+  return rows;
 }
 
-/**
- * Sync de disponibilidade com fallback ESTRITO:
- *   1. TMDB (raiz primaria — usa watch/providers ja apendado ao sync principal)
- *   2. Watchmode (so quando TMDB nao retornar resultado pro pais)
- *   3. MotN (so quando Watchmode tambem nao retornar)
- *
- * Cada source vive em sua propria linha no banco (single-source-of-truth =
- * a com maior prioridade que ainda for valida). NAO inclui marcador
- * "chegou ha X dias" nesta fase.
- */
 export async function syncAvailability(
   input: SyncAvailabilityInput
 ): Promise<SyncAvailabilityResult> {
@@ -295,10 +289,11 @@ export async function syncAvailability(
     motn: "not_attempted",
   };
 
-  // 1. TMDB — base primaria, vem do sync-tmdb-title direto na memoria.
   const tmdbRows = extractTmdbRows(input.tmdbPayload?.["watch/providers"], country);
+
   if (tmdbRows.length > 0) {
     diagnostics.tmdb = "ok";
+
     await replaceAvailability({
       tmdbId,
       mediaType,
@@ -306,8 +301,7 @@ export async function syncAvailability(
       source: "tmdb",
       rows: tmdbRows,
     });
-    const fresh = await getAvailability(mediaType, tmdbId, country);
-    // Limpa fallback sources se TMDB devolveu — TMDB e a verdade.
+
     await Promise.all([
       replaceAvailability({
         tmdbId,
@@ -324,15 +318,18 @@ export async function syncAvailability(
         rows: [],
       }),
     ]);
+
+    const fresh = await getAvailability(mediaType, tmdbId, country);
+
     return {
       source: "tmdb",
-      rows: fresh.filter((r) => r.source === "tmdb"),
+      rows: fresh.filter((row) => row.source === "tmdb"),
       diagnostics,
     };
   }
+
   diagnostics.tmdb = "empty";
 
-  // 2. Watchmode — fallback estrito.
   try {
     const watchmodeRows = await fetchWatchmodeRows(
       tmdbId,
@@ -340,8 +337,10 @@ export async function syncAvailability(
       country,
       input.imdbId ?? null
     );
+
     if (watchmodeRows.length > 0) {
       diagnostics.watchmode = "ok";
+
       await replaceAvailability({
         tmdbId,
         mediaType,
@@ -349,45 +348,32 @@ export async function syncAvailability(
         source: "watchmode",
         rows: watchmodeRows,
       });
+
       const fresh = await getAvailability(mediaType, tmdbId, country);
 
-buildAvailabilityProviders(
-  fresh
-    .filter((r) => r.source === "tmdb")
-    .map((row) => ({
-      providerId: row.tmdb_provider_id ?? 0,
-      providerName: row.provider_name,
-      logoPath: row.provider_logo_path,
-      type: row.availability_type,
-      deeplink: row.deep_link,
-      source: row.source,
-      quality: null,
-    })),
-  {
-    region: country,
-  },
-);
-
-return {
-  source: "tmdb",
-  rows: fresh.filter((r) => r.source === "tmdb"),
-  diagnostics,
-};
+      return {
+        source: "watchmode",
+        rows: fresh.filter((row) => row.source === "watchmode"),
+        diagnostics,
+      };
     }
+
     diagnostics.watchmode = "empty";
-  } catch (err) {
+  } catch (error) {
     console.warn(
       "[sync-availability] watchmode falhou:",
-      err instanceof Error ? err.message : err
+      error instanceof Error ? error.message : error
     );
+
     diagnostics.watchmode = "failed";
   }
 
-  // 3. MotN — fallback final.
   try {
     const motnRows = await fetchMotnRows(tmdbId, mediaType, country);
+
     if (motnRows.length > 0) {
       diagnostics.motn = "ok";
+
       await replaceAvailability({
         tmdbId,
         mediaType,
@@ -395,39 +381,29 @@ return {
         source: "motn",
         rows: motnRows,
       });
+
       const fresh = await getAvailability(mediaType, tmdbId, country);
 
-buildAvailabilityProviders(
-  fresh
-    .filter((r) => r.source === selectedSource)
-    .map((row) => ({
-      providerId: row.tmdb_provider_id ?? 0,
-      providerName: row.provider_name,
-      logoPath: row.provider_logo_path,
-      type: row.availability_type,
-      deeplink: row.deep_link,
-      source: row.source,
-      quality: row.quality,
-    })),
-  {
-    region: country,
-  },
-);
-
-return {
-  source: selectedSource,
-  rows: fresh.filter((r) => r.source === selectedSource),
-  diagnostics,
-};
+      return {
+        source: "motn",
+        rows: fresh.filter((row) => row.source === "motn"),
+        diagnostics,
+      };
     }
+
     diagnostics.motn = "empty";
-  } catch (err) {
+  } catch (error) {
     console.warn(
       "[sync-availability] motn falhou:",
-      err instanceof Error ? err.message : err
+      error instanceof Error ? error.message : error
     );
+
     diagnostics.motn = "failed";
   }
 
-  return { source: "none", rows: [], diagnostics };
+  return {
+    source: "none",
+    rows: [],
+    diagnostics,
+  };
 }

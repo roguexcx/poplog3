@@ -257,7 +257,7 @@ const EDITORIAL_STREAMING_OVERRIDES: Record<number, { name: string; logo: string
 
 function chooseBestAvailability(
   rows: AvailabilityRow[],
-  favoriteProviderIds: number[],
+  favoriteProviderIds: string[],
   region: "BR" | "US",
   tmdbId: number
 ): ContinuityAvailability | null {
@@ -281,7 +281,7 @@ function chooseBestAvailability(
       const providerId = typeof row.provider_id === "number" ? row.provider_id : null;
       const type = normalizeAvailabilityTypeOrNull(row.availability_type);
       const confidence = resolveProviderConfidence(row.source);
-      const isPreferred = providerId !== null && favoriteSet.has(providerId);
+      const isPreferred = row.provider_name !== null && favoriteSet.has(row.provider_name);
 
       let nativeBonus = 0;
       if (row.provider_name?.toLowerCase().includes("apple") && type === "subscription") {
@@ -669,7 +669,7 @@ async function getAvailabilityMap(input: {
   tmdbIds: number[];
   mediaType: MediaType;
   region: "BR" | "US";
-  favoriteProviderIds: number[];
+  favoriteProviderIds: string[];
 }) {
   const map = new Map<number, ContinuityAvailability | null>();
   if (input.tmdbIds.length === 0) return map;
@@ -736,11 +736,11 @@ async function getTitleMap(mediaType: MediaType, tmdbIds: number[]) {
     return map;
   }
 
-  for (const row of (data ?? []) as TitleRow[]) {
-    if (row.media_type === mediaType || !map.has(row.tmdb_id)) {
-      map.set(row.tmdb_id, { ...row, status: null });
-    }
+ for (const row of ((data ?? []) as unknown as TitleRow[])) {
+  if (row.media_type === mediaType || !map.has(row.tmdb_id)) {
+    map.set(row.tmdb_id, { ...row, status: null });
   }
+}
 
   return map;
 }
@@ -997,8 +997,9 @@ export async function getHeroCandidates(
         },
       } satisfies HeroCandidate;
     })
-    .filter((candidate): candidate is HeroCandidate => Boolean(candidate))
-    .filter((candidate) => candidate.score > 0);
+   
+    .filter((candidate) => candidate !== null)
+.filter((candidate) => candidate.score > 0) as HeroCandidate[];
 
   const rawWithFreshness = applyHeroFreshnessAndRotation([...seriesCandidates, ...movieCandidates]);
   const balancedCandidates = pickBalancedCandidates(rawWithFreshness, limit * 2);

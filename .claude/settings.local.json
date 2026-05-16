@@ -17,7 +17,8 @@
       "Bash(rm -rf \"I:/poplog-v3/src/server/services/\")",
       "Bash(rm \"I:/poplog-v3/src/server/normalizers/hero-visual.normalizer.ts\")",
       "Bash(Get-ChildItem -Path \"I:\\\\poplog-v3\\\\src\\\\server\" -Directory)",
-      "Bash(Select-Object -ExpandProperty Name)"
+      "Bash(Select-Object -ExpandProperty Name)",
+      "Bash(npm run *)"
     ]
   }
 }

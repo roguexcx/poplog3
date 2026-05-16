@@ -95,10 +95,10 @@ export async function GET(request: Request) {
     });
 
     return NextResponse.json({
-      source: "reddit_contextual_social",
-      context,
-      ...result,
-    });
+  ...result,
+  source: "reddit_contextual_social",
+  context,
+});
   } catch (error: any) {
     return NextResponse.json(
       {

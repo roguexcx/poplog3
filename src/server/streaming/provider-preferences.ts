@@ -3,8 +3,8 @@ import type { AvailabilityProvider } from "./availability-service";
 export type ProviderRegion = "BR" | "US";
 
 export type ProviderPreferenceInput = {
-  favoriteProviderIds?: number[];
-  hiddenProviderIds?: number[];
+  favoriteProviderIds?: string[];
+  hiddenProviderIds?: string[];
   region?: ProviderRegion;
   onlyFavorites?: boolean;
 };
@@ -40,11 +40,11 @@ export function rankAvailabilityProviders(
   return providers
     .map((provider) => {
       const favoriteIndex = normalized.favoriteProviderIds.indexOf(
-        provider.providerId
-      );
+  provider.name
+);
 
-      const isFavorite = favoriteSet.has(provider.providerId);
-      const isHidden = hiddenSet.has(provider.providerId);
+const isFavorite = favoriteSet.has(provider.name);
+const isHidden = hiddenSet.has(provider.name);
 
       return {
         ...provider,
@@ -63,15 +63,7 @@ export function rankAvailabilityProviders(
         return a.isFavorite ? -1 : 1;
       }
 
-      if (a.preferenceRank !== b.preferenceRank) {
-        return a.preferenceRank - b.preferenceRank;
-      }
-
-      if (a.displayPriority !== b.displayPriority) {
-        return a.displayPriority - b.displayPriority;
-      }
-
-      return a.providerName.localeCompare(b.providerName);
+      return a.name.localeCompare(b.name);
     });
 }
 
@@ -82,7 +74,7 @@ export function hasFavoriteAvailability(
   const normalized = normalizeProviderPreferences(preferences);
   const favoriteSet = new Set(normalized.favoriteProviderIds);
 
-  return providers.some((provider) => favoriteSet.has(provider.providerId));
+  return providers.some((provider) => favoriteSet.has(provider.name));
 }
 
 export function getFavoriteAvailabilityProviders(

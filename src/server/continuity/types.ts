@@ -47,6 +47,7 @@ export type ContinuityProgress = {
 
   nextSeason?: number | null;
   nextEpisode?: number | null;
+  nextEpisodeAirDate?: string | null;
 
   runtimeMinutes?: number | null;
   remainingMinutes?: number | null;
@@ -79,12 +80,17 @@ export type HeroCandidate = {
 
   availability: ContinuityAvailability | null;
 
-  actions: {
+    actions: {
     primary: ContinuityAction;
     secondary?: ContinuityAction;
   };
 
-  debug?: {
+  serverEyebrow?: {
+    text: string;
+    color: string;
+  };
+
+    debug?: {
     scoreBreakdown?: Record<string, number>;
     source?: string;
     [key: string]: unknown;

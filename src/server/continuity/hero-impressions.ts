@@ -94,8 +94,10 @@ function calculateTemporalScore(
   const remaining = total !== null ? Math.max(total - watched, 0) : null;
   const progressPercent = candidate.progress?.percentage ?? 0;
 
-  const lastWatchedAtStr = candidate.progress?.lastWatchedAt;
-  const daysSinceLastWatch = lastWatchedAtStr ? hoursSince(lastWatchedAtStr) / 24 : null;
+ const lastWatchedAtStr = candidate.progress?.lastWatchedAt;
+const hoursSinceLastWatch = lastWatchedAtStr ? hoursSince(lastWatchedAtStr) : null;
+const daysSinceLastWatch =
+  hoursSinceLastWatch !== null ? hoursSinceLastWatch / 24 : null;
 
   /**
    * RELEVANCE SHIELD ENGINE: RESOLUÇÃO DE GATILHOS CONTEXTUAIS

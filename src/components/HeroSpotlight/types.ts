@@ -7,7 +7,9 @@ export type WatchStatus =
   | "finished"
   | "watchlist";
 
-export type { SeriesStatus } from "@/lib/series";
+import type { SeriesStatus } from "@/lib/series";
+
+export type { SeriesStatus };
 
 export type SignalType =
   | "watched_episode"

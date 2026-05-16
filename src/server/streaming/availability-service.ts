@@ -205,11 +205,11 @@ function dedupeProviders(
   >();
 
   for (const provider of providers) {
-    const key = [
-      provider.providerId,
-      provider.normalizedType,
-      provider.region,
-    ].join("-");
+   const key = [
+  provider.name,
+  provider.normalizedType,
+  provider.region,
+].join("-");
 
     const existing = map.get(key);
 

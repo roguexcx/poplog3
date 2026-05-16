@@ -66,7 +66,7 @@ export async function GET() {
           ? (ep?.name ?? `Episódio ${cand.progress.nextEpisode}`)
           : null,
         next_episode_duration: isTv ? 45 : cand.progress?.runtimeMinutes ?? null,
-        next_episode_air_date: cand.progress?.nextEpisodeAirDate ?? null,
+        next_episode_air_date: null,
         next_episode_still_path: ep?.still_path ?? null,
         new_episode_available: cand.context === "new_episode",
         

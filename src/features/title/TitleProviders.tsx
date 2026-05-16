@@ -122,8 +122,18 @@ function groupByType(
     rentBuyMap.set(key, current);
   }
 
-  const rentBuy = Array.from(rentBuyMap.values()).map(({ rent, buy }) => {
+  const rentBuy: MergedProvider[] = Array.from(rentBuyMap.values()).map(
+  ({ rent, buy }) => {
     const base = rent ?? buy!;
+
+    const rentIsPreferred =
+      rent && "isPreferred" in rent ? Boolean(rent.isPreferred) : false;
+
+    const buyIsPreferred =
+      buy && "isPreferred" in buy ? Boolean(buy.isPreferred) : false;
+
+    const baseIsPreferred =
+      "isPreferred" in base ? Boolean(base.isPreferred) : false;
 
     return {
       ...base,
@@ -131,13 +141,11 @@ function groupByType(
       deepLink: rent?.deepLink ?? buy?.deepLink ?? null,
       logoUrl: base.logoUrl ?? null,
       quality: rent?.quality ?? buy?.quality ?? null,
-      isPreferred:
-        ("isPreferred" in base && base.isPreferred) ||
-        Boolean(rent && "isPreferred" in rent && rent.isPreferred) ||
-        Boolean(buy && "isPreferred" in buy && buy.isPreferred),
+      isPreferred: baseIsPreferred || rentIsPreferred || buyIsPreferred,
       accessLabel: rent && buy ? "aluguel/compra" : rent ? "aluguel" : "compra",
     };
-  });
+  }
+);
 
   const groups: ProviderGroup[] = [
     { type: "streaming", items: streaming },
