@@ -3,6 +3,8 @@ import type { MotnTitleResponse } from "@/server/api-clients/movieofthenight/typ
 import { watchmodeFetch } from "@/server/api-clients/watchmode/client";
 import type { WatchmodeSource } from "@/server/api-clients/watchmode/types";
 
+import { buildAvailabilityProviders } from "@/server/streaming/availability-service";
+
 import {
   getAvailability,
   isAvailabilityFresh,
@@ -348,11 +350,29 @@ export async function syncAvailability(
         rows: watchmodeRows,
       });
       const fresh = await getAvailability(mediaType, tmdbId, country);
-      return {
-        source: "watchmode",
-        rows: fresh.filter((r) => r.source === "watchmode"),
-        diagnostics,
-      };
+
+buildAvailabilityProviders(
+  fresh
+    .filter((r) => r.source === "tmdb")
+    .map((row) => ({
+      providerId: row.tmdb_provider_id ?? 0,
+      providerName: row.provider_name,
+      logoPath: row.provider_logo_path,
+      type: row.availability_type,
+      deeplink: row.deep_link,
+      source: row.source,
+      quality: null,
+    })),
+  {
+    region: country,
+  },
+);
+
+return {
+  source: "tmdb",
+  rows: fresh.filter((r) => r.source === "tmdb"),
+  diagnostics,
+};
     }
     diagnostics.watchmode = "empty";
   } catch (err) {
@@ -376,11 +396,29 @@ export async function syncAvailability(
         rows: motnRows,
       });
       const fresh = await getAvailability(mediaType, tmdbId, country);
-      return {
-        source: "motn",
-        rows: fresh.filter((r) => r.source === "motn"),
-        diagnostics,
-      };
+
+buildAvailabilityProviders(
+  fresh
+    .filter((r) => r.source === selectedSource)
+    .map((row) => ({
+      providerId: row.tmdb_provider_id ?? 0,
+      providerName: row.provider_name,
+      logoPath: row.provider_logo_path,
+      type: row.availability_type,
+      deeplink: row.deep_link,
+      source: row.source,
+      quality: row.quality,
+    })),
+  {
+    region: country,
+  },
+);
+
+return {
+  source: selectedSource,
+  rows: fresh.filter((r) => r.source === selectedSource),
+  diagnostics,
+};
     }
     diagnostics.motn = "empty";
   } catch (err) {

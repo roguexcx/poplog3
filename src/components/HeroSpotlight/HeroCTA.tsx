@@ -67,7 +67,7 @@ export default function HeroCTA({
     <div className="flex flex-wrap items-center gap-3">
       <button
         type="button"
-        onClick={onPrimary}
+        onClick={(e) => { e.stopPropagation(); onPrimary(); }}
         className="group relative overflow-hidden rounded-2xl bg-white px-5 py-3 text-sm font-black tracking-[-0.02em] text-black shadow-2xl shadow-white/10 transition-all duration-300 hover:-translate-y-0.5 hover:bg-white/95 active:scale-[0.98]"
       >
         <div className="absolute inset-0 bg-gradient-to-r from-white via-white to-zinc-200 opacity-90" />
@@ -83,7 +83,7 @@ export default function HeroCTA({
 
       <button
         type="button"
-        onClick={onNotNow}
+        onClick={(e) => { e.stopPropagation(); onNotNow(); }}
         className="group rounded-2xl border border-white/[0.12] bg-white/[0.05] px-4 py-3 text-sm font-semibold text-white/72 shadow-xl shadow-black/20 backdrop-blur-xl transition-all duration-300 hover:-translate-y-0.5 hover:border-white/[0.2] hover:bg-white/[0.08] hover:text-white"
       >
         <span className="transition-opacity duration-300 group-hover:opacity-100">

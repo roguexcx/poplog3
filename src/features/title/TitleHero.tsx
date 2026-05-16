@@ -11,6 +11,7 @@ import type { TitlePageData } from "./types";
 
 type TitleHeroProps = {
   title: TitlePageData;
+  onOpenMovieSocial?: () => void;
 };
 
 function formatRuntime(minutes?: number | null) {
@@ -23,15 +24,17 @@ function formatRuntime(minutes?: number | null) {
 }
 
 function formatYearSpan(t: TitlePageData) {
-  if (t.mediaType === "movie") {
-    return t.year ?? null;
-  }
+  if (t.mediaType === "movie") return t.year ?? null;
+
   const startYear =
     t.firstAirDate?.slice(0, 4) ??
     (typeof t.year === "number" ? String(t.year) : t.year);
+
   const endYear = t.lastAirDate?.slice(0, 4);
+
   if (!startYear) return null;
   if (endYear && endYear !== startYear) return `${startYear} – ${endYear}`;
+
   return startYear;
 }
 
@@ -39,12 +42,14 @@ function pad2(n: number) {
   return String(n).padStart(2, "0");
 }
 
-export default function TitleHero({ title }: TitleHeroProps) {
+export default function TitleHero({ title, onOpenMovieSocial }: TitleHeroProps) {
   const runtime = formatRuntime(title.runtime);
   const yearSpan = formatYearSpan(title);
+
   const stateLabel = title.availabilityState
     ? formatAvailabilityState(title.availabilityState)
     : null;
+
   const stateVariant = title.availabilityState
     ? availabilityStateToBadgeVariant(title.availabilityState)
     : "neutral";
@@ -53,6 +58,7 @@ export default function TitleHero({ title }: TitleHeroProps) {
     typeof title.ratings?.poplogScore === "number"
       ? title.ratings.poplogScore
       : null;
+
   const tmdbScore =
     typeof title.voteAverage === "number" ? title.voteAverage : null;
 
@@ -60,14 +66,17 @@ export default function TitleHero({ title }: TitleHeroProps) {
   const watchedCount = progress?.watchedCount ?? 0;
   const totalEpisodes = progress?.totalEpisodes ?? null;
   const hasProgress = title.mediaType === "tv" && watchedCount > 0;
+
   const isComplete =
     hasProgress &&
     typeof totalEpisodes === "number" &&
     watchedCount >= totalEpisodes;
+
   const progressPct =
     typeof totalEpisodes === "number" && totalEpisodes > 0
       ? Math.min(100, Math.round((watchedCount / totalEpisodes) * 100))
       : null;
+
   const nextEpUser = progress?.nextEpisode ?? null;
 
   return (
@@ -169,6 +178,8 @@ export default function TitleHero({ title }: TitleHeroProps) {
                   </span>
                 )
               )}
+
+              
             </div>
 
             <h1 className="break-words text-[clamp(1.875rem,5vw,4.25rem)] font-black leading-[0.98] tracking-[-0.04em] text-white">

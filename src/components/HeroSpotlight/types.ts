@@ -7,12 +7,7 @@ export type WatchStatus =
   | "finished"
   | "watchlist";
 
-export type SeriesStatus =
-  | "returning"
-  | "ended"
-  | "canceled"
-  | "hiatus"
-  | "in_production";
+export type { SeriesStatus } from "@/lib/series";
 
 export type SignalType =
   | "watched_episode"

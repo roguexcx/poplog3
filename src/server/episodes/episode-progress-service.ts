@@ -17,12 +17,13 @@ export type UserSeriesProgress = {
   watchedCount: number;
   totalEpisodes: number | null;
   lastWatchedAt: string | null;
-  /** Set serializavel "S##E##" para hidratacao em client. */
+  /** Set serializável "S##E##" para hidratação em client. */
   watchedKeys: EpisodeKey[];
-  /** Proximo episodio sugerido. Calculado considerando ordem (season, episode). */
+  /** Próximo episódio sugerido. Calculado considerando ordem (season, episode). */
   nextEpisode: {
     seasonNumber: number;
     episodeNumber: number;
+    airDate: string | null;
   } | null;
 };
 
@@ -40,20 +41,50 @@ function episodeKey(season: number, episode: number): EpisodeKey {
 }
 
 /**
- * Marca/desmarca um episodio como assistido. Faz auto-sync com
- * poplog3_user_titles:
- *   - Primeira marcacao → user_titles vira "watching" (se ainda nao for "watched")
- *   - Todos os episodios conhecidos marcados → tenta promover pra "watched"
- *     (precisa de totalEpisodes pra decidir)
- *   - Desmarcar episodio NAO rebaixa automaticamente (decisao do user).
+ * Promove a série para "watching" em poplog3_user_titles se o status atual
+ * não for "watched" nem "watching". Lança em caso de falha — o chamador
+ * decide se propaga ou absorve. O upsert de episódio é idempotente, então
+ * retry após falha aqui é seguro.
+ */
+async function syncLibraryStatusAfterEpisodeMark(
+  userId: string,
+  seriesTmdbId: number
+): Promise<void> {
+  const { data, error } = await supabaseAdmin
+    .from("poplog3_user_titles")
+    .select("status")
+    .eq("user_id", userId)
+    .eq("tmdb_id", seriesTmdbId)
+    .eq("media_type", "tv")
+    .maybeSingle();
+
+  if (error) throw new Error(`[episode-progress] falha ao ler status da série: ${error.message}`);
+
+  const currentStatus = (data?.status as string | null) ?? null;
+  if (currentStatus !== "watched" && currentStatus !== "watching") {
+    await upsertUserTitleStatus({
+      userId,
+      tmdbId: seriesTmdbId,
+      mediaType: "tv",
+      status: "watching",
+    });
+  }
+}
+
+/**
+ * Marca/desmarca um episódio como assistido e sincroniza o status da série
+ * em poplog3_user_titles.
+ *
+ * - Marcar → promove série para "watching" (se ainda não for "watched"/"watching")
+ * - Desmarcar → não rebaixa status (decisão do usuário)
+ * - Falha no sync de status propaga: o upsert de episódio é idempotente,
+ *   então retry é seguro e mantém consistência.
  */
 export async function toggleEpisodeWatched(
   input: ToggleEpisodeInput
 ): Promise<UserSeriesProgress> {
-  const supabase = supabaseAdmin;
-
   if (input.watched) {
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from("poplog3_user_episodes")
       .upsert(
         {
@@ -69,8 +100,10 @@ export async function toggleEpisodeWatched(
       );
 
     if (error) throw new Error(error.message);
+
+    await syncLibraryStatusAfterEpisodeMark(input.userId, input.seriesTmdbId);
   } else {
-    const { error } = await supabase
+    const { error } = await supabaseAdmin
       .from("poplog3_user_episodes")
       .delete()
       .eq("user_id", input.userId)
@@ -81,48 +114,13 @@ export async function toggleEpisodeWatched(
     if (error) throw new Error(error.message);
   }
 
-  // Auto-sync: garante que a serie esta em "watching" ao menos.
-  if (input.watched) {
-    try {
-      const currentStatus = await getUserTitleStatusRaw(
-        input.userId,
-        input.seriesTmdbId
-      );
-      if (currentStatus !== "watched" && currentStatus !== "watching") {
-        await upsertUserTitleStatus({
-          userId: input.userId,
-          tmdbId: input.seriesTmdbId,
-          mediaType: "tv",
-          status: "watching",
-        });
-      }
-    } catch (err) {
-      console.warn("[episode-progress] auto-sync watching falhou:", err);
-    }
-  }
-
   return computeUserSeriesProgress(input.userId, input.seriesTmdbId);
 }
 
-async function getUserTitleStatusRaw(
-  userId: string,
-  seriesTmdbId: number
-): Promise<string | null> {
-  const { data, error } = await supabaseAdmin
-    .from("poplog3_user_titles")
-    .select("status")
-    .eq("user_id", userId)
-    .eq("tmdb_id", seriesTmdbId)
-    .eq("media_type", "tv")
-    .maybeSingle();
-  if (error) return null;
-  return (data?.status as string | null) ?? null;
-}
-
 /**
- * Marca em massa uma lista de episodios. Usado quando o usuario clica
- * "Marcar assistido" na hero de uma serie — todos os episodios conhecidos
- * sao registrados.
+ * Marca em massa uma lista de episódios. Usado quando o usuário clica
+ * "Marcar assistido" na hero de uma série — todos os episódios conhecidos
+ * são registrados.
  */
 export async function bulkMarkEpisodesWatched(input: {
   userId: string;
@@ -156,11 +154,13 @@ export async function bulkMarkEpisodesWatched(input: {
 
   if (error) throw new Error(error.message);
 
+  await syncLibraryStatusAfterEpisodeMark(input.userId, input.seriesTmdbId);
+
   return computeUserSeriesProgress(input.userId, input.seriesTmdbId);
 }
 
 /**
- * Apaga todo o progresso do usuario para a serie.
+ * Apaga todo o progresso do usuário para a série.
  */
 export async function clearSeriesProgress(
   userId: string,
@@ -176,7 +176,7 @@ export async function clearSeriesProgress(
 }
 
 /**
- * Le todos os episodios assistidos da serie por este usuario.
+ * Lê todos os episódios assistidos da série por este usuário.
  */
 export async function getWatchedEpisodesForSeries(
   userId: string,
@@ -201,15 +201,18 @@ export async function getWatchedEpisodesForSeries(
 }
 
 /**
- * Calcula progresso da serie pro user.
+ * Calcula progresso da série pro user.
  * - totalEpisodes vem de poplog3_titles.number_of_episodes (best effort)
  * - nextEpisode: percorre poplog3_episodes ordenado (season, ep) e pega o
- *   primeiro que NAO esta na lista de assistidos.
+ * primeiro que NÃO está na lista de assistidos.
+ * - Proteção nativa contra temporadas fantasma do TMDB (sem episódios válidos ou futuros placeholders).
  */
 export async function computeUserSeriesProgress(
   userId: string,
   seriesTmdbId: number
 ): Promise<UserSeriesProgress> {
+  const now = Date.now();
+  
   const watched = await getWatchedEpisodesForSeries(userId, seriesTmdbId);
   const watchedSet = new Set(
     watched.map((w) => `${w.season_number}-${w.episode_number}`)
@@ -227,7 +230,30 @@ export async function computeUserSeriesProgress(
       ? titleRow.number_of_episodes
       : null;
 
-  // Procura proximo episodio nao assistido percorrendo os ja catalogados.
+  // Blindagem real contra temporadas fantasmas / placeholders TMDB
+const { data: validEpisodesRaw } = await supabaseAdmin
+  .from("poplog3_episodes")
+  .select("season_number, episode_number, air_date")
+  .eq("series_tmdb_id", seriesTmdbId)
+  .gt("season_number", 0)
+  .gt("episode_number", 0)
+  .not("air_date", "is", null);
+
+const validSeasonsSet = new Set<number>();
+
+if (validEpisodesRaw) {
+  for (const row of validEpisodesRaw) {
+    const airTime = new Date(row.air_date as string).getTime();
+
+    // ignora placeholders futuros
+    if (!Number.isFinite(airTime)) continue;
+    if (airTime > now) continue;
+
+    validSeasonsSet.add(row.season_number);
+  }
+}
+
+  // 2. Busca episódios ordenados por hierarquia cronológica padrão
   const { data: episodes } = await supabaseAdmin
     .from("poplog3_episodes")
     .select("season_number, episode_number, air_date")
@@ -236,23 +262,28 @@ export async function computeUserSeriesProgress(
     .order("episode_number", { ascending: true });
 
   let nextEpisode: UserSeriesProgress["nextEpisode"] = null;
-  const now = Date.now();
+
   for (const ep of (episodes ?? []) as Array<{
     season_number: number;
     episode_number: number;
     air_date: string | null;
   }>) {
-    if (ep.season_number <= 0) continue;
+    // Pula especiais (S00) e blindagem contra temporadas fantasma que não estão no set válido
+    if (ep.season_number <= 0 || !validSeasonsSet.has(ep.season_number)) continue;
+
     const key = `${ep.season_number}-${ep.episode_number}`;
     if (watchedSet.has(key)) continue;
-    // So sugere episodios que ja foram ao ar.
+
+    // Só sugere episódios que já foram ao ar (impede detecção de temporadas futuras/anunciadas)
     if (ep.air_date) {
       const t = new Date(ep.air_date).getTime();
       if (Number.isFinite(t) && t > now) continue;
     }
+
     nextEpisode = {
       seasonNumber: ep.season_number,
       episodeNumber: ep.episode_number,
+      airDate: ep.air_date ?? null,
     };
     break;
   }
@@ -278,10 +309,10 @@ export async function computeUserSeriesProgress(
 }
 
 /**
- * Para futura Acompanhando: lista todas as series com pelo menos 1
- * episodio assistido pelo user, ordenadas por ultimo episodio visto.
+ * Para futura Acompanhando: lista todas as séries com pelo menos 1
+ * episódio assistido pelo user, ordenadas por último episódio visto.
  *
- * Retorna metadata minima da serie (titulo, poster) para listagem rapida.
+ * Retorna metadata mínima da série (título, poster) para listagem rápida.
  */
 export type UserWatchingSeriesRow = UserSeriesProgress & {
   title: string | null;
@@ -295,7 +326,7 @@ export async function getUserWatchingSeries(
   userId: string,
   limit = 50
 ): Promise<UserWatchingSeriesRow[]> {
-  // Pega ids unicos de series com progresso, ordenados pelo episodio mais
+  // Pega ids únicos de séries com progresso, ordenados pelo episódio mais
   // recente assistido.
   const { data: recent, error } = await supabaseAdmin
     .from("poplog3_user_episodes")
@@ -386,10 +417,10 @@ export async function getUserWatchingSeries(
 }
 
 /**
- * Marca todos os episodios JA AO AR de uma serie como assistidos pelo user.
- * Le poplog3_episodes (catalogo TMDB ja sincronizado) e faz bulk upsert.
+ * Marca todos os episódios JÁ AO AR de uma série como assistidos pelo user.
+ * Lê poplog3_episodes (catálogo TMDB já sincronizado) e faz bulk upsert.
  *
- * Util para o botao "Marcar assistido" da hero da Title Page.
+ * Útil para o botão "Marcar assistido" da hero da Title Page.
  */
 export async function markAllAiredEpisodes(
   userId: string,

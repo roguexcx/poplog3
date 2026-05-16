@@ -12,7 +12,10 @@
       "mcp__7b1ea04e-0035-4d82-b38c-7360fc338f98__execute_sql",
       "Bash(ls -la \"I:\\\\poplog-v2\\\\src\\\\app\\\\sorteio\")",
       "Bash(find \"I:\\\\poplog-v2\\\\src\\\\components\" -type d | sort)",
-      "Bash(grep -r \"random\\\\|shuffle\\\\|pick\\\\|suggest\\\\|discover\" \"I:\\\\poplog-v2\\\\src\" --include=\"*.tsx\" --include=\"*.ts\" -l)"
+      "Bash(grep -r \"random\\\\|shuffle\\\\|pick\\\\|suggest\\\\|discover\" \"I:\\\\poplog-v2\\\\src\" --include=\"*.tsx\" --include=\"*.ts\" -l)",
+      "Bash(Remove-Item -Path \"I:/poplog-v3/src/server/services/hero-candidates.ts\" -Force)",
+      "Bash(rm -rf \"I:/poplog-v3/src/server/services/\")",
+      "Bash(rm \"I:/poplog-v3/src/server/normalizers/hero-visual.normalizer.ts\")"
     ]
   }
 }

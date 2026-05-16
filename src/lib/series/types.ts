@@ -36,6 +36,23 @@ export type MovieState = "coming-soon" | "released" | "unknown";
 export type TitleAvailabilityState = SeriesState | MovieState;
 
 /**
+ * Estado de produção de uma série conforme retornado pelo TMDB.
+ * Representa o status editorial do show — não o progresso do usuário.
+ *
+ * - returning     : série em andamento, volta com novas temporadas
+ * - ended         : encerrada definitivamente
+ * - canceled      : cancelada
+ * - hiatus        : pausa indefinida
+ * - in_production : em produção (ainda não estreou ou entre temporadas)
+ */
+export type SeriesStatus =
+  | "returning"
+  | "ended"
+  | "canceled"
+  | "hiatus"
+  | "in_production";
+
+/**
  * Mini-estrutura "next/last episode" idêntica ao TMDB.
  * Usada como entrada das funções de estado.
  */

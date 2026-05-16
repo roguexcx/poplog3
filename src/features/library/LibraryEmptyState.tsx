@@ -10,20 +10,20 @@ export default function LibraryEmptyState({
   const content = getEmptyContent(activeTab);
 
   return (
-    <div className="relative overflow-hidden rounded-[2rem] border border-white/[0.08] bg-white/[0.035] px-6 py-14 text-center shadow-[0_22px_70px_rgba(0,0,0,0.28)] backdrop-blur-xl sm:px-8 md:py-20">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(129,140,248,0.16),transparent_42%)]" />
-      <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-white/15 to-transparent" />
+    <div className="relative overflow-hidden rounded-[2.25rem] border border-white/[0.08] bg-white/[0.028] px-6 py-16 text-center shadow-[0_26px_100px_rgba(0,0,0,0.38)] backdrop-blur-xl sm:px-8 md:py-24">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(129,140,248,0.18),transparent_44%),radial-gradient(circle_at_80%_90%,rgba(34,211,238,0.10),transparent_38%)]" />
+      <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-white/18 to-transparent" />
 
       <div className="relative mx-auto max-w-xl">
-        <div className="mx-auto mb-6 flex h-14 w-14 items-center justify-center rounded-2xl border border-white/[0.1] bg-black/20 text-2xl shadow-inner">
+        <div className="mx-auto mb-7 flex h-16 w-16 items-center justify-center rounded-[1.4rem] border border-white/[0.1] bg-white/[0.05] text-3xl shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl">
           {content.icon}
         </div>
 
-        <p className="text-[10px] font-black uppercase tracking-[0.24em] text-indigo-200/65">
+        <p className="text-[10px] font-black uppercase tracking-[0.26em] text-cyan-100/64">
           {content.kicker}
         </p>
 
-        <h2 className="mt-3 text-2xl font-black tracking-[-0.04em] text-white sm:text-3xl">
+        <h2 className="mt-3 text-3xl font-black tracking-[-0.05em] text-white sm:text-4xl">
           {content.title}
         </h2>
 
@@ -43,7 +43,7 @@ function getEmptyContent(activeTab: LibraryTab) {
         kicker: "Watchlist vazia",
         title: "Nenhum título separado ainda.",
         description:
-          "Quando você encontrar algo para ver depois, ele aparece aqui como uma prateleira de desejos cinematográficos.",
+          "Quando você salvar algo para ver depois, ele aparece aqui como uma prateleira visual da sua coleção.",
       };
 
     case "watching":
@@ -52,7 +52,7 @@ function getEmptyContent(activeTab: LibraryTab) {
         kicker: "Nada em andamento",
         title: "Você ainda não começou nenhuma jornada.",
         description:
-          "Séries e títulos marcados como assistindo ficam aqui para virar seu painel de continuidade.",
+          "Séries e títulos marcados como assistindo ficam aqui e também alimentam a lógica do Acompanhando.",
       };
 
     case "watched":
@@ -70,7 +70,7 @@ function getEmptyContent(activeTab: LibraryTab) {
         kicker: "Sem abandonados",
         title: "Nada ficou pelo caminho.",
         description:
-          "Títulos abandonados ficam separados aqui, longe da bagunça, mas ainda dentro da sua história.",
+          "Títulos abandonados ficam separados aqui, fora da continuidade principal, mas ainda dentro da sua história.",
       };
 
     case "fridge":
@@ -79,7 +79,25 @@ function getEmptyContent(activeTab: LibraryTab) {
         kicker: "Geladeira vazia",
         title: "Nenhum título guardado para outro clima.",
         description:
-          "Use a geladeira para deixar títulos em pausa sem jogar tudo para a watchlist ou para os abandonados.",
+          "Use a geladeira para pausar títulos sem misturar tudo com watchlist, assistindo ou abandonados.",
+      };
+
+    case "coming-soon":
+      return {
+        icon: "◌",
+        kicker: "Nada em breve",
+        title: "Nenhum lançamento futuro nesta seleção.",
+        description:
+          "Títulos ainda não lançados aparecem aqui quando estiverem salvos na sua biblioteca.",
+      };
+
+    case "between-seasons":
+      return {
+        icon: "Ⅱ",
+        kicker: "Sem pausas",
+        title: "Nenhuma série entre temporadas.",
+        description:
+          "Quando uma série em andamento estiver sem episódio novo disponível, ela pode entrar neste espaço de pausa.",
       };
 
     default:
@@ -88,7 +106,7 @@ function getEmptyContent(activeTab: LibraryTab) {
         kicker: "Biblioteca vazia",
         title: "Sua coleção ainda está esperando o primeiro título.",
         description:
-          "Salve filmes e séries pela busca ou pelas páginas de título para começar a construir sua biblioteca.",
+          "Salve filmes e séries pela busca ou pelas páginas de título para começar a construir sua biblioteca POPLOG.",
       };
   }
 }

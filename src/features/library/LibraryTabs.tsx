@@ -96,13 +96,12 @@ export default function LibraryTabs({
 
   return (
     <>
-      {/* Mobile: select dropdown */}
       <div className="sm:hidden">
         <select
           value={activeTab}
           onChange={(event) => onChange(event.target.value as LibraryTab)}
           style={{ colorScheme: "dark" }}
-          className="h-11 w-full appearance-none rounded-2xl border border-white/[0.08] bg-black/50 px-4 text-sm font-black uppercase tracking-[0.12em] text-white outline-none [&_option]:bg-[#020617] [&_option]:text-white"
+          className="h-12 w-full appearance-none rounded-2xl border border-white/[0.09] bg-white/[0.045] px-4 text-sm font-black uppercase tracking-[0.12em] text-white outline-none backdrop-blur-xl [&_option]:bg-[#020617] [&_option]:text-white"
           aria-label={`Seção atual: ${activeLabel}`}
         >
           {TABS.map((tab) => {
@@ -117,9 +116,8 @@ export default function LibraryTabs({
         </select>
       </div>
 
-      {/* Desktop: compact pills */}
       <div className="hidden overflow-x-auto pb-1 no-scrollbar sm:block">
-        <div className="flex min-w-max items-center gap-2">
+        <div className="flex min-w-max items-stretch gap-2">
           {TABS.map((tab) => {
             const active = activeTab === tab.id;
             const count = tab.getCount(stats);
@@ -130,25 +128,39 @@ export default function LibraryTabs({
                 type="button"
                 onClick={() => onChange(tab.id)}
                 className={[
-                  "flex shrink-0 items-center gap-1.5 rounded-full border px-4 py-2 text-[11px] font-black uppercase tracking-[0.14em] transition duration-200",
+                  "group flex min-w-[150px] shrink-0 flex-col rounded-[1.25rem] border px-4 py-3 text-left transition duration-300",
                   active
-                    ? "border-indigo-300/35 bg-indigo-400/[0.13] text-indigo-100"
-                    : "border-white/[0.08] bg-white/[0.035] text-white/52 hover:border-white/[0.15] hover:bg-white/[0.06] hover:text-white/82",
+                    ? "border-indigo-200/30 bg-indigo-300/[0.12] text-white shadow-[0_0_34px_rgba(99,102,241,0.14)]"
+                    : "border-white/[0.075] bg-white/[0.028] text-white/52 hover:border-white/[0.15] hover:bg-white/[0.055] hover:text-white/82",
                 ].join(" ")}
               >
-                {tab.label}
-                {typeof count === "number" && count > 0 && (
-                  <span
-                    className={[
-                      "rounded-full border px-1.5 py-px text-[9px] font-black",
-                      active
-                        ? "border-indigo-200/30 bg-white/10 text-indigo-50"
-                        : "border-white/[0.08] bg-black/20 text-white/38",
-                    ].join(" ")}
-                  >
-                    {count}
+                <span className="flex items-center justify-between gap-3">
+                  <span className="text-[10px] font-black uppercase tracking-[0.18em]">
+                    {tab.shortLabel}
                   </span>
-                )}
+
+                  {typeof count === "number" && count > 0 && (
+                    <span
+                      className={[
+                        "rounded-full border px-2 py-0.5 text-[10px] font-black",
+                        active
+                          ? "border-indigo-100/25 bg-white/10 text-indigo-50"
+                          : "border-white/[0.08] bg-black/20 text-white/38",
+                      ].join(" ")}
+                    >
+                      {count}
+                    </span>
+                  )}
+                </span>
+
+                <span
+                  className={[
+                    "mt-1 text-[11px] leading-4",
+                    active ? "text-indigo-100/64" : "text-white/30 group-hover:text-white/44",
+                  ].join(" ")}
+                >
+                  {tab.description}
+                </span>
               </button>
             );
           })}

@@ -30,6 +30,26 @@ export type UpsertSeasonInput = {
   }>;
 };
 
+export async function getCachedEpisode(
+  seriesTmdbId: number,
+  seasonNumber: number,
+  episodeNumber: number
+): Promise<{ name: string | null; still_path: string | null } | null> {
+  const { data, error } = await supabaseAdmin
+    .from("poplog3_episodes")
+    .select("name, still_path")
+    .eq("series_tmdb_id", seriesTmdbId)
+    .eq("season_number", seasonNumber)
+    .eq("episode_number", episodeNumber)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[season-cache/get-episode]", error);
+    return null;
+  }
+  return data ?? null;
+}
+
 export async function getCachedSeason(
   seriesTmdbId: number,
   seasonNumber: number

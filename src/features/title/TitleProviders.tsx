@@ -1,16 +1,13 @@
 import Image from "next/image";
 
-import type { TitleProvider, TitleProviderType } from "./types";
+import type { TitleProvider } from "./types";
+import type { AvailabilityProvider } from "@/server/streaming/availability-service";
 
 type TitleProvidersProps = {
-  providers?: TitleProvider[];
+  providers?: AvailabilityProvider[] | TitleProvider[];
 };
 
-type ProviderGroupType =
-  | "streaming"
-  | "free"
-  | "ads"
-  | "rent-buy";
+type ProviderGroupType = "streaming" | "free" | "ads" | "rent-buy";
 
 type ProviderGroup = {
   type: ProviderGroupType;
@@ -19,6 +16,7 @@ type ProviderGroup = {
 
 type MergedProvider = TitleProvider & {
   accessLabel?: string;
+  isPreferred?: boolean;
 };
 
 const TYPE_LABEL: Record<ProviderGroupType, string> = {
@@ -35,12 +33,7 @@ const TYPE_ACCENT: Record<ProviderGroupType, string> = {
   "rent-buy": "text-amber-200/80",
 };
 
-const TYPE_ORDER: ProviderGroupType[] = [
-  "streaming",
-  "free",
-  "ads",
-  "rent-buy",
-];
+const TYPE_ORDER: ProviderGroupType[] = ["streaming", "free", "ads", "rent-buy"];
 
 function dedupeProviders(providers: MergedProvider[]) {
   const map = new Map<string, MergedProvider>();
@@ -61,52 +54,70 @@ function dedupeProviders(providers: MergedProvider[]) {
       logoUrl: current.logoUrl ?? provider.logoUrl,
       quality: current.quality ?? provider.quality,
       accessLabel: current.accessLabel ?? provider.accessLabel,
+      isPreferred: current.isPreferred || provider.isPreferred,
     });
   }
 
   return Array.from(map.values());
 }
 
-function groupByType(providers: TitleProvider[]): ProviderGroup[] {
+function groupByType(
+  providers: (AvailabilityProvider | TitleProvider)[]
+): ProviderGroup[] {
   const streaming = dedupeProviders(
     providers
-      .filter((p) => p.type === "streaming")
+      .filter(
+        (p) =>
+          p.type === "streaming" ||
+          ("normalizedType" in p && p.normalizedType === "subscription")
+      )
       .map((p) => ({ ...p }))
   );
 
   const free = dedupeProviders(
     providers
-      .filter((p) => p.type === "free")
+      .filter(
+        (p) =>
+          p.type === "free" ||
+          ("normalizedType" in p && p.normalizedType === "free")
+      )
       .map((p) => ({ ...p }))
   );
 
   const ads = dedupeProviders(
     providers
-      .filter((p) => p.type === "ads")
+      .filter(
+        (p) =>
+          p.type === "ads" ||
+          ("normalizedType" in p && p.normalizedType === "ads")
+      )
       .map((p) => ({ ...p }))
   );
 
   const rentBuyMap = new Map<
     string,
     {
-      rent?: TitleProvider;
-      buy?: TitleProvider;
+      rent?: TitleProvider | AvailabilityProvider;
+      buy?: TitleProvider | AvailabilityProvider;
     }
   >();
 
   for (const provider of providers) {
-    if (provider.type !== "rent" && provider.type !== "buy") continue;
+    const isRent =
+      provider.type === "rent" ||
+      ("normalizedType" in provider && provider.normalizedType === "rent");
+
+    const isBuy =
+      provider.type === "buy" ||
+      ("normalizedType" in provider && provider.normalizedType === "buy");
+
+    if (!isRent && !isBuy) continue;
 
     const key = provider.name.trim().toLowerCase();
     const current = rentBuyMap.get(key) ?? {};
 
-    if (provider.type === "rent") {
-      current.rent = provider;
-    }
-
-    if (provider.type === "buy") {
-      current.buy = provider;
-    }
+    if (isRent) current.rent = provider;
+    if (isBuy) current.buy = provider;
 
     rentBuyMap.set(key, current);
   }
@@ -120,32 +131,19 @@ function groupByType(providers: TitleProvider[]): ProviderGroup[] {
       deepLink: rent?.deepLink ?? buy?.deepLink ?? null,
       logoUrl: base.logoUrl ?? null,
       quality: rent?.quality ?? buy?.quality ?? null,
-      accessLabel:
-        rent && buy
-          ? "aluguel/compra"
-          : rent
-            ? "aluguel"
-            : "compra",
+      isPreferred:
+        ("isPreferred" in base && base.isPreferred) ||
+        Boolean(rent && "isPreferred" in rent && rent.isPreferred) ||
+        Boolean(buy && "isPreferred" in buy && buy.isPreferred),
+      accessLabel: rent && buy ? "aluguel/compra" : rent ? "aluguel" : "compra",
     };
   });
 
   const groups: ProviderGroup[] = [
-    {
-      type: "streaming",
-      items: streaming,
-    },
-    {
-      type: "free",
-      items: free,
-    },
-    {
-      type: "ads",
-      items: ads,
-    },
-    {
-      type: "rent-buy",
-      items: rentBuy,
-    },
+    { type: "streaming", items: streaming },
+    { type: "free", items: free },
+    { type: "ads", items: ads },
+    { type: "rent-buy", items: rentBuy },
   ];
 
   return TYPE_ORDER.map((type) => groups.find((group) => group.type === type))
@@ -164,7 +162,9 @@ export default function TitleProviders({ providers }: TitleProvidersProps) {
 
     if (sources.has("tmdb")) return "Fonte: TMDB";
     if (sources.has("watchmode")) return "Fonte: Watchmode (fallback)";
-    if (sources.has("motn")) return "Fonte: MovieOfTheNight (fallback)";
+    if (sources.has("movieofthenight") || sources.has("motn")) {
+      return "Fonte: MovieOfTheNight (fallback)";
+    }
 
     return null;
   })();
@@ -236,7 +236,14 @@ export default function TitleProviders({ providers }: TitleProvidersProps) {
 
 function ProviderPill({ provider }: { provider: MergedProvider }) {
   const inner = (
-    <span className="inline-flex max-w-full items-center gap-2 rounded-2xl border border-white/[0.08] bg-white/[0.04] py-2 pl-2 pr-3 text-[12px] font-semibold text-white/90 backdrop-blur-md transition duration-200 hover:border-white/[0.18] hover:bg-white/[0.08]">
+    <span
+      className={[
+        "inline-flex max-w-full items-center gap-2 rounded-2xl border py-2 pl-2 pr-3 text-[12px] font-semibold backdrop-blur-md transition duration-200",
+        provider.isPreferred
+          ? "border-cyan-300/30 bg-cyan-300/[0.08] text-white shadow-[0_0_24px_rgba(34,211,238,0.10)] hover:border-cyan-200/45 hover:bg-cyan-300/[0.12]"
+          : "border-white/[0.08] bg-white/[0.04] text-white/90 hover:border-white/[0.18] hover:bg-white/[0.08]",
+      ].join(" ")}
+    >
       {provider.logoUrl ? (
         <Image
           src={provider.logoUrl}
@@ -254,6 +261,12 @@ function ProviderPill({ provider }: { provider: MergedProvider }) {
       )}
 
       <span className="min-w-0 truncate">{provider.name}</span>
+
+      {provider.isPreferred && (
+        <span className="shrink-0 rounded-full border border-cyan-200/20 bg-cyan-300/10 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.12em] text-cyan-100">
+          Seu streaming
+        </span>
+      )}
 
       {provider.quality && (
         <span className="ml-1 shrink-0 rounded-full border border-white/[0.10] bg-black/35 px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-white/55">

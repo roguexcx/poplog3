@@ -1,9 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { supabaseAdmin } from "@/server/supabase/admin";
+import { isValidSeason, mapSeriesStatus, type SeriesStatus } from "@/lib/series";
 import type {
   ContentType,
-  SeriesStatus,
   SignalType,
   UserWatching,
   WatchStatus,
@@ -137,20 +137,6 @@ function parseContentId(contentId: string): ParsedContentId | null {
   };
 }
 
-function mapSeriesStatus(raw: string | null): SeriesStatus | null {
-  if (!raw) return null;
-
-  const lower = raw.toLowerCase();
-
-  if (lower.includes("return") || lower === "continuing") return "returning";
-  if (lower.includes("end")) return "ended";
-  if (lower.includes("cancel")) return "canceled";
-  if (lower.includes("hiatus")) return "hiatus";
-  if (lower.includes("production")) return "in_production";
-
-  return null;
-}
-
 function normalizeGenres(genres: unknown): string[] {
   if (!Array.isArray(genres)) return [];
 
@@ -210,45 +196,22 @@ function sortEpisodes<T extends { season_number: number; episode_number: number 
   });
 }
 
-const FUTURE_AIR_WINDOW_MS = 120 * 24 * 60 * 60 * 1000;
-
 function getValidSeasonNumbers(meta: DbTitleMeta): Set<number> {
   const seasons = meta.tmdb_payload?.seasons;
   if (!Array.isArray(seasons) || seasons.length === 0) return new Set();
-
-  const now = Date.now();
-  const futureLimit = now + FUTURE_AIR_WINDOW_MS;
 
   const valid = new Set<number>();
   for (const s of seasons) {
     if (typeof s !== "object" || !s) continue;
     const season = s as {
-      season_number?: unknown;
-      air_date?: unknown;
-      name?: unknown;
-      poster_path?: unknown;
-      overview?: unknown;
+      season_number?: number | null;
+      air_date?: string | null;
+      name?: string | null;
+      poster_path?: string | null;
+      overview?: string | null;
     };
-
-    const num = season.season_number;
-    if (typeof num !== "number" || num <= 0) continue;
-
-    const airTime = typeof season.air_date === "string" && season.air_date
-      ? new Date(season.air_date).getTime()
-      : null;
-
-    const hasValidAirDate =
-      airTime !== null &&
-      Number.isFinite(airTime) &&
-      (airTime <= now || airTime <= futureLimit);
-
-    const hasName = typeof season.name === "string" && Boolean(season.name.trim());
-    const hasStrongSignal =
-      Boolean(season.poster_path) ||
-      (typeof season.overview === "string" && Boolean(season.overview.trim()));
-
-    if (hasValidAirDate || (hasName && hasStrongSignal)) {
-      valid.add(num);
+    if (isValidSeason(season)) {
+      valid.add(season.season_number!);
     }
   }
 

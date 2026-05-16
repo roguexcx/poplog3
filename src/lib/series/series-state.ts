@@ -4,11 +4,55 @@ import type {
   MovieStateInput,
   SeriesState,
   SeriesStateInput,
+  SeriesStatus,
   TitleAvailabilityState,
 } from "./types";
 
 const DEFAULT_FRESH_WINDOW_DAYS = 14;
 const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Janela de sinal futuro aceita para considerar uma temporada real. */
+export const FUTURE_SEASON_WINDOW_DAYS = 120;
+
+/**
+ * Forma mínima de uma temporada necessária para validação.
+ * Compatível com PoplogTitleSeasonStub e com o tmdb_payload raw.
+ */
+export interface SeasonFilterable {
+  season_number?: number | null;
+  air_date?: string | null;
+  name?: string | null;
+  poster_path?: string | null;
+  overview?: string | null;
+}
+
+/**
+ * Decide se uma temporada deve ser exibida ou contada.
+ * Regra global — usada na Title Page e na página Acompanhando.
+ *
+ * Exige season_number > 0 E pelo menos um dos sinais:
+ *   a) air_date passada ou dentro da janela de 120 dias futuros
+ *   b) nome + (poster OU overview)
+ */
+export function isValidSeason(season: SeasonFilterable): boolean {
+  const num = season.season_number;
+  if (typeof num !== "number" || num <= 0) return false;
+
+  const now = Date.now();
+  const futureLimit = now + FUTURE_SEASON_WINDOW_DAYS * DAY_MS;
+  const airTime = season.air_date ? new Date(season.air_date).getTime() : null;
+
+  const hasValidAirDate =
+    airTime !== null &&
+    Number.isFinite(airTime) &&
+    (airTime <= now || airTime <= futureLimit);
+
+  const hasName = Boolean(season.name?.trim());
+  const hasStrongSignal =
+    Boolean(season.poster_path) || Boolean(season.overview?.trim());
+
+  return hasValidAirDate || (hasName && hasStrongSignal);
+}
 
 function parseDate(raw: string | null | undefined): Date | null {
   if (!raw) return null;
@@ -152,6 +196,24 @@ export function seriesStateFromTitle(
     now: options?.now,
     freshEpisodeWindowDays: options?.freshEpisodeWindowDays,
   });
+}
+
+/**
+ * Mapeia o status bruto de produção vindo do TMDB para o enum canônico
+ * `SeriesStatus`. Regra global — não duplicar por tela.
+ *
+ * Retorna `null` quando o status não se encaixa em nenhuma categoria
+ * conhecida (ex: string vazia ou valor inesperado).
+ */
+export function mapSeriesStatus(raw: string | null | undefined): SeriesStatus | null {
+  if (!raw) return null;
+  const lower = raw.toLowerCase();
+  if (lower.includes("return") || lower === "continuing") return "returning";
+  if (lower.includes("end")) return "ended";
+  if (lower.includes("cancel")) return "canceled";
+  if (lower.includes("hiatus")) return "hiatus";
+  if (lower.includes("production")) return "in_production";
+  return null;
 }
 
 /**

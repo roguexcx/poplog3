@@ -30,16 +30,12 @@ export default function LibraryPage({
   initialTab,
 }: LibraryPageProps) {
   const [activeTab, setActiveTab] = useState<LibraryTab>(
-  isValidLibraryTab(initialTab)
-    ? initialTab
-    : "all",
-);
+    isValidLibraryTab(initialTab) ? initialTab : "all",
+  );
   const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
   const [sortBy, setSortBy] = useState<SortBy>(
-  initialTab === "watchlist"
-    ? "rating-desc"
-    : "release-desc",
-);
+    initialTab === "watchlist" ? "rating-desc" : "release-desc",
+  );
   const [page, setPage] = useState(1);
   const itemsPerPage = useLibraryItemsPerPage();
 
@@ -51,6 +47,8 @@ export default function LibraryPage({
       watchlist: library.filter((item) => item.status === "watchlist").length,
       watching: library.filter((item) => item.status === "watching").length,
       betweenSeasons: library.filter(isBetweenSeasons).length,
+      movies: library.filter((item) => item.media_type === "movie").length,
+      series: library.filter((item) => item.media_type === "tv").length,
     };
   }, [library]);
 
@@ -91,51 +89,76 @@ export default function LibraryPage({
   }
 
   return (
-    <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-5 md:gap-8">
-      <LibraryHero stats={stats} />
+    <main className="relative -mx-4 -mt-4 min-h-screen overflow-hidden bg-[#03040a] px-4 pb-12 pt-4 text-white sm:-mx-6 sm:px-6 md:-mx-8 md:px-8 lg:-mx-10 lg:px-10">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute left-[-18%] top-[-12%] h-[36rem] w-[36rem] rounded-full bg-indigo-700/20 blur-[120px]" />
+        <div className="absolute right-[-16%] top-[18rem] h-[34rem] w-[34rem] rounded-full bg-fuchsia-700/12 blur-[130px]" />
+        <div className="absolute bottom-[-18%] left-[28%] h-[34rem] w-[34rem] rounded-full bg-cyan-700/10 blur-[140px]" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(255,255,255,0.035),transparent_22%,rgba(0,0,0,0.76)_100%)]" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,transparent_0,rgba(0,0,0,0.48)_68%,rgba(0,0,0,0.86)_100%)]" />
+      </div>
 
-      <LibraryToolbar
-        activeTab={activeTab}
-        onTabChange={(tab) => {
-          setActiveTab(tab);
-          resetPage();
-        }}
-        stats={stats}
-        total={filteredLibrary.length}
-        page={safePage}
-        totalPages={totalPages}
-        mediaFilter={mediaFilter}
-        sortBy={sortBy}
-        onMediaFilterChange={(filter) => {
-          setMediaFilter(filter);
-          resetPage();
-        }}
-        onSortChange={(sort) => {
-          setSortBy(sort);
-          resetPage();
-        }}
-        onPageChange={setPage}
-      />
+      <div className="relative mx-auto flex w-full max-w-[1600px] flex-col gap-6 md:gap-8">
+        <LibraryHero stats={stats} spotlightItems={library.slice(0, 8)} />
 
-      <section className="pb-8">
-        {filteredLibrary.length === 0 ? (
-          <LibraryEmptyState activeTab={activeTab} />
-        ) : (
-          <div className="flex flex-col gap-7 md:gap-8">
-            <LibraryGrid items={visibleLibrary} />
+        <LibraryToolbar
+          activeTab={activeTab}
+          onTabChange={(tab) => {
+            setActiveTab(tab);
+            resetPage();
+          }}
+          stats={stats}
+          total={filteredLibrary.length}
+          page={safePage}
+          totalPages={totalPages}
+          mediaFilter={mediaFilter}
+          sortBy={sortBy}
+          onMediaFilterChange={(filter) => {
+            setMediaFilter(filter);
+            resetPage();
+          }}
+          onSortChange={(sort) => {
+            setSortBy(sort);
+            resetPage();
+          }}
+          onPageChange={setPage}
+        />
 
-            <div className="border-t border-white/[0.06] pt-5 md:pt-6">
-              <LibraryPagination
-                page={safePage}
-                totalPages={totalPages}
-                total={filteredLibrary.length}
-                onPageChange={setPage}
-              />
+        <section className="relative pb-8">
+          <div className="mb-5 flex flex-col gap-2 md:mb-7 md:flex-row md:items-end md:justify-between">
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[0.24em] text-white/34">
+                Acervo filtrado
+              </p>
+              <h2 className="mt-2 text-2xl font-black tracking-[-0.04em] text-white md:text-4xl">
+                {getSectionTitle(activeTab)}
+              </h2>
             </div>
+
+            <p className="max-w-xl text-sm leading-6 text-white/42 md:text-right">
+              {getSectionDescription(activeTab)}
+            </p>
           </div>
-        )}
-      </section>
-    </div>
+
+          {filteredLibrary.length === 0 ? (
+            <LibraryEmptyState activeTab={activeTab} />
+          ) : (
+            <div className="flex flex-col gap-7 md:gap-8">
+              <LibraryGrid items={visibleLibrary} />
+
+              <div className="rounded-[2rem] border border-white/[0.07] bg-white/[0.025] px-4 py-4 backdrop-blur-xl">
+                <LibraryPagination
+                  page={safePage}
+                  totalPages={totalPages}
+                  total={filteredLibrary.length}
+                  onPageChange={setPage}
+                />
+              </div>
+            </div>
+          )}
+        </section>
+      </div>
+    </main>
   );
 }
 
@@ -174,26 +197,34 @@ function LibraryToolbar({
   onPageChange,
 }: LibraryToolbarProps) {
   return (
-    <div className="sticky top-0 z-30 -mx-4 border-y border-white/[0.06] bg-black/80 px-4 py-3 backdrop-blur-2xl sm:-mx-6 sm:px-6 md:-mx-8 md:px-8 md:py-4 lg:-mx-10 lg:px-10">
-      <div className="mx-auto flex w-full max-w-[1600px] flex-col gap-3 md:gap-4">
+    <div className="sticky top-0 z-30 rounded-[1.75rem] border border-white/[0.08] bg-black/55 p-3 shadow-[0_24px_90px_rgba(0,0,0,0.45)] backdrop-blur-2xl md:p-4">
+      <div className="pointer-events-none absolute inset-x-8 top-0 h-px bg-gradient-to-r from-transparent via-white/18 to-transparent" />
+
+      <div className="relative flex flex-col gap-3 md:gap-4">
         <LibraryTabs activeTab={activeTab} onChange={onTabChange} stats={stats} />
 
         <div className="grid gap-3 xl:grid-cols-[1fr_auto_1fr] xl:items-center">
           <div className="flex justify-center xl:justify-start">
-            <select
-              value={sortBy}
-              onChange={(event) => onSortChange(event.target.value as SortBy)}
-              style={{ colorScheme: "dark" }}
-              className="h-10 w-full max-w-[260px] appearance-none rounded-full border border-white/[0.08] bg-white/[0.035] px-4 text-center text-xs font-semibold text-white/80 outline-none transition hover:border-white/[0.16] focus:border-indigo-300/40 sm:text-left [&_option]:bg-[#020617] [&_option]:text-zinc-100"
-            >
-              <option value="release-desc">Lançamento mais recente</option>
-              <option value="recent">Adicionados recentemente</option>
-              <option value="title-asc">Nome A-Z</option>
-              <option value="release-asc">Lançamento mais antigo</option>
-              <option value="rating-desc">Melhor avaliação</option>
-              <option value="runtime-asc">Mais curto</option>
-              <option value="runtime-desc">Mais longo</option>
-            </select>
+            <div className="relative w-full max-w-[310px]">
+              <select
+                value={sortBy}
+                onChange={(event) => onSortChange(event.target.value as SortBy)}
+                style={{ colorScheme: "dark" }}
+                className="h-11 w-full appearance-none rounded-full border border-white/[0.09] bg-white/[0.045] px-4 pr-10 text-center text-xs font-black uppercase tracking-[0.12em] text-white/78 outline-none transition hover:border-white/[0.18] focus:border-indigo-300/40 sm:text-left [&_option]:bg-[#020617] [&_option]:text-zinc-100"
+              >
+                <option value="release-desc">Lançamento recente</option>
+                <option value="recent">Adicionados recentemente</option>
+                <option value="title-asc">Nome A-Z</option>
+                <option value="release-asc">Lançamento antigo</option>
+                <option value="rating-desc">Melhor avaliação</option>
+                <option value="runtime-asc">Mais curto</option>
+                <option value="runtime-desc">Mais longo</option>
+              </select>
+
+              <span className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-white/32">
+                ↓
+              </span>
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center justify-center gap-2">
@@ -247,22 +278,34 @@ function LibraryPagination({
   compact?: boolean;
 }) {
   if (totalPages <= 1) {
-    return <p className="text-center text-xs text-white/40">{total} títulos</p>;
+    return (
+      <p className="text-center text-xs font-semibold uppercase tracking-[0.16em] text-white/36">
+        {total} títulos
+      </p>
+    );
   }
 
   const pages = getPaginationPages(page, totalPages);
 
   return (
     <div className="flex flex-wrap items-center justify-center gap-2">
-      {!compact && <p className="mr-1 text-xs text-white/40">{total} títulos</p>}
+      {!compact && (
+        <p className="mr-1 text-xs font-semibold uppercase tracking-[0.16em] text-white/36">
+          {total} títulos
+        </p>
+      )}
 
-      {compact && <p className="hidden text-xs text-white/40 sm:block">{total} títulos</p>}
+      {compact && (
+        <p className="hidden text-xs font-semibold uppercase tracking-[0.16em] text-white/34 sm:block">
+          {total} títulos
+        </p>
+      )}
 
       <button
         type="button"
         disabled={page === 1}
         onClick={() => onPageChange(page - 1)}
-        className="h-9 rounded-full border border-white/[0.09] bg-black/20 px-3 text-xs font-black text-white/54 transition hover:border-white/[0.18] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+        className="h-9 rounded-full border border-white/[0.09] bg-white/[0.035] px-3 text-xs font-black text-white/54 transition hover:border-white/[0.18] hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
       >
         ‹
       </button>
@@ -280,8 +323,8 @@ function LibraryPagination({
             className={[
               "h-9 min-w-9 rounded-full border px-3 text-xs font-black transition",
               item === page
-                ? "border-indigo-300/35 bg-indigo-400/[0.16] text-indigo-100"
-                : "border-white/[0.09] bg-black/20 text-white/46 hover:border-white/[0.18] hover:text-white",
+                ? "border-indigo-300/35 bg-indigo-400/[0.18] text-indigo-50 shadow-[0_0_28px_rgba(99,102,241,0.24)]"
+                : "border-white/[0.09] bg-white/[0.035] text-white/46 hover:border-white/[0.18] hover:bg-white/[0.06] hover:text-white",
             ].join(" ")}
           >
             {item}
@@ -293,7 +336,7 @@ function LibraryPagination({
         type="button"
         disabled={page === totalPages}
         onClick={() => onPageChange(page + 1)}
-        className="h-9 rounded-full border border-white/[0.09] bg-black/20 px-3 text-xs font-black text-white/54 transition hover:border-white/[0.18] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
+        className="h-9 rounded-full border border-white/[0.09] bg-white/[0.035] px-3 text-xs font-black text-white/54 transition hover:border-white/[0.18] hover:bg-white/[0.06] hover:text-white disabled:cursor-not-allowed disabled:opacity-35"
       >
         ›
       </button>
@@ -342,15 +385,45 @@ function FilterButton({
       type="button"
       onClick={onClick}
       className={[
-        "rounded-full border px-4 py-2 text-xs font-black uppercase tracking-[0.14em] transition duration-300",
+        "rounded-full border px-4 py-2.5 text-xs font-black uppercase tracking-[0.14em] transition duration-300",
         active
-          ? "border-indigo-300/35 bg-indigo-400/[0.13] text-indigo-100"
-          : "border-white/[0.08] bg-black/20 text-white/42 hover:border-white/[0.16] hover:text-white/76",
+          ? "border-cyan-200/35 bg-cyan-300/[0.13] text-cyan-50 shadow-[0_0_28px_rgba(34,211,238,0.12)]"
+          : "border-white/[0.08] bg-white/[0.03] text-white/42 hover:border-white/[0.16] hover:bg-white/[0.055] hover:text-white/76",
       ].join(" ")}
     >
       {children}
     </button>
   );
+}
+
+function getSectionTitle(activeTab: LibraryTab) {
+  const titles: Record<LibraryTab, string> = {
+    all: "Toda sua biblioteca",
+    "coming-soon": "Títulos em breve",
+    watchlist: "Sua watchlist",
+    watching: "Em andamento",
+    "between-seasons": "Entre temporadas",
+    watched: "Histórico assistido",
+    abandoned: "Abandonados",
+    fridge: "Geladeira",
+  };
+
+  return titles[activeTab];
+}
+
+function getSectionDescription(activeTab: LibraryTab) {
+  const descriptions: Record<LibraryTab, string> = {
+    all: "A visão completa da sua coleção, com filmes e séries organizados por status, tempo, nota e momento.",
+    "coming-soon": "Obras que ainda não chegaram, separadas para não misturar desejo com disponibilidade real.",
+    watchlist: "Tudo que você salvou para ver depois, agora com cara de prateleira cinematográfica.",
+    watching: "Títulos ativos que conversam diretamente com a lógica do Acompanhando.",
+    "between-seasons": "Séries em pausa natural, sem tratar ausência de episódio como pendência urgente.",
+    watched: "Seu histórico finalizado, preservado como memória da plataforma.",
+    abandoned: "O que ficou pelo caminho sem poluir as áreas de continuidade.",
+    fridge: "Títulos guardados para outro clima, longe da watchlist principal.",
+  };
+
+  return descriptions[activeTab];
 }
 
 function useLibraryItemsPerPage() {
@@ -521,9 +594,7 @@ function isBetweenSeasons(item: Poplog3UserLibraryItem) {
   return lastAirTime <= Date.now();
 }
 
-function isValidLibraryTab(
-  value?: string,
-): value is LibraryTab {
+function isValidLibraryTab(value?: string): value is LibraryTab {
   return [
     "all",
     "coming-soon",

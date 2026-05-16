@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useCuradoriaEngine } from "@/hooks/useCuradoriaEngine";
 import HeroSpotlight from "@/components/HeroSpotlight";
@@ -249,7 +249,6 @@ function PosterCard({ item, onClick }: { item: ScoredItem; onClick: () => void }
       onClick={onClick}
       className="group relative flex-shrink-0 w-[148px] sm:w-[160px] text-left"
     >
-      {/* poster */}
       <div
         className="relative aspect-[2/3] rounded-xl overflow-hidden border border-white/[0.07] mb-2.5"
         style={{ background: dominantColor }}
@@ -263,10 +262,8 @@ function PosterCard({ item, onClick }: { item: ScoredItem; onClick: () => void }
           />
         )}
 
-        {/* gradient overlay */}
         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent" />
 
-        {/* top badges */}
         <div className="absolute top-2 left-2 right-2 flex items-start justify-between gap-1">
           <span className={`text-[8.5px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-md border ${STATUS_BADGE[badge.variant]}`}>
             {badge.label}
@@ -279,14 +276,12 @@ function PosterCard({ item, onClick }: { item: ScoredItem; onClick: () => void }
           )}
         </div>
 
-        {/* episode label */}
         {epLabel && (
           <span className="absolute top-8 left-2 text-[8.5px] font-mono font-bold text-white/60 border border-white/10 bg-black/40 backdrop-blur-sm rounded px-1.5 py-0.5">
             {epLabel}
           </span>
         )}
 
-        {/* progress bar + remaining */}
         <div className="absolute bottom-0 left-0 right-0 px-2 pb-2">
           {progress > 0 && (
             <div className="flex items-center justify-between mb-1">
@@ -303,7 +298,6 @@ function PosterCard({ item, onClick }: { item: ScoredItem; onClick: () => void }
         </div>
       </div>
 
-      {/* below card */}
       <div className="px-0.5">
         <p className="text-[12.5px] font-bold text-white/85 leading-tight tracking-[-0.02em] line-clamp-1 mb-1">
           {item.title}
@@ -336,14 +330,12 @@ function ContinueCard({ item, onClick }: { item: ScoredItem; onClick: () => void
       onClick={onClick}
       className="group relative w-full text-left rounded-2xl border border-white/[0.07] bg-white/[0.025] hover:bg-white/[0.045] hover:border-white/[0.13] transition-all duration-300 p-3 overflow-hidden"
     >
-      {/* subtle bg glow from dominant color */}
       <div
         className="absolute inset-0 opacity-10 blur-3xl pointer-events-none"
         style={{ background: `radial-gradient(ellipse at 80% 50%, ${dominantColor}, transparent 70%)` }}
       />
 
       <div className="relative flex gap-3.5">
-        {/* poster */}
         <div
           className="relative h-[116px] w-[82px] flex-shrink-0 rounded-xl overflow-hidden"
           style={{ background: dominantColor }}
@@ -364,10 +356,8 @@ function ContinueCard({ item, onClick }: { item: ScoredItem; onClick: () => void
           )}
         </div>
 
-        {/* content */}
         <div className="flex flex-col justify-between min-w-0 flex-1 py-0.5">
           <div>
-            {/* status tags */}
             <div className="flex items-center gap-1.5 mb-2 flex-wrap">
               {item.new_episode_available && (
                 <span className="text-[8.5px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full bg-rose-500/80 text-rose-100 border border-rose-400/30">
@@ -387,12 +377,10 @@ function ContinueCard({ item, onClick }: { item: ScoredItem; onClick: () => void
               </span>
             </div>
 
-            {/* title */}
             <h3 className="text-[15px] font-black tracking-[-0.03em] text-white/90 leading-tight line-clamp-2 mb-1">
               {item.title}
             </h3>
 
-            {/* next ep name */}
             {item.next_episode_name && (
               <p className="text-[11px] text-white/35 line-clamp-1 italic">
                 "{item.next_episode_name}"
@@ -400,7 +388,6 @@ function ContinueCard({ item, onClick }: { item: ScoredItem; onClick: () => void
             )}
           </div>
 
-          {/* progress */}
           <div className="mt-2">
             <div className="flex items-center justify-between mb-1.5">
               <span className={`text-[10px] font-medium ${ACCENT_TEXT[ctx.accent]}`}>
@@ -439,7 +426,6 @@ function NewEpisodeCard({ item, onClick }: { item: ScoredItem; onClick: () => vo
       onClick={onClick}
       className="group relative w-full text-left rounded-2xl overflow-hidden border border-rose-500/15 bg-rose-950/10 hover:bg-rose-950/20 hover:border-rose-500/25 transition-all duration-300"
     >
-      {/* backdrop blur strip */}
       {item.backdrop_path && (
         <div className="absolute inset-0 opacity-15">
           <img
@@ -458,7 +444,6 @@ function NewEpisodeCard({ item, onClick }: { item: ScoredItem; onClick: () => vo
       )}
 
       <div className="relative flex gap-3.5 p-3.5">
-        {/* still do episódio (ou poster como fallback) */}
         <div
           className="relative h-20 w-[118px] flex-shrink-0 rounded-lg overflow-hidden"
           style={{ background: dominantColor }}
@@ -475,7 +460,6 @@ function NewEpisodeCard({ item, onClick }: { item: ScoredItem; onClick: () => vo
         </div>
 
         <div className="flex-1 min-w-0 flex flex-col justify-center">
-          {/* new badge + ep label */}
           <div className="flex items-center gap-2 mb-1.5">
             <span className="text-[8px] font-black uppercase tracking-widest px-2 py-0.5 rounded-full bg-rose-500 text-white">
               Novo
@@ -497,7 +481,6 @@ function NewEpisodeCard({ item, onClick }: { item: ScoredItem; onClick: () => vo
             </p>
           )}
 
-          {/* progress */}
           <div className="h-[2px] w-full rounded-full bg-white/10 overflow-hidden">
             <div
               className="h-full rounded-full bg-gradient-to-r from-rose-500 to-rose-300"
@@ -506,7 +489,6 @@ function NewEpisodeCard({ item, onClick }: { item: ScoredItem; onClick: () => vo
           </div>
         </div>
 
-        {/* right: platform + duration */}
         <div className="flex flex-col items-end justify-center gap-1 flex-shrink-0">
           {item.streaming_platform && (
             <span className="text-[10px] text-white/35">{item.streaming_platform}</span>
@@ -628,7 +610,7 @@ function SectionDivider() {
 
 function EmptyState() {
   return (
-    <section className="flex min-h-[40vh] flex-col items-center justify-center rounded-[28px] border border-white/[0.06] bg-white/[0.02] px-8 py-16 text-center">
+    <section className="flex min-h-[40vh] flex-col items-center justify-center rounded-[28px] border border-white/[0.08] bg-white/[0.02] px-8 py-16 text-center">
       <div className="mb-6 w-14 h-14 rounded-2xl border border-white/10 bg-white/[0.04] flex items-center justify-center">
         <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-white/25">
           <path d="M15 10l4.553-2.069A1 1 0 0121 8.87V15.13a1 1 0 01-1.447.9L15 14M3 8a2 2 0 012-2h10a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" strokeLinecap="round" strokeLinejoin="round" />
@@ -652,7 +634,6 @@ function LoadingSkeleton() {
       <div className="space-y-8">
         <div className="h-[480px] rounded-[28px] bg-white/[0.03] animate-pulse" />
 
-        {/* identity strip */}
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="h-px w-5 rounded-full bg-white/[0.06]" />
@@ -661,21 +642,18 @@ function LoadingSkeleton() {
           <div className="h-5 w-16 rounded-full bg-white/[0.03] animate-pulse" />
         </div>
 
-        {/* stat bar */}
         <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-4">
           {Array.from({ length: 4 }).map((_, i) => (
             <div key={i} className="h-20 rounded-2xl bg-white/[0.03] animate-pulse" />
           ))}
         </div>
 
-        {/* continue cards */}
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {Array.from({ length: 6 }).map((_, i) => (
             <div key={i} className="h-[116px] rounded-2xl bg-white/[0.03] animate-pulse" />
           ))}
         </div>
 
-        {/* poster rail */}
         <div className="flex gap-3.5 overflow-hidden">
           {Array.from({ length: 7 }).map((_, i) => (
             <div key={i} className="w-[148px] shrink-0 aspect-[2/3] rounded-xl bg-white/[0.03] animate-pulse" />
@@ -691,8 +669,36 @@ function LoadingSkeleton() {
 export default function AcompanhandoPage() {
   const router = useRouter();
 
-  const { items, heroItems, isLoading, snoozeItem, logSignal } =
-    useCuradoriaEngine({ mode: "hero" });
+  // 1. CARREGAMENTO DOS ITENS GERAIS DA BIBLIOTECA
+  const { items, isLoading, snoozeItem, logSignal } =
+    useCuradoriaEngine({ mode: "list" });
+
+  // 2. CONEXÃO ISOLADA COM O NOVO ENDPOINT SERVER-DRIVEN DO HERO CONTINUIDADE
+  const [heroItems, setHeroItems] = useState<ScoredItem[]>([]);
+  const [isHeroLoading, setIsHeroLoading] = useState(true);
+
+  useEffect(() => {
+    fetch("/api/poplog3/continuity/hero")
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && data.candidates) {
+          setHeroItems(data.candidates);
+        }
+      })
+      .catch((err) => console.error("[AcompanhandoPage] Falha ao hidratar o Hero Spotlight:", err))
+      .finally(() => setIsHeroLoading(false));
+  }, []);
+
+  const heroIds = useMemo(() => {
+    return new Set(heroItems.map((item) => String(item.content_id ?? item.id)));
+  }, [heroItems]);
+
+  const sectionItems = useMemo(() => {
+    return items.filter((item) => {
+      const itemId = String(item.content_id ?? item.id);
+      return !heroIds.has(itemId);
+    });
+  }, [items, heroIds]);
 
   const {
     newEpisodeItems,
@@ -704,14 +710,20 @@ export default function AcompanhandoPage() {
     franchiseGroups,
     abandonAlert,
   } = useMemo(() => {
-    const watching  = items.filter(i => i.status === "watching");
-    const paused    = items.filter(i => i.status === "paused");
-    const watchlist = items.filter(i => i.status === "watchlist");
-    const abandoned = items.filter(i => i.status === "abandoned");
+    const watching  = sectionItems.filter(i => i.status === "watching");
+    const paused    = sectionItems.filter(i => i.status === "paused");
+    const watchlist = sectionItems.filter(i => i.status === "watchlist");
+    const abandoned = sectionItems.filter(i => i.status === "abandoned");
 
-    const quick = items.filter(i => {
+    // 1. Novos Episódios: Filtra séries usando a flag estrita calibrada de novidade real
+    const newEps = sectionItems.filter(i => i.new_episode_available && i.content_type === "serie");
+
+    // 2. Continuar de onde parou: Títulos em andamento ativo, removendo duplicidades que têm episódios novos
+    const continuing = watching.filter((i) => !i.new_episode_available);
+
+    // 3. Sessões rápidas de hoje à noite
+    const quick = sectionItems.filter(i => {
       if (i.content_type === "filme") {
-        // Excluir filmes ainda só em cartaz (sem VOD nem streaming)
         if (!i.available_on_vod && !i.streaming_platform) return false;
         const rem = (i.runtime ?? 0) - (i.watch_progress_minutes ?? 0);
         return rem > 0 && rem <= 75;
@@ -719,7 +731,7 @@ export default function AcompanhandoPage() {
       return (i.next_episode_duration ?? 0) > 0 && (i.next_episode_duration ?? 0) <= 35;
     });
 
-    // Merged "reta final" + "retomar" — ordenados por urgência
+    // 4. Retomar / Quase lá: Curadoria de andamento perto da reta final
     const finales = watching.filter(i => {
       if (i.content_type !== "serie") return false;
       const rem = (i.total_episodes_season ?? 0) - (i.episodes_watched ?? 0);
@@ -734,9 +746,9 @@ export default function AcompanhandoPage() {
       return rem === 0 || rem > 5;
     });
 
-    // Franquias: agrupa filmes com belongs_to_collection por collection id
+    // 5. Agrupamento estruturado de Franquias e Universos colecionáveis
     const franchiseMap = new Map<number, { id: number; name: string; poster_path: string | null; items: ScoredItem[] }>();
-    for (const item of items) {
+    for (const item of sectionItems) {
       if (item.content_type !== "filme" || !item.belongs_to_collection) continue;
       const col = item.belongs_to_collection;
       const existing = franchiseMap.get(col.id);
@@ -747,7 +759,7 @@ export default function AcompanhandoPage() {
       }
     }
 
-    // pick the best candidate for the abandon alert:
+    // 6. Alerta de abandono (Prioriza séries paradas perto do fim da temporada)
     const alertCandidate = [...paused, ...abandoned].find(i => {
       if (i.content_type !== "serie") return false;
       const rem = (i.total_episodes_season ?? 0) - (i.episodes_watched ?? 0);
@@ -755,28 +767,29 @@ export default function AcompanhandoPage() {
     }) ?? null;
 
     return {
-      newEpisodeItems:      items.filter(i => i.new_episode_available && i.content_type === "serie").slice(0, 6),
+      newEpisodeItems:      newEps.slice(0, 6),
       resumeOrFinishItems:  [...finales, ...pausedNearEnd, ...otherPaused].slice(0, 12),
-      continuingItems:      watching.slice(0, 12),
+      continuingItems:      continuing.slice(0, 12),
       watchlistSuggestions: watchlist.slice(0, 12),
       rediscoveryItems:     [...paused.slice(0, 4), ...abandoned.slice(0, 6)].slice(0, 10),
       quickTonightItems:    quick.slice(0, 10),
       franchiseGroups:      Array.from(franchiseMap.values()),
       abandonAlert:         alertCandidate,
     };
-  }, [items]);
+  }, [sectionItems]);
 
   function handleNavigate(item: ScoredItem) {
     router.push(`/title/${getMediaType(item)}/${getTmdbId(item)}`);
   }
 
-  if (isLoading) return <LoadingSkeleton />;
+  // Exibe o esqueleto se qualquer uma das duas fontes de dados estiver carregando
+  if (isLoading || isHeroLoading) return <LoadingSkeleton />;
 
   return (
     <PageShell variant="wide">
       <div className="flex flex-col gap-0">
 
-        {/* ── Hero Spotlight ─────────────────────────────────────────── */}
+        {/* ── Hero Spotlight Inteligente Conectado ──────────────────── */}
         <div className="mb-10">
           <HeroSpotlight
             items={heroItems}
@@ -791,7 +804,6 @@ export default function AcompanhandoPage() {
 
         {items.length > 0 && (
           <>
-
             {/* ── Biblioteca identity strip ────────────────────────── */}
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">

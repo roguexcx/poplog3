@@ -1,7 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
+import {
+  buildAvailabilityProviders,
+  type AvailabilityProvider,
+} from "@/server/streaming/availability-service";
 
 import {
   availabilityStateFromTitle,
+  isValidSeason,
   type TitleAvailabilityState,
 } from "@/lib/series";
 import { getCurrentUser } from "@/server/auth/get-current-user";
@@ -9,16 +14,17 @@ import { getAvailability } from "@/server/cache/availability-cache";
 import { getExternalIds } from "@/server/cache/external-ids-cache";
 import { computeUserSeriesProgress } from "@/server/episodes/episode-progress-service";
 import { getUserTitleStatus } from "@/server/library/library-service";
-import { syncAvailability, type TmdbPayloadWithWatch } from "@/server/sync/sync-availability";
+import {
+  syncAvailability,
+  type TmdbPayloadWithWatch,
+} from "@/server/sync/sync-availability";
 import { syncOmdbRatings } from "@/server/sync/sync-omdb-ratings";
 import { syncTmdbTitle } from "@/server/sync/sync-tmdb-title";
-
 import type { PoplogTitleDetails } from "@/server/types/title-details";
 
 type MediaType = "movie" | "tv";
 
 const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
-const FUTURE_AIR_WINDOW_DAYS = 120;
 
 function tmdbImage(path: string | null | undefined, size: string) {
   if (!path) return null;
@@ -27,7 +33,7 @@ function tmdbImage(path: string | null | undefined, size: string) {
 }
 
 function hasDetailFields(
-  title: PoplogTitleDetails | Record<string, unknown>
+  title: PoplogTitleDetails | Record<string, unknown>,
 ): title is PoplogTitleDetails {
   return (
     typeof title === "object" &&
@@ -48,43 +54,12 @@ function uniqueNames(names: Array<string | null | undefined>, limit = 4) {
     new Set(
       names
         .map((name) => name?.trim())
-        .filter((name): name is string => Boolean(name))
-    )
+        .filter((name): name is string => Boolean(name)),
+    ),
   ).slice(0, limit);
 }
 
-function isValidSeason(season: NonNullable<PoplogTitleDetails["seasons"]>[number]) {
-  if (typeof season.season_number !== "number" || season.season_number <= 0) {
-    return false;
-  }
-
-  const now = Date.now();
-  const futureLimit = now + FUTURE_AIR_WINDOW_DAYS * 24 * 60 * 60 * 1000;
-
-  const airTime = season.air_date ? new Date(season.air_date).getTime() : null;
-
-  const hasValidAirDate =
-    airTime !== null &&
-    Number.isFinite(airTime) &&
-    (airTime <= now || airTime <= futureLimit);
-
-  const hasName = Boolean(season.name?.trim());
-
-  const hasStrongSeasonSignal =
-    Boolean(season.poster_path) || Boolean(season.overview?.trim());
-
-  /*
-    Evita temporadas fantasmas da TMDB.
-    Antes, qualquer season com episode_count > 0 passava.
-    Agora, episode_count sozinho NÃO basta, porque a TMDB pode criar
-    temporada/episódio placeholder sem data, nome útil, thumb ou resumo.
-  */
-  return hasValidAirDate || (hasName && hasStrongSeasonSignal);
-}
-
-function filterValidSeasons(
-  seasons: PoplogTitleDetails["seasons"] | undefined
-) {
+function filterValidSeasons(seasons: PoplogTitleDetails["seasons"] | undefined) {
   if (!seasons || seasons.length === 0) return [];
 
   return seasons
@@ -98,7 +73,7 @@ export async function GET(
     params,
   }: {
     params: Promise<{ mediaType: string; id: string }>;
-  }
+  },
 ) {
   const resolved = await params;
   const mediaType = resolved.mediaType as MediaType;
@@ -114,14 +89,14 @@ export async function GET(
   if (mediaType !== "movie" && mediaType !== "tv") {
     return NextResponse.json(
       { ok: false, error: "Invalid media type" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
   if (!id || Number.isNaN(id)) {
     return NextResponse.json(
       { ok: false, error: "Invalid TMDB id" },
-      { status: 400 }
+      { status: 400 },
     );
   }
 
@@ -129,10 +104,7 @@ export async function GET(
     const synced = await syncTmdbTitle(mediaType, id, { force: refresh });
     const title = synced.title;
 
-    const details = hasDetailFields(title)
-      ? (title as PoplogTitleDetails)
-      : null;
-
+    const details = hasDetailFields(title) ? title : null;
     const currentUser = await getCurrentUser();
 
     let userState:
@@ -164,10 +136,7 @@ export async function GET(
         };
       } catch (error) {
         console.warn("[poplog3/titles] userState lookup falhou:", error);
-
-        userState = {
-          isAuthenticated: true,
-        };
+        userState = { isAuthenticated: true };
       }
     }
 
@@ -262,15 +231,7 @@ export async function GET(
       motn: string;
     } | null = null;
 
-    let providers: Array<{
-      name: string;
-      logoUrl: string | null;
-      type: "streaming" | "rent" | "buy" | "free" | "ads";
-      deepLink: string | null;
-      quality: string | null;
-      country: string;
-      source: string;
-    }> = [];
+    let providers: AvailabilityProvider[] = [];
 
     try {
       const result = await syncAvailability({
@@ -294,15 +255,25 @@ export async function GET(
           ? result.rows
           : await getAvailability(mediaType, id, country);
 
-      providers = rows.map((r) => ({
-        name: r.provider_name,
-        logoUrl: tmdbImage(r.provider_logo_path, "w92"),
-        type: r.availability_type,
-        deepLink: r.deep_link,
-        quality: r.quality,
-        country: r.country,
-        source: r.source,
-      }));
+      providers = buildAvailabilityProviders(
+        rows.map((row) => ({
+          name: row.provider_name,
+          logoUrl: tmdbImage(row.provider_logo_path, "w92"),
+          type: row.availability_type,
+          deepLink: row.deep_link,
+          quality: row.quality,
+          country: row.country,
+          source: row.source === "motn" ? "movieofthenight" : row.source,
+
+          providerId: row.tmdb_provider_id ?? 0,
+          providerName: row.provider_name,
+          logoPath: row.provider_logo_path,
+          deeplink: row.deep_link,
+        })) as never,
+        {
+          region: country,
+        },
+      );
     } catch (error) {
       console.warn("[poplog3/titles] availability sync falhou:", error);
     }
@@ -353,7 +324,7 @@ export async function GET(
     }));
 
     const validSeasonNumbers = new Set(
-      validSeasons.map((s) => s.season_number)
+      validSeasons.map((s) => s.season_number),
     );
 
     const rawNext = details?.next_episode_to_air ?? null;
@@ -391,9 +362,7 @@ export async function GET(
             })) ?? [],
 
           homepage: details.homepage ?? null,
-
           budget: details.budget ?? null,
-
           revenue: details.revenue ?? null,
 
           collection: details.belongs_to_collection
@@ -415,21 +384,18 @@ export async function GET(
             })) ?? [],
 
           episodeRunTimeMinutes: avgRuntime(details.episode_run_time ?? null),
-
           productionStatus: details.status ?? null,
-
           inProduction: details.in_production ?? null,
-
           seriesType: details.type ?? null,
 
           creators: uniqueNames(
             details.created_by?.map((p) => p.name) ?? [],
-            4
+            4,
           ),
 
           directors: uniqueNames(
             crew.filter((p) => p.job === "Director").map((p) => p.name),
-            4
+            4,
           ),
 
           writers: uniqueNames(
@@ -438,10 +404,10 @@ export async function GET(
                 (p) =>
                   p.job === "Writer" ||
                   p.job === "Screenplay" ||
-                  p.job === "Story"
+                  p.job === "Story",
               )
               .map((p) => p.name),
-            4
+            4,
           ),
 
           showrunners: uniqueNames(
@@ -449,19 +415,19 @@ export async function GET(
               .filter(
                 (p) =>
                   p.job === "Showrunner" ||
-                  p.job === "Executive Producer"
+                  p.job === "Executive Producer",
               )
               .map((p) => p.name),
-            3
+            3,
           ),
 
           composers: uniqueNames(
             crew
               .filter(
-                (p) => p.job === "Original Music Composer" || p.job === "Music"
+                (p) => p.job === "Original Music Composer" || p.job === "Music",
               )
               .map((p) => p.name),
-            3
+            3,
           ),
         }
       : null;
@@ -482,7 +448,7 @@ export async function GET(
           : details?.number_of_seasons ?? null,
       numberOfEpisodes: validSeasons.reduce(
         (total, season) => total + (season.episode_count ?? 0),
-        0
+        0,
       ),
       overview: title.overview ?? null,
       posterUrl: tmdbImage(title.poster_path, "w780"),
@@ -537,7 +503,6 @@ export async function GET(
         }),
 
       metadata,
-
       lastSyncedAt: title.last_synced_at ?? null,
 
       cacheInfo: {
@@ -566,7 +531,7 @@ export async function GET(
         error: "Failed to fetch title",
         details: error instanceof Error ? error.message : String(error),
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }
