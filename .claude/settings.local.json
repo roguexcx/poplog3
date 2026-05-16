@@ -15,7 +15,9 @@
       "Bash(grep -r \"random\\\\|shuffle\\\\|pick\\\\|suggest\\\\|discover\" \"I:\\\\poplog-v2\\\\src\" --include=\"*.tsx\" --include=\"*.ts\" -l)",
       "Bash(Remove-Item -Path \"I:/poplog-v3/src/server/services/hero-candidates.ts\" -Force)",
       "Bash(rm -rf \"I:/poplog-v3/src/server/services/\")",
-      "Bash(rm \"I:/poplog-v3/src/server/normalizers/hero-visual.normalizer.ts\")"
+      "Bash(rm \"I:/poplog-v3/src/server/normalizers/hero-visual.normalizer.ts\")",
+      "Bash(Get-ChildItem -Path \"I:\\\\poplog-v3\\\\src\\\\server\" -Directory)",
+      "Bash(Select-Object -ExpandProperty Name)"
     ]
   }
 }

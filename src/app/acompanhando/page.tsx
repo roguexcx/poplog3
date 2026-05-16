@@ -671,7 +671,7 @@ export default function AcompanhandoPage() {
 
   // 1. CARREGAMENTO DOS ITENS GERAIS DA BIBLIOTECA
   const { items, isLoading, snoozeItem, logSignal } =
-    useCuradoriaEngine({ mode: "list" });
+  useCuradoriaEngine();
 
   // 2. CONEXÃO ISOLADA COM O NOVO ENDPOINT SERVER-DRIVEN DO HERO CONTINUIDADE
   const [heroItems, setHeroItems] = useState<ScoredItem[]>([]);
