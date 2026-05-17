@@ -15,7 +15,16 @@ function getMediaType(item: ScoredItem) {
 }
 
 function getTmdbId(item: ScoredItem) {
-  return String(item.tmdbId ?? item.content_id ?? item.id).replace(/\D/g, "");
+  const source = item as ScoredItem & {
+    tmdbId?: number | string | null;
+    content_id?: number | string | null;
+    id?: number | string | null;
+  };
+
+  return String(source.tmdbId ?? source.content_id ?? source.id ?? "").replace(
+    /\D/g,
+    "",
+  );
 }
 
 export default function AcompanhandoPage() {
