@@ -34,6 +34,10 @@ export type ContinueItem = {
   remaining_minutes: number;
   status_signal: ContinueStatusSignal;
   runtime: number | null;
+  /** Episódios assistidos na temporada atual (= next_episode - 1) */
+  season_watched: number;
+  /** Total de episódios na temporada atual — de poplog3_seasons; null se não sincronizado */
+  season_total: number | null;
 };
 
 type StateRow = {
@@ -117,6 +121,20 @@ export async function GET() {
       ((titlesRaw ?? []) as TitleRow[]).map((t) => [t.tmdb_id, t]),
     );
 
+    // Batch query para totais de episódios por temporada
+    const { data: seasonsRaw } = await supabaseAdmin
+      .from("poplog3_seasons")
+      .select("series_tmdb_id, season_number, episode_count")
+      .in("series_tmdb_id", tmdbIds);
+
+    type SeasonRow = { series_tmdb_id: number; season_number: number; episode_count: number };
+    const seasonMap = new Map<string, number>(
+      ((seasonsRaw ?? []) as SeasonRow[]).map((r) => [
+        `${r.series_tmdb_id}:${r.season_number}`,
+        r.episode_count,
+      ]),
+    );
+
     const cutoffStr = new Date(Date.now() - NEW_EPISODE_DAYS * 86_400_000)
       .toISOString()
       .slice(0, 10);
@@ -158,6 +176,8 @@ export async function GET() {
         remaining_minutes: remainingMinutes,
         status_signal: resolveSignal(episodesBehind, state.next_episode_air_date, cutoffStr),
         runtime: avgRuntime,
+        season_watched: state.next_episode - 1,
+        season_total: seasonMap.get(`${state.tmdb_id}:${state.next_season}`) ?? null,
       };
     });
 

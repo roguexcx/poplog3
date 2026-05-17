@@ -26,6 +26,10 @@ export type ContinueItem = {
   remaining_minutes: number;
   status_signal: ContinueStatusSignal;
   runtime: number | null;
+  /** Episódios assistidos na temporada atual (= next_episode - 1) */
+  season_watched: number;
+  /** Total de episódios na temporada atual — null se não sincronizado */
+  season_total: number | null;
 };
 
 type Props = {
@@ -147,6 +151,11 @@ export default function ContinueCard({ item, onClick }: Props) {
             {item.next_episode_name && (
               <p className="mt-0.5 truncate text-[11px] leading-tight text-white/48">
                 &ldquo;{item.next_episode_name}&rdquo;
+              </p>
+            )}
+            {item.season_total != null && (
+              <p className="mt-0.5 truncate text-[10px] text-white/35">
+                {item.season_watched} de {item.season_total} eps na T{item.next_season}
               </p>
             )}
           </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 
 import PageShell from "@/components/layout/PageShell";
@@ -12,6 +12,9 @@ import NewEpisodeCard, {
 import ContinueCard, {
   type ContinueItem,
 } from "@/features/acompanhando/ContinueCard";
+import WatchlistPickCard, {
+  type WatchlistPickItem,
+} from "@/features/acompanhando/WatchlistPickCard";
 
 import type { ScoredItem, SignalType } from "@/components/HeroSpotlight/types";
 
@@ -54,6 +57,11 @@ export default function AcompanhandoPage() {
   const [continueItems, setContinueItems] = useState<ContinueItem[]>([]);
   const [isContinueLoading, setIsContinueLoading] = useState(true);
   const [continueSortMode, setContinueSortMode] = useState<ContinueSortMode>("recent");
+
+  const [watchlistPicks, setWatchlistPicks] = useState<WatchlistPickItem[]>([]);
+  const [isWatchlistPicksLoading, setIsWatchlistPicksLoading] = useState(true);
+  // IDs já exibidos na sessão — usados para cooldown de refresh
+  const shownWatchlistIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     fetch("/api/poplog3/continuity/hero")
@@ -103,6 +111,40 @@ export default function AcompanhandoPage() {
       });
   }, []);
 
+  const fetchWatchlistPicks = useCallback((excludeIds: string[] = []) => {
+    setIsWatchlistPicksLoading(true);
+    const params = excludeIds.length
+      ? `?exclude=${excludeIds.join(",")}`
+      : "";
+    fetch(`/api/poplog3/continuity/watchlist-picks${params}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && Array.isArray(data.items)) {
+          setWatchlistPicks(data.items);
+          // Acumula IDs exibidos para cooldown do próximo refresh
+          data.items.forEach((item: WatchlistPickItem) =>
+            shownWatchlistIds.current.add(item.content_id),
+          );
+        }
+      })
+      .catch((err) => {
+        console.error("[AcompanhandoPage] Falha ao carregar watchlist picks:", err);
+      })
+      .finally(() => {
+        setIsWatchlistPicksLoading(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    fetchWatchlistPicks();
+  }, [fetchWatchlistPicks]);
+
+  const refreshWatchlistPicks = useCallback(() => {
+    // Passa os IDs atualmente exibidos como "cooldown"
+    const excludeIds = Array.from(shownWatchlistIds.current);
+    fetchWatchlistPicks(excludeIds);
+  }, [fetchWatchlistPicks]);
+
   const snoozeItem = useCallback(
     async (contentId: string, durationHours = 4) => {
       const snoozedUntil = new Date(
@@ -139,6 +181,10 @@ export default function AcompanhandoPage() {
 
   function handleContinueNavigate(item: ContinueItem) {
     router.push(`/title/tv/${item.tmdb_id}`);
+  }
+
+  function handleWatchlistPickNavigate(item: WatchlistPickItem) {
+    router.push(`/title/${item.media_type}/${item.tmdb_id}`);
   }
 
   const sortedContinueItems = useMemo(() => {
@@ -270,6 +316,49 @@ export default function AcompanhandoPage() {
                     key={item.content_id}
                     item={item}
                     onClick={() => handleContinueNavigate(item)}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+        {/* Da sua watchlist */}
+        {(isWatchlistPicksLoading || watchlistPicks.length > 0) && (
+          <section>
+            <SectionHeader
+              eyebrow="Da sua watchlist"
+              accent="cyan"
+              title="O que ver primeiro?"
+              size="sm"
+              action={
+                <button
+                  type="button"
+                  onClick={refreshWatchlistPicks}
+                  disabled={isWatchlistPicksLoading}
+                  className="rounded-full border border-white/[0.10] bg-white/[0.04] px-3 py-1 text-[11px] font-bold text-white/45 transition-all hover:text-white/70 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Trocar sugestões
+                </button>
+              }
+              className="mb-4"
+            />
+
+            {isWatchlistPicksLoading ? (
+              <div className="grid grid-cols-3 gap-3 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-9">
+                {[...Array(9)].map((_, i) => (
+                  <div
+                    key={i}
+                    className="aspect-[2/3] animate-pulse rounded-xl bg-white/[0.04]"
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="grid grid-cols-3 gap-3 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-9">
+                {watchlistPicks.map((item) => (
+                  <WatchlistPickCard
+                    key={item.content_id}
+                    item={item}
+                    onClick={() => handleWatchlistPickNavigate(item)}
                   />
                 ))}
               </div>

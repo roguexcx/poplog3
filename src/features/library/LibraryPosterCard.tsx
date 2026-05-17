@@ -1,14 +1,15 @@
+import Image from "next/image";
 import Link from "next/link";
 
 import { TmdbImage } from "@/components/images/TmdbImage";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";
 
 const STATUS_BADGE: Record<string, string> = {
-  watching: "border-violet-300/35 bg-violet-500/20 text-violet-100",
+  watching:  "border-violet-300/35 bg-violet-500/20 text-violet-100",
   watchlist: "border-cyan-300/30 bg-cyan-500/18 text-cyan-100",
-  watched: "border-white/[0.12] bg-white/[0.08] text-white/72",
+  watched:   "border-white/[0.12] bg-white/[0.08] text-white/72",
   abandoned: "border-rose-300/30 bg-rose-500/16 text-rose-100",
-  fridge: "border-amber-300/30 bg-amber-500/16 text-amber-100",
+  fridge:    "border-amber-300/30 bg-amber-500/16 text-amber-100",
 };
 
 type LibraryPosterCardProps = {
@@ -16,10 +17,12 @@ type LibraryPosterCardProps = {
   priority?: boolean;
 };
 
-export default function LibraryPosterCard({
-  item,
-}: LibraryPosterCardProps) {
-  const title = item.title;
+export default function LibraryPosterCard({ item, priority }: LibraryPosterCardProps) {
+  const title       = item.title;
+  const isFavorite  = item.favorite === true;
+  const isWatching  = item.status === "watching";
+  const progress    = typeof item.progress_pct === "number" ? item.progress_pct : null;
+  const hasProvider = !!item.best_provider_logo;
 
   const displayTitle =
     title?.title ??
@@ -27,17 +30,34 @@ export default function LibraryPosterCard({
     `${item.media_type}/${item.tmdb_id}`;
 
   const subtitle = getPosterSubtitle(item);
-  const runtime = getRuntimeLabel(item);
+  const runtime  = getRuntimeLabel(item);
 
   return (
-    <Link
-      href={`/title/${item.media_type}/${item.tmdb_id}`}
-      className="group block"
-    >
+    <Link href={`/title/${item.media_type}/${item.tmdb_id}`} className="group block">
       <article className="relative">
-        <div className="absolute -inset-2 rounded-[1.7rem] bg-gradient-to-b from-white/[0.08] to-transparent opacity-0 blur-xl transition duration-500 group-hover:opacity-100" />
 
-        <div className="relative overflow-hidden rounded-[1.45rem] border border-white/[0.08] bg-white/[0.035] shadow-[0_20px_60px_rgba(0,0,0,0.38)] transition duration-300 group-hover:-translate-y-1.5 group-hover:border-white/[0.18] group-hover:bg-white/[0.06] group-hover:shadow-[0_34px_90px_rgba(0,0,0,0.58)]">
+        {/* Ambient glow — amber for favorites, neutral for rest */}
+        <div
+          className={[
+            "absolute -inset-2.5 rounded-[2rem] opacity-0 blur-2xl transition duration-500 group-hover:opacity-100",
+            isFavorite
+              ? "bg-amber-400/[0.18]"
+              : "bg-gradient-to-b from-indigo-400/[0.12] to-transparent",
+          ].join(" ")}
+        />
+
+        {/* Card shell */}
+        <div
+          className={[
+            "relative overflow-hidden rounded-[1.45rem] border bg-white/[0.032] shadow-[0_18px_56px_rgba(0,0,0,0.40)]",
+            "transition duration-300 group-hover:-translate-y-2 group-hover:shadow-[0_36px_100px_rgba(0,0,0,0.62)]",
+            isFavorite
+              ? "border-amber-300/[0.18] group-hover:border-amber-300/[0.34] group-hover:bg-amber-900/[0.07]"
+              : "border-white/[0.08] group-hover:border-white/[0.20] group-hover:bg-white/[0.06]",
+          ].join(" ")}
+        >
+
+          {/* ── Poster image area ─────────────────────────────────────────── */}
           <div className="relative aspect-[2/3] overflow-hidden bg-white/[0.04]">
             <TmdbImage
               path={title?.poster_path ?? null}
@@ -45,57 +65,100 @@ export default function LibraryPosterCard({
               size="w500"
               alt={displayTitle}
               fallbackLabel={displayTitle}
-              className="h-full w-full object-cover brightness-[0.9] saturate-[1.08] transition duration-500 group-hover:scale-[1.055] group-hover:brightness-105"
+              priority={priority}
+              className="h-full w-full object-cover brightness-[0.88] saturate-[1.08] transition duration-500 group-hover:scale-[1.06] group-hover:brightness-[1.04]"
             />
 
-            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/92 via-black/12 to-black/24" />
-            <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_112%,rgba(34,211,238,0.24),transparent_46%),radial-gradient(circle_at_20%_0%,rgba(129,140,248,0.18),transparent_42%)] opacity-0 transition duration-500 group-hover:opacity-100" />
+            {/* Base vignette */}
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-black/24" />
 
-            <div className={`absolute left-3 top-3 rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-md ${STATUS_BADGE[item.status] ?? STATUS_BADGE.watched}`}>
+            {/* Hover colour overlay */}
+            <div
+              className={[
+                "pointer-events-none absolute inset-0 opacity-0 transition duration-500 group-hover:opacity-100",
+                isFavorite
+                  ? "bg-[radial-gradient(circle_at_50%_110%,rgba(251,191,36,0.20),transparent_48%),radial-gradient(circle_at_15%_0%,rgba(251,191,36,0.10),transparent_40%)]"
+                  : "bg-[radial-gradient(circle_at_50%_112%,rgba(34,211,238,0.22),transparent_46%),radial-gradient(circle_at_20%_0%,rgba(129,140,248,0.16),transparent_42%)]",
+              ].join(" ")}
+            />
+
+            {/* Status badge — top left */}
+            <div
+              className={`absolute left-3 top-3 rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] shadow-[0_8px_22px_rgba(0,0,0,0.38)] backdrop-blur-md ${STATUS_BADGE[item.status] ?? STATUS_BADGE.watched}`}
+            >
               {formatStatus(item.status)}
             </div>
 
-            {typeof title?.vote_average === "number" && (
-              <div className="absolute right-3 top-3 rounded-full border border-amber-200/20 bg-black/48 px-2.5 py-1 text-[10px] font-black text-amber-100 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-md">
-                ★ {title.vote_average.toFixed(1)}
+            {/* Top-right badges (favorite ★ or rating) */}
+            <div className="absolute right-3 top-3 flex flex-col items-end gap-1.5">
+              {isFavorite ? (
+                <div className="rounded-full border border-amber-300/30 bg-amber-500/22 px-2 py-1 text-[9px] font-black text-amber-200 shadow-[0_0_16px_rgba(251,191,36,0.30)] backdrop-blur-md">
+                  ★
+                </div>
+              ) : typeof title?.vote_average === "number" ? (
+                <div className="rounded-full border border-amber-200/18 bg-black/50 px-2.5 py-1 text-[10px] font-black text-amber-100 shadow-[0_8px_22px_rgba(0,0,0,0.35)] backdrop-blur-md">
+                  ★ {title.vote_average.toFixed(1)}
+                </div>
+              ) : null}
+            </div>
+
+            {/* Provider logo — bottom right, always visible */}
+            {hasProvider && (
+              <div className="absolute bottom-3 right-3 overflow-hidden rounded-lg border border-white/[0.14] bg-black/55 shadow-[0_4px_14px_rgba(0,0,0,0.45)] backdrop-blur-md">
+                <Image
+                  src={`https://image.tmdb.org/t/p/original${item.best_provider_logo}`}
+                  alt={item.best_provider_name ?? "Provider"}
+                  width={28}
+                  height={28}
+                  className="h-7 w-7 object-cover"
+                />
               </div>
             )}
 
+            {/* Hover info badges — bottom left */}
             <div className="absolute inset-x-0 bottom-0 p-3 sm:p-4">
               <div className="translate-y-2 opacity-0 transition duration-300 group-hover:translate-y-0 group-hover:opacity-100">
-                <div className="flex flex-wrap items-center gap-2">
+                <div className="flex flex-wrap items-center gap-1.5">
                   {subtitle && (
-                    <span className="rounded-full border border-white/[0.12] bg-black/45 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-white/76 backdrop-blur-md">
+                    <span className="rounded-full border border-white/[0.12] bg-black/50 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-white/76 backdrop-blur-md">
                       {subtitle}
                     </span>
                   )}
-
                   {runtime && (
-                    <span className="rounded-full border border-white/[0.12] bg-black/45 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-white/58 backdrop-blur-md">
+                    <span className="rounded-full border border-white/[0.12] bg-black/50 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-white/55 backdrop-blur-md">
                       {runtime}
                     </span>
                   )}
                 </div>
               </div>
             </div>
+
+            {/* Watching progress track — thin line at poster bottom edge */}
+            {isWatching && progress !== null && progress > 0 && (
+              <div className="absolute inset-x-0 bottom-0 h-[3px] bg-black/40">
+                <div
+                  className="h-full bg-gradient-to-r from-violet-500 to-indigo-400 shadow-[0_0_8px_rgba(139,92,246,0.60)]"
+                  style={{ width: `${Math.min(100, progress)}%` }}
+                />
+              </div>
+            )}
           </div>
-        </div>
 
-        <div className="px-1 pb-1 pt-3">
-          <h2 className="line-clamp-2 text-[13px] font-bold leading-[1.32] tracking-[-0.02em] text-white/92 transition group-hover:text-white">
-            {displayTitle}
-          </h2>
-
-          <div className="mt-1.5 flex items-center gap-2 text-[11px] font-medium text-white/36">
-            <span>{title?.year ?? "—"}</span>
-            <span className="h-1 w-1 rounded-full bg-white/18" />
-            <span>{item.media_type === "movie" ? "Filme" : "Série"}</span>
+          {/* ── Card footer — máx 28px, apenas ano · tipo ────────────────── */}
+          <div className="flex h-7 items-center px-[10px]">
+            <div className="flex items-center gap-[5px] text-[11px] font-normal leading-none text-white/40">
+              <span>{title?.year ?? "—"}</span>
+              <span className="text-white/20">·</span>
+              <span>{item.media_type === "movie" ? "Filme" : "Série"}</span>
+            </div>
           </div>
         </div>
       </article>
     </Link>
   );
 }
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
 function getPosterSubtitle(item: Poplog3UserLibraryItem) {
   const releaseTime = getReleaseTime(item);
@@ -123,34 +186,28 @@ function getRuntimeLabel(item: Poplog3UserLibraryItem) {
         ) ?? null
       : item.title?.runtime ?? null;
 
-  if (!runtime) {
-    return null;
-  }
+  if (!runtime) return null;
 
   return item.media_type === "tv" ? `${runtime} min/ep` : `${runtime} min`;
 }
 
 function getReleaseTime(item: Poplog3UserLibraryItem) {
   const title = item.title;
-
   const date =
     item.media_type === "tv"
       ? title?.first_air_date ?? title?.release_date
       : title?.release_date ?? title?.first_air_date;
-
   const time = date ? new Date(date).getTime() : 0;
-
   return Number.isFinite(time) ? time : 0;
 }
 
 function formatStatus(status: string) {
   const labels: Record<string, string> = {
     watchlist: "Watchlist",
-    watching: "Assistindo",
-    watched: "Assistido",
+    watching:  "Assistindo",
+    watched:   "Assistido",
     abandoned: "Abandonado",
-    fridge: "Geladeira",
+    fridge:    "Geladeira",
   };
-
   return labels[status] ?? status;
 }

@@ -21,7 +21,15 @@
       "Bash(npm run *)",
       "Bash(cd /I/poplog-v3 && find src/app/api -type f -name \"*.ts\" | head -20)",
       "Bash(xargs grep -l \"streaming_preferences\\\\|provider_preferences\")",
-      "Bash(cd /I/poplog-v3 && grep -r \"getUserProviderPreferences\" src --include=\"*.ts\" -l)"
+      "Bash(cd /I/poplog-v3 && grep -r \"getUserProviderPreferences\" src --include=\"*.ts\" -l)",
+      "Bash(find /I:/poplog-v3 -type f -name \"*.tsx\" -o -name \"*.ts\" | grep -E \"\\(api|supabase\\)\" | head -20)",
+      "Bash(xargs grep -l \"HorizontalRail\")",
+      "Bash(xargs grep -l \"poplog3_titles\\\\|user_title_state\")",
+      "Bash(xargs basename -a)",
+      "Bash(xargs ls -la)",
+      "Bash(xargs grep -l \"NewEpisodeItem\\\\|ContinueItem\")",
+      "Bash(Get-ChildItem -Path \"I:\\\\poplog-v3\\\\src\\\\app\" -Recurse -Filter \"*library*\" -o ErrorAction SilentlyContinue)",
+      "Bash(Select-Object -ExpandProperty FullName)"
     ]
   }
 }

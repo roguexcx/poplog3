@@ -91,13 +91,13 @@ function getEmptyContent(activeTab: LibraryTab) {
           "Títulos ainda não lançados aparecem aqui quando estiverem salvos na sua biblioteca.",
       };
 
-    case "between-seasons":
+    case "favorites":
       return {
-        icon: "Ⅱ",
-        kicker: "Sem pausas",
-        title: "Nenhuma série entre temporadas.",
+        icon: "★",
+        kicker: "Sem favoritos",
+        title: "Nenhum título marcado como favorito.",
         description:
-          "Quando uma série em andamento estiver sem episódio novo disponível, ela pode entrar neste espaço de pausa.",
+          "Marque filmes e séries como favoritos nas páginas de título para eles aparecerem aqui.",
       };
 
     default:

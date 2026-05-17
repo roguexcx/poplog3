@@ -1,170 +1,128 @@
 export type LibraryTab =
-  | "all"
-  | "coming-soon"
   | "watchlist"
+  | "favorites"
   | "watching"
-  | "between-seasons"
+  | "coming-soon"
   | "watched"
+  | "all"
   | "abandoned"
   | "fridge";
 
 type LibraryTabsProps = {
   activeTab: LibraryTab;
-  onChange: (tab: LibraryTab) => void;
+  onChange:  (tab: LibraryTab) => void;
   stats: {
-    total: number;
+    total:      number;
     comingSoon: number;
-    watched: number;
-    watchlist: number;
-    watching: number;
-    betweenSeasons: number;
+    watched:    number;
+    watchlist:  number;
+    watching:   number;
+    favorites:  number;
   };
 };
 
 const TABS: {
-  id: LibraryTab;
-  label: string;
-  shortLabel: string;
+  id:          LibraryTab;
+  shortLabel:  string;
   description: string;
-  getCount: (stats: LibraryTabsProps["stats"]) => number | null;
+  getCount:    (s: LibraryTabsProps["stats"]) => number | null;
 }[] = [
-  {
-    id: "all",
-    label: "Tudo",
-    shortLabel: "Tudo",
-    description: "Toda sua coleção",
-    getCount: (stats) => stats.total,
-  },
-  {
-    id: "coming-soon",
-    label: "Em breve",
-    shortLabel: "Breve",
-    description: "Títulos ainda não lançados",
-    getCount: (stats) => stats.comingSoon,
-  },
-  {
-    id: "watchlist",
-    label: "Watchlist",
-    shortLabel: "Lista",
-    description: "Separados para depois",
-    getCount: (stats) => stats.watchlist,
-  },
-  {
-    id: "watching",
-    label: "Assistindo",
-    shortLabel: "Vendo",
-    description: "Em andamento",
-    getCount: (stats) => stats.watching,
-  },
-  {
-    id: "between-seasons",
-    label: "Entre temporadas",
-    shortLabel: "Pausa",
-    description: "Sem episódio novo agora",
-    getCount: (stats) => stats.betweenSeasons,
-  },
-  {
-    id: "watched",
-    label: "Assistidos",
-    shortLabel: "Vistos",
-    description: "Histórico finalizado",
-    getCount: (stats) => stats.watched,
-  },
-  {
-    id: "abandoned",
-    label: "Abandonados",
-    shortLabel: "Dropados",
-    description: "Ficaram pelo caminho",
-    getCount: () => null,
-  },
-  {
-    id: "fridge",
-    label: "Geladeira",
-    shortLabel: "Geladeira",
-    description: "Guardados para outro clima",
-    getCount: () => null,
-  },
+  { id: "watchlist",    shortLabel: "Lista",     description: "Separados para depois",     getCount: (s) => s.watchlist  },
+  { id: "favorites",    shortLabel: "Favoritos", description: "O que você mais gosta",     getCount: (s) => s.favorites  },
+  { id: "watching",     shortLabel: "Vendo",     description: "Em andamento",              getCount: (s) => s.watching   },
+  { id: "coming-soon",  shortLabel: "Breve",     description: "Ainda não lançados",        getCount: (s) => s.comingSoon },
+  { id: "watched",      shortLabel: "Vistos",    description: "Histórico finalizado",      getCount: (s) => s.watched    },
+  { id: "all",          shortLabel: "Tudo",      description: "Toda sua coleção",          getCount: (s) => s.total      },
+  { id: "abandoned",    shortLabel: "Dropados",  description: "Ficaram pelo caminho",      getCount: () => null          },
+  { id: "fridge",       shortLabel: "Geladeira", description: "Guardados para outro clima",getCount: () => null          },
 ];
 
-export default function LibraryTabs({
-  activeTab,
-  onChange,
-  stats,
-}: LibraryTabsProps) {
-  const activeLabel =
-    TABS.find((tab) => tab.id === activeTab)?.label ?? "Tudo";
+export default function LibraryTabs({ activeTab, onChange, stats }: LibraryTabsProps) {
+  const activeLabel = TABS.find((t) => t.id === activeTab)?.shortLabel ?? "Tudo";
 
   return (
     <>
+      {/* Mobile: select nativo */}
       <div className="sm:hidden">
         <select
           value={activeTab}
-          onChange={(event) => onChange(event.target.value as LibraryTab)}
+          onChange={(e) => onChange(e.target.value as LibraryTab)}
           style={{ colorScheme: "dark" }}
-          className="h-12 w-full appearance-none rounded-2xl border border-white/[0.09] bg-white/[0.045] px-4 text-sm font-black uppercase tracking-[0.12em] text-white outline-none backdrop-blur-xl [&_option]:bg-[#020617] [&_option]:text-white"
+          className="h-11 w-full appearance-none rounded-2xl border border-white/[0.08] bg-white/[0.035] px-4 text-sm font-medium uppercase tracking-wide text-white outline-none backdrop-blur-xl [&_option]:bg-[#0d0d14] [&_option]:text-white"
           aria-label={`Seção atual: ${activeLabel}`}
         >
           {TABS.map((tab) => {
             const count = tab.getCount(stats);
             return (
               <option key={tab.id} value={tab.id}>
-                {tab.label}
-                {typeof count === "number" ? ` · ${count}` : ""}
+                {tab.shortLabel}{typeof count === "number" ? ` · ${count}` : ""}
               </option>
             );
           })}
         </select>
       </div>
 
-      <div className="hidden overflow-x-auto pb-1 no-scrollbar sm:block">
-        <div className="flex min-w-max items-stretch gap-2">
-          {TABS.map((tab) => {
-            const active = activeTab === tab.id;
-            const count = tab.getCount(stats);
+      {/* Desktop: tab bar — 64px height */}
+      <div className="hidden overflow-x-auto no-scrollbar sm:flex sm:h-16 sm:items-stretch sm:justify-center">
+        {TABS.map((tab, index) => {
+          const active = activeTab === tab.id;
+          const count  = tab.getCount(stats);
 
-            return (
-              <button
-                key={tab.id}
-                type="button"
-                onClick={() => onChange(tab.id)}
-                className={[
-                  "group flex min-w-[150px] shrink-0 flex-col rounded-[1.25rem] border px-4 py-3 text-left transition duration-300",
-                  active
-                    ? "border-indigo-200/30 bg-indigo-300/[0.12] text-white shadow-[0_0_34px_rgba(99,102,241,0.14)]"
-                    : "border-white/[0.075] bg-white/[0.028] text-white/52 hover:border-white/[0.15] hover:bg-white/[0.055] hover:text-white/82",
-                ].join(" ")}
-              >
-                <span className="flex items-center justify-between gap-3">
-                  <span className="text-[10px] font-black uppercase tracking-[0.18em]">
-                    {tab.shortLabel}
-                  </span>
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => onChange(tab.id)}
+              className={[
+                "relative flex flex-col justify-center px-[18px] transition duration-200",
+                "border-b-2",
+                active
+                  ? "border-indigo-500 bg-white/[0.08]"
+                  : "border-transparent hover:bg-white/[0.05]",
+              ].join(" ")}
+            >
+              {/* Separador vertical (exceto no último) */}
+              {index < TABS.length - 1 && (
+                <div className="absolute right-0 top-3 h-[calc(100%-24px)] w-px bg-white/[0.06]" />
+              )}
 
-                  {typeof count === "number" && count > 0 && (
-                    <span
-                      className={[
-                        "rounded-full border px-2 py-0.5 text-[10px] font-black",
-                        active
-                          ? "border-indigo-100/25 bg-white/10 text-indigo-50"
-                          : "border-white/[0.08] bg-black/20 text-white/38",
-                      ].join(" ")}
-                    >
-                      {count}
-                    </span>
-                  )}
-                </span>
-
+              {/* Label + badge */}
+              <div className="flex items-center gap-1.5">
                 <span
                   className={[
-                    "mt-1 text-[11px] leading-4",
-                    active ? "text-indigo-100/64" : "text-white/30 group-hover:text-white/44",
+                    "whitespace-nowrap text-[11px] font-medium uppercase tracking-wide",
+                    active ? "text-white" : "text-white/45",
                   ].join(" ")}
                 >
-                  {tab.description}
+                  {tab.shortLabel}
                 </span>
-              </button>
-            );
-          })}
-        </div>
+
+                {typeof count === "number" && count > 0 && (
+                  <span
+                    className={[
+                      "rounded-full px-[5px] py-px text-[9px] font-medium leading-none tabular-nums",
+                      active
+                        ? "bg-indigo-500/25 text-indigo-200"
+                        : "bg-white/[0.08] text-white/38",
+                    ].join(" ")}
+                  >
+                    {count}
+                  </span>
+                )}
+              </div>
+
+              {/* Subtítulo */}
+              <span
+                className={[
+                  "mt-0.5 whitespace-nowrap text-[10px] leading-none",
+                  active ? "text-white/48" : "text-white/28",
+                ].join(" ")}
+              >
+                {tab.description}
+              </span>
+            </button>
+          );
+        })}
       </div>
     </>
   );

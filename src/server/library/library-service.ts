@@ -11,6 +11,14 @@ import {
 } from "./types";
 
 export type Poplog3UserLibraryItem = Poplog3UserTitle & {
+  /** Campos do estado global (preenchidos por getUserLibraryState) */
+  computed_state?: string | null;
+  watched_episodes?: number;
+  aired_episodes?: number;
+  progress_pct?: number;
+  best_provider_name?: string | null;
+  best_provider_type?: string | null;
+  best_provider_logo?: string | null;
   title: {
     tmdb_id: number;
     media_type: "movie" | "tv";
@@ -25,6 +33,9 @@ export type Poplog3UserLibraryItem = Poplog3UserTitle & {
     runtime: number | null;
     episode_run_time: number[] | null;
     vote_average: number | null;
+    popularity: number | null;
+    number_of_episodes: number | null;
+    number_of_seasons: number | null;
   } | null;
 };
 
@@ -44,40 +55,77 @@ export async function getUserLibraryState(
 
   if (stateRows.length === 0) return null;
 
-  const tmdbIds = stateRows.map((r) => r.tmdb_id);
+  const tmdbIds  = stateRows.map((r) => r.tmdb_id);
+  const tvIds    = stateRows.filter((r) => r.media_type === "tv").map((r) => r.tmdb_id);
+  const today    = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
+
+  // ── Batch 1: metadados dos títulos ───────────────────────────────────────
+  // Filtra por media_type para evitar cruzamento de IDs entre filmes e séries
+  const mediaTypes = [...new Set(stateRows.map((r) => r.media_type))];
 
   const { data: titles, error: titlesError } = await supabaseAdmin
     .from("poplog3_titles")
     .select(
-      "tmdb_id, media_type, title, original_title, poster_path, backdrop_path, year, release_date, first_air_date, last_air_date, runtime, episode_run_time, vote_average",
+      "tmdb_id, media_type, title, original_title, poster_path, backdrop_path, year, release_date, first_air_date, last_air_date, runtime, episode_run_time, vote_average, popularity, number_of_episodes, number_of_seasons, tmdb_payload",
     )
-    .in("tmdb_id", tmdbIds);
+    .in("tmdb_id", tmdbIds)
+    .in("media_type", mediaTypes);
 
   if (titlesError) {
     console.error("[getUserLibraryState] titles query failed", titlesError);
     return null;
   }
 
+  // ── Batch 2: data do último episódio aired por série (regra global) ──────
+  // Usa poplog3_episodes como fonte de verdade — evita o last_air_date do TMDB
+  // que pode conter datas futuras de episódios pré-cadastrados.
+  // Resultado: Map<tmdb_id → "YYYY-MM-DD"> com a data do ep mais recente <= hoje.
+  const lastAiredMap = new Map<number, string>();
+
+  if (tvIds.length > 0) {
+    const { data: epRows } = await supabaseAdmin
+      .from("poplog3_episodes")
+      .select("series_tmdb_id, air_date")
+      .in("series_tmdb_id", tvIds)
+      .not("air_date", "is", null)
+      .lte("air_date", today)
+      .order("air_date", { ascending: false });
+
+    for (const ep of (epRows ?? []) as { series_tmdb_id: number; air_date: string }[]) {
+      if (!lastAiredMap.has(ep.series_tmdb_id)) {
+        lastAiredMap.set(ep.series_tmdb_id, ep.air_date);
+      }
+    }
+  }
+
+  type TitleData = {
+    tmdb_id: number;
+    media_type: string;
+    title: string | null;
+    original_title: string | null;
+    poster_path: string | null;
+    backdrop_path: string | null;
+    year: number | null;
+    release_date: string | null;
+    first_air_date: string | null;
+    last_air_date: string | null;
+    runtime: number | null;
+    episode_run_time: number[] | null;
+    vote_average: number | null;
+    popularity: number | null;
+    number_of_episodes: number | null;
+    number_of_seasons: number | null;
+    tmdb_payload: Record<string, unknown> | null;
+  };
+
+  // Key MUST include media_type — TMDB IDs are NOT globally unique across movie/tv
+  // (e.g. movie 550 = Fight Club, tv 550 = Till Death Us Do Part 1966)
   const titleMap = new Map(
-    ((titles ?? []) as Array<{
-      tmdb_id: number;
-      media_type: string;
-      title: string | null;
-      original_title: string | null;
-      poster_path: string | null;
-      backdrop_path: string | null;
-      year: number | null;
-      release_date: string | null;
-      first_air_date: string | null;
-      last_air_date: string | null;
-      runtime: number | null;
-      episode_run_time: number[] | null;
-      vote_average: number | null;
-    }>).map((t) => [t.tmdb_id, t]),
+    ((titles ?? []) as TitleData[]).map((t) => [`${t.tmdb_id}:${t.media_type}`, t]),
   );
 
   return stateRows.map((row) => {
-    const titleData = titleMap.get(row.tmdb_id) ?? null;
+    const titleData = titleMap.get(`${row.tmdb_id}:${row.media_type}`) ?? null;
 
     return {
       // Campos de Poplog3UserTitle — id/user_id/rating/notes não usados pela UI
@@ -115,10 +163,22 @@ export async function getUserLibraryState(
             year: titleData.year,
             release_date: titleData.release_date,
             first_air_date: titleData.first_air_date,
-            last_air_date: titleData.last_air_date,
+            // last_air_date — cadeia de prioridade (regra global):
+            // 1. poplog3_episodes: último ep com air_date <= hoje (fonte de verdade)
+            // 2. coluna direta last_air_date do poplog3_titles
+            // 3. tmdb_payload.last_air_date (fallback legado)
+            last_air_date:
+              (row.media_type === "tv" ? (lastAiredMap.get(row.tmdb_id) ?? null) : null) ??
+              titleData.last_air_date ??
+              (typeof titleData.tmdb_payload?.last_air_date === "string"
+                ? titleData.tmdb_payload.last_air_date
+                : null),
             runtime: titleData.runtime,
             episode_run_time: titleData.episode_run_time,
             vote_average: titleData.vote_average,
+            popularity: titleData.popularity,
+            number_of_episodes: titleData.number_of_episodes,
+            number_of_seasons: titleData.number_of_seasons,
           }
         : null,
     } as Poplog3UserLibraryItem;
