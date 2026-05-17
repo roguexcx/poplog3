@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
   buildAvailabilityProviders,
+  getBestAvailabilityProvider,
   type AvailabilityProvider,
 } from "@/server/streaming/availability-service";
 
@@ -13,7 +14,9 @@ import { getCurrentUser } from "@/server/auth/get-current-user";
 import { getAvailability } from "@/server/cache/availability-cache";
 import { getExternalIds } from "@/server/cache/external-ids-cache";
 import { computeUserSeriesProgress } from "@/server/episodes/episode-progress-service";
+import { readTitleState, refreshTitleStateAvailability } from "@/server/state/user-title-state";
 import { getUserTitleStatus } from "@/server/library/library-service";
+import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
 import {
   syncAvailability,
   type TmdbPayloadWithWatch,
@@ -116,51 +119,83 @@ export async function GET(
           favorite?: boolean;
           liked?: boolean;
           disliked?: boolean;
+          computedState?: string | null;
         }
       | undefined = {
       isAuthenticated: Boolean(currentUser),
     };
 
-    if (currentUser) {
-      try {
-        const status = await getUserTitleStatus(currentUser.id, id, mediaType);
-
-        userState = {
-          isAuthenticated: true,
-          inWatchlist: status?.status === "watchlist",
-          watching: status?.status === "watching",
-          watched: status?.status === "watched",
-          favorite: Boolean(status?.favorite),
-          liked: status?.liked === true,
-          disliked: status?.liked === false,
-        };
-      } catch (error) {
-        console.warn("[poplog3/titles] userState lookup falhou:", error);
-        userState = { isAuthenticated: true };
-      }
-    }
-
     let userSeriesProgress: {
       watchedCount: number;
       totalEpisodes: number | null;
+      airedEpisodes: number;
       lastWatchedAt: string | null;
       watchedKeys: string[];
       nextEpisode: { seasonNumber: number; episodeNumber: number } | null;
     } | null = null;
 
-    if (currentUser && mediaType === "tv") {
+    if (currentUser) {
       try {
-        const progress = await computeUserSeriesProgress(currentUser.id, id);
+        const state = await readTitleState(currentUser.id, id, mediaType);
 
-        userSeriesProgress = {
-          watchedCount: progress.watchedCount,
-          totalEpisodes: progress.totalEpisodes,
-          lastWatchedAt: progress.lastWatchedAt,
-          watchedKeys: progress.watchedKeys,
-          nextEpisode: progress.nextEpisode,
-        };
+        if (state) {
+          userState = {
+            isAuthenticated: true,
+            inWatchlist: state.status === "watchlist",
+            watching: state.status === "watching",
+            watched: state.status === "watched",
+            favorite: Boolean(state.favorite),
+            liked: state.liked === true,
+            disliked: state.liked === false,
+            computedState: state.computed_state,
+          };
+
+          if (mediaType === "tv") {
+            userSeriesProgress = {
+              watchedCount: state.watched_episodes,
+              totalEpisodes: state.total_episodes,
+              airedEpisodes: state.aired_episodes,
+              lastWatchedAt: state.last_watched_at,
+              watchedKeys: state.watched_keys,
+              nextEpisode:
+                state.next_season !== null && state.next_episode !== null
+                  ? { seasonNumber: state.next_season, episodeNumber: state.next_episode }
+                  : null,
+            };
+          }
+        } else {
+          // Fallback: usuário pré-migração — computa das tabelas fonte
+          const [status, progress] = await Promise.all([
+            getUserTitleStatus(currentUser.id, id, mediaType),
+            mediaType === "tv"
+              ? computeUserSeriesProgress(currentUser.id, id)
+              : Promise.resolve(null),
+          ]);
+
+          userState = {
+            isAuthenticated: true,
+            inWatchlist: status?.status === "watchlist",
+            watching: status?.status === "watching",
+            watched: status?.status === "watched",
+            favorite: Boolean(status?.favorite),
+            liked: status?.liked === true,
+            disliked: status?.liked === false,
+          };
+
+          if (progress) {
+            userSeriesProgress = {
+              watchedCount: progress.watchedCount,
+              totalEpisodes: progress.totalEpisodes,
+              airedEpisodes: progress.airedEpisodes,
+              lastWatchedAt: progress.lastWatchedAt,
+              watchedKeys: progress.watchedKeys,
+              nextEpisode: progress.nextEpisode,
+            };
+          }
+        }
       } catch (error) {
-        console.warn("[poplog3/titles] series progress falhou:", error);
+        console.warn("[poplog3/titles] state lookup falhou:", error);
+        userState = { isAuthenticated: true };
       }
     }
 
@@ -233,6 +268,16 @@ export async function GET(
 
     let providers: AvailabilityProvider[] = [];
 
+    // Carrega preferências do usuário para ranking personalizado de streaming
+    let userStreamingPreferences: Awaited<ReturnType<typeof getUserProviderPreferences>> | undefined;
+    if (currentUser) {
+      try {
+        userStreamingPreferences = await getUserProviderPreferences();
+      } catch {
+        // ignora — usa ranking genérico
+      }
+    }
+
     try {
       const result = await syncAvailability({
         tmdbId: id,
@@ -272,8 +317,19 @@ export async function GET(
         })) as never,
         {
           region: country,
+          preferences: userStreamingPreferences,
         },
       );
+
+      // Persiste o melhor provedor no estado do usuário (fire-and-forget)
+      if (currentUser) {
+        const best = getBestAvailabilityProvider(providers);
+        refreshTitleStateAvailability(currentUser.id, id, mediaType, best ? {
+          providerName: best.name,
+          providerType: best.normalizedType,
+          providerLogo: best.logoUrl ?? null,
+        } : null).catch(console.error);
+      }
     } catch (error) {
       console.warn("[poplog3/titles] availability sync falhou:", error);
     }

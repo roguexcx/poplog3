@@ -61,6 +61,8 @@ const PROVIDER_TYPE_PRIORITY: Record<string, number> = {
   buy: 60,
 };
 
+// TMDB é a fonte principal do ecossistema POPLOG — recebe score alto.
+// Watchmode e MOTN confirmam/enriquecem; mixed = ambas as fontes concordam.
 const SOURCE_CONFIDENCE_PRIORITY: Record<
   ProviderConfidence,
   number
@@ -69,8 +71,8 @@ const SOURCE_CONFIDENCE_PRIORITY: Record<
   user_relevant_confirmed: 95,
   watchmode_confirmed: 90,
   movieofthenight_confirmed: 85,
-  tmdb_only: 70,
-  predicted_window: 40,
+  tmdb_only: 80,
+  predicted_window: 30,
 };
 
 export function normalizeAvailabilityType(

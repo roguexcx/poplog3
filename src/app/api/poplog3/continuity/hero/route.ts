@@ -7,9 +7,12 @@ import { getCachedEpisode } from "@/server/cache/season-cache";
 const HERO_VISIBLE_LIMIT = 5;
 const HERO_POOL_LIMIT = 14;
 
-// Cache curto para acelerar F5/reentrada sem congelar a curadoria por muito tempo.
+// Fresh: 90s — serve do cache sem regenerar.
+// Stale: 8min — serve stale enquanto regenera em background.
+// Max entries: evita crescimento ilimitado em instâncias long-running.
 const HERO_CACHE_TTL_MS = 90_000;
 const HERO_CACHE_STALE_MS = 8 * 60_000;
+const HERO_CACHE_MAX_ENTRIES = 1_000;
 
 type HeroResult = Awaited<ReturnType<typeof getHeroCandidates>>;
 
@@ -19,7 +22,23 @@ type HeroCacheEntry = {
   refreshing?: Promise<HeroResult>;
 };
 
+// LRU simples: quando atinge o limite, limpa as entradas mais antigas.
 const heroMemoryCache = new Map<string, HeroCacheEntry>();
+
+function evictStaleEntries() {
+  if (heroMemoryCache.size < HERO_CACHE_MAX_ENTRIES) return;
+  const now = Date.now();
+  const entries = Array.from(heroMemoryCache.entries())
+    .sort((a, b) => a[1].generatedAtMs - b[1].generatedAtMs);
+  // Remove os 20% mais antigos
+  const toRemove = Math.ceil(entries.length * 0.2);
+  for (let i = 0; i < toRemove; i++) {
+    const entry = entries[i];
+    if (entry && now - entry[1].generatedAtMs > HERO_CACHE_STALE_MS) {
+      heroMemoryCache.delete(entry[0]);
+    }
+  }
+}
 
 function getCacheKey(userId: string, region: string) {
   return `${userId}:${region}`;
@@ -45,11 +64,11 @@ async function refreshHeroCache(userId: string, region: "BR" | "US", cacheKey: s
     region,
   })
     .then((result) => {
+      evictStaleEntries();
       heroMemoryCache.set(cacheKey, {
         result,
         generatedAtMs: Date.now(),
       });
-
       return result;
     })
     .catch((error) => {
@@ -59,15 +78,11 @@ async function refreshHeroCache(userId: string, region: "BR" | "US", cacheKey: s
           generatedAtMs: current.generatedAtMs,
         });
       }
-
       throw error;
     });
 
   if (current) {
-    heroMemoryCache.set(cacheKey, {
-      ...current,
-      refreshing,
-    });
+    heroMemoryCache.set(cacheKey, { ...current, refreshing });
   } else {
     heroMemoryCache.set(cacheKey, {
       result: { candidates: [], generatedAt: new Date(0).toISOString() },
@@ -133,33 +148,24 @@ function weightedPickFromPool<T extends { id: string; score?: number | null; med
       const score = Math.max(1, Number(item.score ?? 1));
       const softenedWeight = Math.sqrt(score);
       const randomKey = Math.random() ** (1 / softenedWeight);
-
-      return {
-        item,
-        index,
-        randomKey,
-      };
+      return { item, index, randomKey };
     })
     .sort((a, b) => b.randomKey - a.randomKey || a.index - b.index);
 
   function canUse(item: T) {
     const mediaType = item.mediaType ?? "unknown";
     const context = item.context ?? "unknown";
-
     if ((mediaCount.get(mediaType) ?? 0) >= 3) return false;
     if (context === "new_episode" && (contextCount.get(context) ?? 0) >= 2) return false;
-
     return true;
   }
 
   function push(item: T) {
     if (selected.length >= limit || usedIds.has(item.id)) return false;
-
     selected.push(item);
     usedIds.add(item.id);
     mediaCount.set(item.mediaType ?? "unknown", (mediaCount.get(item.mediaType ?? "unknown") ?? 0) + 1);
     contextCount.set(item.context ?? "unknown", (contextCount.get(item.context ?? "unknown") ?? 0) + 1);
-
     return true;
   }
 
@@ -203,14 +209,14 @@ export async function GET(request: Request) {
 
     const chosenCandidates = weightedPickFromPool(result.candidates ?? [], HERO_VISIBLE_LIMIT);
 
-    // Fire-and-forget: analytics não bloqueia a resposta.
+    // Fire-and-forget: analytics não bloqueia a resposta
     if (chosenCandidates.length > 0) {
       recordHeroImpressions({ userId: user.id, candidates: chosenCandidates }).catch((error) => {
         console.error("[hero/impressions]", error);
       });
     }
 
-    // Enriquece apenas os 5 candidatos exibidos. Isso evita consultas extras no pool inteiro.
+    // Enriquece apenas os 5 candidatos visíveis com nome/still do próximo episódio
     const episodeData = await Promise.all(
       chosenCandidates.map(async (cand) => {
         if (cand.mediaType !== "tv") return null;
@@ -228,6 +234,9 @@ export async function GET(request: Request) {
     const mappedItems = chosenCandidates.map((cand, index) => {
       const isTv = cand.mediaType === "tv";
       const ep = episodeData[index];
+      const nextEpisodeNumber = cand.progress?.nextEpisode ?? null;
+      const lastWatchedEpisode =
+        nextEpisodeNumber !== null ? Math.max(nextEpisodeNumber - 1, 0) : null;
 
       return {
         id: cand.id,
@@ -243,15 +252,21 @@ export async function GET(request: Request) {
         score: cand.score,
         year: cand.year,
 
+        // Semântica clara: episódio que o usuário vai assistir agora
         current_season: cand.progress?.nextSeason ?? null,
-        current_episode: cand.progress?.nextEpisode
-          ? Math.max(cand.progress.nextEpisode - 1, 0)
-          : null,
+        // last_watched_episode = último assistido (nextEpisode - 1)
+        last_watched_episode: lastWatchedEpisode,
+        // next_episode_number = o que vem a seguir
+        next_episode_number: nextEpisodeNumber,
+
+        // Mantido para compatibilidade com componentes existentes
+        current_episode: lastWatchedEpisode,
+
         total_episodes_season: cand.progress?.totalEpisodes ?? null,
         episodes_watched: cand.progress?.watchedEpisodes ?? null,
 
-        next_episode_name: isTv && cand.progress?.nextEpisode
-          ? (ep?.name ?? `Episódio ${cand.progress.nextEpisode}`)
+        next_episode_name: isTv && nextEpisodeNumber
+          ? (ep?.name ?? `Episódio ${nextEpisodeNumber}`)
           : null,
         next_episode_duration: isTv ? 45 : cand.progress?.runtimeMinutes ?? null,
         next_episode_air_date: cand.progress?.nextEpisodeAirDate ?? null,
@@ -262,6 +277,8 @@ export async function GET(request: Request) {
         watch_progress_minutes: cand.context === "resume" && !isTv ? 45 : null,
 
         streaming_platform: cand.availability?.providerName ?? null,
+        streaming_type: cand.availability?.type ?? null,
+        streaming_is_subscription: cand.availability?.type === "subscription",
         genres: cand.labels,
 
         serverEyebrow: (cand as any).serverEyebrow ?? {

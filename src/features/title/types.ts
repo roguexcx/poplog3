@@ -87,6 +87,8 @@ export type TitleUserState = {
   liked?: boolean;
   disliked?: boolean;
   isAuthenticated?: boolean;
+  /** Estado computado global — fonte de verdade para exibição de status visual. */
+  computedState?: string | null;
 };
 
 export type TitleCompany = {
@@ -152,7 +154,10 @@ export type TitleCacheInfo = {
 /** Progresso pessoal da serie para o usuario logado. */
 export type TitleSeriesProgress = {
   watchedCount: number;
+  /** Total planejado pelo TMDB — pode incluir episódios futuros. Usar airedEpisodes para progresso. */
   totalEpisodes: number | null;
+  /** Episódios que já foram ao ar — denominador correto para barra de progresso. */
+  airedEpisodes?: number;
   lastWatchedAt: string | null;
   /** Chaves "S##E##" — convenção da lib episode-progress-service. */
   watchedKeys: string[];

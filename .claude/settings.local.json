@@ -18,7 +18,10 @@
       "Bash(rm \"I:/poplog-v3/src/server/normalizers/hero-visual.normalizer.ts\")",
       "Bash(Get-ChildItem -Path \"I:\\\\poplog-v3\\\\src\\\\server\" -Directory)",
       "Bash(Select-Object -ExpandProperty Name)",
-      "Bash(npm run *)"
+      "Bash(npm run *)",
+      "Bash(cd /I/poplog-v3 && find src/app/api -type f -name \"*.ts\" | head -20)",
+      "Bash(xargs grep -l \"streaming_preferences\\\\|provider_preferences\")",
+      "Bash(cd /I/poplog-v3 && grep -r \"getUserProviderPreferences\" src --include=\"*.ts\" -l)"
     ]
   }
 }

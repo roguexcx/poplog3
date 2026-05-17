@@ -65,16 +65,19 @@ export default function TitleHero({ title, onOpenMovieSocial }: TitleHeroProps) 
   const progress = title.userSeriesProgress ?? null;
   const watchedCount = progress?.watchedCount ?? 0;
   const totalEpisodes = progress?.totalEpisodes ?? null;
+  // airedEpisodes é o denominador correto para progresso — nunca inclui episódios futuros
+  const airedEpisodes = progress?.airedEpisodes ?? totalEpisodes;
   const hasProgress = title.mediaType === "tv" && watchedCount > 0;
 
+  const computedState = title.userState?.computedState ?? null;
   const isComplete =
-    hasProgress &&
-    typeof totalEpisodes === "number" &&
-    watchedCount >= totalEpisodes;
+    computedState === "completed" ||
+    computedState === "up_to_date" ||
+    (hasProgress && typeof airedEpisodes === "number" && watchedCount >= airedEpisodes);
 
   const progressPct =
-    typeof totalEpisodes === "number" && totalEpisodes > 0
-      ? Math.min(100, Math.round((watchedCount / totalEpisodes) * 100))
+    typeof airedEpisodes === "number" && airedEpisodes > 0
+      ? Math.min(100, Math.round((watchedCount / airedEpisodes) * 100))
       : null;
 
   const nextEpUser = progress?.nextEpisode ?? null;

@@ -37,15 +37,23 @@ export type ContinuityAvailability = {
 };
 
 export type ContinuityProgress = {
+  /** Percentual de episódios assistidos sobre o total aired (nunca sobre futuros). */
   percentage: number;
 
   watchedEpisodes?: number | null;
+  /**
+   * Total de episódios que já foram ao ar (aired).
+   * Fonte de verdade para exibição de progresso na UI.
+   * Nunca inclui episódios futuros ou placeholders do TMDB.
+   */
   totalEpisodes?: number | null;
 
   currentSeason?: number | null;
+  /** Último episódio assistido (= nextEpisode - 1). */
   currentEpisode?: number | null;
 
   nextSeason?: number | null;
+  /** Próximo episódio a assistir — sempre aired, nunca futuro. */
   nextEpisode?: number | null;
   nextEpisodeAirDate?: string | null;
 

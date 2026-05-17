@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { createSupabaseServerClient } from "@/server/supabase/server";
+import { refreshAllUserTitleAvailability } from "@/server/streaming/batch-availability-refresh";
 
 type PreferencePayload = {
   providerIds?: string[];
@@ -109,6 +110,10 @@ export async function PUT(request: Request) {
       );
     }
   }
+
+  // Atualiza best_provider_* em todos os títulos ativos do usuário (fire-and-forget)
+  const safeCountry = country === "US" ? "US" : "BR";
+  refreshAllUserTitleAvailability(user.id, safeCountry).catch(console.error);
 
   return NextResponse.json({ ok: true });
 }

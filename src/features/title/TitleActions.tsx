@@ -32,6 +32,23 @@ function userStateToStatus(
 ): LibraryStatus | null {
   if (!state) return null;
 
+  // Fast path: usa computedState materializado para evitar recalcular localmente
+  switch (state.computedState) {
+    case "watched":
+    case "completed":
+      return "watched";
+    case "up_to_date":
+    case "in_progress":
+      return "watching";
+    case "watchlist":
+      return "watchlist";
+    case "abandoned":
+      return "abandoned";
+    case "fridge":
+      return "fridge";
+  }
+
+  // Fallback para usuários sem computedState ainda (pré-migração)
   if (state.watched) return "watched";
   if (state.watching) return "watching";
   if (state.inWatchlist) return "watchlist";
