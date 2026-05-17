@@ -4,7 +4,181 @@ import { getHeroCandidates } from "@/server/continuity/hero-candidates";
 import { recordHeroImpressions } from "@/server/continuity/hero-impressions";
 import { getCachedEpisode } from "@/server/cache/season-cache";
 
-export async function GET() {
+const HERO_VISIBLE_LIMIT = 5;
+const HERO_POOL_LIMIT = 14;
+
+// Cache curto para acelerar F5/reentrada sem congelar a curadoria por muito tempo.
+const HERO_CACHE_TTL_MS = 90_000;
+const HERO_CACHE_STALE_MS = 8 * 60_000;
+
+type HeroResult = Awaited<ReturnType<typeof getHeroCandidates>>;
+
+type HeroCacheEntry = {
+  result: HeroResult;
+  generatedAtMs: number;
+  refreshing?: Promise<HeroResult>;
+};
+
+const heroMemoryCache = new Map<string, HeroCacheEntry>();
+
+function getCacheKey(userId: string, region: string) {
+  return `${userId}:${region}`;
+}
+
+function isFresh(entry: HeroCacheEntry) {
+  return Date.now() - entry.generatedAtMs <= HERO_CACHE_TTL_MS;
+}
+
+function isUsableStale(entry: HeroCacheEntry) {
+  return Date.now() - entry.generatedAtMs <= HERO_CACHE_STALE_MS;
+}
+
+async function refreshHeroCache(userId: string, region: "BR" | "US", cacheKey: string) {
+  const current = heroMemoryCache.get(cacheKey);
+
+  if (current?.refreshing) {
+    return current.refreshing;
+  }
+
+  const refreshing = getHeroCandidates(userId, {
+    limit: HERO_POOL_LIMIT,
+    region,
+  })
+    .then((result) => {
+      heroMemoryCache.set(cacheKey, {
+        result,
+        generatedAtMs: Date.now(),
+      });
+
+      return result;
+    })
+    .catch((error) => {
+      if (current) {
+        heroMemoryCache.set(cacheKey, {
+          result: current.result,
+          generatedAtMs: current.generatedAtMs,
+        });
+      }
+
+      throw error;
+    });
+
+  if (current) {
+    heroMemoryCache.set(cacheKey, {
+      ...current,
+      refreshing,
+    });
+  } else {
+    heroMemoryCache.set(cacheKey, {
+      result: { candidates: [], generatedAt: new Date(0).toISOString() },
+      generatedAtMs: 0,
+      refreshing,
+    });
+  }
+
+  return refreshing;
+}
+
+async function getHeroResultFast({
+  userId,
+  region,
+  forceRefresh,
+}: {
+  userId: string;
+  region: "BR" | "US";
+  forceRefresh: boolean;
+}) {
+  const cacheKey = getCacheKey(userId, region);
+  const cached = heroMemoryCache.get(cacheKey);
+
+  if (!forceRefresh && cached && isFresh(cached)) {
+    return {
+      result: cached.result,
+      cacheStatus: "memory_hit_fresh" as const,
+    };
+  }
+
+  if (!forceRefresh && cached && isUsableStale(cached)) {
+    void refreshHeroCache(userId, region, cacheKey).catch((error) => {
+      console.error("[api/poplog3/continuity/hero] background refresh failed", error);
+    });
+
+    return {
+      result: cached.result,
+      cacheStatus: "memory_hit_stale_refreshing" as const,
+    };
+  }
+
+  const result = await refreshHeroCache(userId, region, cacheKey);
+
+  return {
+    result,
+    cacheStatus: forceRefresh ? "forced_refresh" as const : "memory_miss" as const,
+  };
+}
+
+function weightedPickFromPool<T extends { id: string; score?: number | null; mediaType?: string; context?: string }>(
+  items: T[],
+  limit: number,
+) {
+  if (items.length <= limit) return items;
+
+  const selected: T[] = [];
+  const usedIds = new Set<string>();
+  const mediaCount = new Map<string, number>();
+  const contextCount = new Map<string, number>();
+
+  const ranked = items
+    .map((item, index) => {
+      const score = Math.max(1, Number(item.score ?? 1));
+      const softenedWeight = Math.sqrt(score);
+      const randomKey = Math.random() ** (1 / softenedWeight);
+
+      return {
+        item,
+        index,
+        randomKey,
+      };
+    })
+    .sort((a, b) => b.randomKey - a.randomKey || a.index - b.index);
+
+  function canUse(item: T) {
+    const mediaType = item.mediaType ?? "unknown";
+    const context = item.context ?? "unknown";
+
+    if ((mediaCount.get(mediaType) ?? 0) >= 3) return false;
+    if (context === "new_episode" && (contextCount.get(context) ?? 0) >= 2) return false;
+
+    return true;
+  }
+
+  function push(item: T) {
+    if (selected.length >= limit || usedIds.has(item.id)) return false;
+
+    selected.push(item);
+    usedIds.add(item.id);
+    mediaCount.set(item.mediaType ?? "unknown", (mediaCount.get(item.mediaType ?? "unknown") ?? 0) + 1);
+    contextCount.set(item.context ?? "unknown", (contextCount.get(item.context ?? "unknown") ?? 0) + 1);
+
+    return true;
+  }
+
+  for (const { item } of ranked) {
+    if (canUse(item)) push(item);
+    if (selected.length >= limit) break;
+  }
+
+  if (selected.length < limit) {
+    for (const { item } of ranked) {
+      push(item);
+      if (selected.length >= limit) break;
+    }
+  }
+
+  return selected;
+}
+
+export async function GET(request: Request) {
   try {
     const user = await getCurrentUser();
 
@@ -15,33 +189,45 @@ export async function GET() {
       );
     }
 
-    const result = await getHeroCandidates(user.id, {
-      limit: 5,
-      region: "BR",
+    const url = new URL(request.url);
+    const forceRefresh = url.searchParams.get("refresh") === "1" || url.searchParams.get("force") === "1";
+    const regionParam = url.searchParams.get("region")?.toUpperCase();
+    const region: "BR" | "US" = regionParam === "US" ? "US" : "BR";
+
+    const startedAt = Date.now();
+    const { result, cacheStatus } = await getHeroResultFast({
+      userId: user.id,
+      region,
+      forceRefresh,
     });
 
-    // Fire-and-forget: analytics não bloqueia a resposta
-    if (result && result.candidates && result.candidates.length > 0) {
-      recordHeroImpressions({ userId: user.id, candidates: result.candidates }).catch(
-        (e) => console.error("[hero/impressions]", e)
-      );
+    const chosenCandidates = weightedPickFromPool(result.candidates ?? [], HERO_VISIBLE_LIMIT);
+
+    // Fire-and-forget: analytics não bloqueia a resposta.
+    if (chosenCandidates.length > 0) {
+      recordHeroImpressions({ userId: user.id, candidates: chosenCandidates }).catch((error) => {
+        console.error("[hero/impressions]", error);
+      });
     }
 
-    // Enriquece candidatos de série com nome e still em paralelo
+    // Enriquece apenas os 5 candidatos exibidos. Isso evita consultas extras no pool inteiro.
     const episodeData = await Promise.all(
-      result.candidates.map(async (cand) => {
+      chosenCandidates.map(async (cand) => {
         if (cand.mediaType !== "tv") return null;
-        const tmdbId = parseInt(cand.id.replace("tv-", ""), 10);
+
+        const tmdbId = Number.parseInt(cand.id.replace("tv-", ""), 10);
         const season = cand.progress?.nextSeason;
         const episode = cand.progress?.nextEpisode;
-        if (!tmdbId || !season || !episode) return null;
+
+        if (!Number.isFinite(tmdbId) || !season || !episode) return null;
+
         return getCachedEpisode(tmdbId, season, episode);
-      })
+      }),
     );
 
-    const mappedItems = result.candidates.map((cand, i) => {
+    const mappedItems = chosenCandidates.map((cand, index) => {
       const isTv = cand.mediaType === "tv";
-      const ep = episodeData[i];
+      const ep = episodeData[index];
 
       return {
         id: cand.id,
@@ -56,36 +242,52 @@ export async function GET() {
         status: cand.context === "watchlist" ? "watchlist" : "watching",
         score: cand.score,
         year: cand.year,
-        
+
         current_season: cand.progress?.nextSeason ?? null,
-        current_episode: cand.progress?.nextEpisode ? Math.max(cand.progress.nextEpisode - 1, 0) : null,
+        current_episode: cand.progress?.nextEpisode
+          ? Math.max(cand.progress.nextEpisode - 1, 0)
+          : null,
         total_episodes_season: cand.progress?.totalEpisodes ?? null,
         episodes_watched: cand.progress?.watchedEpisodes ?? null,
-        
+
         next_episode_name: isTv && cand.progress?.nextEpisode
           ? (ep?.name ?? `Episódio ${cand.progress.nextEpisode}`)
           : null,
         next_episode_duration: isTv ? 45 : cand.progress?.runtimeMinutes ?? null,
-        next_episode_air_date: null,
+        next_episode_air_date: cand.progress?.nextEpisodeAirDate ?? null,
         next_episode_still_path: ep?.still_path ?? null,
         new_episode_available: cand.context === "new_episode",
-        
+
         runtime: cand.progress?.runtimeMinutes ?? null,
         watch_progress_minutes: cand.context === "resume" && !isTv ? 45 : null,
-        
-        // INTEGRAÇÃO EXCLUSIVA: O nome do streaming vai apenas para o local correto
+
         streaming_platform: cand.availability?.providerName ?? null,
-        // HIGIENIZADO: Gêneros limpos passados sem carregar metadados paralelos
-        genres: cand.labels, 
-        
-        serverEyebrow: (cand as any).serverEyebrow ?? { text: cand.contextLabel, color: "#a07ee0" },
-        serverCta: (cand as any).actions?.serverCta ?? { primary: "Assistir agora", icon: "play" }
+        genres: cand.labels,
+
+        serverEyebrow: (cand as any).serverEyebrow ?? {
+          text: cand.contextLabel,
+          color: "#a07ee0",
+        },
+        serverCta: (cand as any).actions?.serverCta ?? {
+          primary: "Assistir agora",
+          icon: "play",
+        },
+        debug: {
+          ...(cand as any).debug,
+          heroRouteCache: cacheStatus,
+        },
       };
     });
 
     return NextResponse.json({
       candidates: mappedItems,
-      generatedAt: result.generatedAt
+      generatedAt: result.generatedAt,
+      cache: {
+        status: cacheStatus,
+        poolSize: result.candidates?.length ?? 0,
+        returned: mappedItems.length,
+        responseTimeMs: Date.now() - startedAt,
+      },
     });
   } catch (error) {
     console.error("[api/poplog3/continuity/hero] failed", error);

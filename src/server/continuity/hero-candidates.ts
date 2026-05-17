@@ -2,11 +2,11 @@ import { supabaseAdmin } from "@/server/supabase/admin";
 import { getUserWatchingSeries } from "@/server/episodes/episode-progress-service";
 import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
 import { normalizeProviderPreferences } from "@/server/streaming/provider-preferences";
+import { normalizeProvider } from "@/server/streaming/provider-normalization";
 import {
   normalizeAvailabilityTypeOrNull,
   resolveProviderConfidence,
 } from "@/server/streaming/availability-service";
-import { syncTmdbTitle } from "@/server/sync/sync-tmdb-title";
 import { applyHeroTemporalCooldown } from "./hero-impressions";
 
 import type {
@@ -80,6 +80,10 @@ type HeroCandidatesOptions = {
 
 const DEFAULT_LIMIT = 5;
 
+const HERO_CONTINUITY_RATIO = 0.7;
+const HERO_DISCOVERY_RATIO = 0.2;
+const HERO_SURPRISE_RATIO = 0.1;
+
 const ACTIVE_LIBRARY_STATUSES = ["watching", "watchlist", "paused"];
 const BLOCKED_LIBRARY_STATUSES = [
   "watched",
@@ -102,8 +106,70 @@ function getYear(value?: string | null): number | null {
   return Number.isFinite(year) ? year : null;
 }
 
+function randomBetween(min: number, max: number): number {
+  return min + Math.random() * (max - min);
+}
+
+function shuffleCandidates<T>(items: T[]): T[] {
+  return [...items].sort(() => Math.random() - 0.5);
+}
+
+type RecentActivityBoost = {
+  rank: 1 | 2;
+  boost: number;
+  source: "episode_progress" | "library_update";
+  activityAt: string;
+  daysSinceActivity: number | null;
+};
+
+function resolveRecentActivityBoost(
+  rank: 1 | 2,
+  activityAt: string,
+): Omit<RecentActivityBoost, "source"> {
+  const daysSinceActivity = daysSince(activityAt);
+  const baseBoost = rank === 1 ? 35 : 22;
+
+  let decayMultiplier = 1;
+  if (daysSinceActivity !== null) {
+    if (daysSinceActivity <= 2) decayMultiplier = 1;
+    else if (daysSinceActivity <= 7) decayMultiplier = 0.8;
+    else if (daysSinceActivity <= 21) decayMultiplier = 0.55;
+    else decayMultiplier = 0.25;
+  }
+
+  return {
+    rank,
+    boost: Math.round(baseBoost * decayMultiplier),
+    activityAt,
+    daysSinceActivity,
+  };
+}
+
+function isWatchlistLike(status?: string | null): boolean {
+  return status === "watchlist" || status === "paused";
+}
+
+function isContinuityContext(context: ContinuityContext): boolean {
+  return [
+    "continue",
+    "resume",
+    "finish_season",
+    "binge",
+    "new_episode",
+  ].includes(context);
+}
+
+function isDiscoveryContext(context: ContinuityContext): boolean {
+  return ["watchlist", "new_streaming", "vod", "rediscovery"].includes(context);
+}
+
 function getTitleName(title?: TitleRow | null): string | null {
-  return title?.title ?? title?.tmdb_payload?.title ?? title?.tmdb_payload?.name ?? null;
+  return (
+    title?.title ??
+    title?.tmdb_payload?.title ??
+    title?.tmdb_payload?.name ??
+    null
+  );
 }
 function getOverview(title?: TitleRow | null): string | null {
   return title?.overview ?? title?.tmdb_payload?.overview ?? null;
@@ -127,7 +193,9 @@ function getTitleStatus(title?: TitleRow | null): string | null {
   return title?.status ?? title?.tmdb_payload?.status ?? null;
 }
 function getTotalEpisodes(title?: TitleRow | null): number | null {
-  return title?.number_of_episodes ?? title?.tmdb_payload?.number_of_episodes ?? null;
+  return (
+    title?.number_of_episodes ?? title?.tmdb_payload?.number_of_episodes ?? null
+  );
 }
 
 function resolveSeriesContext(input: {
@@ -141,46 +209,36 @@ function resolveSeriesContext(input: {
 }): ContinuityContext {
   const daysFromLastWatch = daysSince(input.lastWatchedAt);
 
-  // ── new_episode ──────────────────────────────────────────────────────────────
-  // "Novo episódio" significa: o show tem episódios não assistidos já disponíveis
-  // E o usuário ainda está engajado. Dois caminhos qualificantes:
-  //
-  // Caminho A — o próximo episódio não assistido foi lançado DEPOIS que o usuário
-  //   assistiu pela última vez (sinal forte: houve lançamento real desde a última sessão)
-  //
-  // Caminho B — o usuário assistiu recentemente (≤90d) E o próximo ep é recente
-  //   (≤90d). Cobre marathons ativos onde o ep já existia antes da sessão mais recente.
-  //
-  // Ambos os caminhos exigem: usuário ainda engajado (≤120d) e backlog gerenciável (≤24).
   if (input.nextEpisodeAirDate) {
     const daysSinceNextEp = daysSince(input.nextEpisodeAirDate);
     const isAired = daysSinceNextEp !== null && daysSinceNextEp >= 0;
 
     if (isAired) {
-      const userStillEngaged = daysFromLastWatch !== null && daysFromLastWatch <= 120;
+      const userStillEngaged =
+        daysFromLastWatch !== null && daysFromLastWatch <= 120;
       const manageableBacklog =
         input.remainingEpisodes === null || input.remainingEpisodes <= 24;
 
-      // Caminho A: lançamento após última sessão (série continuou enquanto o usuário parou)
       const newSinceLastWatch =
         input.lastWatchedAt !== null &&
         new Date(input.nextEpisodeAirDate) > new Date(input.lastWatchedAt);
 
-      // Caminho B: usuário ativo recentemente com ep recente (marathon em andamento)
       const recentAndActive =
         daysFromLastWatch !== null &&
         daysFromLastWatch <= 90 &&
         daysSinceNextEp !== null &&
         daysSinceNextEp <= 90;
 
-      if (userStillEngaged && manageableBacklog && (newSinceLastWatch || recentAndActive)) {
+      if (
+        userStillEngaged &&
+        manageableBacklog &&
+        (newSinceLastWatch || recentAndActive)
+      ) {
         return "new_episode";
       }
     }
   }
 
-  // ── finish_season ────────────────────────────────────────────────────────────
-  // Poucos episódios para terminar a temporada atual (progresso global ≥ 60%).
   if (
     input.remainingEpisodes !== null &&
     input.remainingEpisodes > 0 &&
@@ -190,8 +248,6 @@ function resolveSeriesContext(input: {
     return "finish_season";
   }
 
-  // ── binge ────────────────────────────────────────────────────────────────────
-  // Usuário assistiu recentemente, backlog curto — ritmo de maratona.
   if (
     daysFromLastWatch !== null &&
     daysFromLastWatch <= 7 &&
@@ -202,18 +258,17 @@ function resolveSeriesContext(input: {
     return "binge";
   }
 
-  // ── resume ───────────────────────────────────────────────────────────────────
   if (input.libraryStatus === "paused") {
     return "resume";
   }
 
-  // ── new_streaming ────────────────────────────────────────────────────────────
-  if (input.availability?.isPreferred && input.availability.type === "subscription") {
+  if (
+    input.availability?.isPreferred &&
+    input.availability.type === "subscription"
+  ) {
     return "new_streaming";
   }
 
-  // ── rediscovery ──────────────────────────────────────────────────────────────
-  // Série pausada/esquecida, mas com backlog gerenciável — vale revisitar.
   if (
     daysFromLastWatch !== null &&
     daysFromLastWatch >= 30 &&
@@ -228,74 +283,115 @@ function resolveSeriesContext(input: {
 
 function typeScore(type: ContinuityAvailability["type"]): number {
   switch (type) {
-    case "subscription": return 800;
-    case "free": return 400;
-    case "ads": return 200;
-    case "rent": return 40;
-    case "buy": return 20;
-    default: return 0;
+    case "subscription":
+      return 800;
+    case "free":
+      return 400;
+    case "ads":
+      return 200;
+    case "rent":
+      return 40;
+    case "buy":
+      return 20;
+    default:
+      return 0;
   }
 }
 
-function confidenceScore(confidence: ContinuityAvailability["confidence"]): number {
+function confidenceScore(
+  confidence: ContinuityAvailability["confidence"],
+): number {
   switch (confidence) {
-    case "mixed_confirmed": return 90;
-    case "user_relevant_confirmed": return 85;
-    case "watchmode_confirmed": return 80;
-    case "movieofthenight_confirmed": return 75;
-    case "tmdb_only": return 10;
-    default: return 0;
+    case "mixed_confirmed":
+      return 90;
+    case "user_relevant_confirmed":
+      return 85;
+    case "watchmode_confirmed":
+      return 80;
+    case "movieofthenight_confirmed":
+      return 75;
+    case "tmdb_only":
+      return 10;
+    default:
+      return 0;
   }
 }
 
-/**
- * 🛠️ HARDCODED OVERRIDES EDITORIAIS CORRIGIDOS
- */
-const EDITORIAL_STREAMING_OVERRIDES: Record<number, { name: string; logo: string }> = {
-  245318: { name: "Apple TV+", logo: "/68nt9w3tBv68YgYw866986.jpg" }, // Margô Está em Apuros -> Força Apple TV+ Nativa
-};
+function normalizeProviderKey(value?: string | number | null): string | null {
+  if (value === null || value === undefined) return null;
+  return String(value)
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/\s+/g, " ");
+}
+
+function isVodType(type: ContinuityAvailability["type"]): boolean {
+  return type === "rent" || type === "buy";
+}
 
 function chooseBestAvailability(
   rows: AvailabilityRow[],
   favoriteProviderIds: string[],
   region: "BR" | "US",
-  tmdbId: number
+  tmdbId: number,
 ): ContinuityAvailability | null {
-  if (EDITORIAL_STREAMING_OVERRIDES[tmdbId]) {
-    return {
-      region,
-      providerName: EDITORIAL_STREAMING_OVERRIDES[tmdbId].name,
-      providerLogoPath: EDITORIAL_STREAMING_OVERRIDES[tmdbId].logo,
-      providerId: null,
-      type: "subscription",
-      confidence: "user_relevant_confirmed",
-      isPreferred: false,
-    };
-  }
 
-  const favoriteSet = new Set(favoriteProviderIds);
+  const favoriteSet = new Set(
+    favoriteProviderIds
+      .map((favorite) => normalizeProviderKey(favorite))
+      .filter((favorite): favorite is string => Boolean(favorite)),
+  );
 
   const candidates = rows
     .filter((row) => row.country === region)
     .map((row) => {
-      const providerId = typeof row.provider_id === "number" ? row.provider_id : null;
+      const providerId =
+        typeof row.provider_id === "number" ? row.provider_id : null;
       const type = normalizeAvailabilityTypeOrNull(row.availability_type);
       const confidence = resolveProviderConfidence(row.source);
-      const isPreferred = row.provider_name !== null && favoriteSet.has(row.provider_name);
 
-      let nativeBonus = 0;
-      if (row.provider_name?.toLowerCase().includes("apple") && type === "subscription") {
-        nativeBonus = 2000;
-      }
+      const providerIdKey = normalizeProviderKey(providerId);
+      const providerNameKey = normalizeProviderKey(row.provider_name);
 
-      const score = typeScore(type) + confidenceScore(confidence) + nativeBonus + (isPreferred ? 8000 : 0);
+      const isPreferred = Boolean(
+        (providerIdKey && favoriteSet.has(providerIdKey)) ||
+        (providerNameKey && favoriteSet.has(providerNameKey)),
+      );
+
+      let providerPreferenceScore = 0;
+      if (isPreferred && type === "subscription")
+        providerPreferenceScore = 100_000;
+      else if (isPreferred && !isVodType(type))
+        providerPreferenceScore = 80_000;
+      else if (type === "subscription") providerPreferenceScore = 40_000;
+      else if (type === "free" || type === "ads")
+        providerPreferenceScore = 10_000;
+      else if (isPreferred && isVodType(type)) providerPreferenceScore = 1_000;
+
+      const score =
+        providerPreferenceScore + typeScore(type) + confidenceScore(confidence);
+
+      const normalizedProvider = normalizeProvider(
+        row.provider_name,
+        row.provider_logo_path ?? row.logo_path ?? null,
+      );
+
+      const providerName = normalizedProvider?.name ?? row.provider_name ?? null;
+
+      const providerLogoPath =
+        normalizedProvider?.logoPath ??
+        row.provider_logo_path ??
+        row.logo_path ??
+        null;
 
       return {
         score,
         availability: {
           region,
-          providerName: row.provider_name,
-          providerLogoPath: row.provider_logo_path ?? row.logo_path ?? null,
+          providerName,
+          providerLogoPath,
           providerId,
           type,
           confidence,
@@ -316,31 +412,43 @@ function buildContextLabel(input: {
 }): string {
   const remaining = input.remainingEpisodes;
 
-  // Guarda para backlog muito longo — mas não sobrescreve new_episode, que tem
-  // sua própria mensagem independente da quantidade de eps restantes.
   if (remaining !== null && remaining > 15 && input.context !== "new_episode") {
     return "Continuar assistindo";
   }
 
   switch (input.context) {
-    case "new_episode": return "Novo episódio disponível";
+    case "new_episode":
+      return "Novo episódio disponível";
     case "finish_season":
       if (remaining === 1) return "Último episódio da temporada";
       if (remaining === 2) return "Faltam apenas 2 episódios";
       if (remaining === 3) return "Faltam apenas 3 episódios";
       return "Boa para terminar hoje";
-    case "resume": return "Perfeito para continuar agora";
-    case "new_streaming": 
-      return input.availability?.providerName 
-        ? `Disponível na ${input.availability.providerName}` 
+    case "resume":
+      return "Perfeito para continuar agora";
+    case "new_streaming":
+      if (input.availability?.isPreferred && input.availability.providerName) {
+        return `No seu streaming favorito: ${input.availability.providerName}`;
+      }
+      return input.availability?.providerName
+        ? `Disponível na ${input.availability.providerName}`
         : "Chegou no streaming";
-    case "vod": return "Disponível em VOD";
-    case "watchlist": return "Salvo na sua Watchlist";
-    case "binge": return "Maratona recomendada";
-    case "rediscovery": return "Vale a pena revisitar";
+    case "vod":
+      return "Disponíael em VOD";
+    case "watchlist":
+      return "Salvo na sua Watchlist";
+    case "binge":
+      return "Maratona recomendada";
+    case "rediscovery":
+      return "Vale a pena revisitar";
     case "continue":
     default:
-      if (input.progressPercentage >= 90 && remaining !== null && remaining <= 2) return "Você já está quase em dia";
+      if (
+        input.progressPercentage >= 90 &&
+        remaining !== null &&
+        remaining <= 2
+      )
+        return "Você já está quase em dia";
       return "Continuar assistindo";
   }
 }
@@ -367,12 +475,12 @@ function buildSeriesScore(input: {
   if (input.lastWatchedAt) {
     const days = daysSince(input.lastWatchedAt);
     if (days !== null) {
-      if (days <= 2)  scoreBreakdown.recentActivity = 90;
-      else if (days <= 7)  scoreBreakdown.recentActivity = 60;
+      if (days <= 2) scoreBreakdown.recentActivity = 90;
+      else if (days <= 7) scoreBreakdown.recentActivity = 60;
       else if (days <= 21) scoreBreakdown.recentActivity = 30;
       else if (days <= 45) scoreBreakdown.recentActivity = 10;
       else if (days <= 90) scoreBreakdown.oldActivityPenalty = -20;
-      else                 scoreBreakdown.oldActivityPenalty = -45;
+      else scoreBreakdown.oldActivityPenalty = -45;
     }
   }
 
@@ -387,11 +495,17 @@ function buildSeriesScore(input: {
   }
 
   if (input.libraryStatus === "paused") {
-    scoreBreakdown.pausedPenalty = -30;
+    scoreBreakdown.pausedPenalty = -20;
+  }
+
+  if (input.libraryStatus === "watchlist" && input.watchedCount === 0) {
+    scoreBreakdown.unstartedSeriesDiscovery = 65;
   }
 
   const remaining = input.remainingEpisodes;
-  const isRecent = input.releaseDate ? (getYear(input.releaseDate) ?? 0) >= 2025 : false;
+  const isRecent = input.releaseDate
+    ? (getYear(input.releaseDate) ?? 0) >= 2025
+    : false;
 
   if (remaining === null) {
     scoreBreakdown.undefinedTotalPenalty = -25;
@@ -422,20 +536,40 @@ function buildSeriesScore(input: {
   }
 
   switch (input.context) {
-    case "new_episode": scoreBreakdown.contextNewEpisode = 130; break;
-    case "finish_season": scoreBreakdown.contextFinishSeason = 95; break;
-    case "binge": scoreBreakdown.contextBinge = 60; break;
-    case "new_streaming": scoreBreakdown.contextNewStreaming = 85; break;
-    case "resume": scoreBreakdown.contextResume = 50; break;
-    case "rediscovery": scoreBreakdown.contextRediscovery = 40; break;
-    default: scoreBreakdown.contextContinue = 20; break;
+    case "new_episode":
+      scoreBreakdown.contextNewEpisode = 85;
+      break;
+    case "finish_season":
+      scoreBreakdown.contextFinishSeason = 95;
+      break;
+    case "binge":
+      scoreBreakdown.contextBinge = 60;
+      break;
+    case "new_streaming":
+      scoreBreakdown.contextNewStreaming = 85;
+      break;
+    case "resume":
+      scoreBreakdown.contextResume = 50;
+      break;
+    case "rediscovery":
+      scoreBreakdown.contextRediscovery = 40;
+      break;
+    default:
+      scoreBreakdown.contextContinue = 20;
+      break;
   }
 
-  if (input.libraryStatus && BLOCKED_LIBRARY_STATUSES.includes(input.libraryStatus)) {
+  if (
+    input.libraryStatus &&
+    BLOCKED_LIBRARY_STATUSES.includes(input.libraryStatus)
+  ) {
     scoreBreakdown.blockedPenalty = -9999;
   }
 
-  const total = Object.values(scoreBreakdown).reduce((sum, value) => sum + value, 0);
+  const total = Object.values(scoreBreakdown).reduce(
+    (sum, value) => sum + value,
+    0,
+  );
   return { score: total, scoreBreakdown };
 }
 
@@ -454,7 +588,15 @@ function buildMovieScore(input: {
     scoreBreakdown.watching = 90;
   }
   if (input.libraryStatus === "watchlist") {
-    scoreBreakdown.watchlist = 40;
+    scoreBreakdown.watchlist = 50;
+
+    const addedAge = daysSince(input.createdAt);
+    if (addedAge !== null && addedAge >= 30) {
+      scoreBreakdown.forgottenWatchlist = Math.min(
+        70,
+        25 + Math.floor(addedAge / 14) * 5,
+      );
+    }
   }
 
   if (input.releaseDate) {
@@ -468,12 +610,16 @@ function buildMovieScore(input: {
   const hasRegionalAvailability = Boolean(input.availability);
 
   if (releaseAge !== null && releaseAge >= 0 && !hasRegionalAvailability) {
-    scoreBreakdown.theaterExclusivePenalty = -150; 
+    scoreBreakdown.theaterExclusivePenalty = -150;
     const addedAge = daysSince(input.createdAt);
     if (addedAge !== null && addedAge <= 3) {
       scoreBreakdown.freshTheaterCuriosity = 15;
     }
-  } else if (releaseAge !== null && releaseAge >= 0 && hasRegionalAvailability) {
+  } else if (
+    releaseAge !== null &&
+    releaseAge >= 0 &&
+    hasRegionalAvailability
+  ) {
     if (releaseAge <= 30) scoreBreakdown.hotRelease = 100;
     else if (releaseAge <= 90) scoreBreakdown.recentRelease = 60;
     else if (releaseAge <= 180) scoreBreakdown.midRelease = 25;
@@ -493,7 +639,10 @@ function buildMovieScore(input: {
     scoreBreakdown.favoriteProvider = 95;
   } else if (input.availability?.type === "subscription") {
     scoreBreakdown.streaming = 55;
-  } else if (input.availability?.type === "rent" || input.availability?.type === "buy") {
+  } else if (
+    input.availability?.type === "rent" ||
+    input.availability?.type === "buy"
+  ) {
     scoreBreakdown.vod = 30;
   }
 
@@ -501,34 +650,157 @@ function buildMovieScore(input: {
     scoreBreakdown.shortMovie = 20;
   }
 
-  if (input.libraryStatus && BLOCKED_LIBRARY_STATUSES.includes(input.libraryStatus)) {
+  if (
+    input.libraryStatus &&
+    BLOCKED_LIBRARY_STATUSES.includes(input.libraryStatus)
+  ) {
     scoreBreakdown.blockedPenalty = -9999;
   }
 
-  const total = Object.values(scoreBreakdown).reduce((sum, value) => sum + value, 0);
+  const total = Object.values(scoreBreakdown).reduce(
+    (sum, value) => sum + value,
+    0,
+  );
   return { score: total, scoreBreakdown };
 }
 
-function pickBalancedCandidates(candidates: HeroCandidate[], limit: number): HeroCandidate[] {
+function pickWeightedRandom(
+  candidates: HeroCandidate[],
+  usedIds: Set<string>,
+  options: { preferLowerScore?: boolean } = {},
+): HeroCandidate | null {
+  const available = candidates.filter(
+    (candidate) => !usedIds.has(candidate.id),
+  );
+  if (available.length === 0) return null;
+
+  const pool = shuffleCandidates(available).slice(
+    0,
+    Math.min(12, available.length),
+  );
+  const minScore = Math.min(...pool.map((candidate) => candidate.score));
+  const maxScore = Math.max(...pool.map((candidate) => candidate.score));
+
+  const weighted = pool.map((candidate) => {
+    const normalized =
+      maxScore === minScore
+        ? 1
+        : (candidate.score - minScore) / Math.max(maxScore - minScore, 1);
+
+    const scoreWeight = options.preferLowerScore
+      ? 1.2 - normalized
+      : 0.35 + normalized;
+
+    const watchlistSurpriseBoost =
+      candidate.context === "watchlist" ||
+      candidate.debug?.slotBucket === "surprise"
+        ? 0.55
+        : 0;
+
+    return {
+      candidate,
+      weight: Math.max(
+        0.1,
+        scoreWeight + watchlistSurpriseBoost + randomBetween(0, 0.45),
+      ),
+    };
+  });
+
+  const totalWeight = weighted.reduce((sum, item) => sum + item.weight, 0);
+  let cursor = Math.random() * totalWeight;
+
+  for (const item of weighted) {
+    cursor -= item.weight;
+    if (cursor <= 0) return item.candidate;
+  }
+
+  return weighted[0]?.candidate ?? null;
+}
+
+function classifyHeroBucket(
+  candidate: HeroCandidate,
+): "continuity" | "discovery" | "surprise" {
+  if (candidate.debug?.slotBucket === "surprise") return "surprise";
+  if (
+    isContinuityContext(candidate.context) &&
+    candidate.progress?.watchedEpisodes
+  )
+    return "continuity";
+  if (isDiscoveryContext(candidate.context)) return "discovery";
+  return candidate.mediaType === "movie" ? "discovery" : "continuity";
+}
+
+function pickBalancedCandidates(
+  candidates: HeroCandidate[],
+  limit: number,
+): HeroCandidate[] {
   const sorted = [...candidates].sort((a, b) => b.score - a.score);
-  const series = sorted.filter((c) => c.mediaType === "tv");
-  const movies = sorted.filter((c) => c.mediaType === "movie");
-
+  const usedIds = new Set<string>();
   const picked: HeroCandidate[] = [];
-  const pickedIds = new Set<string>();
 
-  function add(candidate?: HeroCandidate) {
-    if (!candidate || pickedIds.has(candidate.id)) return;
-    pickedIds.add(candidate.id);
+  const continuity = sorted.filter(
+    (candidate) => classifyHeroBucket(candidate) === "continuity",
+  );
+  const discovery = sorted.filter(
+    (candidate) => classifyHeroBucket(candidate) === "discovery",
+  );
+  const surprise = sorted.filter(
+    (candidate) => classifyHeroBucket(candidate) === "surprise",
+  );
+
+  const targetContinuity = Math.max(
+    1,
+    Math.round(limit * HERO_CONTINUITY_RATIO),
+  );
+  const targetDiscovery = Math.max(1, Math.round(limit * HERO_DISCOVERY_RATIO));
+  const targetSurprise =
+    limit >= 5 ? Math.max(1, Math.round(limit * HERO_SURPRISE_RATIO)) : 0;
+
+  function add(candidate: HeroCandidate | null) {
+    if (!candidate || usedIds.has(candidate.id) || picked.length >= limit)
+      return;
+    usedIds.add(candidate.id);
     picked.push(candidate);
   }
 
-  add(series[0]);
-  add(movies[0]);
-  add(series[1]);
-  add(movies[1]);
+  add(pickWeightedRandom(continuity, usedIds));
+  add(pickWeightedRandom(continuity, usedIds));
+  add(pickWeightedRandom(sorted, usedIds));
+  add(pickWeightedRandom(discovery, usedIds));
+  add(
+    pickWeightedRandom(surprise.length > 0 ? surprise : discovery, usedIds, {
+      preferLowerScore: true,
+    }),
+  );
 
-  for (const candidate of sorted) {
+  while (
+    picked.filter((candidate) => classifyHeroBucket(candidate) === "continuity")
+      .length < targetContinuity
+  ) {
+    const before = picked.length;
+    add(pickWeightedRandom(continuity, usedIds));
+    if (picked.length === before) break;
+  }
+
+  while (
+    picked.filter((candidate) => classifyHeroBucket(candidate) === "discovery")
+      .length < targetDiscovery
+  ) {
+    const before = picked.length;
+    add(pickWeightedRandom(discovery, usedIds));
+    if (picked.length === before) break;
+  }
+
+  while (
+    picked.filter((candidate) => classifyHeroBucket(candidate) === "surprise")
+      .length < targetSurprise
+  ) {
+    const before = picked.length;
+    add(pickWeightedRandom(surprise, usedIds, { preferLowerScore: true }));
+    if (picked.length === before) break;
+  }
+
+  for (const candidate of shuffleCandidates(sorted)) {
     if (picked.length >= limit) break;
     add(candidate);
   }
@@ -536,21 +808,41 @@ function pickBalancedCandidates(candidates: HeroCandidate[], limit: number): Her
   return picked;
 }
 
-function applyHeroFreshnessAndRotation(candidates: HeroCandidate[]): HeroCandidate[] {
-  const dayOfYear = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) / 86_400_000);
+function applyHeroFreshnessAndRotation(
+  candidates: HeroCandidate[],
+): HeroCandidate[] {
+  const dayOfYear = Math.floor(
+    (Date.now() - new Date(new Date().getFullYear(), 0, 0).getTime()) /
+      86_400_000,
+  );
 
   return candidates.map((candidate) => {
     const stableSeed = (candidate.tmdbId + dayOfYear) % 5;
-    const rotationBonus = stableSeed * 6;
+    const rotationBonus = stableSeed * 5;
+    const requestJitter = randomBetween(0, 45);
 
     let stagnationPenalty = 0;
     const daysSinceInteraction = daysSince(candidate.progress?.lastWatchedAt);
-    
-    if (daysSinceInteraction !== null && daysSinceInteraction > 10) {
-      stagnationPenalty = Math.min(daysSinceInteraction * 1.5, 35);
+
+    if (
+      daysSinceInteraction !== null &&
+      daysSinceInteraction > 21 &&
+      candidate.context !== "watchlist"
+    ) {
+      stagnationPenalty = Math.min(daysSinceInteraction * 1.1, 35);
     }
 
-    const newScore = candidate.score + rotationBonus - stagnationPenalty;
+    const newEpisodeSoftCap = candidate.context === "new_episode" ? -20 : 0;
+    const surpriseBoost =
+      candidate.debug?.slotBucket === "surprise" ? randomBetween(15, 55) : 0;
+
+    const newScore =
+      candidate.score +
+      rotationBonus +
+      requestJitter +
+      surpriseBoost +
+      newEpisodeSoftCap -
+      stagnationPenalty;
 
     return {
       ...candidate,
@@ -558,6 +850,9 @@ function applyHeroFreshnessAndRotation(candidates: HeroCandidate[]): HeroCandida
       debug: {
         ...candidate.debug,
         rotationBonus,
+        requestJitter,
+        surpriseBoost,
+        newEpisodeSoftCap,
         stagnationPenalty,
         originalScore: candidate.score,
       },
@@ -565,13 +860,17 @@ function applyHeroFreshnessAndRotation(candidates: HeroCandidate[]): HeroCandida
   });
 }
 
-function applyHeroDiversity(candidates: HeroCandidate[], limit: number): HeroCandidate[] {
+function applyHeroDiversity(
+  candidates: HeroCandidate[],
+  limit: number,
+): HeroCandidate[] {
   const picked: HeroCandidate[] = [];
-  
+
   const contextCount = new Map<string, number>();
   const providerCount = new Map<string, number>();
   const titleIds = new Set<number>();
   const contextHistory: string[] = [];
+  const mediaTypeCount = new Map<MediaType, number>();
 
   const sorted = [...candidates]
     .sort((a, b) => b.score - a.score)
@@ -589,10 +888,11 @@ function applyHeroDiversity(candidates: HeroCandidate[], limit: number): HeroCan
 
       const lastContext = contextHistory.at(-1);
       if (lastContext && lastContext === candidate.context) {
-        diversityPenalty += 50; 
+        diversityPenalty += 50;
       }
 
-      if (provider) providerCount.set(provider, (providerCount.get(provider) ?? 0) + 1);
+      if (provider)
+        providerCount.set(provider, (providerCount.get(provider) ?? 0) + 1);
       contextCount.set(candidate.context, contextUses + 1);
       contextHistory.push(candidate.context);
 
@@ -617,14 +917,26 @@ function applyHeroDiversity(candidates: HeroCandidate[], limit: number): HeroCan
 
     const currentContextCount = contextCount.get(candidate.context) ?? 0;
     if (currentContextCount >= 2) continue;
+    if (
+      candidate.context === "new_episode" &&
+      currentContextCount >= 1 &&
+      picked.length < limit - 1
+    )
+      continue;
 
-    const provider = providerCount.get(candidate.availability?.providerName ?? "") ?? 0;
+    const currentMediaCount = mediaTypeCount.get(candidate.mediaType) ?? 0;
+    const maxPerMediaType = limit >= 5 ? 3 : limit;
+    if (currentMediaCount >= maxPerMediaType) continue;
+
+    const provider =
+      providerCount.get(candidate.availability?.providerName ?? "") ?? 0;
     if (candidate.availability?.providerName && provider >= 2) continue;
 
     picked.push(candidate);
     titleIds.add(candidate.tmdbId);
 
     contextCount.set(candidate.context, currentContextCount + 1);
+    mediaTypeCount.set(candidate.mediaType, currentMediaCount + 1);
     if (candidate.availability?.providerName) {
       providerCount.set(candidate.availability.providerName, provider + 1);
     }
@@ -640,7 +952,11 @@ function applyHeroDiversity(candidates: HeroCandidate[], limit: number): HeroCan
     } else if (candidate.context === "new_episode") {
       primaryActionText = "Ver novo episódio";
       primaryActionIcon = "sparkles";
-    } else if (candidate.context === "resume" || candidate.context === "continue" || candidate.context === "binge") {
+    } else if (
+      candidate.context === "resume" ||
+      candidate.context === "continue" ||
+      candidate.context === "binge"
+    ) {
       primaryActionText = "Continuar assistindo";
       primaryActionIcon = "play";
     }
@@ -653,8 +969,8 @@ function applyHeroDiversity(candidates: HeroCandidate[], limit: number): HeroCan
         secondary: "open_title",
         serverCta: {
           primary: primaryActionText,
-          icon: primaryActionIcon
-        }
+          icon: primaryActionIcon,
+        },
       },
       debug: {
         ...candidate.debug,
@@ -682,7 +998,10 @@ async function getAvailabilityMap(input: {
     .in("tmdb_id", input.tmdbIds);
 
   if (error) {
-    console.error("[continuity/hero-candidates] availability query failed", error);
+    console.error(
+      "[continuity/hero-candidates] availability query failed",
+      error,
+    );
     return map;
   }
 
@@ -700,7 +1019,7 @@ async function getAvailabilityMap(input: {
         grouped.get(tmdbId) ?? [],
         input.favoriteProviderIds,
         input.region,
-        tmdbId
+        tmdbId,
       ),
     );
   }
@@ -736,11 +1055,11 @@ async function getTitleMap(mediaType: MediaType, tmdbIds: number[]) {
     return map;
   }
 
- for (const row of ((data ?? []) as unknown as TitleRow[])) {
-  if (row.media_type === mediaType || !map.has(row.tmdb_id)) {
-    map.set(row.tmdb_id, { ...row, status: null });
+  for (const row of (data ?? []) as unknown as TitleRow[]) {
+    if (row.media_type === mediaType || !map.has(row.tmdb_id)) {
+      map.set(row.tmdb_id, { ...row, status: null });
+    }
   }
-}
 
   return map;
 }
@@ -748,7 +1067,9 @@ async function getTitleMap(mediaType: MediaType, tmdbIds: number[]) {
 async function getMovieUserTitles(userId: string, limit: number) {
   const { data, error } = await supabaseAdmin
     .from("poplog3_user_titles")
-    .select("tmdb_id, media_type, status, favorite, liked, created_at, updated_at")
+    .select(
+      "tmdb_id, media_type, status, favorite, liked, created_at, updated_at",
+    )
     .eq("user_id", userId)
     .eq("media_type", "movie")
     .in("status", ACTIVE_LIBRARY_STATUSES)
@@ -757,6 +1078,28 @@ async function getMovieUserTitles(userId: string, limit: number) {
 
   if (error) {
     console.error("[continuity/hero-candidates] movies query failed", error);
+    return [];
+  }
+  return (data ?? []) as UserTitleRow[];
+}
+
+async function getTvUserTitles(userId: string, limit: number) {
+  const { data, error } = await supabaseAdmin
+    .from("poplog3_user_titles")
+    .select(
+      "tmdb_id, media_type, status, favorite, liked, created_at, updated_at",
+    )
+    .eq("user_id", userId)
+    .eq("media_type", "tv")
+    .in("status", ACTIVE_LIBRARY_STATUSES)
+    .order("updated_at", { ascending: false })
+    .limit(limit);
+
+  if (error) {
+    console.error(
+      "[continuity/hero-candidates] tv user titles query failed",
+      error,
+    );
     return [];
   }
   return (data ?? []) as UserTitleRow[];
@@ -773,12 +1116,78 @@ export async function getHeroCandidates(
   );
   const region = options.region ?? preferences.region;
 
-  const [watchingSeries, movieUserTitles] = await Promise.all([
+  const [watchingSeries, movieUserTitles, tvUserTitles] = await Promise.all([
     getUserWatchingSeries(userId, 30),
-    getMovieUserTitles(userId, 50),
+    getMovieUserTitles(userId, 60),
+    getTvUserTitles(userId, 60),
   ]);
 
-  const seriesIds = watchingSeries.map((series) => series.seriesTmdbId);
+  const latestActivityByTitle = new Map<
+    string,
+    { activityAt: string; source: "episode_progress" | "library_update" }
+  >();
+
+  function registerActivity(
+    key: string,
+    activityAt: string | null | undefined,
+    source: "episode_progress" | "library_update",
+  ) {
+    if (!activityAt) return;
+
+    const timestamp = new Date(activityAt).getTime();
+    if (!Number.isFinite(timestamp)) return;
+
+    const current = latestActivityByTitle.get(key);
+    if (!current || timestamp > new Date(current.activityAt).getTime()) {
+      latestActivityByTitle.set(key, { activityAt, source });
+    }
+  }
+
+  for (const series of watchingSeries) {
+    registerActivity(
+      `tv-${series.seriesTmdbId}`,
+      series.lastWatchedAt,
+      "episode_progress",
+    );
+  }
+
+  for (const title of movieUserTitles) {
+    registerActivity(
+      `movie-${title.tmdb_id}`,
+      title.updated_at,
+      "library_update",
+    );
+  }
+
+  for (const title of tvUserTitles) {
+    registerActivity(`tv-${title.tmdb_id}`, title.updated_at, "library_update");
+  }
+
+  const recentActivityBoostMap = new Map<string, RecentActivityBoost>();
+
+  Array.from(latestActivityByTitle.entries())
+    .sort(
+      ([, a], [, b]) =>
+        new Date(b.activityAt).getTime() - new Date(a.activityAt).getTime(),
+    )
+    .slice(0, 2)
+    .forEach(([key, activity], index) => {
+      const rank = (index + 1) as 1 | 2;
+      recentActivityBoostMap.set(key, {
+        ...resolveRecentActivityBoost(rank, activity.activityAt),
+        source: activity.source,
+      });
+    });
+
+  const watchingSeriesIds = new Set(
+    watchingSeries.map((series) => series.seriesTmdbId),
+  );
+  const seriesIds = Array.from(
+    new Set([
+      ...watchingSeries.map((series) => series.seriesTmdbId),
+      ...tvUserTitles.map((series) => series.tmdb_id),
+    ]),
+  );
   const movieIds = movieUserTitles.map((movie) => movie.tmdb_id);
 
   const [
@@ -803,36 +1212,24 @@ export async function getHeroCandidates(
     getTitleMap("movie", movieIds),
   ]);
 
-  const missingSeriesIds = seriesIds.filter((id) => !seriesTitleMap.has(id));
-  if (missingSeriesIds.length > 0) {
-    console.log("[continuity/hero-candidates] syncing missing series", missingSeriesIds);
-    await Promise.allSettled(
-      missingSeriesIds.map((id) =>
-        syncTmdbTitle("tv", id).catch((error) => {
-          console.error("[continuity/hero-candidates] failed syncing series", id, error);
-          return null;
-        }),
-      ),
-    );
-
-    const refreshedSeriesTitleMap = await getTitleMap("tv", missingSeriesIds);
-    for (const [id, title] of refreshedSeriesTitleMap.entries()) {
-      seriesTitleMap.set(id, title);
-    }
-  }
-
   const seriesCandidates: HeroCandidate[] = watchingSeries
     .map((series) => {
       const title = seriesTitleMap.get(series.seriesTmdbId);
-      const availability = seriesAvailabilityMap.get(series.seriesTmdbId) ?? null;
+      const availability =
+        seriesAvailabilityMap.get(series.seriesTmdbId) ?? null;
 
-      const totalEpisodes = series.totalEpisodes ?? getTotalEpisodes(title) ?? null;
+      const totalEpisodes =
+        series.totalEpisodes ?? getTotalEpisodes(title) ?? null;
       const watchedEpisodes = series.watchedCount;
-      const remainingEpisodes = typeof totalEpisodes === "number" ? Math.max(totalEpisodes - watchedEpisodes, 0) : null;
+      const remainingEpisodes =
+        typeof totalEpisodes === "number"
+          ? Math.max(totalEpisodes - watchedEpisodes, 0)
+          : null;
 
-      const percentage = totalEpisodes && totalEpisodes > 0
-        ? Math.min(Math.round((watchedEpisodes / totalEpisodes) * 100), 100)
-        : 0;
+      const percentage =
+        totalEpisodes && totalEpisodes > 0
+          ? Math.min(Math.round((watchedEpisodes / totalEpisodes) * 100), 100)
+          : 0;
 
       const context = resolveSeriesContext({
         progressPercentage: percentage,
@@ -856,8 +1253,18 @@ export async function getHeroCandidates(
         releaseDate: getFirstAirDate(title),
       });
 
-      const contextLabel = buildContextLabel({ context, remainingEpisodes, progressPercentage: percentage, availability });
-      const genreLabels = (title?.tmdb_payload?.genres ?? []).slice(0, 2).map(g => g.name);
+      const recentActivityBoost =
+        recentActivityBoostMap.get(`tv-${series.seriesTmdbId}`) ?? null;
+
+      const contextLabel = buildContextLabel({
+        context,
+        remainingEpisodes,
+        progressPercentage: percentage,
+        availability,
+      });
+      const genreLabels = (title?.tmdb_payload?.genres ?? [])
+        .slice(0, 2)
+        .map((g) => g.name);
 
       const eyebrowColorMap = {
         new_episode: "#f43f5e",
@@ -868,19 +1275,22 @@ export async function getHeroCandidates(
         continue: "#6366f1",
         rediscovery: "#9ca3af",
         watchlist: "#14b8a6",
-        vod: "#10b981"
+        vod: "#10b981",
       };
 
       return {
         id: "tv-" + series.seriesTmdbId,
         tmdbId: series.seriesTmdbId,
         mediaType: "tv",
-        title: getTitleName(title) ?? series.title ?? `Série #${series.seriesTmdbId}`,
+        title:
+          getTitleName(title) ??
+          series.title ??
+          `Série #${series.seriesTmdbId}`,
         overview: getOverview(title),
         year: getYear(getFirstAirDate(title)),
         posterPath: series.posterPath ?? getPosterPath(title),
         backdropPath: series.backdropPath ?? getBackdropPath(title),
-        score,
+        score: score + (recentActivityBoost?.boost ?? 0),
         priority: 999,
         context,
         contextLabel,
@@ -890,8 +1300,12 @@ export async function getHeroCandidates(
           percentage,
           watchedEpisodes,
           totalEpisodes,
-          currentSeason: series.nextEpisode?.seasonNumber ? series.nextEpisode.seasonNumber : null,
-          currentEpisode: series.nextEpisode?.episodeNumber ? Math.max(series.nextEpisode.episodeNumber - 1, 0) : null,
+          currentSeason: series.nextEpisode?.seasonNumber
+            ? series.nextEpisode.seasonNumber
+            : null,
+          currentEpisode: series.nextEpisode?.episodeNumber
+            ? Math.max(series.nextEpisode.episodeNumber - 1, 0)
+            : null,
           nextSeason: series.nextEpisode?.seasonNumber ?? null,
           nextEpisode: series.nextEpisode?.episodeNumber ?? null,
           nextEpisodeAirDate: series.nextEpisode?.airDate ?? null,
@@ -901,22 +1315,141 @@ export async function getHeroCandidates(
         },
         availability,
         actions: {
-          primary: context === "finish_season" ? "finish_season" : context === "resume" ? "resume" : "continue",
+          primary:
+            context === "finish_season"
+              ? "finish_season"
+              : context === "resume"
+                ? "resume"
+                : "continue",
           secondary: "open_title",
         },
         serverEyebrow: {
           text: contextLabel.toUpperCase(),
-          color: eyebrowColorMap[context] ?? "#6366f1"
+          color: eyebrowColorMap[context] ?? "#6366f1",
         },
         debug: {
           source: "poplog3_user_episodes",
           titleFoundInCache: Boolean(title),
           hydratedFromPayload: Boolean(title?.tmdb_payload),
+          recentActivityBoost,
           scoreBreakdown,
         },
       } satisfies HeroCandidate;
     })
     .filter((candidate) => candidate.score > 0);
+
+  const unstartedSeriesCandidates: HeroCandidate[] = tvUserTitles
+    .filter((userTitle) => !watchingSeriesIds.has(userTitle.tmdb_id))
+    .map((userTitle) => {
+      const title = seriesTitleMap.get(userTitle.tmdb_id);
+      if (!title) return null;
+
+      const availability = seriesAvailabilityMap.get(userTitle.tmdb_id) ?? null;
+      const firstAirDate = getFirstAirDate(title);
+      const firstAirAge = daysSince(firstAirDate);
+
+      let context: ContinuityContext = "watchlist";
+      if (userTitle.status === "paused") {
+        context = "rediscovery";
+      } else if (
+        availability?.isPreferred ||
+        availability?.type === "subscription"
+      ) {
+        context = "new_streaming";
+      }
+
+      if (firstAirAge !== null && firstAirAge <= 120 && availability) {
+        context = "new_streaming";
+      }
+
+      const { score, scoreBreakdown } = buildSeriesScore({
+        context,
+        progressPercentage: 0,
+        watchedCount: 0,
+        totalEpisodes: getTotalEpisodes(title),
+        remainingEpisodes: getTotalEpisodes(title),
+        lastWatchedAt: userTitle.updated_at,
+        mediaStatus: getTitleStatus(title),
+        libraryStatus: userTitle.status,
+        availability,
+        releaseDate: firstAirDate,
+      });
+
+      const addedAge = daysSince(userTitle.created_at);
+      const surpriseScore =
+        addedAge !== null && addedAge >= 30
+          ? Math.min(80, 25 + Math.floor(addedAge / 14) * 5)
+          : 0;
+      const recentActivityBoost =
+        recentActivityBoostMap.get(`tv-${userTitle.tmdb_id}`) ?? null;
+      const finalScore =
+        score + surpriseScore + (recentActivityBoost?.boost ?? 0);
+
+      const contextLabel =
+        context === "watchlist"
+          ? "Série salva para começar"
+          : buildContextLabel({
+              context,
+              remainingEpisodes: null,
+              progressPercentage: 0,
+              availability,
+            });
+      const genreLabels = (title?.tmdb_payload?.genres ?? [])
+        .slice(0, 2)
+        .map((g) => g.name);
+
+      const eyebrowColorMap = {
+        new_streaming: "#06b6d4",
+        rediscovery: "#9ca3af",
+        watchlist: "#14b8a6",
+      };
+
+      return {
+        id: "tv-" + userTitle.tmdb_id,
+        tmdbId: userTitle.tmdb_id,
+        mediaType: "tv",
+        title: getTitleName(title) ?? `Série #${userTitle.tmdb_id}`,
+        overview: getOverview(title),
+        year: getYear(firstAirDate),
+        posterPath: getPosterPath(title),
+        backdropPath: getBackdropPath(title),
+        score: finalScore,
+        priority: 999,
+        context,
+        contextLabel,
+        reason: contextLabel,
+        labels: genreLabels.length > 0 ? genreLabels : ["Série"],
+        progress: {
+          percentage: 0,
+          watchedEpisodes: 0,
+          totalEpisodes: getTotalEpisodes(title),
+          runtimeMinutes: null,
+          remainingMinutes: null,
+          lastWatchedAt: userTitle.updated_at,
+        },
+        availability,
+        actions: {
+          primary: context === "new_streaming" ? "watch_now" : "open_title",
+          secondary: "open_title",
+        },
+        serverEyebrow: {
+          text: contextLabel.toUpperCase(),
+          color:
+            eyebrowColorMap[context as keyof typeof eyebrowColorMap] ??
+            "#14b8a6",
+        },
+        debug: {
+          source: "poplog3_user_titles_tv_unstarted",
+          hydratedFromPayload: Boolean(title.tmdb_payload),
+          slotBucket: surpriseScore > 0 ? "surprise" : "discovery",
+          surpriseScore,
+          recentActivityBoost,
+          scoreBreakdown,
+        },
+      } satisfies HeroCandidate;
+    })
+    .filter((candidate) => candidate !== null)
+    .filter((candidate) => candidate.score > 0) as HeroCandidate[];
 
   const movieCandidates: HeroCandidate[] = movieUserTitles
     .map((userTitle) => {
@@ -930,14 +1463,18 @@ export async function getHeroCandidates(
       let context: ContinuityContext = "watchlist";
       if (userTitle.status === "watching") {
         context = "resume";
-      } else if (availability?.type === "rent" || availability?.type === "buy") {
+      } else if (
+        availability?.type === "rent" ||
+        availability?.type === "buy"
+      ) {
         context = "vod";
       } else if (availability) {
         context = "new_streaming";
       }
 
       if (releaseAge !== null && releaseAge <= 120 && availability) {
-        context = availability.type === "subscription" ? "new_streaming" : "vod";
+        context =
+          availability.type === "subscription" ? "new_streaming" : "vod";
       }
 
       const runtime = getRuntime(title);
@@ -950,14 +1487,30 @@ export async function getHeroCandidates(
         availability,
       });
 
-      const contextLabel = buildContextLabel({ context, remainingEpisodes: null, progressPercentage: 0, availability });
-      const genreLabels = (title?.tmdb_payload?.genres ?? []).slice(0, 2).map(g => g.name);
+      const addedAge = daysSince(userTitle.created_at);
+      const surpriseScore =
+        userTitle.status === "watchlist" && addedAge !== null && addedAge >= 30
+          ? Math.min(80, 25 + Math.floor(addedAge / 14) * 5)
+          : 0;
+
+      const recentActivityBoost =
+        recentActivityBoostMap.get(`movie-${userTitle.tmdb_id}`) ?? null;
+
+      const contextLabel = buildContextLabel({
+        context,
+        remainingEpisodes: null,
+        progressPercentage: 0,
+        availability,
+      });
+      const genreLabels = (title?.tmdb_payload?.genres ?? [])
+        .slice(0, 2)
+        .map((g) => g.name);
 
       const eyebrowColorMap = {
         resume: "#a855f7",
         new_streaming: "#06b6d4",
         watchlist: "#14b8a6",
-        vod: "#10b981"
+        vod: "#10b981",
       };
 
       return {
@@ -969,7 +1522,7 @@ export async function getHeroCandidates(
         year: getYear(releaseDate),
         posterPath: getPosterPath(title),
         backdropPath: getBackdropPath(title),
-        score,
+        score: score + surpriseScore + (recentActivityBoost?.boost ?? 0),
         priority: 999,
         context,
         contextLabel,
@@ -983,27 +1536,44 @@ export async function getHeroCandidates(
         },
         availability,
         actions: {
-          primary: context === "new_streaming" || context === "vod" ? "watch_now" : context === "resume" ? "resume" : "open_title",
+          primary:
+            context === "new_streaming" || context === "vod"
+              ? "watch_now"
+              : context === "resume"
+                ? "resume"
+                : "open_title",
           secondary: "open_title",
         },
         serverEyebrow: {
           text: contextLabel.toUpperCase(),
-          color: eyebrowColorMap[context] ?? "#14b8a6"
+          color: eyebrowColorMap[context] ?? "#14b8a6",
         },
         debug: {
           source: "poplog3_user_titles",
           hydratedFromPayload: Boolean(title.tmdb_payload),
+          slotBucket: surpriseScore > 0 ? "surprise" : "discovery",
+          surpriseScore,
+          recentActivityBoost,
           scoreBreakdown,
         },
       } satisfies HeroCandidate;
     })
-   
     .filter((candidate) => candidate !== null)
-.filter((candidate) => candidate.score > 0) as HeroCandidate[];
+    .filter((candidate) => candidate.score > 0) as HeroCandidate[];
 
-  const rawWithFreshness = applyHeroFreshnessAndRotation([...seriesCandidates, ...movieCandidates]);
-  const balancedCandidates = pickBalancedCandidates(rawWithFreshness, limit * 2);
-  const withTemporalCooldown = await applyHeroTemporalCooldown(userId, balancedCandidates);
+  const rawWithFreshness = applyHeroFreshnessAndRotation([
+    ...seriesCandidates,
+    ...unstartedSeriesCandidates,
+    ...movieCandidates,
+  ]);
+  const balancedCandidates = pickBalancedCandidates(
+    rawWithFreshness,
+    limit * 2,
+  );
+  const withTemporalCooldown = await applyHeroTemporalCooldown(
+    userId,
+    balancedCandidates,
+  );
   const candidates = applyHeroDiversity(withTemporalCooldown, limit);
 
   return {
