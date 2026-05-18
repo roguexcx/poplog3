@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { TmdbImage } from "@/components/images/TmdbImage";
+import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
 
 type PosterCardProps = {
   /** Caminho do poster TMDB. Pode incluir ou não a `/` inicial. */
@@ -103,7 +103,7 @@ export default function PosterCard({
           )}
 
           {bottomOverlay && (
-            <div className="pointer-events-none absolute inset-x-0 bottom-0 p-3 opacity-0 transition duration-300 group-hover:opacity-100 sm:p-4">
+            <div className="absolute inset-x-0 bottom-0 p-3 opacity-0 transition duration-300 group-hover:opacity-100 sm:p-4">
               {bottomOverlay}
             </div>
           )}

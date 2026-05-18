@@ -1,4 +1,4 @@
-import { TmdbImage } from "@/components/images/TmdbImage";
+import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";
 
 type LibraryHeroProps = {

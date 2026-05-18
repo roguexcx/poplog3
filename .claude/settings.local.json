@@ -29,7 +29,23 @@
       "Bash(xargs ls -la)",
       "Bash(xargs grep -l \"NewEpisodeItem\\\\|ContinueItem\")",
       "Bash(Get-ChildItem -Path \"I:\\\\poplog-v3\\\\src\\\\app\" -Recurse -Filter \"*library*\" -o ErrorAction SilentlyContinue)",
-      "Bash(Select-Object -ExpandProperty FullName)"
+      "Bash(Select-Object -ExpandProperty FullName)",
+      "Bash(find \"I:\\\\\\\\poplog-v3\" -type f \\\\\\( -name \"*.tsx\" -o -name \"*.ts\" -o -name \"*.json\" \\\\\\))",
+      "Bash(cd /mnt/i/poplog-v3 && npx tsc --noEmit --project tsconfig.json 2>&1 | grep -E \"\\(agenda|AgendaNew\\)\" | head -30)",
+      "Bash(echo \"Exit: $?\")",
+      "Bash(Get-ChildItem -Path \"I:\\\\poplog-v3\\\\src\\\\app\\\\\" -Recurse -Force | Select-Object -First 50)",
+      "Bash(find \"I:\\\\\\\\v2 boa\\\\\\\\poplog-v2-codex-streamings\\\\\\\\src\\\\\\\\features\\\\\\\\home\" -type f)",
+      "Bash(Get-ChildItem -Path \"I:\\\\poplog-v3\\\\src\" -Recurse -File)",
+      "Bash(Select-Object FullName)",
+      "Bash(ConvertTo-Csv -NoTypeInformation)",
+      "Bash(Out-String)",
+      "Bash(xargs grep -l \"buildTmdbUrl\\\\|getMediaType\\\\|getTitle\")",
+      "Bash(xargs grep -l \"getMediaType\\\\|getTitle\")",
+      "Bash(xargs grep -l \"SearchBar\")",
+      "Bash(xargs wc -l)",
+      "Bash(Get-ChildItem -Path \"I:\\\\v2 boa\\\\poplog-v2-codex-streamings\\\\src\" -Recurse -Filter \"*.ts*\")",
+      "Bash(ls \"I:\\\\v2 boa\\\\\")",
+      "Bash(ls \"I:/\")"
     ]
   }
 }

@@ -110,11 +110,20 @@ export type TitleLanguage = {
   name: string;
 };
 
+export type TitleCollectionPart = {
+  id: number;
+  title: string;
+  releaseDate?: string | null;
+  year?: number | null;
+  posterPath?: string | null;
+};
+
 export type TitleCollection = {
   id: number;
   name: string;
   posterPath?: string | null;
   backdropPath?: string | null;
+  parts?: TitleCollectionPart[];
 };
 
 export type TitleMetadataBlock = {

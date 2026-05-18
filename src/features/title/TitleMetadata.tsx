@@ -1,10 +1,8 @@
-import Image from "next/image";
 import Link from "next/link";
 
 import SectionHeader from "@/components/ui/SectionHeader";
 
 import type {
-  TitleCollection,
   TitleMediaType,
   TitleMetadataBlock,
 } from "./types";
@@ -202,7 +200,6 @@ function buildDetails(
 function isMeaningful(metadata: TitleMetadataBlock, mediaType: TitleMediaType) {
   return (
     buildDetails(metadata, mediaType).length > 0 ||
-    Boolean(metadata.collection) ||
     Boolean(metadata.homepage)
   );
 }
@@ -216,50 +213,49 @@ export default function TitleMetadata({
   const details = buildDetails(metadata, mediaType);
 
   return (
-    <section className="flex flex-col gap-4">
-      <SectionHeader
-        eyebrow="Bastidores"
-        title="Produção"
-        accent="neutral"
-        size="sm"
+    <section className="relative overflow-hidden rounded-[1.5rem] border border-white/[0.08] bg-white/[0.035] p-5 backdrop-blur-xl">
+      <div
+        className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_85%_0%,rgba(148,163,184,0.07),transparent_50%)]"
+        aria-hidden
+      />
+      <div
+        className="pointer-events-none absolute inset-x-6 top-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent"
+        aria-hidden
       />
 
-      <div className="rounded-2xl border border-white/[0.06] bg-white/[0.018] p-4 backdrop-blur-md sm:p-5">
+      <div className="relative">
+        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/45">
+          Bastidores
+        </p>
+
         {details.length > 0 && (
-          <dl className="grid gap-x-8 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
+          <dl className="mt-3 flex flex-col divide-y divide-white/[0.05]">
             {details.map((item, index) => (
               <div
                 key={`${item.label}-${item.value}-${index}`}
-                className="min-w-0"
+                className="flex items-baseline justify-between gap-3 py-2.5 first:pt-0 last:pb-0"
               >
-                <dt className="text-[10px] font-black uppercase tracking-[0.18em] text-white/32">
+                <dt className="shrink-0 text-[10px] font-black uppercase tracking-[0.16em] text-white/32">
                   {item.label}
                 </dt>
-
-                <dd className="mt-1 text-[12px] font-semibold leading-[1.45] tracking-[-0.01em] text-white/72 sm:text-[12.5px]">
-  {item.value}
-</dd>
+                <dd className="min-w-0 text-right text-[11.5px] font-semibold leading-[1.4] tracking-[-0.01em] text-white/70">
+                  {item.value}
+                </dd>
               </div>
             ))}
           </dl>
         )}
 
-        {(metadata.collection || metadata.homepage) && (
-          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-white/[0.06] pt-4">
-            {metadata.collection && (
-              <CollectionPill collection={metadata.collection} />
-            )}
-
-            {metadata.homepage && (
-              <Link
-                href={metadata.homepage}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-white/52 transition hover:border-cyan-200/25 hover:bg-cyan-300/[0.06] hover:text-cyan-100"
-              >
-                Site oficial →
-              </Link>
-            )}
+        {metadata.homepage && (
+          <div className="mt-4 border-t border-white/[0.06] pt-4">
+            <Link
+              href={metadata.homepage}
+              target="_blank"
+              rel="noreferrer noopener"
+              className="rounded-full border border-white/[0.08] bg-white/[0.03] px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] text-white/52 transition hover:border-white/20 hover:bg-white/[0.06] hover:text-white/80"
+            >
+              Site oficial →
+            </Link>
           </div>
         )}
       </div>
@@ -267,34 +263,3 @@ export default function TitleMetadata({
   );
 }
 
-function CollectionPill({ collection }: { collection: TitleCollection }) {
-  const poster = collection.posterPath
-    ? `https://image.tmdb.org/t/p/w92${
-        collection.posterPath.startsWith("/")
-          ? collection.posterPath
-          : `/${collection.posterPath}`
-      }`
-    : null;
-
-  return (
-    <Link
-      href={`/franquia/${collection.id}`}
-      className="inline-flex max-w-full items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.03] px-2 py-1.5 pr-3 text-white/70 transition hover:border-fuchsia-200/25 hover:bg-fuchsia-300/[0.06] hover:text-white"
-    >
-      {poster && (
-        <Image
-          src={poster}
-          alt=""
-          width={22}
-          height={32}
-          unoptimized
-          className="h-7 w-5 rounded object-cover opacity-80"
-        />
-      )}
-
-      <span className="min-w-0 truncate text-[10px] font-black uppercase tracking-[0.16em]">
-        {collection.name}
-      </span>
-    </Link>
-  );
-}

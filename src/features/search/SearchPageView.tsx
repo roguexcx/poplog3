@@ -6,7 +6,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Film, Search, Sparkles, Tv, UserRound, X } from "lucide-react";
 
 import PageShell from "@/components/layout/PageShell";
-import PosterCard from "@/components/ui/PosterCard";
+import InteractivePosterCard from "@/components/ui/InteractivePosterCard";
 import EmptyState from "@/components/ui/EmptyState";
 import SectionHeader from "@/components/ui/SectionHeader";
 
@@ -107,14 +107,16 @@ function TitleGrid({ titles }: { titles: SearchResult[] }) {
   return (
     <div className="grid grid-cols-2 gap-x-4 gap-y-8 md:grid-cols-4 lg:grid-cols-6">
       {titles.map((title) => (
-        <PosterCard
+        <InteractivePosterCard
           key={`${title.media_type}-${title.tmdb_id}`}
+          id={title.tmdb_id}
           href={`/title/${title.media_type}/${title.tmdb_id}`}
           mediaType={title.media_type}
           title={title.title}
           posterPath={title.poster_path}
           fallbackPath={title.backdrop_path}
           year={getYear(title)}
+          source="search"
         />
       ))}
     </div>

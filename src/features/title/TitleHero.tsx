@@ -83,7 +83,7 @@ export default function TitleHero({ title, onOpenMovieSocial }: TitleHeroProps) 
   const nextEpUser = progress?.nextEpisode ?? null;
 
   return (
-    <section className="relative isolate min-h-[88vh] overflow-hidden">
+    <section className="-mx-4 -mt-4 relative isolate min-h-[88vh] overflow-hidden sm:-mx-6 md:-mx-8 md:-mt-6 lg:-mx-10">
       {title.backdropUrl && (
         <div className="absolute inset-0 -z-10">
           <Image
@@ -103,15 +103,15 @@ export default function TitleHero({ title, onOpenMovieSocial }: TitleHeroProps) 
         aria-hidden
       />
       <div
-        className="absolute inset-0 -z-10 bg-gradient-to-b from-zinc-950/65 via-zinc-950/55 to-zinc-950/95"
+        className="absolute inset-0 -z-10 bg-gradient-to-b from-[#020617]/65 via-[#020617]/55 to-[#020617]/95"
         aria-hidden
       />
       <div
-        className="absolute inset-y-0 left-0 -z-10 w-[55%] bg-gradient-to-r from-zinc-950/85 via-zinc-950/55 to-transparent"
+        className="absolute inset-y-0 left-0 -z-10 w-[55%] bg-gradient-to-r from-[#020617]/85 via-[#020617]/55 to-transparent"
         aria-hidden
       />
       <div
-        className="absolute inset-x-0 bottom-0 -z-10 h-40 bg-gradient-to-t from-zinc-950 to-transparent"
+        className="absolute inset-x-0 bottom-0 -z-10 h-[55vh] bg-gradient-to-t from-[#020617] via-[#020617]/80 to-transparent"
         aria-hidden
       />
 

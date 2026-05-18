@@ -23,6 +23,7 @@ import {
 } from "@/server/sync/sync-availability";
 import { syncOmdbRatings } from "@/server/sync/sync-omdb-ratings";
 import { syncTmdbTitle } from "@/server/sync/sync-tmdb-title";
+import { fetchTmdbCollection } from "@/server/api-clients/tmdb/client";
 import type { PoplogTitleDetails } from "@/server/types/title-details";
 
 type MediaType = "movie" | "tv";
@@ -395,6 +396,11 @@ export async function GET(
 
     const crew = details?.crew ?? [];
 
+    const collectionDetails =
+      details?.belongs_to_collection && mediaType === "movie"
+        ? await fetchTmdbCollection(details.belongs_to_collection.id)
+        : null;
+
     const metadata = details
       ? {
           productionCompanies:
@@ -428,6 +434,24 @@ export async function GET(
                 posterPath: details.belongs_to_collection.poster_path ?? null,
                 backdropPath:
                   details.belongs_to_collection.backdrop_path ?? null,
+                parts: collectionDetails
+                  ? collectionDetails.parts
+                      .filter((p) => Boolean(p.release_date))
+                      .sort((a, b) =>
+                        (a.release_date ?? "") < (b.release_date ?? "")
+                          ? -1
+                          : 1
+                      )
+                      .map((p) => ({
+                        id: p.id,
+                        title: p.title ?? p.original_title ?? "Sem título",
+                        releaseDate: p.release_date ?? null,
+                        year: p.release_date
+                          ? new Date(p.release_date).getFullYear()
+                          : null,
+                        posterPath: p.poster_path ?? null,
+                      }))
+                  : [],
               }
             : null,
 

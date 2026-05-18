@@ -32,6 +32,26 @@ export type TmdbCollectionSummary = {
   backdrop_path?: string | null;
 };
 
+export type TmdbCollectionPart = {
+  id: number;
+  title?: string;
+  original_title?: string;
+  release_date?: string;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+  vote_average?: number;
+  media_type?: string;
+};
+
+export type TmdbCollectionDetails = {
+  id: number;
+  name: string;
+  overview?: string | null;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+  parts: TmdbCollectionPart[];
+};
+
 export type TmdbCreator = {
   id: number;
   name: string;

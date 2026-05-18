@@ -257,7 +257,7 @@ export default function TitleActions({
     setFavorite(next);
 
     const ensureStatus: LibraryStatus | null =
-      status ?? (next ? "watchlist" : null);
+      status ?? (next ? "watched" : null);
 
     if (ensureStatus !== status) {
       setStatus(ensureStatus);

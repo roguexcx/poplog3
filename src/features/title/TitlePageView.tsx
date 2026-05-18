@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import TitleCast from "./TitleCast";
+import TitleCollectionSection from "./TitleCollectionSection";
 import TitleEpisodeBrowser from "./TitleEpisodeBrowser";
 import TitleHero from "./TitleHero";
 import TitleMetadata from "./TitleMetadata";
@@ -58,7 +59,7 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
   })();
 
   return (
-    <main className="relative min-h-screen overflow-x-clip text-white">
+    <div className="relative text-white">
       <TitleHero
         title={title}
         onOpenMovieSocial={
@@ -128,6 +129,11 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
               />
             )}
 
+            <TitleCollectionSection
+              collection={title.metadata?.collection ?? null}
+              currentTitleId={typeof title.id === "number" ? title.id : null}
+            />
+
             <TitleRecommendations recommendations={title.recommendations} />
           </div>
 
@@ -167,6 +173,6 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
         lastSyncedAt={title.lastSyncedAt ?? null}
         cacheInfo={title.cacheInfo ?? null}
       />
-    </main>
+    </div>
   );
 }

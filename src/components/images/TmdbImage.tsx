@@ -1,6 +1,49 @@
-import Image from "next/image";
+"use client";
 
-type TmdbImageProps = {
+import Image, { type ImageProps } from "next/image";
+import { useState, type ReactNode } from "react";
+
+import { buildTmdbUrlLoose } from "@/lib/images/url";
+import type { ImageKind } from "@/lib/images/sizes";
+
+// ─── V2-style default export (para componentes migrados do V2) ────────────────
+
+export type TmdbImageProps = Omit<ImageProps, "src" | "alt"> & {
+  path: string | null | undefined;
+  alt: string;
+  kind: ImageKind;
+  size: string;
+  fallback?: ReactNode;
+};
+
+export default function TmdbImage({
+  path,
+  kind,
+  size,
+  alt,
+  fallback = null,
+  ...rest
+}: TmdbImageProps) {
+  const [errored, setErrored] = useState(false);
+
+  const src = buildTmdbUrlLoose(kind, size, path);
+  if (!src || errored) return <>{fallback}</>;
+
+  return (
+    <Image
+      src={src}
+      alt={alt}
+      onError={() => setErrored(true)}
+      {...rest}
+    />
+  );
+}
+
+// ─── V3-style named export (backward compat para componentes existentes do V3) ─
+
+const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
+
+type TmdbImageV3Props = {
   path: string | null;
   fallbackPath?: string | null;
   size?: "w300" | "w500" | "w780" | "original";
@@ -10,14 +53,12 @@ type TmdbImageProps = {
   fallbackLabel?: string;
 };
 
-const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
-
 function normalizePath(path: string | null | undefined) {
   if (!path) return null;
   return path.startsWith("/") ? path : `/${path}`;
 }
 
-export function TmdbImage({
+export function TmdbImageLegacy({
   path,
   fallbackPath = null,
   size = "w500",
@@ -25,7 +66,7 @@ export function TmdbImage({
   className = "",
   priority = false,
   fallbackLabel = "Sem imagem",
-}: TmdbImageProps) {
+}: TmdbImageV3Props) {
   const imagePath = normalizePath(path) ?? normalizePath(fallbackPath);
 
   if (!imagePath) {

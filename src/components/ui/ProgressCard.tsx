@@ -1,7 +1,7 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
 
-import { TmdbImage } from "@/components/images/TmdbImage";
+import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
 
 type ProgressCardProps = {
   /** Título principal (nome da série/filme) */

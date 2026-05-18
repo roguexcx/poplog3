@@ -1,3 +1,5 @@
+import type { TmdbCollectionDetails } from "./types";
+
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
 
 type TmdbFetchOptions = {
@@ -44,4 +46,16 @@ export async function tmdbFetch<T>(
   }
 
   return response.json() as Promise<T>;
+}
+
+export async function fetchTmdbCollection(
+  id: number
+): Promise<TmdbCollectionDetails | null> {
+  try {
+    return await tmdbFetch<TmdbCollectionDetails>(`/collection/${id}`, {
+      revalidate: 86400,
+    });
+  } catch {
+    return null;
+  }
 }

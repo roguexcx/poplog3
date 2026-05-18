@@ -177,6 +177,28 @@ export async function GET() {
           effectiveNextEpisode: 1,
           episodesBehind: aired,
         });
+        continue;
+      }
+
+      // up_to_date: usuário está em dia, mas tmdb_payload indica novo episódio disponível hoje
+      if (cs === "up_to_date" && state.status === "watching") {
+        const nextEpToAir = title.tmdb_payload?.next_episode_to_air as Record<string, unknown> | null | undefined;
+        if (nextEpToAir) {
+          const airDate = typeof nextEpToAir.air_date === "string" ? nextEpToAir.air_date : null;
+          const seasonNum = typeof nextEpToAir.season_number === "number" ? nextEpToAir.season_number : null;
+          const episodeNum = typeof nextEpToAir.episode_number === "number" ? nextEpToAir.episode_number : null;
+          const todayStr = new Date().toISOString().slice(0, 10);
+          if (airDate && seasonNum && episodeNum && airDate >= cutoffStr && airDate <= todayStr) {
+            eligible.push({
+              ...state,
+              ...title,
+              tmdb_id: state.tmdb_id,
+              effectiveNextSeason: seasonNum,
+              effectiveNextEpisode: episodeNum,
+              episodesBehind: 1,
+            });
+          }
+        }
       }
     }
 
@@ -217,6 +239,14 @@ export async function GET() {
       const runtime =
         item.episode_run_time?.[0] ?? item.runtime ?? null;
 
+      // Para up_to_date, next_episode_air_date vem do tmdb_payload
+      const nextEpAirDate: string | null =
+        item.next_episode_air_date ??
+        (() => {
+          const neta = item.tmdb_payload?.next_episode_to_air as Record<string, unknown> | null | undefined;
+          return typeof neta?.air_date === "string" ? neta.air_date : null;
+        })();
+
       return {
         content_id: `tv-${item.tmdb_id}`,
         tmdb_id: item.tmdb_id,
@@ -232,7 +262,7 @@ export async function GET() {
         next_episode: item.effectiveNextEpisode,
         next_episode_name: ep?.name ?? null,
         next_episode_still_path: ep?.still_path ?? null,
-        next_episode_air_date: item.next_episode_air_date ?? null,
+        next_episode_air_date: nextEpAirDate,
         last_air_date: lastAirDate,
         days_since_new_episode: daysSince,
         runtime,
