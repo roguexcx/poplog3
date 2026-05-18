@@ -7,6 +7,7 @@ export type UserTitle = {
   media_type: MediaType;
   status: string;
   favorite: boolean;
+  liked?: boolean | null;
   created_at: string;
   watched_at: string | null;
   title: string | null;

@@ -78,7 +78,7 @@ export async function POST(request: Request) {
     url.searchParams.get("onlyMissingImages") === "true";
 
   const { data, error } = await supabaseAdmin
-    .from("poplog3_user_titles")
+    .from("user_titles")
     .select(
       `
       tmdb_id,

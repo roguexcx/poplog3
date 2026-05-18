@@ -122,13 +122,6 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
 
             <TitleCast cast={title.cast} />
 
-            {hasMetadata && (
-              <TitleMetadata
-                metadata={title.metadata}
-                mediaType={title.mediaType}
-              />
-            )}
-
             <TitleCollectionSection
               collection={title.metadata?.collection ?? null}
               currentTitleId={typeof title.id === "number" ? title.id : null}
@@ -145,6 +138,13 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
             {hasRatings && <TitleScoreCard ratings={title.ratings} />}
 
             <TitleProviders providers={title.providers} />
+
+            {hasMetadata && (
+              <TitleMetadata
+                metadata={title.metadata}
+                mediaType={title.mediaType}
+              />
+            )}
           </aside>
         </div>
       </section>

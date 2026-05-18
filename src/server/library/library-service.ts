@@ -189,44 +189,79 @@ export async function getUserLibrary(
   userId: string,
   status?: string
 ): Promise<Poplog3UserLibraryItem[]> {
-  const supabase = supabaseAdmin;
-
-  let query = supabase
-    .from("poplog3_user_titles")
-    .select(
-      `
-      *,
-      title:poplog3_titles (
-        tmdb_id,
-        media_type,
-        title,
-        original_title,
-        poster_path,
-        backdrop_path,
-        year,
-        release_date,
-        first_air_date,
-        last_air_date,
-        runtime,
-        episode_run_time,
-        vote_average
-      )
-    `
-    )
+  let query = supabaseAdmin
+    .from("user_titles")
+    .select("id, user_id, tmdb_id, media_type, status, liked, favorite, created_at, watched_at")
     .eq("user_id", userId)
-    .order("updated_at", { ascending: false });
+    .order("created_at", { ascending: false });
 
   if (status) {
     query = query.eq("status", status);
   }
 
   const { data, error } = await query;
+  if (error) throw new Error(error.message);
 
-  if (error) {
-    throw new Error(error.message);
-  }
+  const rows = (data ?? []) as Array<Record<string, unknown>>;
+  if (rows.length === 0) return [];
 
-  return (data ?? []) as Poplog3UserLibraryItem[];
+  const tmdbIds = rows.map((r) => r.tmdb_id as number);
+  const mediaTypes = [...new Set(rows.map((r) => r.media_type as string))];
+
+  const { data: titles } = await supabaseAdmin
+    .from("poplog3_titles")
+    .select(
+      "tmdb_id, media_type, title, original_title, poster_path, backdrop_path, year, release_date, first_air_date, last_air_date, runtime, episode_run_time, vote_average"
+    )
+    .in("tmdb_id", tmdbIds)
+    .in("media_type", mediaTypes);
+
+  const titleMap = new Map(
+    ((titles ?? []) as Array<Record<string, unknown>>).map((t) => [
+      `${t.tmdb_id}:${t.media_type}`,
+      t,
+    ])
+  );
+
+  return rows.map((row) => {
+    const titleData = titleMap.get(`${row.tmdb_id}:${row.media_type}`) ?? null;
+    return {
+      id: row.id as string,
+      user_id: row.user_id as string,
+      tmdb_id: row.tmdb_id as number,
+      media_type: row.media_type as "movie" | "tv",
+      status: row.status as import("./types").Poplog3LibraryStatus,
+      rating: null,
+      liked: (row.liked as boolean | null) ?? null,
+      favorite: Boolean(row.favorite),
+      notes: null,
+      started_at: null,
+      finished_at: null,
+      abandoned_at: null,
+      created_at: row.created_at as string,
+      updated_at: (row.watched_at as string | null) ?? (row.created_at as string),
+      title: titleData
+        ? {
+            tmdb_id: titleData.tmdb_id as number,
+            media_type: titleData.media_type as "movie" | "tv",
+            title: titleData.title as string | null,
+            original_title: titleData.original_title as string | null,
+            poster_path: titleData.poster_path as string | null,
+            backdrop_path: titleData.backdrop_path as string | null,
+            year: titleData.year as number | null,
+            release_date: titleData.release_date as string | null,
+            first_air_date: titleData.first_air_date as string | null,
+            last_air_date: titleData.last_air_date as string | null,
+            runtime: titleData.runtime as number | null,
+            episode_run_time: titleData.episode_run_time as number[] | null,
+            vote_average: titleData.vote_average as number | null,
+            popularity: null,
+            number_of_episodes: null,
+            number_of_seasons: null,
+          }
+        : null,
+    } as Poplog3UserLibraryItem;
+  });
 }
 
 export async function getUserTitleStatus(
@@ -234,55 +269,87 @@ export async function getUserTitleStatus(
   tmdbId: number,
   mediaType: "movie" | "tv"
 ): Promise<Poplog3UserTitle | null> {
-  const supabase = supabaseAdmin;
-
-  const { data, error } = await supabase
-    .from("poplog3_user_titles")
-    .select("*")
+  const { data, error } = await supabaseAdmin
+    .from("user_titles")
+    .select("id, user_id, tmdb_id, media_type, status, liked, favorite, created_at, watched_at")
     .eq("user_id", userId)
     .eq("tmdb_id", tmdbId)
     .eq("media_type", mediaType)
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
-  if (error) {
-    throw new Error(error.message);
-  }
+  if (error) throw new Error(error.message);
+  if (!data) return null;
 
-  return data as Poplog3UserTitle | null;
+  const row = data as Record<string, unknown>;
+  return {
+    id: row.id as string,
+    user_id: row.user_id as string,
+    tmdb_id: row.tmdb_id as number,
+    media_type: row.media_type as "movie" | "tv",
+    status: row.status as import("./types").Poplog3LibraryStatus,
+    rating: null,
+    liked: (row.liked as boolean | null) ?? null,
+    favorite: Boolean(row.favorite),
+    notes: null,
+    started_at: null,
+    finished_at: null,
+    abandoned_at: null,
+    created_at: row.created_at as string,
+    updated_at: (row.watched_at as string | null) ?? (row.created_at as string),
+  };
 }
 
 export async function upsertUserTitleStatus(
   input: UpsertUserTitleInput
 ): Promise<Poplog3UserTitle> {
-  const supabase = supabaseAdmin;
+  const now = new Date().toISOString();
 
-  const payload = {
-    user_id: input.userId,
-    tmdb_id: input.tmdbId,
-    media_type: input.mediaType,
-    status: input.status,
-    rating: input.rating ?? null,
-    liked: input.liked ?? null,
-    favorite: input.favorite ?? false,
-    notes: input.notes ?? null,
-    updated_at: new Date().toISOString(),
-  };
+  // Remove qualquer linha anterior para este título — user_titles não tem unique constraint
+  // e pode ter múltiplas linhas de status diferentes (watchlist + watched).
+  // Após uma mudança explícita de status, deixamos apenas uma linha.
+  await supabaseAdmin
+    .from("user_titles")
+    .delete()
+    .eq("user_id", input.userId)
+    .eq("tmdb_id", input.tmdbId)
+    .eq("media_type", input.mediaType);
 
-  const { data, error } = await supabase
-    .from("poplog3_user_titles")
-    .upsert(payload, {
-      onConflict: "user_id,tmdb_id,media_type",
+  const { data, error } = await supabaseAdmin
+    .from("user_titles")
+    .insert({
+      user_id: input.userId,
+      tmdb_id: input.tmdbId,
+      media_type: input.mediaType,
+      status: input.status,
+      liked: input.liked ?? null,
+      favorite: input.favorite ?? false,
+      watched_at: input.status === "watched" ? now : null,
     })
-    .select()
+    .select("id, user_id, tmdb_id, media_type, status, liked, favorite, created_at, watched_at")
     .single();
 
-  if (error) {
-    throw new Error(error.message);
-  }
+  if (error) throw new Error(error.message);
 
-  const result = data as Poplog3UserTitle;
+  const row = data as Record<string, unknown>;
+  const result: Poplog3UserTitle = {
+    id: row.id as string,
+    user_id: row.user_id as string,
+    tmdb_id: row.tmdb_id as number,
+    media_type: row.media_type as "movie" | "tv",
+    status: row.status as import("./types").Poplog3LibraryStatus,
+    rating: null,
+    liked: (row.liked as boolean | null) ?? null,
+    favorite: Boolean(row.favorite),
+    notes: null,
+    started_at: null,
+    finished_at: null,
+    abandoned_at: null,
+    created_at: row.created_at as string,
+    updated_at: (row.watched_at as string | null) ?? (row.created_at as string),
+  };
 
-  // Propaga mudança de status para o estado global
   upsertTitleState({
     userId: input.userId,
     tmdbId: input.tmdbId,
@@ -308,20 +375,15 @@ export async function removeUserTitle(
   tmdbId: number,
   mediaType: "movie" | "tv"
 ): Promise<void> {
-  const supabase = supabaseAdmin;
-
-  const { error } = await supabase
-    .from("poplog3_user_titles")
+  const { error } = await supabaseAdmin
+    .from("user_titles")
     .delete()
     .eq("user_id", userId)
     .eq("tmdb_id", tmdbId)
     .eq("media_type", mediaType);
 
-  if (error) {
-    throw new Error(error.message);
-  }
+  if (error) throw new Error(error.message);
 
-  // Remove do estado global e loga o evento
   deleteTitleState(userId, tmdbId, mediaType).catch((err) =>
     console.error("[state] deleteTitleState failed", err),
   );

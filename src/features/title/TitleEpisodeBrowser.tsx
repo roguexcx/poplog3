@@ -190,17 +190,11 @@ export default function TitleEpisodeBrowser({
       return initialSeason;
     }
 
-    const now = Date.now();
+    // Sem progresso do usuário: começa na primeira temporada regular (S01)
+    const firstRegular = seasons.find((s) => s.seasonNumber > 0);
+    if (firstRegular) return firstRegular.seasonNumber;
 
-    const aired = seasons.filter(
-      (s) => s.airDate && new Date(s.airDate).getTime() <= now,
-    );
-
-    if (aired.length > 0) {
-      return aired[aired.length - 1].seasonNumber;
-    }
-
-    return seasonNumbers[seasonNumbers.length - 1];
+    return seasonNumbers[0] ?? null;
   });
 
   const [season, setSeason] = useState<SeasonDto | null>(null);
@@ -219,6 +213,7 @@ export default function TitleEpisodeBrowser({
   );
 
   const [savingKey, setSavingKey] = useState<string | null>(null);
+  const [seasonSaving, setSeasonSaving] = useState(false);
   const [, startTransition] = useTransition();
 
   const handleCacheComments = useCallback(
@@ -415,6 +410,93 @@ export default function TitleEpisodeBrowser({
     });
   }
 
+  async function handleMarkSeason(seasonNumber: number) {
+    if (!season || seasonSaving) return;
+
+    const now = Date.now();
+    const keysToAdd = season.episodes
+      .filter((ep) => ep.airDate && new Date(ep.airDate).getTime() <= now)
+      .map((ep) => episodeKey(seasonNumber, ep.episodeNumber));
+
+    setWatchedKeys((prev) => {
+      const next = new Set(prev);
+      keysToAdd.forEach((k) => next.add(k));
+      return next;
+    });
+    setSeasonSaving(true);
+
+    try {
+      const res = await fetch("/api/poplog3/episodes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ seriesTmdbId, markSeason: seasonNumber }),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const body = (await res.json()) as {
+        ok: boolean;
+        progress?: { watchedKeys?: string[] };
+      };
+
+      if (body.ok && body.progress?.watchedKeys) {
+        setWatchedKeys(new Set(body.progress.watchedKeys));
+      }
+    } catch (err) {
+      setWatchedKeys((prev) => {
+        const next = new Set(prev);
+        keysToAdd.forEach((k) => next.delete(k));
+        return next;
+      });
+      console.warn("[season mark] erro:", err);
+    } finally {
+      setSeasonSaving(false);
+    }
+  }
+
+  async function handleClearSeason(seasonNumber: number) {
+    if (!season || seasonSaving) return;
+
+    const keysToRemove = season.episodes.map((ep) =>
+      episodeKey(seasonNumber, ep.episodeNumber),
+    );
+
+    setWatchedKeys((prev) => {
+      const next = new Set(prev);
+      keysToRemove.forEach((k) => next.delete(k));
+      return next;
+    });
+    setSeasonSaving(true);
+
+    try {
+      const res = await fetch("/api/poplog3/episodes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ seriesTmdbId, clearSeason: seasonNumber }),
+      });
+
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      const body = (await res.json()) as {
+        ok: boolean;
+        progress?: { watchedKeys?: string[] };
+      };
+
+      if (body.ok && body.progress?.watchedKeys) {
+        setWatchedKeys(new Set(body.progress.watchedKeys));
+      }
+    } catch (err) {
+      setWatchedKeys((prev) => {
+        const next = new Set(prev);
+        keysToRemove.forEach((k) => next.add(k));
+        return next;
+      });
+      console.warn("[season clear] erro:", err);
+    } finally {
+      setSeasonSaving(false);
+    }
+  }
+
   return (
     <section className="flex flex-col gap-5">
       <SectionHeader
@@ -460,6 +542,67 @@ export default function TitleEpisodeBrowser({
           );
         })}
       </div>
+
+      {season && season.episodes.length > 0 && (() => {
+        const now = Date.now();
+        const airedEps = season.episodes.filter(
+          (ep) => ep.airDate && new Date(ep.airDate).getTime() <= now,
+        );
+        if (airedEps.length === 0) return null;
+
+        const watchedCount = airedEps.filter((ep) =>
+          watchedKeys.has(episodeKey(selected, ep.episodeNumber)),
+        ).length;
+        const allWatched = watchedCount === airedEps.length;
+
+        return (
+          <div className="flex items-center justify-between gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.025] px-4 py-3">
+            <p className="text-[12px] text-white/50">
+              {watchedCount > 0 ? (
+                <>
+                  <span className="font-semibold text-emerald-300/90">
+                    {watchedCount}
+                  </span>
+                  {" de "}
+                  <span className="font-semibold text-white/72">
+                    {airedEps.length}
+                  </span>
+                  {airedEps.length === 1 ? " episódio assistido" : " episódios assistidos"}
+                </>
+              ) : (
+                <>
+                  {airedEps.length}{" "}
+                  {airedEps.length === 1
+                    ? "episódio disponível"
+                    : "episódios disponíveis"}
+                </>
+              )}
+            </p>
+
+            <button
+              type="button"
+              disabled={seasonSaving}
+              onClick={() =>
+                allWatched
+                  ? handleClearSeason(selected)
+                  : handleMarkSeason(selected)
+              }
+              className={[
+                "shrink-0 rounded-xl border px-3.5 py-1.5 text-[12px] font-semibold tracking-[-0.01em] transition duration-200 disabled:cursor-not-allowed disabled:opacity-50",
+                allWatched
+                  ? "border-rose-300/28 bg-rose-500/10 text-rose-200/90 hover:border-rose-300/48 hover:bg-rose-500/20"
+                  : "border-emerald-300/28 bg-emerald-500/10 text-emerald-200/90 hover:border-emerald-300/48 hover:bg-emerald-500/20",
+              ].join(" ")}
+            >
+              {seasonSaving
+                ? "Salvando…"
+                : allWatched
+                  ? "Desmarcar temporada"
+                  : "Marcar temporada como vista"}
+            </button>
+          </div>
+        );
+      })()}
 
       {loading && !season && (
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">

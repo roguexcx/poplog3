@@ -59,11 +59,13 @@ async function syncLibraryStatusAfterEpisodeMark(
   seriesTmdbId: number
 ): Promise<{ status: string; favorite: boolean; liked: boolean | null }> {
   const { data, error } = await supabaseAdmin
-    .from("poplog3_user_titles")
+    .from("user_titles")
     .select("status, favorite, liked")
     .eq("user_id", userId)
     .eq("tmdb_id", seriesTmdbId)
     .eq("media_type", "tv")
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (error) throw new Error(`[episode-progress] falha ao ler status da série: ${error.message}`);
@@ -204,6 +206,73 @@ export async function bulkMarkEpisodesWatched(input: {
     event: {
       type: input.eventType ?? "season_marked",
       payload: { count: input.episodes.length },
+    },
+  }).catch((err) => console.error("[state] upsertTitleState failed", err));
+
+  return progress;
+}
+
+export async function markSeasonWatched(
+  userId: string,
+  seriesTmdbId: number,
+  seasonNumber: number
+): Promise<UserSeriesProgress> {
+  const today = new Date().toISOString().split("T")[0];
+
+  const { data: episodes, error } = await supabaseAdmin
+    .from("poplog3_episodes")
+    .select("episode_number, runtime")
+    .eq("series_tmdb_id", seriesTmdbId)
+    .eq("season_number", seasonNumber)
+    .not("air_date", "is", null)
+    .lte("air_date", today);
+
+  if (error) throw new Error(error.message);
+
+  const eps = (episodes ?? []).map(
+    (e: { episode_number: number; runtime: number | null }) => ({
+      seasonNumber,
+      episodeNumber: e.episode_number,
+      runtimeMinutes: e.runtime ?? null,
+    })
+  );
+
+  return bulkMarkEpisodesWatched({
+    userId,
+    seriesTmdbId,
+    episodes: eps,
+    eventType: "season_marked",
+  });
+}
+
+export async function clearSeasonProgress(
+  userId: string,
+  seriesTmdbId: number,
+  seasonNumber: number
+): Promise<UserSeriesProgress> {
+  const { error } = await supabaseAdmin
+    .from("poplog3_user_episodes")
+    .delete()
+    .eq("user_id", userId)
+    .eq("series_tmdb_id", seriesTmdbId)
+    .eq("season_number", seasonNumber);
+
+  if (error) throw new Error(error.message);
+
+  const [libraryEntry, progress] = await Promise.all([
+    syncLibraryStatusAfterEpisodeMark(userId, seriesTmdbId),
+    computeUserSeriesProgress(userId, seriesTmdbId),
+  ]);
+
+  upsertTitleState({
+    userId,
+    tmdbId: seriesTmdbId,
+    mediaType: "tv",
+    seriesProgress: progress,
+    libraryEntry,
+    event: {
+      type: "season_unmarked",
+      payload: { season: seasonNumber },
     },
   }).catch((err) => console.error("[state] upsertTitleState failed", err));
 
@@ -409,7 +478,7 @@ export async function getUserWatchingSeries(
       .eq("media_type", "tv")
       .in("tmdb_id", orderedIds),
     supabaseAdmin
-      .from("poplog3_user_titles")
+      .from("user_titles")
       .select("tmdb_id, status")
       .eq("user_id", userId)
       .eq("media_type", "tv")

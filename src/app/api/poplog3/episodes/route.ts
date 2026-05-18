@@ -3,9 +3,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import {
   bulkMarkEpisodesWatched,
+  clearSeasonProgress,
   clearSeriesProgress,
   computeUserSeriesProgress,
   markAllAiredEpisodes,
+  markSeasonWatched,
   toggleEpisodeWatched,
 } from "@/server/episodes/episode-progress-service";
 
@@ -78,6 +80,30 @@ export async function POST(request: NextRequest) {
     if (body.clear === true) {
       await clearSeriesProgress(user.id, seriesTmdbId);
       const progress = await computeUserSeriesProgress(user.id, seriesTmdbId);
+      return NextResponse.json({ ok: true, progress });
+    }
+
+    if (body.markSeason !== undefined) {
+      const seasonNumber = asPositiveInteger(body.markSeason);
+      if (seasonNumber === null) {
+        return NextResponse.json(
+          { ok: false, error: "markSeason invalido" },
+          { status: 400 }
+        );
+      }
+      const progress = await markSeasonWatched(user.id, seriesTmdbId, seasonNumber);
+      return NextResponse.json({ ok: true, progress });
+    }
+
+    if (body.clearSeason !== undefined) {
+      const seasonNumber = asPositiveInteger(body.clearSeason);
+      if (seasonNumber === null) {
+        return NextResponse.json(
+          { ok: false, error: "clearSeason invalido" },
+          { status: 400 }
+        );
+      }
+      const progress = await clearSeasonProgress(user.id, seriesTmdbId, seasonNumber);
       return NextResponse.json({ ok: true, progress });
     }
 

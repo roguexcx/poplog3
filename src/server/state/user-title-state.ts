@@ -177,11 +177,13 @@ async function fetchLibraryEntry(
   mediaType: MediaType,
 ): Promise<{ status: string | null; favorite: boolean; liked: boolean | null } | null> {
   const { data } = await supabaseAdmin
-    .from("poplog3_user_titles")
+    .from("user_titles")
     .select("status, favorite, liked")
     .eq("user_id", userId)
     .eq("tmdb_id", tmdbId)
     .eq("media_type", mediaType)
+    .order("created_at", { ascending: false })
+    .limit(1)
     .maybeSingle();
 
   if (!data) return null;
@@ -239,7 +241,7 @@ async function computeFranchiseProgress(
         String(collectionId),
       ),
     supabaseAdmin
-      .from("poplog3_user_titles")
+      .from("user_titles")
       .select("tmdb_id")
       .eq("user_id", userId)
       .eq("media_type", "movie")

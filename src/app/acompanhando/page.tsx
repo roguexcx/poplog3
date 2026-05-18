@@ -45,6 +45,93 @@ async function postCuradoriaAction(body: unknown) {
   }).catch(() => null);
 }
 
+// ── Hook responsivo para itens por página da seção Continue ──────────────────
+function useContinueItemsPerPage() {
+  const [itemsPerPage, setItemsPerPage] = useState(9);
+
+  useEffect(() => {
+    function update() {
+      if (window.innerWidth < 768)  { setItemsPerPage(4); return; }
+      if (window.innerWidth < 1280) { setItemsPerPage(6); return; }
+      setItemsPerPage(9);
+    }
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
+
+  return itemsPerPage;
+}
+
+// ── Paginação compacta para blocos internos ───────────────────────────────────
+function SectionPagination({
+  page,
+  totalPages,
+  onPageChange,
+}: {
+  page: number;
+  totalPages: number;
+  onPageChange: (p: number) => void;
+}) {
+  if (totalPages <= 1) return null;
+
+  const pages = getSectionPaginationPages(page, totalPages);
+
+  return (
+    <div className="flex items-center justify-center gap-1.5 pt-2">
+      <button
+        type="button"
+        disabled={page === 1}
+        onClick={() => onPageChange(page - 1)}
+        className="h-8 rounded-full border border-white/[0.08] bg-white/[0.03] px-3 text-xs font-black text-white/45 transition hover:border-white/[0.15] hover:text-white disabled:cursor-not-allowed disabled:opacity-25"
+      >
+        ‹
+      </button>
+
+      {pages.map((item, index) =>
+        item === "gap" ? (
+          <span key={`gap-${index}`} className="px-1 text-xs text-white/22">…</span>
+        ) : (
+          <button
+            key={item}
+            type="button"
+            onClick={() => onPageChange(item)}
+            className={[
+              "h-8 min-w-8 rounded-full border px-2.5 text-xs font-black transition",
+              item === page
+                ? "border-indigo-300/28 bg-indigo-400/[0.14] text-indigo-50 shadow-[0_0_16px_rgba(99,102,241,0.16)]"
+                : "border-white/[0.07] bg-white/[0.025] text-white/38 hover:border-white/[0.14] hover:text-white",
+            ].join(" ")}
+          >
+            {item}
+          </button>
+        ),
+      )}
+
+      <button
+        type="button"
+        disabled={page === totalPages}
+        onClick={() => onPageChange(page + 1)}
+        className="h-8 rounded-full border border-white/[0.08] bg-white/[0.03] px-3 text-xs font-black text-white/45 transition hover:border-white/[0.15] hover:text-white disabled:cursor-not-allowed disabled:opacity-25"
+      >
+        ›
+      </button>
+    </div>
+  );
+}
+
+function getSectionPaginationPages(page: number, total: number): Array<number | "gap"> {
+  if (total <= 5) return Array.from({ length: total }, (_, i) => i + 1);
+  const set    = new Set([1, total, page - 1, page, page + 1]);
+  const sorted = [...set].filter((n) => n >= 1 && n <= total).sort((a, b) => a - b);
+  const result: Array<number | "gap"> = [];
+  for (let i = 0; i < sorted.length; i++) {
+    if (i > 0 && sorted[i] - sorted[i - 1] > 1) result.push("gap");
+    result.push(sorted[i]);
+  }
+  return result;
+}
+
 export default function AcompanhandoPage() {
   const router = useRouter();
 
@@ -57,6 +144,8 @@ export default function AcompanhandoPage() {
   const [continueItems, setContinueItems] = useState<ContinueItem[]>([]);
   const [isContinueLoading, setIsContinueLoading] = useState(true);
   const [continueSortMode, setContinueSortMode] = useState<ContinueSortMode>("recent");
+  const [continuePage, setContinuePage] = useState(1);
+  const continueItemsPerPage = useContinueItemsPerPage();
 
   const [watchlistPicks, setWatchlistPicks] = useState<WatchlistPickItem[]>([]);
   const [isWatchlistPicksLoading, setIsWatchlistPicksLoading] = useState(true);
@@ -197,6 +286,16 @@ export default function AcompanhandoPage() {
     return continueItems;
   }, [continueItems, continueSortMode]);
 
+  const continueTotalPages = Math.max(1, Math.ceil(sortedContinueItems.length / continueItemsPerPage));
+  const safeContinuePage   = Math.min(continuePage, continueTotalPages);
+  const visibleContinueItems = useMemo(() => {
+    const start = (safeContinuePage - 1) * continueItemsPerPage;
+    return sortedContinueItems.slice(start, start + continueItemsPerPage);
+  }, [sortedContinueItems, safeContinuePage, continueItemsPerPage]);
+
+  // Reseta para a primeira página ao trocar ordenação ou tamanho de tela
+  useEffect(() => { setContinuePage(1); }, [continueSortMode, continueItemsPerPage]);
+
   return (
     <PageShell variant="wide">
       <div className="flex flex-col gap-10">
@@ -253,6 +352,7 @@ export default function AcompanhandoPage() {
             )}
           </section>
         )}
+
         {/* Continue de onde parou */}
         {(isContinueLoading || continueItems.length > 0) && (
           <section>
@@ -302,7 +402,7 @@ export default function AcompanhandoPage() {
 
             {isContinueLoading ? (
               <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-3">
-                {[...Array(6)].map((_, i) => (
+                {[...Array(continueItemsPerPage)].map((_, i) => (
                   <div
                     key={i}
                     className="h-[95px] animate-pulse rounded-2xl bg-white/[0.04]"
@@ -310,18 +410,26 @@ export default function AcompanhandoPage() {
                 ))}
               </div>
             ) : (
-              <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-3">
-                {sortedContinueItems.map((item) => (
-                  <ContinueCard
-                    key={item.content_id}
-                    item={item}
-                    onClick={() => handleContinueNavigate(item)}
-                  />
-                ))}
+              <div className="flex flex-col gap-4">
+                <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-3">
+                  {visibleContinueItems.map((item) => (
+                    <ContinueCard
+                      key={item.content_id}
+                      item={item}
+                      onClick={() => handleContinueNavigate(item)}
+                    />
+                  ))}
+                </div>
+                <SectionPagination
+                  page={safeContinuePage}
+                  totalPages={continueTotalPages}
+                  onPageChange={setContinuePage}
+                />
               </div>
             )}
           </section>
         )}
+
         {/* Da sua watchlist */}
         {(isWatchlistPicksLoading || watchlistPicks.length > 0) && (
           <section>

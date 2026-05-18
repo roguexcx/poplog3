@@ -300,66 +300,51 @@ function getEpisodeContext({
 }
 
 async function getOverlayBase(userId: string, parsed: ParsedContentId) {
-  const { data, error } = await supabaseAdmin
-    .from("poplog3_user_titles")
-    .select(
-      `
-      id,
-      user_id,
-      tmdb_id,
-      media_type,
-      status,
-      rating,
-      started_at,
-      finished_at,
-      created_at,
-      updated_at,
-      title:poplog3_titles (
-        tmdb_id,
-        media_type,
-        title,
-        poster_path,
-        backdrop_path,
-        year,
-        runtime,
-        episode_run_time,
-        vote_average,
-        genres,
-        number_of_seasons,
-        number_of_episodes,
-        tmdb_payload
-      )
-    `
-    )
-    .eq("user_id", userId)
-    .eq("tmdb_id", parsed.tmdbId)
-    .eq("media_type", parsed.mediaType)
-    .maybeSingle();
+  const [userRow, titleRow] = await Promise.all([
+    supabaseAdmin
+      .from("user_titles")
+      .select("status, created_at")
+      .eq("user_id", userId)
+      .eq("tmdb_id", parsed.tmdbId)
+      .eq("media_type", parsed.mediaType)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+    supabaseAdmin
+      .from("poplog3_titles")
+      .select("title, poster_path, backdrop_path, year, runtime, episode_run_time, vote_average, genres, number_of_seasons, number_of_episodes, tmdb_payload")
+      .eq("tmdb_id", parsed.tmdbId)
+      .eq("media_type", parsed.mediaType)
+      .maybeSingle(),
+  ]);
 
-  if (error) throw new Error(error.message);
+  if (userRow.error) throw new Error(userRow.error.message);
+  if (titleRow.error) throw new Error(titleRow.error.message);
 
-  const row = data as unknown as DbUserTitle | null;
-
-  if (!row || !row.title) {
-    throw new Error("Título não encontrado na biblioteca POPLOG3.");
+  if (!userRow.data || !titleRow.data) {
+    throw new Error("Título não encontrado na biblioteca.");
   }
+
+  const status = (userRow.data as Record<string, unknown>).status as string;
+  const createdAt = (userRow.data as Record<string, unknown>).created_at as string;
+  const meta = titleRow.data as unknown as DbTitleMeta;
 
   return {
     user_id: userId,
     content_id: parsed.contentId,
     content_type: parsed.contentType,
-    title: row.title.title ?? "Sem título",
-    poster_path: row.title.poster_path ?? null,
-    backdrop_path: row.title.backdrop_path ?? null,
-    status: LIBRARY_TO_WATCH_STATUS[row.status] ?? "watching",
-    runtime: row.title.runtime ?? null,
-    tmdb_rating: row.title.vote_average ?? null,
-    user_rating: row.rating ? Math.round(Number(row.rating)) : null,
-    added_to_watchlist_at: row.created_at ?? null,
-    started_at: row.started_at ?? null,
-    finished_at: row.finished_at ?? null,
-    genres: normalizeGenres(row.title.genres),
-    year: row.title.year ?? null,
+    title: meta.title ?? "Sem título",
+    poster_path: meta.poster_path ?? null,
+    backdrop_path: meta.backdrop_path ?? null,
+    status: LIBRARY_TO_WATCH_STATUS[status] ?? "watching",
+    runtime: meta.runtime ?? null,
+    tmdb_rating: meta.vote_average ?? null,
+    user_rating: null,
+    added_to_watchlist_at: createdAt ?? null,
+    started_at: null,
+    finished_at: null,
+    genres: normalizeGenres(meta.genres),
+    year: meta.year ?? null,
     updated_at: new Date().toISOString(),
   };
 }
@@ -417,51 +402,59 @@ export async function GET() {
   }
 
   const { data: rawUserTitles, error } = await supabaseAdmin
-    .from("poplog3_user_titles")
-    .select(
-      `
-      id,
-      user_id,
-      tmdb_id,
-      media_type,
-      status,
-      rating,
-      started_at,
-      finished_at,
-      created_at,
-      updated_at,
-      title:poplog3_titles (
-        tmdb_id,
-        media_type,
-        title,
-        poster_path,
-        backdrop_path,
-        year,
-        runtime,
-        episode_run_time,
-        vote_average,
-        genres,
-        number_of_seasons,
-        number_of_episodes,
-        tmdb_payload
-      )
-    `
-    )
+    .from("user_titles")
+    .select("id, user_id, tmdb_id, media_type, status, created_at, watched_at")
     .eq("user_id", user.id)
     .in("status", ["watching", "watchlist", "abandoned", "fridge"])
-    .order("updated_at", { ascending: false })
+    .order("created_at", { ascending: false })
     .limit(120);
 
   if (error) {
-    console.error("[acompanhando] poplog3_user_titles query error:", error);
+    console.error("[acompanhando] user_titles query error:", error);
+    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
+  }
 
-    return NextResponse.json(
-      { ok: false, error: error.message },
-      { status: 500 }
+  const rawRows = (rawUserTitles ?? []) as Array<Record<string, unknown>>;
+
+  // Busca metadados dos títulos em lote
+  const tmdbIds = rawRows.map((r) => r.tmdb_id as number);
+  const mediaTypeValues = [...new Set(rawRows.map((r) => r.media_type as string))];
+
+  let titlesMetaMap = new Map<string, DbTitleMeta>();
+  if (tmdbIds.length > 0) {
+    const { data: titlesData } = await supabaseAdmin
+      .from("poplog3_titles")
+      .select("tmdb_id, media_type, title, poster_path, backdrop_path, year, runtime, episode_run_time, vote_average, genres, number_of_seasons, number_of_episodes, tmdb_payload")
+      .in("tmdb_id", tmdbIds)
+      .in("media_type", mediaTypeValues);
+
+    titlesMetaMap = new Map(
+      ((titlesData ?? []) as unknown as DbTitleMeta[]).map((t) => [
+        `${t.tmdb_id}:${t.media_type}`,
+        t,
+      ])
     );
   }
 
-  const userTitles = (rawUserTitles ?? []) as unknown as DbUserTitle[];
+  const userTitles: DbUserTitle[] = rawRows
+    .map((row) => {
+      const meta = titlesMetaMap.get(`${row.tmdb_id}:${row.media_type}`) ?? null;
+      if (!meta) return null;
+      return {
+        id: row.id as string,
+        user_id: row.user_id as string,
+        tmdb_id: row.tmdb_id as number,
+        media_type: row.media_type as MediaType,
+        status: row.status as string,
+        rating: null,
+        started_at: null,
+        finished_at: null,
+        created_at: row.created_at as string,
+        updated_at: (row.watched_at as string | null) ?? (row.created_at as string),
+        title: meta,
+      } as DbUserTitle;
+    })
+    .filter((r): r is DbUserTitle => r !== null);
 
   const seriesIds = userTitles
     .filter((ut) => ut.media_type === "tv")
@@ -776,16 +769,24 @@ export async function POST(request: NextRequest) {
     if (body.action === "mark_watched") {
       const now = new Date().toISOString();
 
-      const { error } = await supabaseAdmin
-        .from("poplog3_user_titles")
-        .update({
-          status: "watched",
-          finished_at: now,
-          updated_at: now,
-        })
+      // Remove linhas antigas e insere nova com status watched
+      await supabaseAdmin
+        .from("user_titles")
+        .delete()
         .eq("user_id", user.id)
         .eq("tmdb_id", parsed.tmdbId)
         .eq("media_type", parsed.mediaType);
+
+      const { error } = await supabaseAdmin
+        .from("user_titles")
+        .insert({
+          user_id: user.id,
+          tmdb_id: parsed.tmdbId,
+          media_type: parsed.mediaType,
+          status: "watched",
+          favorite: false,
+          watched_at: now,
+        });
 
       if (error) throw new Error(error.message);
 

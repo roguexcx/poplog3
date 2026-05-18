@@ -276,7 +276,7 @@ export async function GET() {
       const user = await getCurrentUser();
       if (user) {
         const { data } = await supabaseAdmin
-          .from("poplog3_user_titles")
+          .from("user_titles")
           .select("tmdb_id, media_type, status")
           .eq("user_id", user.id);
         if (data) {

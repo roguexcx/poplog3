@@ -51,7 +51,8 @@ export async function GET() {
       .toISOString()
       .slice(0, 10);
 
-    const { data: statesRaw, error } = await supabaseAdmin
+    // Query 1: in_progress + watchlist com next_episode_air_date já preenchida
+    const inProgressQuery = supabaseAdmin
       .from("user_title_state")
       .select("tmdb_id, status, next_season, next_episode, next_episode_air_date")
       .eq("user_id", user.id)
@@ -62,6 +63,21 @@ export async function GET() {
       .order("next_episode_air_date", { ascending: true })
       .limit(MAX_ITEMS);
 
+    // Query 2: up_to_date + watching — next_episode_air_date é null no state,
+    // mas tmdb_payload.next_episode_to_air pode ter episódio futuro confirmado
+    const upToDateQuery = supabaseAdmin
+      .from("user_title_state")
+      .select("tmdb_id, status")
+      .eq("user_id", user.id)
+      .eq("media_type", "tv")
+      .eq("status", "watching")
+      .eq("computed_state", "up_to_date");
+
+    const [{ data: statesRaw, error }, { data: upToDateRaw }] = await Promise.all([
+      inProgressQuery,
+      upToDateQuery,
+    ]);
+
     if (error) {
       console.error("[upcoming-episodes] query error", {
         message: error.message,
@@ -70,11 +86,59 @@ export async function GET() {
       return NextResponse.json({ items: [] });
     }
 
-    if (!statesRaw || statesRaw.length === 0) {
-      return NextResponse.json({ items: [] });
+    const states = (statesRaw ?? []) as StateRow[];
+
+    // Sintetiza StateRows para séries up_to_date usando tmdb_payload.next_episode_to_air
+    if (upToDateRaw && upToDateRaw.length > 0) {
+      const upToDateIds = (upToDateRaw as { tmdb_id: number; status: string | null }[]).map(
+        (s) => s.tmdb_id,
+      );
+
+      const { data: payloads } = await supabaseAdmin
+        .from("poplog3_titles")
+        .select("tmdb_id, tmdb_payload")
+        .in("tmdb_id", upToDateIds)
+        .eq("media_type", "tv");
+
+      const alreadyIncluded = new Set(states.map((s) => s.tmdb_id));
+
+      for (const row of payloads ?? []) {
+        if (alreadyIncluded.has((row as { tmdb_id: number }).tmdb_id)) continue;
+
+        const payload = (row as { tmdb_payload: Record<string, unknown> | null }).tmdb_payload;
+        const neta = payload?.next_episode_to_air as Record<string, unknown> | null | undefined;
+        if (!neta) continue;
+
+        const airDate =
+          typeof neta.air_date === "string" ? neta.air_date : null;
+        const seasonNum =
+          typeof neta.season_number === "number" ? neta.season_number : null;
+        const episodeNum =
+          typeof neta.episode_number === "number" ? neta.episode_number : null;
+
+        if (!airDate || !seasonNum || !episodeNum) continue;
+        if (airDate < tomorrowStr || airDate > cutoffStr) continue;
+
+        const upToDateEntry = upToDateRaw.find(
+          (s) => (s as { tmdb_id: number }).tmdb_id === (row as { tmdb_id: number }).tmdb_id,
+        ) as { tmdb_id: number; status: string | null } | undefined;
+
+        states.push({
+          tmdb_id: (row as { tmdb_id: number }).tmdb_id,
+          status: upToDateEntry?.status ?? "watching",
+          next_season: seasonNum,
+          next_episode: episodeNum,
+          next_episode_air_date: airDate,
+        });
+      }
+
+      // Re-ordena por air_date após merge
+      states.sort((a, b) =>
+        (a.next_episode_air_date ?? "").localeCompare(b.next_episode_air_date ?? ""),
+      );
     }
 
-    const states = statesRaw as StateRow[];
+    if (states.length === 0) return NextResponse.json({ items: [] });
 
     // Filtra os que têm todos os campos necessários
     const valid = states.filter(
@@ -112,6 +176,7 @@ export async function GET() {
     const now = Date.now();
 
     const items: UpcomingEpisodeItem[] = valid
+      .slice(0, MAX_ITEMS)
       .map((s, i) => {
         const title = titleMap.get(s.tmdb_id);
         if (!title) return null;
