@@ -1,3 +1,4 @@
+import { logApiCall } from "@/server/engine-logger";
 import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 
 import {
@@ -44,6 +45,7 @@ export async function syncTmdbSeason(
   seasonNumber: number,
   options: { force?: boolean } = {}
 ): Promise<SyncTmdbSeasonResult> {
+  const t0 = Date.now();
   const cached = await getCachedSeason(seriesTmdbId, seasonNumber);
 
   if (
@@ -51,6 +53,16 @@ export async function syncTmdbSeason(
     cached &&
     isSeasonCacheFresh(cached.last_synced_at)
   ) {
+    logApiCall({
+      api: "tmdb",
+      op: "sync-season",
+      mediaType: "tv",
+      tmdbId: seriesTmdbId,
+      endpoint: `/tv/${seriesTmdbId}/season/${seasonNumber}`,
+      cacheStatus: "hit",
+      durationMs: Date.now() - t0,
+      success: true,
+    });
     return { season: cached, source: "cache", cache_status: "fresh" };
   }
 
@@ -97,6 +109,17 @@ export async function syncTmdbSeason(
   });
 
   const fresh = await getCachedSeason(seriesTmdbId, seasonNumber);
+
+  logApiCall({
+    api: "tmdb",
+    op: "sync-season",
+    mediaType: "tv",
+    tmdbId: seriesTmdbId,
+    endpoint: `/tv/${seriesTmdbId}/season/${seasonNumber}`,
+    cacheStatus: options.force ? "forced" : "miss",
+    durationMs: Date.now() - t0,
+    success: true,
+  });
 
   return {
     season: fresh,

@@ -216,6 +216,15 @@ export default function TitleEpisodeBrowser({
   const [seasonSaving, setSeasonSaving] = useState(false);
   const [, startTransition] = useTransition();
 
+  type PendingPrevDialog = {
+    seasonNumber: number;
+    episodeNumber: number;
+    runtimeMinutes: number | null;
+    prevEpisodes: Array<{ episodeNumber: number; runtimeMinutes: number | null }>;
+  };
+  const [pendingPrevDialog, setPendingPrevDialog] =
+    useState<PendingPrevDialog | null>(null);
+
   const handleCacheComments = useCallback(
     (cacheKey: string, payload: CachedEpisodeComments) => {
       setCommentsCache((prev) => ({
@@ -344,7 +353,16 @@ export default function TitleEpisodeBrowser({
   const hasMoreEpisodes =
     Boolean(season) && visibleCount < (season?.episodes.length ?? 0);
 
-  function toggleEpisode(
+  function dispatchLibraryStatusChanged(status: string) {
+    if (typeof window === "undefined") return;
+    window.dispatchEvent(
+      new CustomEvent("poplog3:library-status-changed", {
+        detail: { tmdbId: seriesTmdbId, status },
+      }),
+    );
+  }
+
+  async function doToggleEpisode(
     seasonNumber: number,
     episodeNumber: number,
     nextWatched: boolean,
@@ -354,10 +372,8 @@ export default function TitleEpisodeBrowser({
 
     setWatchedKeys((prev) => {
       const next = new Set(prev);
-
       if (nextWatched) next.add(key);
       else next.delete(key);
-
       return next;
     });
 
@@ -367,9 +383,7 @@ export default function TitleEpisodeBrowser({
       try {
         const res = await fetch("/api/poplog3/episodes", {
           method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
+          headers: { "content-type": "application/json" },
           body: JSON.stringify({
             seriesTmdbId,
             seasonNumber,
@@ -379,30 +393,25 @@ export default function TitleEpisodeBrowser({
           }),
         });
 
-        if (!res.ok) {
-          throw new Error(`HTTP ${res.status}`);
-        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
 
         const body = (await res.json()) as {
           ok: boolean;
-          progress?: {
-            watchedKeys?: string[];
-          };
+          progress?: { watchedKeys?: string[] };
         };
 
         if (body.ok && body.progress?.watchedKeys) {
           setWatchedKeys(new Set(body.progress.watchedKeys));
         }
+
+        if (nextWatched) dispatchLibraryStatusChanged("watching");
       } catch (err) {
         setWatchedKeys((prev) => {
           const next = new Set(prev);
-
           if (nextWatched) next.delete(key);
           else next.add(key);
-
           return next;
         });
-
         console.warn("[episode toggle] erro:", err);
       } finally {
         setSavingKey(null);
@@ -410,13 +419,104 @@ export default function TitleEpisodeBrowser({
     });
   }
 
+  async function doBulkMarkEpisodes(
+    episodes: Array<{ seasonNumber: number; episodeNumber: number; runtimeMinutes: number | null }>,
+  ) {
+    const keys = episodes.map((ep) => episodeKey(ep.seasonNumber, ep.episodeNumber));
+
+    setWatchedKeys((prev) => {
+      const next = new Set(prev);
+      keys.forEach((k) => next.add(k));
+      return next;
+    });
+
+    // Marca o primeiro como saving para feedback visual
+    if (keys.length > 0) setSavingKey(keys[keys.length - 1]);
+
+    startTransition(async () => {
+      try {
+        const res = await fetch("/api/poplog3/episodes", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            seriesTmdbId,
+            bulk: episodes,
+          }),
+        });
+
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+        const body = (await res.json()) as {
+          ok: boolean;
+          progress?: { watchedKeys?: string[] };
+        };
+
+        if (body.ok && body.progress?.watchedKeys) {
+          setWatchedKeys(new Set(body.progress.watchedKeys));
+        }
+
+        dispatchLibraryStatusChanged("watching");
+      } catch (err) {
+        setWatchedKeys((prev) => {
+          const next = new Set(prev);
+          keys.forEach((k) => next.delete(k));
+          return next;
+        });
+        console.warn("[bulk episode toggle] erro:", err);
+      } finally {
+        setSavingKey(null);
+      }
+    });
+  }
+
+  function toggleEpisode(
+    seasonNumber: number,
+    episodeNumber: number,
+    nextWatched: boolean,
+    runtimeMinutes: number | null,
+  ) {
+    // Ao desmarcar: vai direto, sem diálogo
+    if (!nextWatched || !season) {
+      void doToggleEpisode(seasonNumber, episodeNumber, nextWatched, runtimeMinutes);
+      return;
+    }
+
+    // Ao marcar: verifica se há episódios anteriores não assistidos nessa temporada
+    const now = Date.now();
+    const prevUnwatched = season.episodes
+      .filter(
+        (ep) =>
+          ep.episodeNumber < episodeNumber &&
+          ep.airDate &&
+          new Date(ep.airDate).getTime() <= now &&
+          !watchedKeys.has(episodeKey(seasonNumber, ep.episodeNumber)),
+      )
+      .map((ep) => ({ episodeNumber: ep.episodeNumber, runtimeMinutes: ep.runtime ?? null }));
+
+    if (prevUnwatched.length === 0) {
+      void doToggleEpisode(seasonNumber, episodeNumber, nextWatched, runtimeMinutes);
+      return;
+    }
+
+    // Há anteriores não assistidos: abre diálogo de confirmação
+    setPendingPrevDialog({
+      seasonNumber,
+      episodeNumber,
+      runtimeMinutes,
+      prevEpisodes: prevUnwatched,
+    });
+  }
+
   async function handleMarkSeason(seasonNumber: number) {
     if (!season || seasonSaving) return;
 
     const now = Date.now();
-    const keysToAdd = season.episodes
-      .filter((ep) => ep.airDate && new Date(ep.airDate).getTime() <= now)
-      .map((ep) => episodeKey(seasonNumber, ep.episodeNumber));
+    const episodesToMark = season.episodes.filter(
+      (ep) => ep.airDate && new Date(ep.airDate).getTime() <= now,
+    );
+    const keysToAdd = episodesToMark.map((ep) =>
+      episodeKey(seasonNumber, ep.episodeNumber),
+    );
 
     setWatchedKeys((prev) => {
       const next = new Set(prev);
@@ -429,7 +529,14 @@ export default function TitleEpisodeBrowser({
       const res = await fetch("/api/poplog3/episodes", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ seriesTmdbId, markSeason: seasonNumber }),
+        body: JSON.stringify({
+          seriesTmdbId,
+          bulk: episodesToMark.map((ep) => ({
+            seasonNumber,
+            episodeNumber: ep.episodeNumber,
+            runtimeMinutes: ep.runtime ?? null,
+          })),
+        }),
       });
 
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
@@ -442,6 +549,8 @@ export default function TitleEpisodeBrowser({
       if (body.ok && body.progress?.watchedKeys) {
         setWatchedKeys(new Set(body.progress.watchedKeys));
       }
+
+      dispatchLibraryStatusChanged("watching");
     } catch (err) {
       setWatchedKeys((prev) => {
         const next = new Set(prev);
@@ -716,7 +825,101 @@ export default function TitleEpisodeBrowser({
           }
         />
       )}
+
+      {pendingPrevDialog && (
+        <PreviousEpisodesDialog
+          count={pendingPrevDialog.prevEpisodes.length}
+          onMarkAll={() => {
+            const { seasonNumber, episodeNumber, runtimeMinutes, prevEpisodes } =
+              pendingPrevDialog;
+            setPendingPrevDialog(null);
+            void doBulkMarkEpisodes([
+              ...prevEpisodes.map((ep) => ({ seasonNumber, ...ep })),
+              { seasonNumber, episodeNumber, runtimeMinutes },
+            ]);
+          }}
+          onMarkOnly={() => {
+            const { seasonNumber, episodeNumber, runtimeMinutes } =
+              pendingPrevDialog;
+            setPendingPrevDialog(null);
+            void doToggleEpisode(seasonNumber, episodeNumber, true, runtimeMinutes);
+          }}
+          onCancel={() => setPendingPrevDialog(null)}
+        />
+      )}
     </section>
+  );
+}
+
+type PreviousEpisodesDialogProps = {
+  count: number;
+  onMarkAll: () => void;
+  onMarkOnly: () => void;
+  onCancel: () => void;
+};
+
+function PreviousEpisodesDialog({
+  count,
+  onMarkAll,
+  onMarkOnly,
+  onCancel,
+}: PreviousEpisodesDialogProps) {
+  return (
+    <div
+      className="fixed inset-0 z-[90] flex items-end justify-center bg-black/60 px-4 py-4 backdrop-blur-sm sm:items-center"
+      role="dialog"
+      aria-modal="true"
+      aria-label="Marcar episódios anteriores"
+      onMouseDown={onCancel}
+    >
+      <div
+        className="w-full max-w-sm overflow-hidden rounded-[1.5rem] border border-white/[0.12] bg-zinc-950 shadow-[0_24px_80px_rgba(0,0,0,0.65)]"
+        onMouseDown={(e) => e.stopPropagation()}
+      >
+        <div className="px-5 pb-2 pt-5">
+          <div className="mb-1 flex items-center gap-2">
+            <span className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-300/70">
+              Continuidade
+            </span>
+          </div>
+          <h2 className="text-[17px] font-bold tracking-[-0.03em] text-white">
+            Marcar episódios anteriores?
+          </h2>
+          <p className="mt-1.5 text-[13px] leading-[1.55] text-white/52">
+            {count === 1
+              ? "Há 1 episódio anterior ainda não marcado como assistido."
+              : `Há ${count} episódios anteriores ainda não marcados como assistidos.`}{" "}
+            Deseja marcá-los também?
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2 p-4">
+          <button
+            type="button"
+            onClick={onMarkAll}
+            className="w-full rounded-xl border border-indigo-300/28 bg-indigo-500/14 px-4 py-3 text-[13px] font-bold tracking-[-0.01em] text-indigo-50 transition hover:border-indigo-300/45 hover:bg-indigo-500/22"
+          >
+            Marcar anteriores também
+          </button>
+
+          <button
+            type="button"
+            onClick={onMarkOnly}
+            className="w-full rounded-xl border border-white/[0.09] bg-white/[0.04] px-4 py-3 text-[13px] font-bold tracking-[-0.01em] text-white/78 transition hover:border-white/[0.18] hover:bg-white/[0.08]"
+          >
+            Somente este episódio
+          </button>
+
+          <button
+            type="button"
+            onClick={onCancel}
+            className="w-full rounded-xl px-4 py-2.5 text-[12px] font-semibold text-white/35 transition hover:text-white/60"
+          >
+            Cancelar
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 

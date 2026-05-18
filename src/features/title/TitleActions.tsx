@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
+import { useEffect, useMemo, useState, useTransition } from "react";
 
 import ActionButton from "@/components/ui/ActionButton";
 import {
@@ -93,6 +93,25 @@ export default function TitleActions({
   const [, startTransition] = useTransition();
 
   const id = Number(tmdbId);
+
+  // Quando um episódio é marcado em TitleEpisodeBrowser, o estado "Assistindo"
+  // deve refletir imediatamente nos botões de ação sem reload.
+  useEffect(() => {
+    if (mediaType !== "tv") return;
+
+    function handleLibraryStatusChanged(event: Event) {
+      const e = event as CustomEvent<{ tmdbId: number; status: string }>;
+      if (e.detail?.tmdbId !== id) return;
+      if (e.detail.status === "watching") {
+        setStatus((prev) => (prev === null || prev === "watchlist" ? "watching" : prev));
+      }
+    }
+
+    window.addEventListener("poplog3:library-status-changed", handleLibraryStatusChanged);
+    return () => {
+      window.removeEventListener("poplog3:library-status-changed", handleLibraryStatusChanged);
+    };
+  }, [id, mediaType]);
 
   const isAuthenticated = initialState?.isAuthenticated === true;
 

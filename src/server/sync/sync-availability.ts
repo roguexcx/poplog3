@@ -1,3 +1,4 @@
+import { logApiCall } from "@/server/engine-logger";
 import { motnFetch } from "@/server/api-clients/movieofthenight/client";
 import type { MotnTitleResponse } from "@/server/api-clients/movieofthenight/types";
 import { watchmodeFetch } from "@/server/api-clients/watchmode/client";
@@ -265,6 +266,7 @@ async function fetchMotnRows(
 export async function syncAvailability(
   input: SyncAvailabilityInput
 ): Promise<SyncAvailabilityResult> {
+  const t0 = Date.now();
   const country = input.country ?? "BR";
   const { tmdbId, mediaType } = input;
   const maxAgeDays = input.maxAgeDays ?? 7;
@@ -272,6 +274,15 @@ export async function syncAvailability(
   const cached = await getAvailability(mediaType, tmdbId, country);
 
   if (!input.force && cached.length > 0 && isAvailabilityFresh(cached, maxAgeDays)) {
+    logApiCall({
+      api: "tmdb",
+      op: "sync-availability",
+      mediaType,
+      tmdbId,
+      cacheStatus: "hit",
+      durationMs: Date.now() - t0,
+      success: true,
+    });
     return {
       source: "cache",
       rows: cached,
@@ -303,23 +314,21 @@ export async function syncAvailability(
     });
 
     await Promise.all([
-      replaceAvailability({
-        tmdbId,
-        mediaType,
-        country,
-        source: "watchmode",
-        rows: [],
-      }),
-      replaceAvailability({
-        tmdbId,
-        mediaType,
-        country,
-        source: "motn",
-        rows: [],
-      }),
+      replaceAvailability({ tmdbId, mediaType, country, source: "watchmode", rows: [] }),
+      replaceAvailability({ tmdbId, mediaType, country, source: "motn", rows: [] }),
     ]);
 
     const fresh = await getAvailability(mediaType, tmdbId, country);
+
+    logApiCall({
+      api: "tmdb",
+      op: "sync-availability",
+      mediaType,
+      tmdbId,
+      cacheStatus: "miss",
+      durationMs: Date.now() - t0,
+      success: true,
+    });
 
     return {
       source: "tmdb",
@@ -341,15 +350,20 @@ export async function syncAvailability(
     if (watchmodeRows.length > 0) {
       diagnostics.watchmode = "ok";
 
-      await replaceAvailability({
-        tmdbId,
-        mediaType,
-        country,
-        source: "watchmode",
-        rows: watchmodeRows,
-      });
+      await replaceAvailability({ tmdbId, mediaType, country, source: "watchmode", rows: watchmodeRows });
 
       const fresh = await getAvailability(mediaType, tmdbId, country);
+
+      logApiCall({
+        api: "watchmode",
+        op: "sync-availability",
+        mediaType,
+        tmdbId,
+        cacheStatus: "miss",
+        durationMs: Date.now() - t0,
+        success: true,
+        fallbackFrom: "tmdb",
+      });
 
       return {
         source: "watchmode",
@@ -366,6 +380,18 @@ export async function syncAvailability(
     );
 
     diagnostics.watchmode = "failed";
+
+    logApiCall({
+      api: "watchmode",
+      op: "sync-availability",
+      mediaType,
+      tmdbId,
+      cacheStatus: "failed",
+      durationMs: Date.now() - t0,
+      success: false,
+      fallbackFrom: "tmdb",
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 
   try {
@@ -374,15 +400,20 @@ export async function syncAvailability(
     if (motnRows.length > 0) {
       diagnostics.motn = "ok";
 
-      await replaceAvailability({
-        tmdbId,
-        mediaType,
-        country,
-        source: "motn",
-        rows: motnRows,
-      });
+      await replaceAvailability({ tmdbId, mediaType, country, source: "motn", rows: motnRows });
 
       const fresh = await getAvailability(mediaType, tmdbId, country);
+
+      logApiCall({
+        api: "motn",
+        op: "sync-availability",
+        mediaType,
+        tmdbId,
+        cacheStatus: "miss",
+        durationMs: Date.now() - t0,
+        success: true,
+        fallbackFrom: "watchmode",
+      });
 
       return {
         source: "motn",
@@ -399,6 +430,18 @@ export async function syncAvailability(
     );
 
     diagnostics.motn = "failed";
+
+    logApiCall({
+      api: "motn",
+      op: "sync-availability",
+      mediaType,
+      tmdbId,
+      cacheStatus: "failed",
+      durationMs: Date.now() - t0,
+      success: false,
+      fallbackFrom: "watchmode",
+      error: error instanceof Error ? error.message : String(error),
+    });
   }
 
   return {

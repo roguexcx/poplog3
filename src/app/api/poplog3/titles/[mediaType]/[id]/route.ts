@@ -17,6 +17,7 @@ import { computeUserSeriesProgress } from "@/server/episodes/episode-progress-se
 import { readTitleState, refreshTitleStateAvailability } from "@/server/state/user-title-state";
 import { getUserTitleStatus } from "@/server/library/library-service";
 import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
+import { withOrigin } from "@/server/engine-logger";
 import {
   syncAvailability,
   type TmdbPayloadWithWatch,
@@ -104,7 +105,7 @@ export async function GET(
     );
   }
 
-  try {
+  return withOrigin("title", async () => { try {
     const synced = await syncTmdbTitle(mediaType, id, { force: refresh });
     const title = synced.title;
 
@@ -614,4 +615,5 @@ export async function GET(
       { status: 500 },
     );
   }
+  }); // withOrigin("title")
 }

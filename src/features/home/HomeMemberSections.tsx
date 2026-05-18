@@ -118,7 +118,7 @@ function MemberContent() {
   if (titles.length === 0) return <EmptyMemberHome />;
 
   return (
-    <>
+    <div className="flex flex-col gap-14">
       <div id="for-you">
         <ForYouSection />
       </div>
@@ -126,7 +126,7 @@ function MemberContent() {
       <div id="watchlist">
         <WatchlistVivaSection />
       </div>
-    </>
+    </div>
   );
 }
 

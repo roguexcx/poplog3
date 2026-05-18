@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { withOrigin } from "@/server/engine-logger";
 import { syncTmdbSeason } from "@/server/sync/sync-tmdb-season";
 
 export async function GET(
@@ -31,7 +32,7 @@ export async function GET(
     );
   }
 
-  try {
+  return withOrigin("title", async () => { try {
     const result = await syncTmdbSeason(seriesId, seasonNumber, {
       force: refresh,
     });
@@ -90,4 +91,5 @@ export async function GET(
       { status: 500 }
     );
   }
+  }); // withOrigin("title")
 }

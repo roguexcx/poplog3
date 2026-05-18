@@ -1,3 +1,4 @@
+import { logApiCall } from "@/server/engine-logger";
 import { omdbFetch } from "@/server/api-clients/omdb/client";
 import type { OmdbTitleResponse } from "@/server/api-clients/omdb/types";
 
@@ -54,6 +55,7 @@ export type SyncOmdbResult = {
 export async function syncOmdbRatings(
   input: SyncOmdbInput
 ): Promise<SyncOmdbResult> {
+  const t0 = Date.now();
   const { tmdbId, mediaType } = input;
 
   const maxAgeDays = input.maxAgeDays ?? 30;
@@ -76,23 +78,60 @@ export async function syncOmdbRatings(
       typeof cached.metacritic_score === "number"
     );
 
-  if (
-    !input.force &&
-    cached &&
-    cacheHasEnoughData &&
-    isRatingsCacheFresh(
-      cached.updated_at,
-      maxAgeDays
-    )
-  ) {
-    return {
-      source: "cache",
-      cache_status: "fresh",
-      ratings: cached,
-    };
+  if (!input.force && cached) {
+    if (
+      cacheHasEnoughData &&
+      isRatingsCacheFresh(cached.updated_at, maxAgeDays)
+    ) {
+      logApiCall({
+        api: "omdb",
+        op: "sync-ratings",
+        mediaType,
+        tmdbId,
+        cacheStatus: "hit",
+        durationMs: Date.now() - t0,
+        success: true,
+      });
+      return {
+        source: "cache",
+        cache_status: "fresh",
+        ratings: cached,
+      };
+    }
+
+    // Sem dados completos mas tentamos recentemente — cooldown de 1 dia
+    // para evitar burn loop quando OMDb falhou ou não tem dados para o título.
+    if (
+      !cacheHasEnoughData &&
+      isRatingsCacheFresh(cached.updated_at, 1)
+    ) {
+      logApiCall({
+        api: "omdb",
+        op: "sync-ratings",
+        mediaType,
+        tmdbId,
+        cacheStatus: "hit",
+        durationMs: Date.now() - t0,
+        success: true,
+      });
+      return {
+        source: "cache",
+        cache_status: "fresh",
+        ratings: cached,
+      };
+    }
   }
 
   if (!input.imdbId) {
+    logApiCall({
+      api: "omdb",
+      op: "sync-ratings",
+      mediaType,
+      tmdbId,
+      cacheStatus: "skipped",
+      durationMs: Date.now() - t0,
+      success: true,
+    });
     console.warn(
       `[sync-omdb-ratings] sem imdb_id para ${mediaType}/${tmdbId}`
     );
@@ -148,10 +187,32 @@ export async function syncOmdbRatings(
   } catch (error) {
     console.warn(
       `[sync-omdb-ratings] OMDb falhou para ${input.imdbId}:`,
-      error instanceof Error
-        ? error.message
-        : error
+      error instanceof Error ? error.message : error
     );
+
+    // Toca updated_at para ativar cooldown de 1 dia e evitar burn loop.
+    await upsertRatings({
+      tmdbId,
+      mediaType,
+      imdbRating: cached?.imdb_rating ?? null,
+      imdbVotes: cached?.imdb_votes ?? null,
+      rottenTomatoesScore: cached?.rotten_tomatoes_score ?? null,
+      metacriticScore: cached?.metacritic_score ?? null,
+      tmdbRating: input.tmdbRating ?? cached?.tmdb_rating ?? null,
+      poplogScore: cached?.poplog_score ?? null,
+    }).catch(() => {});
+
+    logApiCall({
+      api: "omdb",
+      op: "sync-ratings",
+      mediaType,
+      tmdbId,
+      endpoint: input.imdbId,
+      cacheStatus: "failed",
+      durationMs: Date.now() - t0,
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    });
 
     return {
       source: "cache",
@@ -164,6 +225,30 @@ export async function syncOmdbRatings(
     console.warn(
       `[sync-omdb-ratings] OMDb retornou False para ${input.imdbId}: ${response.Error ?? ""}`
     );
+
+    // Idem: toca updated_at para não tentar de novo hoje.
+    await upsertRatings({
+      tmdbId,
+      mediaType,
+      imdbRating: cached?.imdb_rating ?? null,
+      imdbVotes: cached?.imdb_votes ?? null,
+      rottenTomatoesScore: cached?.rotten_tomatoes_score ?? null,
+      metacriticScore: cached?.metacritic_score ?? null,
+      tmdbRating: input.tmdbRating ?? cached?.tmdb_rating ?? null,
+      poplogScore: cached?.poplog_score ?? null,
+    }).catch(() => {});
+
+    logApiCall({
+      api: "omdb",
+      op: "sync-ratings",
+      mediaType,
+      tmdbId,
+      endpoint: input.imdbId,
+      cacheStatus: "failed",
+      durationMs: Date.now() - t0,
+      success: false,
+      error: response.Error ?? "Response=False",
+    });
 
     return {
       source: "cache",
@@ -247,6 +332,17 @@ export async function syncOmdbRatings(
       : cached
         ? "stale_refreshed"
         : "created";
+
+  logApiCall({
+    api: "omdb",
+    op: "sync-ratings",
+    mediaType,
+    tmdbId,
+    endpoint: input.imdbId,
+    cacheStatus: input.force ? "forced" : "miss",
+    durationMs: Date.now() - t0,
+    success: true,
+  });
 
   return {
     source: "omdb",

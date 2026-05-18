@@ -30,16 +30,20 @@ export async function GET(request: NextRequest) {
       },
     });
 
+    const rawResults = data.results.filter(
+      (item) => item.media_type === "movie" || item.media_type === "tv"
+    );
+
     const titles = filterValidTitles(
-      data.results.map((item) => normalizeTmdbTitle(item))
+      rawResults.map((item) => normalizeTmdbTitle(item))
     );
 
     // Cache é best-effort no search — não queremos quebrar o resultado da
     // busca se uma persistência específica falhar.
-    await Promise.all(
+    Promise.all(
       titles.map(async (title, index) => {
         try {
-          await upsertCachedTitle(title, data.results[index]);
+          await upsertCachedTitle(title, rawResults[index]);
         } catch (cacheError) {
           console.warn(
             `[poplog3/search] falha ao cachear ${title.media_type}/${title.tmdb_id}:`,
@@ -47,13 +51,13 @@ export async function GET(request: NextRequest) {
           );
         }
       })
-    );
+    ).catch(() => {/* silent */});
 
     return NextResponse.json({
       ok: true,
       query,
-      count: titles.length,
-      results: titles,
+      count: rawResults.length,
+      results: rawResults,
     });
   } catch (error) {
     console.error("[poplog3/search]", error);

@@ -35,7 +35,7 @@ export function useSearch(query: string) {
         const data = await res.json();
 
         const filtered = (data.results as TMDBItem[] | undefined ?? [])
-          .filter((item) => item.media_type === "movie" || item.media_type === "tv")
+          .filter((item) => (item.media_type === "movie" || item.media_type === "tv") && item.id != null)
           .slice(0, MAX_RESULTS);
 
         setResults(filtered);

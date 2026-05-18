@@ -1,3 +1,5 @@
+import { logApiCall } from "@/server/engine-logger";
+
 const OMDB_BASE_URL = "https://www.omdbapi.com/";
 
 type OmdbFetchParams = {
@@ -28,15 +30,45 @@ function buildOmdbUrl(params: OmdbFetchParams) {
 }
 
 export async function omdbFetch<T>(params: OmdbFetchParams): Promise<T> {
+  const t0 = Date.now();
+
   const response = await fetch(buildOmdbUrl(params), {
     next: {
       revalidate: 60 * 60 * 24 * 30,
     },
   });
 
+  const durationMs = Date.now() - t0;
+
   if (!response.ok) {
-    throw new Error(`OMDb request failed: ${response.status}`);
+    let detail = "";
+    try {
+      const body = await response.json() as { Error?: string };
+      if (body?.Error) detail = `: ${body.Error}`;
+    } catch {}
+    const error = `OMDb request failed: ${response.status}${detail}`;
+    logApiCall({
+      api: "omdb",
+      op: "fetch",
+      endpoint: params.imdbId ?? params.title ?? "unknown",
+      cacheStatus: "none",
+      durationMs,
+      success: false,
+      httpStatus: response.status,
+      error,
+    });
+    throw new Error(error);
   }
+
+  logApiCall({
+    api: "omdb",
+    op: "fetch",
+    endpoint: params.imdbId ?? params.title ?? "unknown",
+    cacheStatus: "none",
+    durationMs,
+    success: true,
+    httpStatus: response.status,
+  });
 
   return response.json() as Promise<T>;
 }

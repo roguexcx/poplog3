@@ -321,6 +321,7 @@ export default function ForYouSection() {
       <SectionHeader
         title="Para você"
         subtitle="Escolhas personalizadas com base no que você ama."
+        className="mb-6"
         action={
           <Link
             href="/profile?tab=recommendations"

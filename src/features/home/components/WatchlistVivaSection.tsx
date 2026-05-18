@@ -64,20 +64,9 @@ function shuffle<T>(arr: T[]): T[] {
   return [...arr].sort(() => Math.random() - 0.5);
 }
 
-function daysUntilRelease(releaseDate: string): number {
-  return Math.floor((new Date(releaseDate).getTime() - Date.now()) / 86_400_000);
-}
-
-function isVisibleOnHome(t: WatchlistTitle): boolean {
-  const days = daysUntilRelease(t.release_date);
-  return days <= 7;
-}
-
 function selectFive(all: WatchlistTitle[]): Array<WatchlistTitle & { _slot: WatchlistSlot }> {
-  const eligible = all.filter(isVisibleOnHome);
-
-  const main   = eligible.filter((t) => !t.fridge);
-  const fridge = eligible.filter((t) => t.fridge);
+  const main   = all.filter((t) => !t.fridge);
+  const fridge = all.filter((t) => t.fridge);
   const recent = main.filter((t) => daysSince(t.created_at) <= 45);
   const old    = main.filter((t) => daysSince(t.created_at) > 90);
   const middle = main.filter((t) => !recent.includes(t) && !old.includes(t));
@@ -315,9 +304,6 @@ function WatchlistCard({
           )}
         </p>
 
-        <p className="mt-1.5 text-[11px] leading-relaxed text-[#52526a] line-clamp-2">
-          {context}
-        </p>
       </Link>
     </article>
   );
@@ -344,16 +330,20 @@ export default function WatchlistVivaSection() {
   const [visible, setVisible]     = useState<Array<WatchlistTitle & { _slot: WatchlistSlot }>>([]);
   const [loading, setLoading]     = useState(true);
 
-  const didFetchRef = useRef(false);
+  const lastKeyRef = useRef<string>("");
 
   useEffect(() => {
     if (titlesLoading) return;
-    if (didFetchRef.current) return;
-    didFetchRef.current = true;
 
     const rows = userTitles.filter((t) => t.status === "watchlist") as WatchlistRow[];
+    const key  = rows.map((r) => r.id).sort().join(",");
+
+    if (key === lastKeyRef.current) return;
+    lastKeyRef.current = key;
 
     if (!rows.length) {
+      setAllTitles([]);
+      setVisible([]);
       setLoading(false);
       return;
     }
@@ -398,8 +388,7 @@ export default function WatchlistVivaSection() {
     }
 
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [titlesLoading]);
+  }, [titlesLoading, userTitles]);
 
   function reshuffle() {
     setVisible(selectFive(allTitles));
@@ -438,7 +427,7 @@ export default function WatchlistVivaSection() {
     <section>
       <SectionHeader
         title="Da sua watchlist"
-        subtitle={!loading && allTitles.length > 5 ? `${allTitles.length} títulos na lista` : undefined}
+        className="mb-6"
         action={
           <button
             onClick={reshuffle}

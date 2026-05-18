@@ -8,7 +8,6 @@ import {
   Dice5,
   Home,
   Library,
-  ListVideo,
   LogIn,
   LogOut,
   Menu,
@@ -22,7 +21,19 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 
-const NAV_GROUPS = [
+type NavLink = {
+  href: string;
+  label: string;
+  icon: React.ComponentType<{ size?: number; className?: string }>;
+  authRequired?: boolean;
+};
+
+type NavGroup = {
+  label: string;
+  links: NavLink[];
+};
+
+const NAV_GROUPS: NavGroup[] = [
   {
     label: "Descobrir",
     links: [
@@ -33,43 +44,43 @@ const NAV_GROUPS = [
   {
     label: "Acompanhar",
     links: [
-      { href: "/acompanhando", label: "Acompanhando", icon: PlayCircle },
+      { href: "/acompanhando", label: "Acompanhando", icon: PlayCircle, authRequired: true },
       { href: "/agenda", label: "Agenda", icon: CalendarDays },
     ],
   },
   {
     label: "Organizar",
     links: [
-      { href: "/library", label: "Biblioteca", icon: Library },
-      { href: "/library?tab=watchlist", label: "Watchlist", icon: ListVideo },
+      { href: "/library", label: "Biblioteca", icon: Library, authRequired: true },
     ],
   },
   {
     label: "Explorar",
-    links: [{ href: "/sorteio", label: "Sorteio", icon: Dice5 }],
+    links: [
+      { href: "/sorteio", label: "Sorteio", icon: Dice5, authRequired: true },
+    ],
   },
   {
     label: "Conta",
     links: [
-      { href: "/profile", label: "Perfil", icon: UserCircle },
-      { href: "/settings", label: "Ajustes", icon: Settings },
+      { href: "/profile", label: "Perfil", icon: UserCircle, authRequired: true },
+      { href: "/settings", label: "Ajustes", icon: Settings, authRequired: true },
     ],
   },
 ];
 
-const MOBILE_LINKS = [
+const MOBILE_LINKS: NavLink[] = [
   { href: "/", label: "Início", icon: Home },
   { href: "/buscar", label: "Buscar", icon: Search },
-  { href: "/acompanhando", label: "Assistir", icon: PlayCircle },
-  { href: "/library", label: "Biblioteca", icon: Library },
+  { href: "/acompanhando", label: "Assistir", icon: PlayCircle, authRequired: true },
+  { href: "/library", label: "Biblioteca", icon: Library, authRequired: true },
 ];
 
-const MOBILE_MORE_LINKS = [
-  { href: "/library?tab=watchlist", label: "Watchlist", icon: ListVideo },
+const MOBILE_MORE_LINKS: NavLink[] = [
   { href: "/agenda", label: "Agenda", icon: CalendarDays },
-  { href: "/sorteio", label: "Sorteio", icon: Dice5 },
-  { href: "/profile", label: "Perfil", icon: UserCircle },
-  { href: "/settings", label: "Ajustes", icon: Settings },
+  { href: "/sorteio", label: "Sorteio", icon: Dice5, authRequired: true },
+  { href: "/profile", label: "Perfil", icon: UserCircle, authRequired: true },
+  { href: "/settings", label: "Ajustes", icon: Settings, authRequired: true },
 ];
 
 export default function Sidebar() {
@@ -80,27 +91,30 @@ export default function Sidebar() {
   const [loginOpen, setLoginOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [user, setUser] = useState<User | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
 
   useEffect(() => {
     const supabase = createClient();
 
     supabase.auth.getSession().then(({ data }) => {
       setUser(data.session?.user ?? null);
+      setAuthLoading(false);
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
-  setUser(session?.user ?? null);
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
 
-  if (
-    event === "SIGNED_IN" ||
-    event === "SIGNED_OUT" ||
-    event === "TOKEN_REFRESHED"
-  ) {
-    router.refresh();
-  }
-});
+      if (
+        event === "SIGNED_IN" ||
+        event === "SIGNED_OUT" ||
+        event === "TOKEN_REFRESHED"
+      ) {
+        router.refresh();
+      }
+    });
 
     return () => {
       subscription.unsubscribe();
@@ -109,29 +123,26 @@ export default function Sidebar() {
 
   async function handleLogout() {
     const supabase = createClient();
-
     await supabase.auth.signOut();
-
-setUser(null);
-setMobileMenuOpen(false);
-
-router.refresh();
+    setUser(null);
+    setMobileMenuOpen(false);
+    router.refresh();
   }
 
   function refreshUser() {
     const supabase = createClient();
-
     supabase.auth.getSession().then(({ data }) => {
       setUser(data.session?.user ?? null);
     });
   }
 
   function isActive(href: string) {
-    if (href === "/") {
-      return pathname === "/";
-    }
-
+    if (href === "/") return pathname === "/";
     return pathname === href || pathname.startsWith(`${href}/`);
+  }
+
+  function isVisible(link: NavLink) {
+    return !link.authRequired || (!authLoading && !!user);
   }
 
   return (
@@ -165,61 +176,66 @@ router.refresh();
 
         <nav className="flex-1 overflow-y-auto px-3 pb-4 no-scrollbar">
           <div className="space-y-5">
-            {NAV_GROUPS.map((group) => (
-              <div key={group.label}>
-                <p
-                  className={`mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-600 transition-all duration-300 ${
-                    isHovered
-                      ? "opacity-100"
-                      : "pointer-events-none opacity-0"
-                  }`}
-                >
-                  {group.label}
-                </p>
+            {NAV_GROUPS.map((group) => {
+              const visibleLinks = group.links.filter(isVisible);
+              if (visibleLinks.length === 0) return null;
 
-                <div className="space-y-1.5">
-                  {group.links.map((link) => {
-                    const active = isActive(link.href);
+              return (
+                <div key={group.label}>
+                  <p
+                    className={`mb-2 px-3 text-[10px] font-bold uppercase tracking-[0.18em] text-zinc-600 transition-all duration-300 ${
+                      isHovered
+                        ? "opacity-100"
+                        : "pointer-events-none opacity-0"
+                    }`}
+                  >
+                    {group.label}
+                  </p>
 
-                    return (
-                      <Link
-                        key={link.href}
-                        href={link.href}
-                        title={!isHovered ? link.label : undefined}
-                        className={`group relative flex items-center gap-4 rounded-xl px-3 py-3 transition-all duration-200 ${
-                          active
-                            ? "bg-indigo-600/10 text-indigo-300"
-                            : "text-zinc-300 hover:bg-white/5 hover:text-white"
-                        }`}
-                      >
-                        <link.icon
-                          size={22}
-                          className={`shrink-0 transition-colors duration-200 ${
+                  <div className="space-y-1.5">
+                    {visibleLinks.map((link) => {
+                      const active = isActive(link.href);
+
+                      return (
+                        <Link
+                          key={link.href}
+                          href={link.href}
+                          title={!isHovered ? link.label : undefined}
+                          className={`group relative flex items-center gap-4 rounded-xl px-3 py-3 transition-all duration-200 ${
                             active
-                              ? "text-indigo-300 stroke-[2.5px]"
-                              : "text-zinc-300 stroke-[1.9px] group-hover:text-white"
-                          }`}
-                        />
-
-                        <span
-                          className={`whitespace-nowrap font-medium transition-all duration-300 ${
-                            isHovered
-                              ? "translate-x-0 opacity-100"
-                              : "pointer-events-none -translate-x-2 opacity-0"
+                              ? "bg-indigo-600/10 text-indigo-300"
+                              : "text-zinc-300 hover:bg-white/5 hover:text-white"
                           }`}
                         >
-                          {link.label}
-                        </span>
+                          <link.icon
+                            size={22}
+                            className={`shrink-0 transition-colors duration-200 ${
+                              active
+                                ? "text-indigo-300 stroke-[2.5px]"
+                                : "text-zinc-300 stroke-[1.9px] group-hover:text-white"
+                            }`}
+                          />
 
-                        {active && !isHovered && (
-                          <div className="absolute left-0 h-6 w-1 rounded-r-full bg-indigo-500" />
-                        )}
-                      </Link>
-                    );
-                  })}
+                          <span
+                            className={`whitespace-nowrap font-medium transition-all duration-300 ${
+                              isHovered
+                                ? "translate-x-0 opacity-100"
+                                : "pointer-events-none -translate-x-2 opacity-0"
+                            }`}
+                          >
+                            {link.label}
+                          </span>
+
+                          {active && !isHovered && (
+                            <div className="absolute left-0 h-6 w-1 rounded-r-full bg-indigo-500" />
+                          )}
+                        </Link>
+                      );
+                    })}
+                  </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </nav>
 
@@ -281,9 +297,10 @@ router.refresh();
         </div>
       </aside>
 
+      {/* Mobile bottom nav */}
       <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/5 bg-[#09090f]/90 px-2 pb-[env(safe-area-inset-bottom,8px)] pt-1.5 backdrop-blur-xl md:hidden">
         <div className="flex items-center justify-around">
-          {MOBILE_LINKS.map((link) => {
+          {MOBILE_LINKS.filter(isVisible).map((link) => {
             const active = isActive(link.href);
 
             return (
@@ -312,7 +329,6 @@ router.refresh();
             className="flex min-h-[44px] min-w-[44px] flex-col items-center justify-center gap-1 rounded-xl px-2 text-zinc-300 transition-colors hover:text-white"
           >
             <Menu size={22} className="stroke-[1.9px]" />
-
             <span className="text-[10px] font-bold uppercase tracking-normal">
               Mais
             </span>
@@ -320,6 +336,7 @@ router.refresh();
         </div>
       </nav>
 
+      {/* Mobile sheet */}
       {mobileMenuOpen && (
         <div className="fixed inset-0 z-[60] md:hidden">
           <button
@@ -348,7 +365,7 @@ router.refresh();
             </div>
 
             <div className="grid grid-cols-2 gap-2">
-              {MOBILE_MORE_LINKS.map((link) => {
+              {MOBILE_MORE_LINKS.filter(isVisible).map((link) => {
                 const active = isActive(link.href);
 
                 return (

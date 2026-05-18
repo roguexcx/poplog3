@@ -310,6 +310,7 @@ export default function TrendingNowSection() {
       <SectionHeader
         title="Em alta agora"
         subtitle="O que todo mundo está assistindo."
+        className="mb-6"
         action={
           <div className="flex items-center gap-3">
             <FilterPills active={filter} onChange={setFilter} />

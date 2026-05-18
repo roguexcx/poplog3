@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { withOrigin } from "@/server/engine-logger";
 import { syncTmdbTitle } from "@/server/sync/sync-tmdb-title";
 import { supabaseAdmin } from "@/server/supabase/admin";
 
@@ -64,6 +65,7 @@ async function fetchPersistedState(
 }
 
 export async function POST(request: Request) {
+  return withOrigin("admin", async () => {
   const adminSecret = request.headers.get("x-admin-secret");
 
   if (adminSecret !== process.env.ADMIN_SECRET) {
@@ -77,19 +79,9 @@ export async function POST(request: Request) {
   const onlyMissingImages =
     url.searchParams.get("onlyMissingImages") === "true";
 
-  const { data, error } = await supabaseAdmin
+  const { data: userTitlesData, error } = await supabaseAdmin
     .from("user_titles")
-    .select(
-      `
-      tmdb_id,
-      media_type,
-      title:poplog3_titles (
-        title,
-        poster_path,
-        backdrop_path
-      )
-    `
-    );
+    .select("tmdb_id, media_type");
 
   if (error) {
     return NextResponse.json(
@@ -98,7 +90,28 @@ export async function POST(request: Request) {
     );
   }
 
-  const rows = (data ?? []) as HydrateRow[];
+  const userTitlesRaw = (userTitlesData ?? []) as Array<{ tmdb_id: number; media_type: string }>;
+  const tmdbIds = [...new Set(userTitlesRaw.map((r) => r.tmdb_id))];
+  const mediaTypes = [...new Set(userTitlesRaw.map((r) => r.media_type))];
+
+  const titleMetaMap = new Map<string, { title?: string | null; poster_path?: string | null; backdrop_path?: string | null }>();
+  if (tmdbIds.length > 0) {
+    const { data: titlesData } = await supabaseAdmin
+      .from("poplog3_titles")
+      .select("tmdb_id, media_type, title, poster_path, backdrop_path")
+      .in("tmdb_id", tmdbIds)
+      .in("media_type", mediaTypes);
+
+    for (const t of (titlesData ?? []) as Array<{ tmdb_id: number; media_type: string; title: string | null; poster_path: string | null; backdrop_path: string | null }>) {
+      titleMetaMap.set(`${t.media_type}:${t.tmdb_id}`, { title: t.title, poster_path: t.poster_path, backdrop_path: t.backdrop_path });
+    }
+  }
+
+  const rows: HydrateRow[] = userTitlesRaw.map((r) => ({
+    tmdb_id: r.tmdb_id,
+    media_type: r.media_type,
+    title: titleMetaMap.get(`${r.media_type}:${r.tmdb_id}`) ?? null,
+  }));
 
   const missing: LibraryItemToHydrate[] = [];
   const seen = new Set<string>();
@@ -241,4 +254,5 @@ export async function POST(request: Request) {
     })),
     results,
   });
+  }); // withOrigin("admin")
 }

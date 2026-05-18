@@ -1,3 +1,5 @@
+import { logApiCall } from "@/server/engine-logger";
+
 const MOTN_BASE_URL =
   "https://streaming-availability.p.rapidapi.com";
 
@@ -10,6 +12,8 @@ export async function motnFetch<T>(
     throw new Error("MOVIEOFTHENIGHT_API_KEY não configurada.");
   }
 
+  const t0 = Date.now();
+
   const response = await fetch(`${MOTN_BASE_URL}${path}`, {
     headers: {
       "X-RapidAPI-Key": apiKey,
@@ -19,11 +23,32 @@ export async function motnFetch<T>(
     },
   });
 
+  const durationMs = Date.now() - t0;
+
   if (!response.ok) {
-    throw new Error(
-      `MovieOfTheNight request failed: ${response.status}`
-    );
+    const error = `MovieOfTheNight request failed: ${response.status}`;
+    logApiCall({
+      api: "motn",
+      op: "fetch",
+      endpoint: path,
+      cacheStatus: "none",
+      durationMs,
+      success: false,
+      httpStatus: response.status,
+      error,
+    });
+    throw new Error(error);
   }
+
+  logApiCall({
+    api: "motn",
+    op: "fetch",
+    endpoint: path,
+    cacheStatus: "none",
+    durationMs,
+    success: true,
+    httpStatus: response.status,
+  });
 
   return response.json() as Promise<T>;
 }

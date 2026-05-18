@@ -1,3 +1,4 @@
+import { logApiCall } from "@/server/engine-logger";
 import { PoplogTitle } from "@/server/types/title";
 import { PoplogTitleDetails } from "@/server/types/title-details";
 
@@ -107,6 +108,7 @@ export async function syncTmdbTitle(
   id: number,
   options: SyncTmdbTitleOptions = {}
 ): Promise<SyncTmdbTitleResult> {
+  const t0 = Date.now();
   const cached = await getCachedTitleWithPayload(mediaType, id);
 
   // Cache fresh E payload completo: retorna direto.
@@ -116,6 +118,15 @@ export async function syncTmdbTitle(
     isTitleCacheFresh(cached.title.last_synced_at) &&
     isTitlePayloadComplete(cached.rawPayload)
   ) {
+    logApiCall({
+      api: "tmdb",
+      op: "sync-title",
+      mediaType,
+      tmdbId: id,
+      cacheStatus: "hit",
+      durationMs: Date.now() - t0,
+      success: true,
+    });
     return {
       title: cached.title,
       source: "cache",
@@ -232,6 +243,16 @@ export async function syncTmdbTitle(
       : cached.title
         ? "stale_refreshed"
         : "created";
+
+  logApiCall({
+    api: "tmdb",
+    op: "sync-title",
+    mediaType,
+    tmdbId: id,
+    cacheStatus: options.force ? "forced" : "miss",
+    durationMs: Date.now() - t0,
+    success: true,
+  });
 
   return {
     title,

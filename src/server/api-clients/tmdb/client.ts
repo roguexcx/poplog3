@@ -1,3 +1,4 @@
+import { logApiCall } from "@/server/engine-logger";
 import type { TmdbCollectionDetails } from "./types";
 
 const TMDB_BASE_URL = "https://api.themoviedb.org/3";
@@ -31,6 +32,8 @@ export async function tmdbFetch<T>(
     throw new Error("TMDB_ACCESS_TOKEN não configurado.");
   }
 
+  const t0 = Date.now();
+
   const response = await fetch(buildTmdbUrl(path, options.params), {
     headers: {
       Authorization: `Bearer ${token}`,
@@ -41,9 +44,31 @@ export async function tmdbFetch<T>(
     },
   });
 
+  const durationMs = Date.now() - t0;
+
   if (!response.ok) {
+    logApiCall({
+      api: "tmdb",
+      op: "fetch",
+      endpoint: path,
+      cacheStatus: "none",
+      durationMs,
+      success: false,
+      httpStatus: response.status,
+      error: `TMDB request failed: ${response.status}`,
+    });
     throw new Error(`TMDB request failed: ${response.status}`);
   }
+
+  logApiCall({
+    api: "tmdb",
+    op: "fetch",
+    endpoint: path,
+    cacheStatus: "none",
+    durationMs,
+    success: true,
+    httpStatus: response.status,
+  });
 
   return response.json() as Promise<T>;
 }
