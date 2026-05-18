@@ -77,7 +77,7 @@ function HorizontalCard({
           <TmdbImage
             path={part.posterPath ?? null}
             fallbackPath={null}
-            size="w342"
+            size="w500"
             alt={part.title}
             fallbackLabel={part.title}
             className="h-full w-full object-cover"
