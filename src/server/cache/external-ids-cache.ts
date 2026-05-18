@@ -17,7 +17,7 @@ export async function getExternalIds(
   tmdbId: number
 ): Promise<ExternalIdsRow | null> {
   const { data, error } = await supabaseAdmin
-    .from("poplog3_title_external_ids")
+    .from("title_external_ids")
     .select("tmdb_id, media_type, imdb_id, tvdb_id, trakt_id, watchmode_id, motn_id")
     .eq("media_type", mediaType)
     .eq("tmdb_id", tmdbId)
@@ -61,7 +61,7 @@ export async function upsertExternalIds(
   };
 
   const { error } = await supabaseAdmin
-    .from("poplog3_title_external_ids")
+    .from("title_external_ids")
     .upsert(merged, { onConflict: "tmdb_id,media_type" });
 
   if (error) {

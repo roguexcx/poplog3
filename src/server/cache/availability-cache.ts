@@ -90,7 +90,7 @@ export async function replaceAvailability(
   const { tmdbId, mediaType, country, source, rows } = input;
 
   // Cross-reference: para cada providerName/tmdbProviderId, tenta achar o
-  // poplog3_providers.id (catalogo de providers ja populado).
+  // streaming_providers.id (catalogo de providers).
   const lookupKeys = rows
     .map((r) => r.tmdbProviderId)
     .filter((v): v is number => typeof v === "number");
@@ -98,7 +98,7 @@ export async function replaceAvailability(
   const providerLookup = new Map<number, string>();
   if (lookupKeys.length > 0) {
     const { data: providers } = await supabaseAdmin
-      .from("poplog3_providers")
+      .from("streaming_providers")
       .select("id, tmdb_provider_id")
       .in("tmdb_provider_id", lookupKeys);
     for (const p of (providers ?? []) as Array<{

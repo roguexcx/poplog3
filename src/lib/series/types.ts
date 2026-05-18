@@ -3,7 +3,7 @@
  *
  * IMPORTANTE: estes estados descrevem a SÉRIE em si — não o usuário.
  * O progresso pessoal (em dia, atrasado, etc) é uma camada separada,
- * que vive em poplog3_user_titles + poplog3_episode_progress.
+ * que vive em user_titles + user_episodes.
  *
  * - coming-soon          : primeira temporada ainda não estreou.
  * - episode-available    : um novo episódio saiu há pouco (default: 14 dias).

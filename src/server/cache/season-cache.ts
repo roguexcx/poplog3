@@ -55,7 +55,7 @@ export async function getCachedSeason(
   seasonNumber: number
 ): Promise<PoplogSeason | null> {
   const { data: season, error: sErr } = await supabaseAdmin
-    .from("poplog3_seasons")
+    .from("title_seasons")
     .select(
       "series_tmdb_id, season_number, tmdb_season_id, name, overview, poster_path, air_date, episode_count, vote_average, last_synced_at"
     )
@@ -104,7 +104,7 @@ export async function upsertSeason(input: UpsertSeasonInput): Promise<void> {
   const now = new Date().toISOString();
 
   const { error: sErr } = await supabaseAdmin
-    .from("poplog3_seasons")
+    .from("title_seasons")
     .upsert(
       {
         series_tmdb_id: input.seriesTmdbId,

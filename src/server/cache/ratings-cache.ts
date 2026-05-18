@@ -18,7 +18,7 @@ export async function getCachedRatings(
   tmdbId: number
 ): Promise<CachedRatings | null> {
   const { data, error } = await supabaseAdmin
-    .from("poplog3_title_ratings")
+    .from("title_ratings")
     .select(
       "tmdb_id, media_type, imdb_rating, imdb_votes, rotten_tomatoes_score, metacritic_score, tmdb_rating, poplog_score, updated_at"
     )
@@ -90,7 +90,7 @@ export async function upsertRatings(
   const now = new Date().toISOString();
 
   const { error } = await supabaseAdmin
-    .from("poplog3_title_ratings")
+    .from("title_ratings")
     .upsert(
       {
         tmdb_id: input.tmdbId,

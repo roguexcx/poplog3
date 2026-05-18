@@ -356,7 +356,7 @@ async function upsertCuradoriaOverlay(
 ) {
   const base = await getOverlayBase(userId, parsed);
 
-  const { error } = await supabaseAdmin.from("poplog3_curadoria_state").upsert(
+  const { error } = await supabaseAdmin.from("user_curadoria_state").upsert(
     {
       ...base,
       ...patch,
@@ -380,7 +380,7 @@ async function logCuradoriaSignal(
   }
 
   const { error } = await supabaseAdmin
-    .from("poplog3_curadoria_signals")
+    .from("user_curadoria_signals")
     .insert({
       user_id: userId,
       content_id: contentId,
@@ -471,14 +471,14 @@ export async function GET() {
     overlayResult,
   ] = await Promise.all([
     supabaseAdmin
-      .from("poplog3_curadoria_preferences")
+      .from("user_curadoria_preferences")
       .select("*")
       .eq("user_id", user.id)
       .maybeSingle(),
 
     seriesIds.length > 0
       ? supabaseAdmin
-          .from("poplog3_user_episodes")
+          .from("user_episodes")
           .select(
             "series_tmdb_id, season_number, episode_number, watched_at, runtime_minutes"
           )
@@ -497,7 +497,7 @@ export async function GET() {
 
     contentIds.length > 0
       ? supabaseAdmin
-          .from("poplog3_curadoria_state")
+          .from("user_curadoria_state")
           .select(
             `
             content_id,
@@ -522,14 +522,14 @@ export async function GET() {
 
   if (preferencesResult.error) {
     console.error(
-      "[acompanhando] poplog3_curadoria_preferences error:",
+      "[acompanhando] user_curadoria_preferences error:",
       preferencesResult.error
     );
   }
 
   if (userEpisodesResult.error) {
     console.error(
-      "[acompanhando] poplog3_user_episodes error:",
+      "[acompanhando] user_episodes error:",
       userEpisodesResult.error
     );
   }
@@ -543,7 +543,7 @@ export async function GET() {
 
   if (overlayResult.error) {
     console.error(
-      "[acompanhando] poplog3_curadoria_state error:",
+      "[acompanhando] user_curadoria_state error:",
       overlayResult.error
     );
   }

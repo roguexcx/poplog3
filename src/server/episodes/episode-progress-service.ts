@@ -92,7 +92,7 @@ export async function toggleEpisodeWatched(
 ): Promise<UserSeriesProgress> {
   if (input.watched) {
     const { error } = await supabaseAdmin
-      .from("poplog3_user_episodes")
+      .from("user_episodes")
       .upsert(
         {
           user_id: input.userId,
@@ -128,7 +128,7 @@ export async function toggleEpisodeWatched(
     return progress;
   } else {
     const { error } = await supabaseAdmin
-      .from("poplog3_user_episodes")
+      .from("user_episodes")
       .delete()
       .eq("user_id", input.userId)
       .eq("series_tmdb_id", input.seriesTmdbId)
@@ -185,7 +185,7 @@ export async function bulkMarkEpisodesWatched(input: {
   }));
 
   const { error } = await supabaseAdmin
-    .from("poplog3_user_episodes")
+    .from("user_episodes")
     .upsert(payload, {
       onConflict: "user_id,series_tmdb_id,season_number,episode_number",
     });
@@ -251,7 +251,7 @@ export async function clearSeasonProgress(
   seasonNumber: number
 ): Promise<UserSeriesProgress> {
   const { error } = await supabaseAdmin
-    .from("poplog3_user_episodes")
+    .from("user_episodes")
     .delete()
     .eq("user_id", userId)
     .eq("series_tmdb_id", seriesTmdbId)
@@ -284,7 +284,7 @@ export async function clearSeriesProgress(
   seriesTmdbId: number
 ): Promise<void> {
   const { error } = await supabaseAdmin
-    .from("poplog3_user_episodes")
+    .from("user_episodes")
     .delete()
     .eq("user_id", userId)
     .eq("series_tmdb_id", seriesTmdbId);
@@ -305,7 +305,7 @@ export async function getWatchedEpisodesForSeries(
   seriesTmdbId: number
 ): Promise<UserEpisodeRow[]> {
   const { data, error } = await supabaseAdmin
-    .from("poplog3_user_episodes")
+    .from("user_episodes")
     .select(
       "user_id, series_tmdb_id, season_number, episode_number, watched_at, runtime_minutes"
     )
@@ -335,7 +335,7 @@ export async function computeUserSeriesProgress(
 
   const [watchedResult, titleResult, episodesResult] = await Promise.all([
     supabaseAdmin
-      .from("poplog3_user_episodes")
+      .from("user_episodes")
       .select("season_number, episode_number, watched_at, runtime_minutes")
       .eq("user_id", userId)
       .eq("series_tmdb_id", seriesTmdbId),
@@ -438,7 +438,7 @@ export async function getUserWatchingSeries(
 
   // Query 1: todos os episódios assistidos do usuário (todas as séries, uma só query)
   const { data: allWatched, error: watchedErr } = await supabaseAdmin
-    .from("poplog3_user_episodes")
+    .from("user_episodes")
     .select("series_tmdb_id, season_number, episode_number, watched_at, runtime_minutes")
     .eq("user_id", userId)
     .order("watched_at", { ascending: false });

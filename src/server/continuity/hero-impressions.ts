@@ -209,7 +209,7 @@ export async function getHeroImpressionStats(
   const tmdbIds = Array.from(new Set(candidates.map((candidate) => candidate.tmdbId)));
 
   const { data, error } = await supabaseAdmin
-    .from("poplog3_hero_impressions")
+    .from("hero_impressions")
     .select("tmdb_id, media_type, context, score_at_time, session_id, seen_at")
     .eq("user_id", userId)
     .in("tmdb_id", tmdbIds)
@@ -296,7 +296,7 @@ export async function recordHeroImpressions(input: {
   }));
 
   const { error } = await supabaseAdmin
-    .from("poplog3_hero_impressions")
+    .from("hero_impressions")
     .insert(rows);
 
   if (error) {

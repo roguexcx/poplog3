@@ -342,8 +342,8 @@ export default function ProfilePage() {
 
       // fetch library counts
       const { data: titles } = await supabase
-        .from("poplog3_user_titles")
-        .select("status, media_type, is_favorite")
+        .from("user_titles")
+        .select("status, media_type, favorite")
         .eq("user_id", user.id);
 
       if (titles) {
@@ -352,7 +352,7 @@ export default function ProfilePage() {
           watching:  titles.filter(t => t.status === "watching").length,
           watchlist: titles.filter(t => t.status === "watchlist").length,
           abandoned: titles.filter(t => t.status === "abandoned").length,
-          favorites: titles.filter(t => t.is_favorite).length,
+          favorites: titles.filter(t => t.favorite).length,
           movies:    titles.filter(t => t.media_type === "movie").length,
           series:    titles.filter(t => t.media_type === "tv").length,
           total:     titles.length,

@@ -78,7 +78,7 @@ export async function POST(request: Request) {
 
   try {
     const userEpisodes = await fetchAllRows<UserEpisodeRow>(
-      "poplog3_user_episodes",
+      "user_episodes",
       "series_tmdb_id, season_number, episode_number"
     );
 

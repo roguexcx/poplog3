@@ -29,7 +29,7 @@ type UserTitleRow = {
   favorite: boolean | null;
   liked: boolean | null;
   created_at: string | null;
-  updated_at: string | null;
+  watched_at: string | null;
 };
 
 type TmdbPayload = {
@@ -1219,7 +1219,7 @@ async function getUserLibraryFromState(
         favorite: row.favorite,
         liked: row.liked,
         created_at: row.created_at,
-        updated_at: row.last_event_at,
+        watched_at: row.last_event_at,
       });
     } else {
       movieUserTitles.push({
@@ -1229,7 +1229,7 @@ async function getUserLibraryFromState(
         favorite: row.favorite,
         liked: row.liked,
         created_at: row.created_at,
-        updated_at: row.last_event_at,
+        watched_at: row.last_event_at,
       });
     }
   }
@@ -1239,14 +1239,14 @@ async function getUserLibraryFromState(
 
 async function getMovieUserTitles(userId: string, limit: number) {
   const { data, error } = await supabaseAdmin
-    .from("poplog3_user_titles")
+    .from("user_titles")
     .select(
-      "tmdb_id, media_type, status, favorite, liked, created_at, updated_at",
+      "tmdb_id, media_type, status, favorite, liked, created_at, watched_at",
     )
     .eq("user_id", userId)
     .eq("media_type", "movie")
     .in("status", ACTIVE_LIBRARY_STATUSES)
-    .order("updated_at", { ascending: false })
+    .order("watched_at", { ascending: false })
     .limit(limit);
 
   if (error) {
@@ -1258,14 +1258,14 @@ async function getMovieUserTitles(userId: string, limit: number) {
 
 async function getTvUserTitles(userId: string, limit: number) {
   const { data, error } = await supabaseAdmin
-    .from("poplog3_user_titles")
+    .from("user_titles")
     .select(
-      "tmdb_id, media_type, status, favorite, liked, created_at, updated_at",
+      "tmdb_id, media_type, status, favorite, liked, created_at, watched_at",
     )
     .eq("user_id", userId)
     .eq("media_type", "tv")
     .in("status", ACTIVE_LIBRARY_STATUSES)
-    .order("updated_at", { ascending: false })
+    .order("watched_at", { ascending: false })
     .limit(limit);
 
   if (error) {
@@ -1339,10 +1339,10 @@ export async function getHeroCandidates(
     );
   }
   for (const title of movieUserTitles) {
-    registerActivity(`movie-${title.tmdb_id}`, title.updated_at, "library_update");
+    registerActivity(`movie-${title.tmdb_id}`, title.watched_at, "library_update");
   }
   for (const title of tvUserTitles) {
-    registerActivity(`tv-${title.tmdb_id}`, title.updated_at, "library_update");
+    registerActivity(`tv-${title.tmdb_id}`, title.watched_at, "library_update");
   }
 
   const recentActivityBoostMap = new Map<string, RecentActivityBoost>();
@@ -1523,7 +1523,7 @@ export async function getHeroCandidates(
           color: eyebrowColorMap[context] ?? "#6366f1",
         },
         debug: {
-          source: "poplog3_user_episodes",
+          source: "user_episodes",
           titleFoundInCache: Boolean(title),
           hydratedFromPayload: Boolean(title?.tmdb_payload),
           recentActivityBoost,
@@ -1568,7 +1568,7 @@ export async function getHeroCandidates(
         watchedCount: 0,
         airedEpisodes: totalEps ?? 0,     // sem dados aired disponíveis aqui
         remainingAiredEpisodes: totalEps,
-        lastWatchedAt: userTitle.updated_at,
+        lastWatchedAt: userTitle.watched_at,
         mediaStatus: getTitleStatus(title),
         libraryStatus: userTitle.status,
         availability,
@@ -1625,7 +1625,7 @@ export async function getHeroCandidates(
           totalEpisodes: getTotalEpisodes(title),
           runtimeMinutes: null,
           remainingMinutes: null,
-          lastWatchedAt: userTitle.updated_at,
+          lastWatchedAt: userTitle.watched_at,
         },
         availability,
         actions: {
@@ -1639,7 +1639,7 @@ export async function getHeroCandidates(
             "#14b8a6",
         },
         debug: {
-          source: "poplog3_user_titles_tv_unstarted",
+          source: "user_titles_tv_unstarted",
           hydratedFromPayload: Boolean(title.tmdb_payload),
           slotBucket: surpriseScore > 0 ? "surprise" : "discovery",
           surpriseScore,
@@ -1687,7 +1687,7 @@ export async function getHeroCandidates(
       const { score, scoreBreakdown } = buildMovieScore({
         libraryStatus: userTitle.status,
         createdAt: userTitle.created_at,
-        updatedAt: userTitle.updated_at,
+        updatedAt: userTitle.watched_at,
         releaseDate,
         runtime,
         availability,
@@ -1738,7 +1738,7 @@ export async function getHeroCandidates(
           percentage: userTitle.status === "watching" ? 1 : 0,
           runtimeMinutes: runtime,
           remainingMinutes: runtime,
-          lastWatchedAt: userTitle.updated_at,
+          lastWatchedAt: userTitle.watched_at,
         },
         availability,
         actions: {
@@ -1755,7 +1755,7 @@ export async function getHeroCandidates(
           color: eyebrowColorMap[context] ?? "#14b8a6",
         },
         debug: {
-          source: "poplog3_user_titles",
+          source: "user_titles",
           hydratedFromPayload: Boolean(title.tmdb_payload),
           slotBucket: surpriseScore > 0 ? "surprise" : "discovery",
           surpriseScore,

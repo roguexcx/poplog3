@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 
 /**
- * Status canônicos do POPLOG. Cobre estado do usuário (poplog3_user_titles)
+ * Status canônicos do POPLOG. Cobre estado do usuário (user_titles)
  * e estados editoriais (em breve, novo episódio, etc).
  */
 export type StatusBadgeVariant =

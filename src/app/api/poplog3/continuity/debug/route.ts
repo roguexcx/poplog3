@@ -11,7 +11,7 @@ export async function GET() {
   }
 
   const { data: episodes, error: episodesError } = await supabaseAdmin
-    .from("poplog3_user_episodes")
+    .from("user_episodes")
     .select("series_tmdb_id, watched_at")
     .eq("user_id", user.id)
     .order("watched_at", { ascending: false })

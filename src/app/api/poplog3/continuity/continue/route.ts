@@ -36,7 +36,7 @@ export type ContinueItem = {
   runtime: number | null;
   /** Episódios assistidos na temporada atual (= next_episode - 1) */
   season_watched: number;
-  /** Total de episódios na temporada atual — de poplog3_seasons; null se não sincronizado */
+  /** Total de episódios na temporada atual — de title_seasons; null se não sincronizado */
   season_total: number | null;
 };
 
@@ -123,7 +123,7 @@ export async function GET() {
 
     // Batch query para totais de episódios por temporada
     const { data: seasonsRaw } = await supabaseAdmin
-      .from("poplog3_seasons")
+      .from("title_seasons")
       .select("series_tmdb_id, season_number, episode_count")
       .in("series_tmdb_id", tmdbIds);
 
