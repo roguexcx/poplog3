@@ -71,8 +71,9 @@ function parseIcsDate(value: string): Date {
 /**
  * Parseia o SUMMARY no formato:
  *   "Nome da Série  (SxEE): Nome do Episódio"
+ *   "(SxEE): Nome do Episódio"   ← série sem nome (edge case do feed)
  *
- * Retorna null se o formato não bater.
+ * Retorna null se o formato não bater de jeito nenhum.
  */
 function parseSummary(raw: string): {
   seriesTitle: string;
@@ -81,18 +82,20 @@ function parseSummary(raw: string): {
   seasonEp: string;
   episodeName: string;
 } | null {
-  // Regex flexível: captura título, temporada, episódio e nome do ep.
+  // Regex flexível: título opcional, temporada, episódio e nome do ep.
   // Exemplo: "The Heir  (1x36): Ep. 1x36"
   //          "Bear Grylls is Running Wild  (1x7): Bear with Rhys Darby"
-  const match = raw.match(/^(.+?)\s*\((\d+)x(\d+)\):\s*(.*)$/i);
+  //          "(1x11): Ep. 1x11"  ← sem título (feed às vezes omite)
+  const match = raw.match(/^(.*?)\s*\((\d+)x(\d+)\):\s*(.*)$/i);
   if (!match) return null;
 
   const [, rawTitle, rawSeason, rawEpisode, rawEpName] = match;
   const season = parseInt(rawSeason, 10);
   const episode = parseInt(rawEpisode, 10);
+  const seriesTitle = decodeHtmlEntities(rawTitle.trim()) || `Série ${season}x${rawEpisode}`;
 
   return {
-    seriesTitle: decodeHtmlEntities(rawTitle.trim()),
+    seriesTitle,
     season,
     episode,
     seasonEp: `${season}x${episode.toString().padStart(2, "0")}`,
