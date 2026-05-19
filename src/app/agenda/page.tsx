@@ -3,9 +3,14 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import PageShell from "@/components/layout/PageShell";
+import AgendaProviderSection from "@/features/agenda/AgendaProviderSection";
 import AgendaNewEpisodeCard from "@/features/agenda/AgendaNewEpisodeCard";
 import type { NewEpisodeItem } from "@/features/agenda/AgendaNewEpisodeCard";
-import type { AgendaMovie, AgendaResponse, AgendaTv } from "@/app/api/poplog3/agenda/route";
+import type {
+  AgendaV2CompatResponse as AgendaResponse,
+  LegacyAgendaMovie as AgendaMovie,
+  LegacyAgendaTv as AgendaTv,
+} from "@/server/agenda/types";
 import type { UpcomingEpisodeItem } from "@/app/api/poplog3/continuity/upcoming-episodes/route";
 import type { LeavingItem } from "@/app/api/poplog3/agenda/leaving-soon/route";
 
@@ -885,24 +890,18 @@ export default function AgendaPage() {
   const [mode, setMode]               = useState<"geral" | "minha">("minha");
 
   useEffect(() => {
-    const fetchAgenda   = fetch("/api/poplog3/agenda").then((r) => r.json() as Promise<AgendaResponse>);
-    const fetchNewEps   = fetch("/api/poplog3/continuity/new-episodes")
-      .then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] }));
-    const fetchUpcoming = fetch("/api/poplog3/continuity/upcoming-episodes")
-      .then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] }));
-    // MovieOfTheNight — cache 24h no servidor, budget 500 req/mês
-    const fetchLeaving  = fetch("/api/poplog3/agenda/leaving-soon")
-      .then((r) => (r.ok ? r.json() : { items: [] })).catch(() => ({ items: [] }));
-
-    Promise.all([fetchAgenda, fetchNewEps, fetchUpcoming, fetchLeaving])
-      .then(([agenda, newEps, upEps, leaving]) => {
+    fetch("/api/poplog3/agenda/v2")
+      .then((r) => r.json() as Promise<AgendaResponse>)
+      .then((agenda) => {
         setAgendaData(agenda);
-        setNewEpisodes(newEps?.items ?? []);
-        setUpcomingEps(upEps?.items ?? []);
-        setLeavingSoon(leaving?.items ?? []);
+        setNewEpisodes(agenda.newEpisodes ?? []);
+        setUpcomingEps(agenda.upcomingEpisodes ?? []);
+        setLeavingSoon(agenda.leavingSoonItems ?? []);
 
         const hasLib = Object.keys(agenda?.userLibraryIds ?? {}).length > 0;
-        const hasEps = (newEps?.items ?? []).length > 0 || (upEps?.items ?? []).length > 0;
+        const hasEps =
+          (agenda.newEpisodes ?? []).length > 0 ||
+          (agenda.upcomingEpisodes ?? []).length > 0;
         if (!hasLib && !hasEps) setMode("geral");
       })
       .catch(console.error)
@@ -913,7 +912,7 @@ export default function AgendaPage() {
   const {
     // Agenda Geral
     nowPlaying, upcoming, airingToday, onTheAirDeduped, newSeries, soonToReturn,
-    trendingMoviesFiltered, trendingTvFiltered, countdownItems, leavingSoonFiltered,
+    countdownItems, leavingSoonFiltered,
     // Minha Agenda
     myNowPlaying, myUpcoming, myAiringTodayOnly,
     todayNewEpisodes, recentNewEpisodes, thisWeekEps, laterEps,
@@ -924,7 +923,7 @@ export default function AgendaPage() {
       const empty = {
         nowPlaying: [], upcoming: [], airingToday: [], onTheAirDeduped: [], newSeries: [],
         soonToReturn: [],
-        trendingMoviesFiltered: [], trendingTvFiltered: [], countdownItems: [], leavingSoonFiltered: [],
+        countdownItems: [], leavingSoonFiltered: [],
         myNowPlaying: [], myUpcoming: [], myAiringTodayOnly: [],
         todayNewEpisodes: [], recentNewEpisodes: [], thisWeekEps: [], laterEps: [],
         newEpTagMap: new Map<number, string>(),
@@ -945,9 +944,6 @@ export default function AgendaPage() {
     const newSeriesSorted = sortByLang([...(agendaData.newSeries ?? [])]);
     // soonToReturn: séries com air_date entre +8 dias e 3 meses, também lang-sorted
     const soonToReturnSorted = sortByLang([...(agendaData.soonToReturn ?? [])]);
-    const trendingMovies  = [...(agendaData.trendingMovies ?? [])].sort((a, b) => b.popularity - a.popularity);
-    const trendingTv      = [...(agendaData.trendingTv ?? [])].sort((a, b) => b.popularity - a.popularity);
-
     // ── Agenda Geral — dedup global por seção (ordem de prioridade) ──────────
     const geralTvSeen    = new Set<number>();
     const geralMovieSeen = new Set<number>();
@@ -970,7 +966,7 @@ export default function AgendaPage() {
     // 5. Em Cartaz (nowPlaying)
     nowPlaying.forEach((m) => geralMovieSeen.add(m.id));
 
-    // 6. Saindo dos Streamings — registra no seen para não reaparecer em Trending
+    // 6. Saindo dos Streamings
     leavingSoon.forEach((item) => {
       if (item.media_type === "movie") geralMovieSeen.add(item.id);
       else geralTvSeen.add(item.id);
@@ -984,10 +980,6 @@ export default function AgendaPage() {
 
     // 8. Próximas Estreias — remove overlap com countdown
     const upcoming_deduped = upcoming.filter((m) => !geralMovieSeen.has(m.id));
-
-    // 9. Trending — remove tudo já visto
-    const trendingMoviesFiltered = trendingMovies.filter((m) => !geralMovieSeen.has(m.id));
-    const trendingTvFiltered     = trendingTv.filter((t) => !geralTvSeen.has(t.id));
 
     // ── Minha Agenda — dedup personalizado ──────────────────────────────────
     const myNowPlaying = nowPlaying.filter((m) => isActive(lib, `movie-${m.id}`));
@@ -1030,7 +1022,7 @@ export default function AgendaPage() {
 
     return {
       nowPlaying, upcoming: upcoming_deduped, airingToday, onTheAirDeduped, newSeries, soonToReturn,
-      trendingMoviesFiltered, trendingTvFiltered, countdownItems, leavingSoonFiltered,
+      countdownItems, leavingSoonFiltered,
       myNowPlaying, myUpcoming, myAiringTodayOnly,
       todayNewEpisodes, recentNewEpisodes: recentNewEpsDeduped,
       thisWeekEps, laterEps,
@@ -1045,6 +1037,9 @@ export default function AgendaPage() {
   function navigateTv(item: AgendaTv)          { router.push(`/title/tv/${item.id}`); }
   function navigateEpisode(tmdbId: number)     { router.push(`/title/tv/${tmdbId}`); }
   function navigateLeaving(item: LeavingItem)  { router.push(`/title/${item.media_type}/${item.id}`); }
+  function navigateAgendaEvent(item: { mediaType: "movie" | "tv"; tmdbId: number }) {
+    router.push(`/title/${item.mediaType}/${item.tmdbId}`);
+  }
 
   if (isLoading) return <LoadingSkeleton />;
 
@@ -1202,10 +1197,20 @@ export default function AgendaPage() {
       )}
 
       {/* ════════════════════════════════════════════════════════════ */}
-      {/* AGENDA GERAL — radar editorial do entretenimento             */}
+      {/* AGENDA GERAL — calendário informativo                         */}
       {/* ════════════════════════════════════════════════════════════ */}
       {mode === "geral" && (
         <div className="flex flex-col gap-0">
+
+          {agendaData?.calendar.byProvider.Netflix?.length ? (
+            <section className="mb-10">
+              <AgendaProviderSection
+                providerName="Netflix"
+                events={agendaData.calendar.byProvider.Netflix.slice(0, 12)}
+                onSelect={navigateAgendaEvent}
+              />
+            </section>
+          ) : null}
 
           {/* ── HOJE: episódios com contexto de temporada/ep ─────── */}
           {airingToday.length > 0 && (
@@ -1265,7 +1270,7 @@ export default function AgendaPage() {
                     ))}
                   </ScrollRail>
                 ) : (
-                  // Poucos itens: banner editorial maior
+                    // Poucos itens: banner maior
                   <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                     {newSeries.map((t) => (
                       <button key={t.id} type="button" onClick={() => navigateTv(t)}
@@ -1386,42 +1391,6 @@ export default function AgendaPage() {
                     <MovieCard key={m.id} item={m}
                       userStatus={isActive(lib, `movie-${m.id}`) ? lib[`movie-${m.id}`] : undefined}
                       onClick={() => navigateMovie(m)}
-                    />
-                  ))}
-                </ScrollRail>
-              </section>
-            </>
-          )}
-
-          {/* ── TENDÊNCIAS — sem overlap com seções anteriores ────── */}
-          {trendingMoviesFiltered.length > 0 && (
-            <>
-              <SectionDivider />
-              <section className="mb-10">
-                <TimelineLabel label="Tendências" color="muted" />
-                <SectionHeader eyebrow="TMDB · Filmes desta semana" eyebrowColor="amber" title="Filmes em alta" count={trendingMoviesFiltered.length} />
-                <ScrollRail>
-                  {trendingMoviesFiltered.slice(0, 12).map((m) => (
-                    <MovieCard key={m.id} item={m}
-                      userStatus={isActive(lib, `movie-${m.id}`) ? lib[`movie-${m.id}`] : undefined}
-                      onClick={() => navigateMovie(m)}
-                    />
-                  ))}
-                </ScrollRail>
-              </section>
-            </>
-          )}
-
-          {trendingTvFiltered.length > 0 && (
-            <>
-              {trendingMoviesFiltered.length > 0 && <SectionDivider />}
-              <section className="mb-10">
-                <SectionHeader eyebrow="TMDB · Séries desta semana" eyebrowColor="amber" title="Séries em alta" count={trendingTvFiltered.length} />
-                <ScrollRail>
-                  {trendingTvFiltered.slice(0, 12).map((t) => (
-                    <TvCard key={t.id} item={t}
-                      userStatus={isActive(lib, `tv-${t.id}`) ? lib[`tv-${t.id}`] : undefined}
-                      onClick={() => navigateTv(t)}
                     />
                   ))}
                 </ScrollRail>
