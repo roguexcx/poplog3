@@ -3,6 +3,11 @@ import { filterValidTitles } from "@/server/utils/filter-valid-titles";
 import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import { normalizeTmdbTitle } from "@/server/normalizers/tmdb-title";
 import { upsertCachedTitle } from "@/server/cache/title-cache";
+import {
+  findCachedFuzzyTitles,
+  normalizeSearchTerm,
+  shouldUseFuzzyFallback,
+} from "@/server/search/fuzzy-title-search";
 import type { TmdbMediaType, TmdbTitleSummary } from "@/server/api-clients/tmdb/types";
 
 type SearchMediaType = "all" | "movie" | "tv";
@@ -185,17 +190,32 @@ export async function GET(request: NextRequest) {
       })
     );
 
+    const seenTitleKeys = new Set(
+      titles.map((title) => `${title.media_type}-${title.tmdb_id}`)
+    );
+    const fuzzyTitles = shouldUseFuzzyFallback(titles.length, page)
+      ? await findCachedFuzzyTitles({
+          query,
+          mediaType,
+          genre,
+          excludeKeys: seenTitleKeys,
+        })
+      : [];
+    const results = [...titles, ...fuzzyTitles];
+
     return NextResponse.json({
       ok: true,
       query,
+      normalizedQuery: normalizeSearchTerm(query),
       type: mediaType,
       genre,
       page: data.page ?? page,
       totalPages: data.total_pages ?? 1,
-      totalResults: data.total_results ?? titles.length + people.length,
-      count: titles.length,
+      totalResults: Math.max(data.total_results ?? 0, results.length + people.length),
+      count: results.length,
+      fuzzyCount: fuzzyTitles.length,
       peopleCount: people.length,
-      results: titles,
+      results,
       people,
     });
   } catch (error) {

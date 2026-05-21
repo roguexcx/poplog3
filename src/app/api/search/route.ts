@@ -3,7 +3,36 @@ import { filterValidTitles } from "@/server/utils/filter-valid-titles";
 import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import { normalizeTmdbTitle } from "@/server/normalizers/tmdb-title";
 import { upsertCachedTitle } from "@/server/cache/title-cache";
+import {
+  findCachedFuzzyTitles,
+  normalizeSearchTerm,
+  shouldUseFuzzyFallback,
+} from "@/server/search/fuzzy-title-search";
 import type { TmdbTitleSummary } from "@/server/api-clients/tmdb/types";
+
+function fuzzyMatchToTmdbSummary(
+  title: Awaited<ReturnType<typeof findCachedFuzzyTitles>>[number]
+): TmdbTitleSummary {
+  return {
+    id: title.tmdb_id,
+    media_type: title.media_type,
+    title: title.media_type === "movie" ? title.title : undefined,
+    name: title.media_type === "tv" ? title.title : undefined,
+    original_title: title.media_type === "movie" ? title.original_title ?? undefined : undefined,
+    original_name: title.media_type === "tv" ? title.original_title ?? undefined : undefined,
+    overview: title.overview ?? undefined,
+    poster_path: title.poster_path ?? null,
+    backdrop_path: title.backdrop_path ?? null,
+    release_date: title.release_date ?? undefined,
+    first_air_date: title.first_air_date ?? undefined,
+    last_air_date: title.last_air_date ?? null,
+    genre_ids: title.genres,
+    popularity: title.popularity ?? undefined,
+    vote_average: title.vote_average ?? undefined,
+    vote_count: title.vote_count ?? undefined,
+    original_language: title.original_language ?? undefined,
+  };
+}
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -53,11 +82,25 @@ export async function GET(request: NextRequest) {
       })
     ).catch(() => {/* silent */});
 
+    const seenTitleKeys = new Set(
+      titles.map((title) => `${title.media_type}-${title.tmdb_id}`)
+    );
+    const fuzzyTitles = shouldUseFuzzyFallback(titles.length, 1)
+      ? await findCachedFuzzyTitles({
+          query,
+          mediaType: "all",
+          excludeKeys: seenTitleKeys,
+        })
+      : [];
+    const results = [...rawResults, ...fuzzyTitles.map(fuzzyMatchToTmdbSummary)];
+
     return NextResponse.json({
       ok: true,
       query,
-      count: rawResults.length,
-      results: rawResults,
+      normalizedQuery: normalizeSearchTerm(query),
+      count: results.length,
+      fuzzyCount: fuzzyTitles.length,
+      results,
     });
   } catch (error) {
     console.error("[poplog3/search]", error);

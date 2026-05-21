@@ -6,14 +6,45 @@ import {
 import { useRouter } from "next/navigation";
 import ContextualAttribution from "@/components/attribution/ContextualAttribution";
 import PageShell from "@/components/layout/PageShell";
-import type { IcsSeriesGroup, ContentCategory } from "@/lib/ics-engine";
-import { FEATURED_CATEGORIES, CATEGORY_PRIORITY, filterEnrichedGroup } from "@/lib/ics-engine";
+import type { IcsSeriesGroup, MovieGroup, ContentCategory } from "@/lib/ics-engine";
+import { filterEnrichedGroup, CATEGORY_PRIORITY } from "@/lib/ics-engine";
 import type { IcsAgendaResponse } from "@/app/api/ics/agenda/route";
 
 // ── Constantes ─────────────────────────────────────────────────────────────────
 
 const TMDB_IMG = (path: string | null, size: string) =>
   path ? `https://image.tmdb.org/t/p/${size}${path}` : null;
+
+// Idiomas com texto não-latino nos posters — preferir backdrop nesses casos
+const POSTER_TEXT_LANGS = new Set(["ja","ko","zh","th","hi","ar","he","ru","uk","vi","id"]);
+
+// Retorna a melhor imagem para cards HORIZONTAIS (hero, wide, square)
+// Sempre backdrop; nunca poster com texto estrangeiro
+function bestHorizontalImg(
+  tmdb: { backdrop_path: string | null; poster_path: string | null; clean_backdrop_path?: string | null },
+  size = "w780",
+): string | null {
+  // Cards horizontais: NUNCA usar poster — só backdrop limpo ou backdrop padrão
+  const path = tmdb.clean_backdrop_path ?? tmdb.backdrop_path;
+  if (!path) return null;
+  return TMDB_IMG(path, size);
+}
+
+// Retorna a melhor imagem para cards VERTICAIS (poster, tall)
+// Usa poster se for idioma com texto legível; caso contrário usa backdrop
+function bestVerticalImg(
+  tmdb: { backdrop_path: string | null; poster_path: string | null; clean_backdrop_path?: string | null; original_language?: string },
+): string | null {
+  const lang        = tmdb.original_language ?? "";
+  const cleanBd     = tmdb.clean_backdrop_path ?? tmdb.backdrop_path;
+  if (POSTER_TEXT_LANGS.has(lang)) {
+    // Idioma não-latino: usar backdrop limpo (sem caracteres)
+    return TMDB_IMG(cleanBd, "w780") || TMDB_IMG(tmdb.poster_path, "w342");
+  }
+  // Para idiomas latinos: poster ok; fallback pro backdrop limpo
+  return TMDB_IMG(tmdb.poster_path, "w342") || TMDB_IMG(cleanBd, "w780");
+}
+
 
 const ENRICH_BATCH   = 10;
 const ENRICH_PAUSE   = 700;
@@ -40,7 +71,7 @@ const PHASE_LABELS: Record<Phase, string> = {
 
 // ── Tipos de view ──────────────────────────────────────────────────────────────
 
-type ViewMode = "month" | "week" | "day";
+type ViewMode = "day" | "week" | "month" | "range";
 
 // ── Helpers de data ────────────────────────────────────────────────────────────
 
@@ -84,6 +115,19 @@ function formatTime(isoStr: string): string {
   return d.toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
 }
 
+function daysUntilDate(dateStr: string): number {
+  const date = new Date(`${dateStr}T12:00:00`);
+  const today = new Date(`${todayStr()}T12:00:00`);
+  return Math.ceil((date.getTime() - today.getTime()) / 86_400_000);
+}
+
+function dateLabelFromDays(days: number): string {
+  if (days <= 0) return "Hoje";
+  if (days === 1) return "Amanhã";
+  if (days <= 7) return `Em ${days} dias`;
+  return `Em ${days} dias`;
+}
+
 function getDaysInMonth(y: number, m: number) { return new Date(y, m + 1, 0).getDate(); }
 
 function getFirstDayOfMonth(y: number, m: number) {
@@ -94,7 +138,261 @@ function getFirstDayOfMonth(y: number, m: number) {
 // ── Filtro: só mostra grupos com poster + nome TMDB ───────────────────────────
 
 function hasValidTmdb(g: IcsSeriesGroup): boolean {
-  return !!(g.tmdb?.poster_path && g.tmdb?.name);
+  // Precisa ter nome E pelo menos uma imagem (poster ou backdrop)
+  return !!(g.tmdb?.name && (g.tmdb?.poster_path || g.tmdb?.backdrop_path));
+}
+
+function firstEpisodeOnDay(group: IcsSeriesGroup, dateStr: string) {
+  return group.episodes
+    .filter((ep) => ep.startAt.slice(0, 10) === dateStr)
+    .sort((a, b) => a.startAt.localeCompare(b.startAt))[0] ?? null;
+}
+
+function episodesOnDay(group: IcsSeriesGroup, dateStr: string) {
+  return group.episodes
+    .filter((ep) => ep.startAt.slice(0, 10) === dateStr)
+    .sort((a, b) => a.startAt.localeCompare(b.startAt));
+}
+
+function isPremiereEpisode(group: IcsSeriesGroup, dateStr: string): boolean {
+  const ep = firstEpisodeOnDay(group, dateStr);
+  if (!ep || ep.season !== 1 || ep.episode !== 1) return false;
+  // Não é estreia se o TMDB já indica múltiplas temporadas (série estabelecida)
+  const numSeasons = group.tmdb?.number_of_seasons;
+  if (numSeasons && numSeasons > 1) return false;
+  // Grupos sintéticos TMDB (key começa com "tmdb-") têm number_of_seasons=null
+  // mas podem ser séries estabelecidas. Verificamos first_air_date:
+  // se a série estreou há mais de 180 dias, não tratamos como estreia nova.
+  if (group.key.startsWith("tmdb-") && group.tmdb?.first_air_date) {
+    const airMs = new Date(group.tmdb.first_air_date).getTime();
+    const nowMs  = Date.now();
+    if (nowMs - airMs > 180 * 24 * 3600 * 1000) return false;
+  }
+  return true;
+}
+
+function isSeasonStart(group: IcsSeriesGroup, dateStr: string): boolean {
+  const ep = firstEpisodeOnDay(group, dateStr);
+  return !!ep && ep.episode === 1;
+}
+
+function isSeasonFinaleGuess(group: IcsSeriesGroup, dateStr: string): boolean {
+  const ep = firstEpisodeOnDay(group, dateStr);
+  if (!ep) return false;
+  const seasonEps = group.episodes.filter((item) => item.season === ep.season);
+  const maxEp = Math.max(...seasonEps.map((item) => item.episode));
+  return maxEp > 1 && ep.episode === maxEp;
+}
+
+function groupEditorialScore(
+  group: IcsSeriesGroup,
+  dateStr: string,
+  trendingDay: Set<number>,
+  trendingWeek: Set<number>,
+): number {
+  const tmdbId = group.tmdb?.tmdb_id;
+  const days = daysUntilDate(dateStr);
+  const timeBoost = days <= 0 ? 18 : days === 1 ? 12 : days <= 7 ? 7 : Math.max(0, 6 - Math.floor(days / 5));
+  // Penalidade para quem não tem imagem — não deve ocupar slots de destaque
+  const hasBackdrop = !!(group.tmdb?.clean_backdrop_path ?? group.tmdb?.backdrop_path);
+  const hasPoster   = !!group.tmdb?.poster_path;
+  const imgPenalty  = hasBackdrop ? 0 : hasPoster ? -25 : -60;
+  return (
+    (group.relevanceScore ?? 0) +
+    ((group.tmdb?.popularity ?? 0) / 10) +
+    (trendingDay.has(tmdbId ?? -1) ? 38 : 0) +
+    (trendingWeek.has(tmdbId ?? -1) ? 20 : 0) +
+    (isPremiereEpisode(group, dateStr) ? 34 : 0) +
+    (isSeasonFinaleGuess(group, dateStr) ? 30 : 0) +
+    (isSeasonStart(group, dateStr) ? 12 : 0) +
+    (group.episodeCount > 1 ? Math.min(12, group.episodeCount * 2) : 0) +
+    timeBoost +
+    imgPenalty
+  );
+}
+
+function editorialSignal(
+  group: IcsSeriesGroup,
+  dateStr: string,
+  trendingDay: Set<number>,
+  trendingWeek: Set<number>,
+  movie?: MovieGroup,
+) {
+  // Sinais para filmes
+  if (movie) {
+    const tmdbId = movie.movie.tmdb_id;
+    if (trendingDay.has(tmdbId))  return { label: "Explodindo agora",  color: "rose" as const };
+    const releaseDate = movie.movie.release_date ?? dateStr;
+    const days = daysUntilDate(releaseDate);
+    if (days === 0)                return { label: "Estreia hoje",       color: "emerald" as const };
+    if (days > 0 && days <= 3)    return { label: "Em breve",            color: "cyan" as const };
+    if (days > 3 && days <= 14)   return { label: `Estreia em ${days}d`, color: "cyan" as const };
+    if (days > 14)                 return { label: "Próxima estreia",     color: "slate" as const };
+    // Passou: estreou recentemente (days < 0 = já nos cinemas)
+    if (trendingWeek.has(tmdbId)) return { label: "Trending",            color: "amber" as const };
+    if ((movie.relevanceScore ?? 0) >= 65) return { label: "Imperdível", color: "sky" as const };
+    return { label: "Nos cinemas",  color: "slate" as const };
+  }
+
+  // Sinais para séries
+  const tmdbId = group.tmdb?.tmdb_id;
+  if (trendingDay.has(tmdbId ?? -1))   return { label: "Explodindo agora",   color: "rose" as const };
+  if (isSeasonFinaleGuess(group, dateStr)) return { label: "Final de temporada", color: "violet" as const };
+  // "Estreia de série" só para S01E01 — série completamente nova
+  if (isPremiereEpisode(group, dateStr))   return { label: "Estreia de série",   color: "emerald" as const };
+  // Nova temporada: E01 de qualquer season > 1
+  if (isSeasonStart(group, dateStr))       return { label: "Nova temporada",      color: "cyan" as const };
+  if (trendingWeek.has(tmdbId ?? -1))      return { label: "Trending",            color: "amber" as const };
+  if ((group.relevanceScore ?? 0) >= 70)   return { label: "Hype alto",           color: "sky" as const };
+  return { label: "Novo episódio", color: "slate" as const };
+}
+
+type EditorialGroup = {
+  group: IcsSeriesGroup;
+  /** Presente quando o item é um filme (não uma série) */
+  movie?: MovieGroup;
+  dateStr: string;
+  score: number;
+  visualWeight: "hero" | "wide" | "poster" | "compact";
+};
+
+// Score editorial para filmes — com fator de equalização para não dominar séries.
+// Filmes têm popularidade estruturalmente maior; o cap (×0.72) nivela o campo.
+function movieEditorialScore(
+  movie: MovieGroup,
+  trendingDay: Set<number>,
+  trendingWeek: Set<number>,
+): number {
+  const m = movie.movie;
+  const tmdbId = m.tmdb_id;
+  const releaseDate = m.release_date ?? todayStr();
+  const days = daysUntilDate(releaseDate);
+
+  // Boost temporal: filmes lançados hoje ou recentemente são mais relevantes
+  const timeBoost = days <= 0 ? 20 : days <= 3 ? 14 : days <= 7 ? 8 : Math.max(0, 5 - Math.floor(days / 7));
+
+  // Penalidade de imagem
+  const hasBackdrop = !!(m.clean_backdrop_path ?? m.backdrop_path);
+  const hasPoster   = !!m.poster_path;
+  const imgPenalty  = hasBackdrop ? 0 : hasPoster ? -20 : -50;
+
+  // Boost estreia (hoje)
+  const isPremiereToday = days >= -3 && days <= 1;
+
+  const rawScore =
+    (movie.relevanceScore ?? 0) +
+    ((m.popularity ?? 0) / 10) +
+    (trendingDay.has(tmdbId)  ? 35 : 0) +
+    (trendingWeek.has(tmdbId) ? 18 : 0) +
+    (isPremiereToday          ? 28 : 0) +
+    timeBoost +
+    imgPenalty;
+
+  // Fator de equalização: reduz score de filmes para que não dominem séries.
+  // Cap: máximo ~40% dos itens do feed podem ser filmes — controlado pelo caller.
+  return rawScore * 0.72;
+}
+
+function buildEditorialGroups(
+  sourceGroups: IcsSeriesGroup[],
+  sourceMovies: MovieGroup[],
+  options: {
+    mode: ViewMode;
+    selectedDay: string;
+    weekStart: Date;
+    year: number;
+    month: number;
+    trendingDay: Set<number>;
+    trendingWeek: Set<number>;
+  },
+): EditorialGroup[] {
+  const today = todayStr();
+  const rangeStart =
+    options.mode === "day" ? options.selectedDay :
+    options.mode === "week" ? toLocalDateStr(options.weekStart) :
+    options.mode === "month" ? `${options.year}-${String(options.month + 1).padStart(2, "0")}-01` :
+    today;
+  const rangeEnd = (() => {
+    if (options.mode === "day") return options.selectedDay;
+    if (options.mode === "week") {
+      const end = new Date(options.weekStart);
+      end.setDate(end.getDate() + 6);
+      return toLocalDateStr(end);
+    }
+    if (options.mode === "month") {
+      return `${options.year}-${String(options.month + 1).padStart(2, "0")}-${String(getDaysInMonth(options.year, options.month)).padStart(2, "0")}`;
+    }
+    const end = new Date();
+    end.setDate(end.getDate() + 30);
+    return toLocalDateStr(end);
+  })();
+
+  const seen = new Set<string>();
+  const items: EditorialGroup[] = [];
+
+  // ── Séries ──────────────────────────────────────────────────────────────────
+  for (const group of sourceGroups) {
+    if (!hasValidTmdb(group)) continue;
+    const ep = group.episodes
+      .filter((item) => {
+        const day = item.startAt.slice(0, 10);
+        return day >= rangeStart && day <= rangeEnd;
+      })
+      .sort((a, b) => a.startAt.localeCompare(b.startAt))[0];
+    if (!ep) continue;
+    const key = `${group.key}-${ep.startAt.slice(0, 10)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const dateStr = ep.startAt.slice(0, 10);
+    const score = groupEditorialScore(group, dateStr, options.trendingDay, options.trendingWeek);
+    items.push({ group, dateStr, score, visualWeight: "compact" });
+  }
+
+  // ── Filmes — incluídos SOMENTE se a data de lançamento cair dentro do range ──
+  // Um filme aparece na posição da sua data de estreia no Brasil (release_date).
+  // Nunca aparece como "em cartaz recorrente" — apenas na semana/dia/mês em que estreou.
+  // O pipeline backend (route.ts) já filtra filmes com release_date > 14 dias atrás,
+  // então cabe ao frontend posicionar corretamente dentro do range visível.
+  for (const movie of sourceMovies) {
+    if (!movie.isRelevant) continue;
+    const releaseDate = movie.movie.release_date ?? todayStr();
+    // O filme só aparece se a data de estreia está dentro do range atual (dia/semana/mês)
+    if (releaseDate < rangeStart || releaseDate > rangeEnd) continue;
+    const key = movie.key;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const score = movieEditorialScore(movie, options.trendingDay, options.trendingWeek);
+    items.push({ group: {} as IcsSeriesGroup, movie, dateStr: releaseDate, score, visualWeight: "compact" });
+  }
+
+  items.sort((a, b) => b.score - a.score);
+
+  // Cap de filmes: no máximo 1 filme a cada 3 itens (33%) para distribuição equilibrada.
+  // Reordena para intercalar filmes entre séries em vez de empilhá-los.
+  const series = items.filter(i => !i.movie);
+  const movies  = items.filter(i =>  i.movie);
+  const movieCap = Math.ceil(series.length / 2.5); // máx ~40% do total
+  const cappedMovies = movies.slice(0, movieCap);
+
+  // Intercala: a cada 3 séries, insere 1 filme (pelo score mais alto disponível)
+  const merged: EditorialGroup[] = [];
+  let mi = 0;
+  for (let si = 0; si < series.length; si++) {
+    merged.push(series[si]);
+    // Insere filme após a 3ª, 6ª, 9ª... série SE o filme tiver score razoável
+    if ((si + 1) % 3 === 0 && mi < cappedMovies.length) {
+      merged.push(cappedMovies[mi++]);
+    }
+  }
+  // Filmes restantes vão ao final (mas limitados)
+  while (mi < cappedMovies.length) merged.push(cappedMovies[mi++]);
+
+  // Distribui pesos visuais: últimos 25% viram compact
+  const len = merged.length;
+  return merged.map((item, index) => {
+    if (index >= len - Math.max(3, Math.floor(len * 0.25))) return { ...item, visualWeight: "compact" as const };
+    return { ...item, visualWeight: "poster" as const };
+  });
 }
 
 // ── Agrupamento por dia para o calendário ──────────────────────────────────────
@@ -116,14 +414,17 @@ function buildDayMap(groups: IcsSeriesGroup[]): Map<string, IcsSeriesGroup[]> {
 // ── Categoria label ────────────────────────────────────────────────────────────
 
 const CAT_LABEL: Partial<Record<ContentCategory, string>> = {
-  CINEMATIC: "Prestige", SERIES: "Série", ANIMATION: "Animação",
-  DOCUMENTARY: "Doc", REALITY_PREMIUM: "Reality", REALITY: "Reality",
-  DAILY_SOAP: "Soap", VARIETY: "Variedade", KIDS: "Kids",
+  MOVIE:           "Filme",
+  // CINEMATIC: label dinâmico via resolveCinematicLabel()
+  SERIES:          "Série",  ANIMATION: "Animação",
+  DOCUMENTARY:     "Doc", REALITY_PREMIUM: "Reality", REALITY: "Reality",
+  DAILY_SOAP:      "Soap", VARIETY: "Variedade", KIDS: "Kids",
 };
 
 const CAT_COLOR: Partial<Record<ContentCategory, string>> = {
-  CINEMATIC:       "bg-violet-500/20 text-violet-300/80 border-violet-500/20",
-  SERIES:          "bg-indigo-500/20 text-indigo-300/80 border-indigo-500/20",
+  MOVIE:           "bg-rose-500/20 text-rose-300/80 border-rose-500/20",
+  // CINEMATIC: cor dinâmica via resolveCinematicLabel()
+  SERIES:          "bg-sky-500/20 text-sky-300/80 border-sky-500/20",
   ANIMATION:       "bg-teal-500/20 text-teal-300/80 border-teal-500/20",
   DOCUMENTARY:     "bg-cyan-500/20 text-cyan-300/80 border-cyan-500/20",
   REALITY_PREMIUM: "bg-amber-500/20 text-amber-300/80 border-amber-500/20",
@@ -132,14 +433,55 @@ const CAT_COLOR: Partial<Record<ContentCategory, string>> = {
   VARIETY:         "bg-white/[0.04] text-white/25 border-white/[0.07]",
 };
 
+/** Grupos CINEMATIC com score >= 70 E rede/produtora de prestígio são "Prestige". */
+function isCinematicPrestige(group: IcsSeriesGroup): boolean {
+  if ((group.relevanceScore ?? 0) < 70) return false;
+  const networks = group.tmdb?.networks ?? [];
+  const companies = group.tmdb?.production_companies ?? [];
+  // Redes/produtoras consideradas prestige (HBO, A24, Apple TV+, Netflix, Amazon, etc.)
+  const prestigeNetworkIds = new Set([49, 2552, 213, 1024, 453, 2739, 3353, 6, 67, 41077, 3268]);
+  return (
+    networks.some((n) => prestigeNetworkIds.has(n.id)) ||
+    companies.some((c) => prestigeNetworkIds.has(c.id))
+  );
+}
+
+/** Retorna label de fallback para CINEMATIC: usa gênero quando disponível. */
+function cinematicFallbackLabel(group: IcsSeriesGroup): string {
+  const genres = group.tmdb?.genres ?? [];
+  if (genres.some((g) => /crime|mistério|thriller/i.test(g))) return "Crime / Mistério";
+  if (genres.some((g) => /drama/i.test(g)))                   return "Drama";
+  if (genres.some((g) => /ficção|sci.fi|fantasy/i.test(g)))   return "Ficção";
+  return "Cinematic";
+}
+
+/** Resolve label e cor para grupos CINEMATIC com dois tiers:
+ *  - Prestige (violeta): score alto + rede/produtora reconhecida
+ *  - Crime/Mistério (azul serie): todo o resto
+ */
+function resolveCinematicLabel(group: IcsSeriesGroup): { label: string; color: string } {
+  if (isCinematicPrestige(group)) {
+    return { label: "Prestige", color: "bg-violet-500/20 text-violet-300/80 border-violet-500/20" };
+  }
+  return { label: cinematicFallbackLabel(group), color: "bg-sky-500/20 text-sky-300/80 border-sky-500/10" };
+}
+
+/** Retorna label e cor de categoria para qualquer grupo. */
+function resolveCatLabel(group: IcsSeriesGroup): { label: string; color: string } {
+  if (group.category === "CINEMATIC") return resolveCinematicLabel(group);
+  const label = CAT_LABEL[group.category] ?? group.category;
+  const color = CAT_COLOR[group.category] ?? "bg-white/[0.05] text-white/30 border-white/[0.08]";
+  return { label, color };
+}
+
 // ── Componentes visuais ────────────────────────────────────────────────────────
 
-function SectionEyebrow({ children, color = "indigo" }: {
+function SectionEyebrow({ children, color = "sky" }: {
   children: React.ReactNode;
-  color?: "indigo" | "rose" | "cyan" | "violet" | "teal" | "amber";
+  color?: "sky" | "rose" | "cyan" | "violet" | "teal" | "amber";
 }) {
   const colors = {
-    indigo: "bg-indigo-400/60 text-indigo-400/80",
+    sky:    "bg-sky-400/60 text-sky-400/80",
     rose:   "bg-rose-400/60 text-rose-400/80",
     cyan:   "bg-cyan-400/60 text-cyan-400/80",
     violet: "bg-violet-400/60 text-violet-400/80",
@@ -164,14 +506,14 @@ function SectionDivider() {
 function PhaseBar({ phase, enrichProgress }: { phase: Phase; enrichProgress: number }) {
   if (phase === "done") return null;
   return (
-    <div className="flex items-center gap-3 mb-6 px-4 py-3 rounded-2xl border border-white/[0.06] bg-white/[0.02]">
-      <span className="w-1.5 h-1.5 rounded-full bg-indigo-400/80 animate-pulse shrink-0" />
+    <div className="flex items-center gap-3 mb-6 px-4 py-3 rounded-[22px] border border-white/[0.08] bg-white/[0.035] backdrop-blur-xl">
+      <span className="w-1.5 h-1.5 rounded-full bg-sky-400/80 animate-pulse shrink-0" />
       <span className="text-[11px] font-bold text-white/40">{PHASE_LABELS[phase]}</span>
       {phase === "enriching" && enrichProgress > 0 && (
         <>
           <div className="flex-1 h-px bg-white/[0.06] rounded-full overflow-hidden">
             <div
-              className="h-full bg-indigo-500/50 rounded-full transition-all duration-500"
+              className="h-full bg-sky-500/50 rounded-full transition-all duration-500"
               style={{ width: `${Math.min(100, enrichProgress)}%` }}
             />
           </div>
@@ -196,8 +538,7 @@ function SeriesCard({
   const poster   = tmdb ? TMDB_IMG(tmdb.poster_path, "w185") : null;
   const backdrop = tmdb ? TMDB_IMG(tmdb.backdrop_path, "w780") : null;
   const name     = tmdb?.name ?? group.rawTitle;
-  const catLabel = CAT_LABEL[group.category] ?? group.category;
-  const catColor = CAT_COLOR[group.category] ?? "bg-white/[0.05] text-white/30 border-white/[0.08]";
+  const { label: catLabel, color: catColor } = resolveCatLabel(group);
 
   const nextDate = new Date(group.nextAirDate);
   const daysUntil = Math.ceil((nextDate.getTime() - Date.now()) / 86_400_000);
@@ -211,7 +552,7 @@ function SeriesCard({
   const urgencyColor =
     daysUntil <= 0  ? "text-rose-400" :
     daysUntil <= 1  ? "text-amber-400" :
-    daysUntil <= 7  ? "text-indigo-400" :
+    daysUntil <= 7  ? "text-sky-400" :
     "text-white/30";
 
   const handleClick = (e: React.MouseEvent) => {
@@ -224,7 +565,7 @@ function SeriesCard({
       <a
         href={href}
         onClick={handleClick}
-        className="group relative w-full text-left rounded-2xl border border-white/[0.07] bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/[0.12] transition-all duration-300 overflow-hidden p-3.5 block"
+        className="group relative w-full text-left rounded-2xl border border-white/[0.07] bg-white/[0.02] hover:bg-white/[0.075] hover:border-white/[0.18] hover:-translate-y-0.5 transition-all duration-300 overflow-hidden p-3.5 block"
       >
         {backdrop && (
           <div className="absolute inset-0 opacity-[0.07]">
@@ -233,7 +574,7 @@ function SeriesCard({
           </div>
         )}
         <div className="relative flex items-center gap-3.5">
-          <div className="relative w-[46px] h-[68px] rounded-xl overflow-hidden bg-white/[0.05] shrink-0 border border-white/[0.08]">
+          <div className="relative w-[46px] h-[68px] rounded-2xl overflow-hidden bg-white/[0.05] shrink-0 border border-white/[0.08]">
             {poster ? (
               <img src={poster} alt={name} className="h-full w-full object-cover" loading="lazy" />
             ) : (
@@ -292,10 +633,15 @@ function SeriesCard({
           </div>
         )}
         <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent" />
-        <div className="absolute top-2.5 left-2.5">
+        <div className="absolute top-2.5 left-2.5 flex flex-col gap-1">
           <span className={`text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-lg border ${catColor}`}>
             {catLabel}
           </span>
+          {group.streamingProvider && (
+            <span className="text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-lg border bg-emerald-500/15 text-emerald-300/80 border-emerald-500/20 self-start">
+              {group.streamingProvider.name}
+            </span>
+          )}
         </div>
         {tmdb?.vote_average && tmdb.vote_average > 0 && (
           <div className="absolute top-2.5 right-2.5 flex items-center gap-1 bg-black/40 rounded-lg px-1.5 py-0.5">
@@ -319,6 +665,7 @@ function SeriesCard({
     </a>
   );
 }
+
 
 // ── ScrollRail ─────────────────────────────────────────────────────────────────
 
@@ -489,7 +836,7 @@ function SpotlightHero({
 
   if (isLoading && items.length === 0) {
     return (
-      <div className="relative rounded-[20px] overflow-hidden bg-white/[0.02] border border-white/[0.06] min-h-[280px] animate-pulse" />
+      <div className="relative rounded-[28px] overflow-hidden bg-white/[0.02] border border-white/[0.06] min-h-[280px] animate-pulse" />
     );
   }
 
@@ -501,8 +848,7 @@ function SpotlightHero({
   const backdrop = TMDB_IMG(tmdb.backdrop_path, "w1280");
   const poster   = TMDB_IMG(tmdb.poster_path,   "w342");
   const name     = tmdb.name;
-  const catLabel = CAT_LABEL[group.category] ?? group.category;
-  const catColor = CAT_COLOR[group.category] ?? "bg-white/[0.05] text-white/30 border-white/[0.08]";
+  const { label: catLabel, color: catColor } = resolveCatLabel(group);
 
   // Badge de destaque: prioridade nos badges
   const badge =
@@ -518,7 +864,7 @@ function SpotlightHero({
     <section className="mb-10">
       <div className="flex items-end justify-between mb-4">
         <div>
-          <SectionEyebrow color="rose">Destaques</SectionEyebrow>
+          <SectionEyebrow color="sky">Destaques</SectionEyebrow>
           <h2 className="text-xl font-black tracking-[-0.03em] text-white/90 leading-tight">Em destaque</h2>
         </div>
         {/* Dots de navegação */}
@@ -540,7 +886,7 @@ function SpotlightHero({
       </div>
 
       <div
-        className="relative rounded-[20px] overflow-hidden border border-white/[0.08] cursor-pointer"
+        className="relative rounded-[28px] overflow-hidden border border-white/[0.08] cursor-pointer"
         style={{ minHeight: 280 }}
         onClick={() => router.push(href)}
       >
@@ -577,7 +923,7 @@ function SpotlightHero({
           {backdrop ? (
             <img src={backdrop} alt="" className="h-full w-full object-cover" />
           ) : (
-            <div className="h-full w-full bg-gradient-to-br from-indigo-950 to-black" />
+            <div className="h-full w-full bg-gradient-to-br from-sky-950 to-black" />
           )}
           <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/60 to-black/20" />
           <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
@@ -590,7 +936,7 @@ function SpotlightHero({
         >
           {/* Poster */}
           {poster && (
-            <div className="hidden sm:block w-[90px] shrink-0 rounded-xl overflow-hidden border border-white/[0.10] shadow-xl shadow-black/40">
+            <div className="hidden sm:block w-[90px] shrink-0 rounded-2xl overflow-hidden border border-white/[0.10] shadow-xl shadow-black/40">
               <img src={poster} alt={name} className="w-full aspect-[2/3] object-cover" />
             </div>
           )}
@@ -602,6 +948,11 @@ function SpotlightHero({
               <span className={`text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-lg border ${catColor}`}>
                 {catLabel}
               </span>
+              {group.streamingProvider && (
+                <span className="text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-lg border bg-emerald-500/15 text-emerald-300/80 border-emerald-500/20">
+                  {group.streamingProvider.name}
+                </span>
+              )}
               {badge && (
                 <span className={`text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-lg border ${badge.cls}`}>
                   {badge.text}
@@ -696,6 +1047,679 @@ function SpotlightHero({
   );
 }
 
+// ── Editorial agenda feed ─────────────────────────────────────────────────────
+
+const SIGNAL_STYLES = {
+  rose: "border-rose-400/25 bg-rose-500/15 text-rose-200",
+  violet: "border-violet-400/25 bg-violet-500/15 text-violet-200",
+  emerald: "border-emerald-400/25 bg-emerald-500/15 text-emerald-200",
+  cyan: "border-cyan-400/25 bg-cyan-500/15 text-cyan-200",
+  amber: "border-amber-400/25 bg-amber-500/15 text-amber-200",
+  sky: "border-sky-400/25 bg-sky-500/15 text-sky-200",
+  slate: "border-white/[0.08] bg-white/[0.05] text-white/50",
+};
+
+function SignalBadge({
+  label,
+  color,
+}: {
+  label: string;
+  color: keyof typeof SIGNAL_STYLES;
+}) {
+  return (
+    <span className={`inline-flex items-center rounded-lg border px-2 py-1 text-[9px] font-black uppercase ${SIGNAL_STYLES[color]}`}>
+      {label}
+    </span>
+  );
+}
+
+// ── Normalização de item (série ou filme) para uso nos cards ──────────────────
+// Abstrai as diferenças entre IcsSeriesGroup e MovieGroup para os card components.
+
+interface NormalizedItem {
+  tmdbId: number;
+  name: string;
+  overview: string | null;
+  backdrop: string | null;
+  poster: string | null;
+  voteAvg: number;
+  category: ContentCategory;
+  href: string;
+  /** Para séries: label de episódio (S2E4). Para filmes: runtime ou gênero. */
+  subLabel: string;
+  /** Data label: "Hoje", "Amanhã", "Em 3 dias", etc. */
+  dateLabel: string;
+  days: number;
+  isMovie: boolean;
+}
+
+function resolveItemData(item: EditorialGroup): NormalizedItem {
+  const { movie, group, dateStr } = item;
+
+  if (movie) {
+    const m = movie.movie;
+    const days = daysUntilDate(m.release_date ?? dateStr);
+    const dateLabel = days < -7 ? "Nos cinemas" : days < 0 ? `Estreou há ${Math.abs(days)} dias` : days === 0 ? "Estreia hoje" : days === 1 ? "Amanhã" : `Em ${days} dias`;
+    const backdrop = m.clean_backdrop_path != null
+      ? TMDB_IMG(m.clean_backdrop_path, "w1280")
+      : TMDB_IMG(m.backdrop_path ?? null, "w1280");
+    const subLabel = (m.genres ?? []).slice(0, 2).join(" · ") || "Cinema";
+    return {
+      tmdbId:    m.tmdb_id,
+      name:      m.name ?? "",
+      overview:  m.overview ?? null,
+      backdrop,
+      poster:    TMDB_IMG(m.poster_path ?? null, "w342"),
+      voteAvg:   m.vote_average ?? 0,
+      category:  "MOVIE",
+      href:      `/title/movie/${m.tmdb_id}`,
+      subLabel,
+      dateLabel,
+      days,
+      isMovie:   true,
+    };
+  }
+
+  // Série
+  const tmdb = group.tmdb!;
+  const days = daysUntilDate(dateStr);
+  const dateLabel = days <= 0 ? "Hoje" : days === 1 ? "Amanhã" : days <= 7 ? `Em ${days} dias` : `Em ${days} dias`;
+  const eps = episodesOnDay(group, dateStr);
+  const firstEp = eps[0];
+  const subLabel = firstEp
+    ? `S${firstEp.season}E${firstEp.episode}${firstEp.episodeName && firstEp.episodeName.toLowerCase() !== "tba" ? ` · ${firstEp.episodeName}` : ""}`
+    : "";
+  const backdrop = bestHorizontalImg(tmdb, "w1280");
+  return {
+    tmdbId:    tmdb.tmdb_id,
+    name:      tmdb.name,
+    overview:  tmdb.overview ?? null,
+    backdrop,
+    poster:    TMDB_IMG(tmdb.poster_path, "w342") || TMDB_IMG(tmdb.backdrop_path, "w780"),
+    voteAvg:   tmdb.vote_average ?? 0,
+    category:  group.category,
+    href:      `/title/tv/${tmdb.tmdb_id}`,
+    subLabel,
+    dateLabel,
+    days,
+    isMovie:   false,
+  };
+}
+
+function AgendaEditorialHeroCard({
+  item,
+  trendingDay,
+  trendingWeek,
+}: {
+  item: EditorialGroup;
+  trendingDay: Set<number>;
+  trendingWeek: Set<number>;
+}) {
+  const d = resolveItemData(item);
+  const signal = editorialSignal(item.group, item.dateStr, trendingDay, trendingWeek, item.movie);
+  const { label: catLabel, color: catColor } = d.isMovie
+    ? { label: CAT_LABEL[d.category] ?? d.category, color: CAT_COLOR[d.category] ?? "bg-white/[0.05] text-white/30 border-white/[0.08]" }
+    : resolveCatLabel(item.group);
+  // Série: info de episódio; Filme: gênero
+  const firstEp = !item.movie ? (episodesOnDay(item.group, item.dateStr)[0] ?? null) : null;
+  const showTime = firstEp && !firstEp.startAt.endsWith("T00:00:00.000Z");
+
+  return (
+    <a
+      href={d.href}
+      className="group relative w-full h-full overflow-hidden rounded-[26px] border border-white/[0.08] bg-zinc-950/80 text-left shadow-[0_18px_44px_rgba(0,0,0,0.34)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-white/[0.16] block"
+    >
+      {d.backdrop && (
+        <img src={d.backdrop} alt="" className="absolute inset-0 h-full w-full object-cover opacity-[0.72] transition-transform duration-700 group-hover:scale-[1.03]" />
+      )}
+      <div className="absolute inset-0 bg-gradient-to-r from-zinc-950/80 via-zinc-950/38 to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/70 via-transparent to-transparent" />
+
+      <div className="relative flex h-full flex-col justify-between p-5 sm:p-7">
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <SignalBadge label={signal.label} color={signal.color} />
+            <span className={`rounded-lg border px-2 py-1 text-[9px] font-black uppercase ${catColor}`}>{catLabel}</span>
+            {!item.movie && item.group.streamingProvider && (
+              <span className="rounded-lg border border-emerald-500/20 bg-emerald-500/15 px-2 py-1 text-[9px] font-black uppercase text-emerald-300/80">
+                {item.group.streamingProvider.name}
+              </span>
+            )}
+            <span className="rounded-lg border border-white/[0.08] bg-black/20 px-2 py-1 text-[9px] font-black uppercase text-white/45">
+              {d.dateLabel}
+            </span>
+          </div>
+          {d.voteAvg > 0 && (
+            <span className="rounded-lg border border-amber-400/20 bg-amber-500/10 px-2 py-1 text-[11px] font-black text-amber-200">
+              ★ {d.voteAvg.toFixed(1)}
+            </span>
+          )}
+        </div>
+
+        <div className="flex items-end gap-5">
+          {d.poster && (
+            <div className="hidden w-[104px] overflow-hidden rounded-2xl border border-white/[0.10] bg-white/[0.04] shadow-[0_14px_32px_rgba(0,0,0,0.30)] sm:block">
+              <img src={d.poster} alt={d.name} className="aspect-[2/3] w-full object-cover" />
+            </div>
+          )}
+          <div className="min-w-0 max-w-[650px]">
+            <p className="mb-2 text-[11px] font-black uppercase tracking-[0.08em] text-emerald-300/90">
+              {d.subLabel}{showTime && firstEp ? ` · ${formatTime(firstEp.startAt)}` : ""}
+            </p>
+            <h2 className="mb-3 text-3xl font-black leading-none tracking-[-0.04em] text-white sm:text-5xl">
+              {d.name}
+            </h2>
+            {d.overview && (
+              <p className="line-clamp-3 max-w-2xl text-[13px] leading-relaxed text-white/62">{d.overview}</p>
+            )}
+          </div>
+        </div>
+      </div>
+    </a>
+  );
+}
+
+function AgendaEditorialWideCard({
+  item,
+  trendingDay,
+  trendingWeek,
+}: {
+  item: EditorialGroup;
+  trendingDay: Set<number>;
+  trendingWeek: Set<number>;
+}) {
+  const d = resolveItemData(item);
+  const signal = editorialSignal(item.group, item.dateStr, trendingDay, trendingWeek, item.movie);
+
+  return (
+    <a
+      href={d.href}
+      className="group relative w-full h-full overflow-hidden rounded-[24px] border border-white/[0.08] bg-zinc-950/75 text-left shadow-[0_14px_34px_rgba(0,0,0,0.30)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-white/[0.15] block"
+    >
+      {d.backdrop && (
+        <img src={d.backdrop} alt="" className="absolute inset-0 h-full w-full object-cover opacity-[0.65] transition-transform duration-700 group-hover:scale-[1.04]" />
+      )}
+      <div className="absolute inset-0 bg-gradient-to-r from-zinc-950/72 via-zinc-950/30 to-transparent" />
+      <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/60 via-transparent to-transparent" />
+      <div className="relative flex h-full flex-col justify-between p-5">
+        <div className="flex items-center justify-between gap-3">
+          <SignalBadge label={signal.label} color={signal.color} />
+          <span className="text-[10px] font-bold uppercase text-white/38">{d.dateLabel}</span>
+        </div>
+        <div className="max-w-[560px]">
+          <p className="mb-2 text-[10px] font-black uppercase tracking-[0.08em] text-emerald-300/80">
+            {d.subLabel || (d.isMovie ? "Cinema" : "Novo evento")}
+          </p>
+          <h3 className="line-clamp-2 text-2xl font-black leading-tight tracking-[-0.035em] text-white">{d.name}</h3>
+          {d.overview && (
+            <p className="mt-2 line-clamp-2 text-[12px] leading-relaxed text-white/52">
+              {d.overview}
+            </p>
+          )}
+        </div>
+      </div>
+    </a>
+  );
+}
+
+function AgendaEditorialPosterCard({
+  item,
+  trendingDay,
+  trendingWeek,
+}: {
+  item: EditorialGroup;
+  trendingDay: Set<number>;
+  trendingWeek: Set<number>;
+}) {
+  const d = resolveItemData(item);
+  // Poster: vertical — usa poster se disponível
+  const bgImg = d.poster ?? d.backdrop;
+  const signal = editorialSignal(item.group, item.dateStr, trendingDay, trendingWeek, item.movie);
+
+  return (
+    <a
+      href={d.href}
+      className="group relative w-full h-full overflow-hidden rounded-[24px] border border-white/[0.08] bg-zinc-950/75 text-left shadow-[0_14px_34px_rgba(0,0,0,0.30)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-white/[0.15] block"
+    >
+      {bgImg && (
+        <img src={bgImg} alt="" className="absolute inset-0 h-full w-full object-cover object-top opacity-[0.75] transition-transform duration-700 group-hover:scale-[1.04]" />
+      )}
+      <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/72 via-zinc-950/20 to-transparent" />
+      <div className="relative flex h-full flex-col justify-between p-4">
+        <div className="flex items-start justify-between gap-2">
+          <SignalBadge label={signal.label} color={signal.color} />
+          {d.voteAvg > 0 && (
+            <span className="rounded-lg border border-amber-400/15 bg-black/20 px-1.5 py-1 text-[10px] font-black text-amber-200/90">
+              ★ {d.voteAvg.toFixed(1)}
+            </span>
+          )}
+        </div>
+        <div>
+          <p className="mb-1.5 text-[10px] font-black uppercase tracking-[0.08em] text-emerald-300/80">
+            {d.dateLabel}{d.subLabel ? ` · ${d.subLabel}` : ""}
+          </p>
+          <h3 className="line-clamp-2 text-[19px] font-black leading-tight tracking-[-0.035em] text-white">{d.name}</h3>
+          {d.overview && (
+            <p className="mt-2 line-clamp-2 text-[11px] leading-relaxed text-white/50">
+              {d.overview}
+            </p>
+          )}
+        </div>
+      </div>
+    </a>
+  );
+}
+
+function AgendaEditorialSquareCard({
+  item,
+  trendingDay,
+  trendingWeek,
+}: {
+  item: EditorialGroup;
+  trendingDay: Set<number>;
+  trendingWeek: Set<number>;
+}) {
+  const d = resolveItemData(item);
+  // Square: backdrop horizontal preferido; fallback para poster
+  const bgImg = d.backdrop ?? d.poster;
+  const signal = editorialSignal(item.group, item.dateStr, trendingDay, trendingWeek, item.movie);
+
+  return (
+    <a
+      href={d.href}
+      className="group relative w-full h-full overflow-hidden rounded-[24px] border border-white/[0.08] bg-zinc-950/75 text-left shadow-[0_14px_34px_rgba(0,0,0,0.28)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-white/[0.15] block"
+    >
+      {bgImg && (
+        <img src={bgImg} alt="" className="absolute inset-0 h-full w-full object-cover opacity-[0.60] transition-transform duration-700 group-hover:scale-[1.05]" />
+      )}
+      <div className="absolute inset-0 bg-gradient-to-br from-zinc-950/50 via-transparent to-zinc-950/80" />
+      <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/65 via-transparent to-transparent" />
+      <div className="relative flex h-full flex-col justify-between p-4">
+        <div className="flex items-center justify-between gap-2">
+          <SignalBadge label={signal.label} color={signal.color} />
+          {d.voteAvg > 0 && (
+            <span className="rounded-lg border border-amber-400/15 bg-black/25 px-1.5 py-1 text-[10px] font-black text-amber-200/90">
+              ★ {d.voteAvg.toFixed(1)}
+            </span>
+          )}
+        </div>
+        <div>
+          <p className="mb-1 text-[9px] font-black uppercase tracking-[0.09em] text-emerald-300/80">
+            {d.dateLabel}{d.subLabel ? ` · ${d.subLabel}` : ""}
+          </p>
+          <h3 className="line-clamp-2 text-[16px] font-black leading-tight tracking-[-0.03em] text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.7)]">
+            {d.name}
+          </h3>
+        </div>
+      </div>
+    </a>
+  );
+}
+
+// ── Tall card (poster 2:3 alto — só para o item #1 de muito hype) ─────────────
+function AgendaEditorialTallCard({
+  item,
+  trendingDay,
+  trendingWeek,
+}: {
+  item: EditorialGroup;
+  trendingDay: Set<number>;
+  trendingWeek: Set<number>;
+}) {
+  const d = resolveItemData(item);
+  // Tall: vertical — poster preferido, fallback backdrop
+  const poster = d.poster ?? d.backdrop;
+  const signal = editorialSignal(item.group, item.dateStr, trendingDay, trendingWeek, item.movie);
+
+  return (
+    <a
+      href={d.href}
+      className="group relative w-full h-full overflow-hidden rounded-[24px] border border-white/[0.08] bg-zinc-950/75 text-left shadow-[0_14px_34px_rgba(0,0,0,0.28)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-0.5 hover:border-white/[0.16] block"
+    >
+      {poster ? (
+        <img src={poster} alt="" className="absolute inset-0 h-full w-full object-cover opacity-90 transition-transform duration-700 group-hover:scale-[1.04]" />
+      ) : (
+        <div className="absolute inset-0 bg-gradient-to-b from-zinc-800 to-zinc-950" />
+      )}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/15 to-transparent" />
+      <div className="relative flex h-full flex-col justify-between p-3.5">
+        <div className="flex items-center justify-between gap-2">
+          <SignalBadge label={signal.label} color={signal.color} />
+          {d.voteAvg > 0 && (
+            <span className="rounded-lg border border-amber-400/15 bg-black/30 px-1.5 py-1 text-[10px] font-black text-amber-200/90">
+              ★ {d.voteAvg.toFixed(1)}
+            </span>
+          )}
+        </div>
+        <div>
+          <p className="mb-1 text-[9px] font-black uppercase tracking-[0.10em] text-emerald-300/85">
+            {d.dateLabel}{d.subLabel ? ` · ${d.subLabel}` : ""}
+          </p>
+          <h3 className="line-clamp-2 text-[17px] font-black leading-tight tracking-[-0.03em] text-white drop-shadow-[0_1px_4px_rgba(0,0,0,0.8)]">
+            {d.name}
+          </h3>
+        </div>
+      </div>
+    </a>
+  );
+}
+
+function AgendaCompactCluster({ items }: { items: EditorialGroup[] }) {
+  if (items.length === 0) return null;
+
+  return (
+    <div className="col-span-1 rounded-[24px] border border-white/[0.08] bg-zinc-900/80 shadow-[0_18px_50px_rgba(0,0,0,0.40)] backdrop-blur-xl p-4 sm:col-span-2 lg:col-span-4">
+      <div className="mb-4 flex items-center justify-between gap-4">
+        <div>
+          <p className="text-[9px] font-black uppercase text-white/30">Agenda compactada</p>
+          <h3 className="text-[18px] font-black text-white">Também relevantes</h3>
+        </div>
+        <span className="rounded-full border border-white/[0.08] px-2.5 py-1 text-[11px] font-black text-white/30">
+          {items.length}
+        </span>
+      </div>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {items.slice(0, 12).map((editorialItem) => {
+          const d = resolveItemData(editorialItem);
+          return (
+            <a
+              key={`${editorialItem.movie ? `movie-${d.tmdbId}` : editorialItem.group.key}-${editorialItem.dateStr}`}
+              href={d.href}
+              className="flex min-w-0 items-center gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.035] p-2.5 text-left transition-colors hover:border-white/[0.10] hover:bg-white/[0.05]"
+            >
+              <div className="h-14 w-10 shrink-0 overflow-hidden rounded-lg bg-white/[0.05]">
+                {d.poster && <img src={d.poster} alt="" className="h-full w-full object-cover" loading="lazy" />}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-black text-white/85">{d.name}</p>
+                <p className="mt-1 text-[10px] font-bold text-white/35">
+                  {d.dateLabel}{d.subLabel ? ` · ${d.subLabel}` : ""}
+                  {!editorialItem.movie && editorialItem.group.streamingProvider && (
+                    <span className="ml-1.5 text-emerald-400/70">· {editorialItem.group.streamingProvider.name}</span>
+                  )}
+                </p>
+              </div>
+            </a>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Sistema de linhas sem buracos ─────────────────────────────────────────────
+//
+// Cada "linha" define um layout de 4 colunas e consome exatamente N itens.
+// O grid CSS único garante que cada célula estique para preencher a linha — sem gaps.
+//
+// Layouts disponíveis (sempre somam 4 cols):
+//   "2+1+1"  → wide(2) | poster(1) | poster(1)          consome 3
+//   "1+1+2"  → poster(1) | poster(1) | wide(2)          consome 3
+//   "2+2"    → wide(2) | wide(2)                         consome 2
+//   "1+2+1"  → poster(1) | wide(2) | poster(1)          consome 3
+//   "4"      → poster(1)|poster(1)|poster(1)|poster(1)  consome 4
+//   "3+1"    → wide(3) | poster(1)                      consome 2  (lg only)
+//   "1+3"    → poster(1) | wide(3)                      consome 2  (lg only)
+//   "tall+3" → tall(1 col, 2 rows) + 3 posters em 3 cols (só para #1 de hype muito alto)
+//
+// O ciclo de layouts cria dinamismo sem deixar espaços.
+
+// ── Sistema de layouts score-driven — variedade máxima ───────────────────────
+//
+// 16 layouts diferentes, todos somam exatamente 12 cols em sm+.
+// Formato de span: "col-span-MOBILE sm:col-span-DESKTOP"
+//
+// Formatos de card:
+//   "hero"    → banner horizontal largo (widescreen), usa backdrop prioritariamente
+//   "wide"    → banner horizontal médio, backdrop ou poster
+//   "poster"  → retângulo vertical 2:3, usa poster prioritariamente
+//   "square"  → quadrado 1:1, backdrop ou poster
+//   "tall"    → poster gigante vertical (só para #1 hype extremo)
+//
+// Regra: soma dos sm:col-span = 12 por linha. Mobile sempre col-span-12 ou col-span-6.
+
+// ── Templates fixos de layout por view ───────────────────────────────────────
+//
+// Cada view é uma sequência de "linhas" que se repetem.
+// Cada linha some exatamente 12 colunas — garantia matemática de zero buracos.
+// Dentro de cada linha, cada slot tem: tipo de card + col-span desktop + col-span mobile.
+// Mobile: todos os slots ficam full (12) ou metade (6), nunca menos.
+//
+// Tipos de card:
+//   hero   → banner widescreen, usa backdrop, conteúdo no lado esquerdo
+//   wide   → banner horizontal compacto
+//   square → quadrado 1:1
+//   poster → retângulo 2:3 vertical
+
+type CardType = "hero" | "wide" | "square" | "poster" | "tall";
+
+interface SlotDef {
+  cardType: CardType;
+  colSm: number;  // colunas desktop (soma 12 por linha)
+  colXs: number;  // colunas mobile (6 ou 12)
+}
+
+type RowDef = SlotDef[];  // soma de colSm deve ser 12
+
+// Altura fixa por linha — hero/wide ficam mais altos
+const ROW_H: Record<string, string> = {
+  hero:   "h-[320px]",
+  wide:   "h-[240px]",
+  square: "h-[220px]",
+  poster: "h-[260px]",
+  tall:   "h-[320px]",
+};
+
+// ── Template Dia/Hoje ─────────────────────────────────────────────────────────
+const ROWS_DAY: RowDef[] = [
+  // L1: hero grande + poster
+  [{ cardType:"hero",   colSm:8, colXs:12 }, { cardType:"poster", colSm:4, colXs:6 }],  // não vai embaixo do hero no mobile pois hero é full
+  // L2: square + square + square
+  [{ cardType:"square", colSm:4, colXs:6 }, { cardType:"square", colSm:4, colXs:6 }, { cardType:"square", colSm:4, colXs:6 }],
+  // L3: poster + wide
+  [{ cardType:"poster", colSm:4, colXs:6 }, { cardType:"wide",   colSm:8, colXs:12 }],
+  // L4: poster + poster + poster + poster
+  [{ cardType:"poster", colSm:3, colXs:6 }, { cardType:"poster", colSm:3, colXs:6 }, { cardType:"poster", colSm:3, colXs:6 }, { cardType:"poster", colSm:3, colXs:6 }],
+  // L5: wide + square + square
+  [{ cardType:"wide",   colSm:6, colXs:12 }, { cardType:"square", colSm:3, colXs:6 }, { cardType:"square", colSm:3, colXs:6 }],
+];
+
+// ── Template Semana ───────────────────────────────────────────────────────────
+const ROWS_WEEK: RowDef[] = [
+  // L1: hero + poster + poster
+  [{ cardType:"hero",   colSm:6, colXs:12 }, { cardType:"poster", colSm:3, colXs:6 }, { cardType:"poster", colSm:3, colXs:6 }],
+  // L2: square + square + square + square
+  [{ cardType:"square", colSm:3, colXs:6 }, { cardType:"square", colSm:3, colXs:6 }, { cardType:"square", colSm:3, colXs:6 }, { cardType:"square", colSm:3, colXs:6 }],
+  // L3: wide + poster
+  [{ cardType:"wide",   colSm:8, colXs:12 }, { cardType:"poster", colSm:4, colXs:6 }],
+  // L4: poster + wide + poster
+  [{ cardType:"poster", colSm:3, colXs:6 }, { cardType:"wide",   colSm:6, colXs:12 }, { cardType:"poster", colSm:3, colXs:6 }],
+  // L5: square + square + wide
+  [{ cardType:"square", colSm:4, colXs:6 }, { cardType:"square", colSm:4, colXs:6 }, { cardType:"wide",   colSm:4, colXs:12 }],
+  // L6: poster × 4
+  [{ cardType:"poster", colSm:3, colXs:6 }, { cardType:"poster", colSm:3, colXs:6 }, { cardType:"poster", colSm:3, colXs:6 }, { cardType:"poster", colSm:3, colXs:6 }],
+];
+
+// ── Template Mês / 30 dias ────────────────────────────────────────────────────
+const ROWS_MONTH: RowDef[] = [
+  // L1: wide + poster + poster
+  [{ cardType:"wide",   colSm:6, colXs:12 }, { cardType:"poster", colSm:3, colXs:6 }, { cardType:"poster", colSm:3, colXs:6 }],
+  // L2: square + square + square
+  [{ cardType:"square", colSm:4, colXs:6 }, { cardType:"square", colSm:4, colXs:6 }, { cardType:"square", colSm:4, colXs:6 }],
+  // L3: hero + poster
+  [{ cardType:"hero",   colSm:8, colXs:12 }, { cardType:"poster", colSm:4, colXs:6 }],
+  // L4: poster × 4
+  [{ cardType:"poster", colSm:3, colXs:6 }, { cardType:"poster", colSm:3, colXs:6 }, { cardType:"poster", colSm:3, colXs:6 }, { cardType:"poster", colSm:3, colXs:6 }],
+  // L5: square + wide + square
+  [{ cardType:"square", colSm:3, colXs:6 }, { cardType:"wide",   colSm:6, colXs:12 }, { cardType:"square", colSm:3, colXs:6 }],
+  // L6: wide + poster + poster
+  [{ cardType:"wide",   colSm:6, colXs:12 }, { cardType:"poster", colSm:3, colXs:6 }, { cardType:"poster", colSm:3, colXs:6 }],
+  // L7: poster + hero
+  [{ cardType:"poster", colSm:4, colXs:6 }, { cardType:"hero",   colSm:8, colXs:12 }],
+  // L8: square × 4
+  [{ cardType:"square", colSm:3, colXs:6 }, { cardType:"square", colSm:3, colXs:6 }, { cardType:"square", colSm:3, colXs:6 }, { cardType:"square", colSm:3, colXs:6 }],
+];
+
+function getRows(mode: ViewMode): RowDef[] {
+  if (mode === "day")  return ROWS_DAY;
+  if (mode === "week") return ROWS_WEEK;
+  return ROWS_MONTH;
+}
+
+// Distribui items pelos slots do template, repetindo linhas conforme necessário
+function assignSlots(
+  items: EditorialGroup[],
+  mode:  ViewMode,
+): Array<{ item: EditorialGroup; slot: SlotDef; rowH: string }> {
+  const rows    = getRows(mode);
+  const nonCmp  = items.filter(i => i.visualWeight !== "compact");
+  const result: Array<{ item: EditorialGroup; slot: SlotDef; rowH: string }> = [];
+
+  // Flatten slots in order, repeating the pattern
+  let itemIdx = 0;
+  let rowIdx  = 0;
+  while (itemIdx < nonCmp.length) {
+    const row = rows[rowIdx % rows.length];
+    for (const slot of row) {
+      if (itemIdx >= nonCmp.length) break;
+      // Altura da linha = o maior tipo de card da linha
+      const lineH = ROW_H[slot.cardType];
+      result.push({ item: nonCmp[itemIdx], slot, rowH: lineH });
+      itemIdx++;
+    }
+    rowIdx++;
+  }
+  return result;
+}
+
+
+function AgendaEditorialFeed({
+  items,
+  mode,
+  isLoading,
+  trendingDay,
+  trendingWeek,
+}: {
+  items:        EditorialGroup[];
+  mode:         ViewMode;
+  isLoading:    boolean;
+  trendingDay:  Set<number>;
+  trendingWeek: Set<number>;
+}) {
+  const rows    = getRows(mode);
+  const nonCmp  = items.filter(i => i.visualWeight !== "compact");
+  const compact = items.filter(i => i.visualWeight === "compact");
+
+  if (isLoading && items.length === 0) {
+    // Skeleton: primeiras 2 linhas do template
+    return (
+      <div className="flex flex-col gap-3">
+        {rows.slice(0, 2).map((row, rIdx) => {
+          const rowH = ROW_H[row[0].cardType];
+          return (
+            <div key={rIdx} className={`grid gap-3 ${rowH}`} style={{ gridTemplateColumns: "repeat(12, 1fr)" }}>
+              {row.map((slot, sIdx) => (
+                <div
+                  key={sIdx}
+                  className="h-full rounded-2xl bg-white/[0.035] animate-pulse"
+                  style={{ gridColumn: `span ${slot.colSm}` }}
+                />
+              ))}
+            </div>
+          );
+        })}
+      </div>
+    );
+  }
+
+  if (nonCmp.length === 0) {
+    return (
+      <div className="rounded-[24px] border border-white/[0.08] bg-zinc-900/80 px-6 py-14 text-center">
+        <p className="text-[14px] font-black text-white/35">Nada forte o bastante para este recorte.</p>
+        <p className="mt-1 text-[11px] text-white/20">A curadoria fica melhor quando chegam novos eventos.</p>
+      </div>
+    );
+  }
+
+  // Distribui items pelas linhas do template, repetindo até acabar.
+  // Linha incompleta (< slots disponíveis): itens vão pro compacto em vez de
+  // ficarem sozinhos num grid com espaço vazio.
+  const renderedRows: Array<{ rowDef: RowDef; items: EditorialGroup[] }> = [];
+  const spillover: EditorialGroup[] = []; // itens que não completam uma linha
+  let cursor = 0;
+  let rIdx   = 0;
+  while (cursor < nonCmp.length) {
+    const rowDef  = rows[rIdx % rows.length];
+    const remaining = nonCmp.length - cursor;
+    if (remaining === 0) break;
+
+    if (remaining >= rowDef.length) {
+      // Linha completa — renderiza normalmente
+      renderedRows.push({ rowDef, items: nonCmp.slice(cursor, cursor + rowDef.length) });
+      cursor += rowDef.length;
+    } else {
+      // Sobrou menos que o tamanho da linha.
+      // Se sobrou 1 item → sempre vai pro spillover.
+      // Se sobrou ≥2 itens → tenta achar uma linha menor que caiba exatamente.
+      const smaller = rows.find(r => r.length === remaining);
+      if (smaller) {
+        renderedRows.push({ rowDef: smaller, items: nonCmp.slice(cursor, cursor + remaining) });
+      } else {
+        // Não tem linha do tamanho certo → vai pro spillover
+        spillover.push(...nonCmp.slice(cursor, cursor + remaining));
+      }
+      cursor += remaining;
+    }
+    rIdx++;
+  }
+  // Spillover junta com os itens compactos — mantém ordem decrescente por score
+  const allCompact = [...spillover, ...compact].sort((a, b) => b.score - a.score);
+
+  return (
+    <div className="flex flex-col gap-3">
+      {renderedRows.map((row, rIdx) => {
+        // Altura da linha: o maior tipo da linha dita a altura
+        const dominantType = row.rowDef.reduce<CardType>((best, slot) => {
+          const order: CardType[] = ["hero", "wide", "poster", "square", "tall"];
+          return order.indexOf(slot.cardType) < order.indexOf(best) ? slot.cardType : best;
+        }, "square");
+        const rowH = ROW_H[dominantType];
+
+        return (
+          <div
+            key={rIdx}
+            className={`grid gap-3 ${rowH}`}
+            style={{ gridTemplateColumns: "repeat(12, 1fr)" }}
+          >
+            {row.items.map((item, cIdx) => {
+              const slot = row.rowDef[cIdx];
+              const key  = `${item.group.key}-${item.dateStr}-${rIdx}-${cIdx}`;
+              return (
+                <div
+                  key={key}
+                  className="h-full min-w-0"
+                  style={{ gridColumn: `span ${slot.colSm}` }}
+                >
+                  {slot.cardType === "hero"   && <AgendaEditorialHeroCard   item={item} trendingDay={trendingDay} trendingWeek={trendingWeek} />}
+                  {slot.cardType === "wide"   && <AgendaEditorialWideCard   item={item} trendingDay={trendingDay} trendingWeek={trendingWeek} />}
+                  {slot.cardType === "square" && <AgendaEditorialSquareCard item={item} trendingDay={trendingDay} trendingWeek={trendingWeek} />}
+                  {slot.cardType === "poster" && <AgendaEditorialPosterCard item={item} trendingDay={trendingDay} trendingWeek={trendingWeek} />}
+                  {slot.cardType === "tall"   && <AgendaEditorialTallCard   item={item} trendingDay={trendingDay} trendingWeek={trendingWeek} />}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+
+      {allCompact.length > 0 && (
+        <AgendaCompactCluster items={allCompact} />
+      )}
+    </div>
+  );
+}
+
+
 // ── AgendaHero ─────────────────────────────────────────────────────────────────
 
 function AgendaHero({
@@ -713,41 +1737,41 @@ function AgendaHero({
   });
 
   return (
-    <div className="relative isolate rounded-[24px] overflow-hidden mb-8 min-h-[240px] sm:min-h-[280px] flex flex-col justify-between p-6 sm:p-8 border border-white/[0.06]">
-      <div className="absolute inset-0 -z-10 bg-gradient-to-br from-indigo-950/80 via-black to-black" />
-      <div className="absolute inset-0 -z-10" style={{ background: "radial-gradient(ellipse at 20% 0%, rgba(99,102,241,0.15) 0%, transparent 60%)" }} />
-      <div className="absolute inset-0 -z-10" style={{ background: "radial-gradient(ellipse at 90% 100%, rgba(6,182,212,0.08) 0%, transparent 50%)" }} />
+    <div className="relative isolate mb-9 flex min-h-[260px] flex-col justify-between overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.035] p-6 shadow-[0_24px_90px_rgba(0,0,0,0.35)] backdrop-blur-xl sm:min-h-[320px] sm:p-9">
+      <div className="absolute inset-0 -z-10 bg-zinc-950" />
+      <div className="absolute inset-0 -z-10" style={{ background: "radial-gradient(ellipse at 18% 0%, rgba(56,189,248,0.18) 0%, transparent 56%)" }} />
+      <div className="absolute inset-0 -z-10" style={{ background: "radial-gradient(ellipse at 88% 100%, rgba(16,185,129,0.12) 0%, transparent 52%)" }} />
       <div className="absolute inset-0 -z-10 opacity-[0.025]"
         style={{ backgroundImage: "linear-gradient(0deg,white 1px,transparent 1px),linear-gradient(90deg,white 1px,transparent 1px)", backgroundSize: "64px 64px" }} />
 
       <div className="flex items-start justify-between gap-4">
         <div>
-          <SectionEyebrow color="indigo">Calendário · bancodeseries.com.br</SectionEyebrow>
+          <SectionEyebrow color="sky">Agenda · POPLOG</SectionEyebrow>
           <p className="text-[12px] text-white/30 capitalize">{today}</p>
         </div>
-        {/* View toggle */}
-        <div className="flex items-center gap-1 rounded-2xl border border-white/[0.08] bg-white/[0.025] p-1">
-          {(["month", "week", "day"] as ViewMode[]).map((v) => (
+        {/* Toggle de período */}
+        <div className="flex items-center gap-1 rounded-2xl border border-white/[0.09] bg-black/25 p-1 backdrop-blur-md">
+          {(["day", "week", "month", "range"] as ViewMode[]).map((v) => (
             <button key={v} type="button" onClick={() => onChangeMode(v)}
-              className={`text-[11px] font-bold px-3.5 py-1.5 rounded-xl transition-all duration-200 capitalize ${
+              className={`text-[11px] font-bold px-3.5 py-1.5 rounded-lg transition-all duration-200 ${
                 mode === v
-                  ? "bg-indigo-500/20 text-indigo-200 border border-indigo-500/20"
+                  ? "border border-sky-300/25 bg-sky-300/[0.14] text-sky-100 shadow-[0_0_18px_rgba(56,189,248,0.12)]"
                   : "text-white/30 hover:text-white/55"
               }`}>
-              {v === "month" ? "Mês" : v === "week" ? "Semana" : "Dia"}
+              {v === "day" ? "Hoje" : v === "week" ? "Semana" : v === "month" ? "Mês" : "30 dias"}
             </button>
           ))}
         </div>
       </div>
 
       <div className="mt-4">
-        <h1 className="text-5xl sm:text-6xl font-black tracking-[-0.05em] text-white/90 leading-none mb-2">Agenda</h1>
-        <p className="text-[13px] text-white/35 leading-relaxed max-w-sm">
+        <h1 className="text-5xl sm:text-7xl font-black text-white leading-[0.9] tracking-[-0.07em] mb-3">Agenda</h1>
+        <p className="text-[13px] sm:text-[14px] text-white/55 leading-relaxed max-w-2xl">
           {phase !== "done"
             ? PHASE_LABELS[phase]
             : filteredCount > 0
-              ? `${filteredCount} séries · ${filteredEps.toLocaleString("pt-BR")} episódios nos próximos 30 dias`
-              : "Calendário de episódios"}
+              ? `${filteredCount} séries curadas · ${filteredEps.toLocaleString("pt-BR")} episódios comprimidos por relevância`
+              : "Feed editorial de entretenimento"}
         </p>
       </div>
 
@@ -760,14 +1784,14 @@ function AgendaHero({
           </div>
           <div className="h-3 w-px bg-white/10" />
           <div className="flex items-center gap-2">
-            <span className="text-xl font-black text-cyan-300/80">{filteredEps.toLocaleString("pt-BR")}</span>
+            <span className="text-xl font-black text-emerald-300">{filteredEps.toLocaleString("pt-BR")}</span>
             <span className="text-[11px] text-white/30">episódios</span>
           </div>
           {phase === "enriching" && (
             <>
               <div className="h-3 w-px bg-white/10" />
               <div className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-indigo-400/60 animate-pulse" />
+                <span className="w-1.5 h-1.5 rounded-full bg-sky-400/90 animate-pulse" />
                 <span className="text-[11px] text-white/25">Enriquecendo… {Math.round(enrichProgress)}%</span>
               </div>
             </>
@@ -776,8 +1800,8 @@ function AgendaHero({
             <>
               <div className="h-3 w-px bg-white/10" />
               <div className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/80" />
-                <span className="text-[11px] text-white/20 uppercase tracking-[0.15em] text-[9.5px] font-bold">Feed ICS ativo</span>
+                <span className="w-1.5 h-1.5 rounded-full bg-[#10B981]" />
+                <span className="text-[9.5px] font-bold uppercase text-white/25">Engine editorial ativa</span>
               </div>
             </>
           )}
@@ -846,29 +1870,29 @@ function MonthView({
             if (c === "ANIMATION")       return "bg-teal-500/20 border-teal-500/20 text-teal-200/80";
             if (c === "DOCUMENTARY")     return "bg-cyan-500/20 border-cyan-500/20 text-cyan-200/80";
             if (c === "REALITY_PREMIUM") return "bg-amber-500/20 border-amber-500/20 text-amber-200/80";
-            return "bg-indigo-500/15 border-indigo-500/15 text-indigo-200/75";
+            return "bg-sky-500/15 border-sky-500/15 text-sky-200/75";
           };
 
           return (
             <button key={dateStr} type="button" onClick={() => onSelectDay(dateStr)}
               className={[
-                "relative min-h-[90px] sm:min-h-[110px] rounded-xl p-2 text-left transition-all duration-200 border group/cell",
+                "relative min-h-[90px] sm:min-h-[110px] rounded-2xl p-2 text-left transition-all duration-200 border group/cell",
                 !isCurrent ? "opacity-20 border-white/[0.03] bg-transparent cursor-default" : "",
                 isCurrent && !isToday && !isSel && !hasContent ? "border-white/[0.05] bg-transparent hover:bg-white/[0.02] hover:border-white/[0.08]" : "",
                 isCurrent && !isToday && !isSel && hasContent  ? "border-white/[0.08] bg-white/[0.02] hover:bg-white/[0.05] hover:border-white/[0.13]" : "",
-                isToday && !isSel ? "border-indigo-500/50 bg-indigo-500/[0.08] hover:bg-indigo-500/[0.12]" : "",
-                isSel ? "border-indigo-400/70 bg-indigo-500/[0.16] ring-1 ring-indigo-500/30" : "",
+                isToday && !isSel ? "border-sky-500/50 bg-sky-500/[0.08] hover:bg-sky-500/[0.12]" : "",
+                isSel ? "border-sky-400/70 bg-sky-500/[0.16] ring-1 ring-sky-500/30" : "",
               ].join(" ")}
             >
               <div className="flex items-center justify-between mb-1.5">
                 <span className={[
                   "text-[13px] font-black leading-none",
-                  isToday ? "text-indigo-300" : isCurrent ? "text-white/50" : "text-white/15",
+                  isToday ? "text-sky-300" : isCurrent ? "text-white/50" : "text-white/15",
                 ].join(" ")}>
                   {dayNum}
                 </span>
                 {hasContent && (
-                  <span className={`text-[9px] font-black tabular-nums ${isToday ? "text-indigo-400/80" : "text-white/20"}`}>
+                  <span className={`text-[9px] font-black tabular-nums ${isToday ? "text-sky-400/80" : "text-white/20"}`}>
                     {groups.length}
                   </span>
                 )}
@@ -928,22 +1952,22 @@ function WeekView({
           <button key={dateStr} type="button" onClick={() => onSelectDay(dateStr)}
             className={[
               "w-full flex items-center gap-4 px-4 py-3.5 rounded-2xl border transition-all duration-200 text-left",
-              isSel ? "border-indigo-400/50 bg-indigo-500/[0.12]" :
-              isToday ? "border-indigo-500/35 bg-indigo-500/[0.07] hover:bg-indigo-500/[0.10]" :
+              isSel ? "border-sky-400/50 bg-sky-500/[0.12]" :
+              isToday ? "border-sky-500/35 bg-sky-500/[0.07] hover:bg-sky-500/[0.10]" :
               groups.length > 0 ? "border-white/[0.08] bg-white/[0.025] hover:bg-white/[0.05]" :
               "border-white/[0.04] bg-transparent hover:bg-white/[0.02]",
             ].join(" ")}
           >
             <div className="flex flex-col items-center justify-center w-[48px] shrink-0 gap-0.5">
-              <span className={`text-[10px] font-bold uppercase tracking-[0.15em] leading-none ${isToday ? "text-indigo-400" : "text-white/25"}`}>
+              <span className={`text-[10px] font-bold uppercase tracking-[0.15em] leading-none ${isToday ? "text-sky-400" : "text-white/25"}`}>
                 {DAY_SHORT[i]}
               </span>
-              <span className={`text-[22px] font-black tabular-nums leading-none ${isToday ? "text-indigo-200" : "text-white/55"}`}>
+              <span className={`text-[22px] font-black tabular-nums leading-none ${isToday ? "text-sky-200" : "text-white/55"}`}>
                 {dayNum}
               </span>
             </div>
 
-            <div className={`w-px self-stretch rounded-full ${isToday ? "bg-indigo-500/30" : "bg-white/[0.06]"}`} />
+            <div className={`w-px self-stretch rounded-full ${isToday ? "bg-sky-500/30" : "bg-white/[0.06]"}`} />
 
             {groups.length === 0 ? (
               <span className="text-[11px] text-white/15 flex-1 italic">Nenhuma série</span>
@@ -957,7 +1981,7 @@ function WeekView({
                     c === "ANIMATION"       ? "bg-teal-500/20 border-teal-500/20 text-teal-200/85" :
                     c === "DOCUMENTARY"     ? "bg-cyan-500/20 border-cyan-500/20 text-cyan-200/85" :
                     c === "REALITY_PREMIUM" ? "bg-amber-500/20 border-amber-500/20 text-amber-200/85" :
-                    "bg-indigo-500/15 border-indigo-500/15 text-indigo-200/80";
+                    "bg-sky-500/15 border-sky-500/15 text-sky-200/80";
                   return (
                     <div key={g.key} className={`flex items-center gap-1.5 rounded-lg px-2 py-1 border ${pc}`}>
                       {poster && (
@@ -1004,20 +2028,17 @@ function DayView({
     );
   }
 
-  // Ordena grupos pelo horário do primeiro ep do dia
-  const sortedGroups = [...groups].sort((a, b) => {
-    const aEp = a.episodes.find((ep) => ep.startAt.slice(0, 10) === dateStr);
-    const bEp = b.episodes.find((ep) => ep.startAt.slice(0, 10) === dateStr);
-    if (!aEp) return 1;
-    if (!bEp) return -1;
-    return aEp.startAt.localeCompare(bEp.startAt);
-  });
+  // Ordena grupos por relevância decrescente (hype + popularidade + tendência)
+  const sortedGroups = [...groups].sort(
+    (a, b) => (b.relevanceScore ?? 0) - (a.relevanceScore ?? 0) ||
+              ((b.tmdb?.popularity ?? 0) - (a.tmdb?.popularity ?? 0))
+  );
 
   return (
     <div>
       <div className="flex items-center justify-between mb-5">
         <div>
-          <SectionEyebrow color="indigo">Episódios do dia</SectionEyebrow>
+          <SectionEyebrow color="sky">Séries do dia</SectionEyebrow>
           <h3 className="text-[16px] font-black tracking-[-0.03em] text-white/80 capitalize leading-tight">{label}</h3>
         </div>
         <span className="text-[11px] font-black text-white/20 border border-white/[0.08] rounded-full px-2.5 py-0.5">
@@ -1036,7 +2057,7 @@ function DayView({
           return (
             <div
               key={g.key}
-              className="group relative rounded-2xl border border-white/[0.06] bg-white/[0.02] hover:border-white/[0.10] transition-all duration-300 overflow-hidden cursor-pointer"
+              className="group relative rounded-[22px] border border-white/[0.08] bg-white/[0.035] backdrop-blur-xl hover:border-white/[0.10] transition-all duration-300 overflow-hidden cursor-pointer"
               onClick={() => g.tmdb?.tmdb_id && router.push(`/title/tv/${g.tmdb.tmdb_id}`)}
             >
               {g.tmdb?.backdrop_path && (
@@ -1046,7 +2067,7 @@ function DayView({
                 </div>
               )}
               <div className="relative flex items-start gap-4 p-4">
-                <div className="relative w-[56px] h-[84px] rounded-xl overflow-hidden bg-white/[0.04] shrink-0 border border-white/[0.08]">
+                <div className="relative w-[56px] h-[84px] rounded-2xl overflow-hidden bg-white/[0.04] shrink-0 border border-white/[0.08]">
                   {g.tmdb?.poster_path ? (
                     <img src={TMDB_IMG(g.tmdb.poster_path, "w185")!} alt={g.tmdb.name} className="h-full w-full object-cover" loading="lazy" />
                   ) : (
@@ -1059,8 +2080,8 @@ function DayView({
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-2 flex-wrap">
-                    <span className={`text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${CAT_COLOR[g.category] ?? "bg-white/[0.05] text-white/30 border-white/[0.08]"}`}>
-                      {CAT_LABEL[g.category] ?? g.category}
+                    <span className={`text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${resolveCatLabel(g).color}`}>
+                      {resolveCatLabel(g).label}
                     </span>
                     {showTime && (
                       <span className="text-[10px] font-bold text-white/30 border border-white/[0.07] rounded-full px-2 py-0.5">
@@ -1113,13 +2134,13 @@ function PeriodNav({ label, onPrev, onNext, onToday }: {
       <h2 className="text-[20px] font-black tracking-[-0.03em] text-white/85 capitalize">{label}</h2>
       <div className="flex items-center gap-2">
         <button type="button" onClick={onToday}
-          className="text-[11px] font-bold text-white/40 hover:text-white/65 border border-white/[0.09] rounded-xl px-3.5 py-1.5 transition-colors">
+          className="text-[11px] font-bold text-white/40 hover:text-white/65 border border-white/[0.09] rounded-2xl px-3.5 py-1.5 transition-colors">
           Hoje
         </button>
         {(["prev", "next"] as const).map((dir) => (
           <button key={dir} type="button" onClick={dir === "prev" ? onPrev : onNext}
             aria-label={dir === "prev" ? "Anterior" : "Próximo"}
-            className="w-9 h-9 rounded-xl border border-white/[0.09] bg-white/[0.03] flex items-center justify-center text-white/40 hover:text-white/75 hover:bg-white/[0.07] transition-all">
+            className="w-9 h-9 rounded-2xl border border-white/[0.09] bg-white/[0.045] flex items-center justify-center text-white/40 hover:text-white/75 hover:bg-white/[0.07] transition-all">
             <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4">
               {dir === "prev"
                 ? <path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" />
@@ -1138,9 +2159,9 @@ function DayPanel({ dateStr, groups, onClose }: {
   dateStr: string; groups: IcsSeriesGroup[]; onClose: () => void;
 }) {
   return (
-    <div className="mt-8 rounded-[20px] border border-indigo-500/20 bg-indigo-950/10 p-5 sm:p-6">
+    <div className="mt-8 rounded-[28px] border border-sky-500/20 bg-sky-950/10 p-5 sm:p-6">
       <div className="flex items-center justify-between mb-4">
-        <SectionEyebrow color="indigo">Detalhe do dia</SectionEyebrow>
+        <SectionEyebrow color="sky">Detalhe do dia</SectionEyebrow>
         <button type="button" onClick={onClose}
           className="text-[10px] font-bold text-white/25 hover:text-white/50 border border-white/[0.07] rounded-lg px-2.5 py-1 transition-colors">
           Fechar
@@ -1168,6 +2189,9 @@ export default function AgendaClient({ initialData }: { initialData: IcsAgendaRe
   const [featuredGroups, setFeatured] = useState<IcsSeriesGroup[]>(() =>
     initialData ? hydrate(initialData.featuredGroups ?? []) : []
   );
+  const [movies, setMovies]           = useState<MovieGroup[]>(() =>
+    initialData?.movies ?? []
+  );
   const [phase, setPhase]             = useState<Phase>(() => initialData ? "done" : "idle");
   const [error, setError]             = useState<string | null>(null);
   const [enrichProgress, setEnrichProgress] = useState(0);
@@ -1180,7 +2204,8 @@ export default function AgendaClient({ initialData }: { initialData: IcsAgendaRe
   );
 
   const now = new Date();
-  const [mode, setMode]                 = useState<ViewMode>("month");
+
+  const [mode, setMode]                 = useState<ViewMode>("week");
   const [navYear, setNavYear]           = useState(now.getFullYear());
   const [navMonth, setNavMonth]         = useState(now.getMonth());
   const [navWeekStart, setNavWeekStart] = useState(() => startOfWeek(now));
@@ -1188,7 +2213,7 @@ export default function AgendaClient({ initialData }: { initialData: IcsAgendaRe
 
   // Fallback: só executa se não tínhamos initialData (cache frio)
   useEffect(() => {
-    if (initialData) return; // dados já estão no estado — nada a fazer
+    if (initialData) return;
 
     let cancelled = false;
 
@@ -1208,6 +2233,7 @@ export default function AgendaClient({ initialData }: { initialData: IcsAgendaRe
         const hydratedFeatured = hydrate(data.featuredGroups ?? []);
         setGroups(hydratedGroups);
         setFeatured(hydratedFeatured);
+        setMovies(data.movies ?? []);
 
         const needsEnrich = hydratedFeatured.filter((g) => !g.tmdb);
         if (needsEnrich.length === 0) { setPhase("done"); return; }
@@ -1254,12 +2280,16 @@ export default function AgendaClient({ initialData }: { initialData: IcsAgendaRe
   }, [initialData]);
 
   // Só mostra grupos com poster + nome TMDB
-  const visibleGroups   = useMemo(() => groups.filter(hasValidTmdb),        [groups]);
   const visibleFeatured = useMemo(() => featuredGroups.filter(hasValidTmdb), [featuredGroups]);
 
-  const byDay = useMemo(() => buildDayMap(groups), [groups]);
+  // Mapa dia → grupos (para MonthView, WeekView, DayView)
+  const byDay = useMemo(() => buildDayMap([...featuredGroups, ...groups]), [featuredGroups, groups]);
 
-  // Stats contadores filtrados
+  // Grupos do dia selecionado (para DayPanel e DayView)
+  const selectedDayGroups = byDay.get(selectedDay) ?? [];
+  const showDayPanel = mode !== "day" && selectedDay !== "" && selectedDayGroups.length > 0;
+
+  // Stats
   const filteredCount = visibleFeatured.length;
   const filteredEps   = useMemo(
     () => visibleFeatured.reduce((acc, g) => acc + g.episodeCount, 0),
@@ -1272,7 +2302,7 @@ export default function AgendaClient({ initialData }: { initialData: IcsAgendaRe
       setNavMonth((m) => m === 0 ? 11 : m - 1);
     } else if (mode === "week") {
       setNavWeekStart((d) => { const n = new Date(d); n.setDate(n.getDate() - 7); return n; });
-    } else {
+    } else if (mode === "day") {
       setSelectedDay((s) => { const d = new Date(s + "T12:00:00"); d.setDate(d.getDate() - 1); return toLocalDateStr(d); });
     }
   }, [mode, navMonth]);
@@ -1283,7 +2313,7 @@ export default function AgendaClient({ initialData }: { initialData: IcsAgendaRe
       setNavMonth((m) => m === 11 ? 0 : m + 1);
     } else if (mode === "week") {
       setNavWeekStart((d) => { const n = new Date(d); n.setDate(n.getDate() + 7); return n; });
-    } else {
+    } else if (mode === "day") {
       setSelectedDay((s) => { const d = new Date(s + "T12:00:00"); d.setDate(d.getDate() + 1); return toLocalDateStr(d); });
     }
   }, [mode, navMonth]);
@@ -1295,29 +2325,40 @@ export default function AgendaClient({ initialData }: { initialData: IcsAgendaRe
   }, []);
 
   const periodLabel = useMemo(() => {
+    if (mode === "range") return "Próximos 30 dias";
     if (mode === "month") return formatMonthYear(navYear, navMonth);
-    if (mode === "week")  return `Semana de ${formatWeekRange(navWeekStart)}`;
+    if (mode === "week") return `Semana de ${formatWeekRange(navWeekStart)}`;
     return formatDayFull(selectedDay);
   }, [mode, navYear, navMonth, navWeekStart, selectedDay]);
 
-  const selectedDayGroups = byDay.get(selectedDay) ?? [];
-  const showDayPanel = mode !== "day" && selectedDay !== "" && selectedDayGroups.length > 0;
-
-  // Spotlight: destaques do dia+semana com prioridade para estreias/finais/trending
   const spotlightItems = useMemo(
     () => buildSpotlightItems(visibleFeatured, trendingDayRef.current, trendingWeekRef.current),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
     [visibleFeatured],
   );
 
   const isLoading = phase !== "done" && phase !== "idle";
+  const editorialItems = useMemo(
+    () => buildEditorialGroups(visibleFeatured, movies, {
+      mode,
+      selectedDay,
+      weekStart: navWeekStart,
+      year: navYear,
+      month: navMonth,
+      trendingDay: trendingDayRef.current,
+      trendingWeek: trendingWeekRef.current,
+    }),
+    [mode, selectedDay, navWeekStart, navYear, navMonth, visibleFeatured, movies],
+  );
 
   return (
     <PageShell variant="wide">
 
       <AgendaHero
-        phase={phase} mode={mode} onChangeMode={setMode}
-        filteredCount={filteredCount} filteredEps={filteredEps}
+        phase={phase}
+        mode={mode}
+        onChangeMode={setMode}
+        filteredCount={filteredCount}
+        filteredEps={filteredEps}
         enrichProgress={enrichProgress}
       />
 
@@ -1327,82 +2368,21 @@ export default function AgendaClient({ initialData }: { initialData: IcsAgendaRe
         </div>
       )}
 
-      {/* Spotlight — substitui "Estreando hoje / Na agenda hoje" */}
+      {/* Spotlight — destaques editoriais do período */}
       <SpotlightHero items={spotlightItems} isLoading={isLoading} />
 
       <SectionDivider />
 
+      {/* Feed editorial em blocos — hero, wide, poster, compact */}
       <section>
-        <PeriodNav label={periodLabel} onPrev={handlePrev} onNext={handleNext} onToday={handleToday} />
-
-        {isLoading && groups.length === 0 ? (
-          mode === "month" ? (
-            <div className="grid grid-cols-7 gap-[3px]">
-              {Array.from({ length: 35 }).map((_, i) => (
-                <div key={i} className="h-[68px] rounded-xl bg-white/[0.025] animate-pulse" />
-              ))}
-            </div>
-          ) : (
-            <div className="space-y-2">
-              {Array.from({ length: 5 }).map((_, i) => (
-                <div key={i} className="h-[72px] rounded-2xl bg-white/[0.03] animate-pulse" />
-              ))}
-            </div>
-          )
-        ) : (
-          <>
-            {mode === "month" && (
-              <MonthView year={navYear} month={navMonth} byDay={byDay} selectedDay={selectedDay} onSelectDay={setSelectedDay} />
-            )}
-            {mode === "week" && (
-              <WeekView weekStart={navWeekStart} byDay={byDay} selectedDay={selectedDay} onSelectDay={setSelectedDay} />
-            )}
-            {mode === "day" && (
-              <DayView dateStr={selectedDay} groups={selectedDayGroups} />
-            )}
-          </>
-        )}
-
-        {showDayPanel && (
-          <DayPanel dateStr={selectedDay} groups={selectedDayGroups} onClose={() => setSelectedDay("")} />
-        )}
+        <AgendaEditorialFeed
+          items={editorialItems}
+          mode={mode}
+          isLoading={isLoading}
+          trendingDay={trendingDayRef.current}
+          trendingWeek={trendingWeekRef.current}
+        />
       </section>
-
-      {visibleFeatured.length > 0 && (
-        <>
-          <SectionDivider />
-          <section className="mb-10">
-            <div className="flex items-end justify-between mb-5">
-              <div>
-                <SectionEyebrow color="indigo">Próximos 30 dias</SectionEyebrow>
-                <h2 className="text-xl font-black tracking-[-0.03em] text-white/90 leading-tight">Todas as séries</h2>
-              </div>
-              <span className="text-[11px] text-white/25 border border-white/10 rounded-full px-2.5 py-0.5">{visibleFeatured.length}</span>
-            </div>
-            {isLoading && visibleFeatured.length === 0 ? (
-              <div className="space-y-2">
-                {Array.from({ length: 5 }).map((_, i) => (
-                  <div key={i} className="h-[72px] rounded-2xl bg-white/[0.03] animate-pulse" />
-                ))}
-              </div>
-            ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {visibleFeatured
-                  .slice()
-                  .sort((a, b) => CATEGORY_PRIORITY[a.category] - CATEGORY_PRIORITY[b.category])
-                  .map((g) => (
-                    <SeriesCard
-                      key={g.key}
-                      group={g}
-                      href={`/title/tv/${g.tmdb!.tmdb_id}`}
-                      compact
-                    />
-                  ))}
-              </div>
-            )}
-          </section>
-        </>
-      )}
 
       <div className="mt-10 flex items-center gap-2 border-t border-white/[0.05] pt-6">
         <span className={`w-1.5 h-1.5 rounded-full ${phase === "done" ? "bg-emerald-400/60" : "bg-amber-400/60 animate-pulse"}`} />

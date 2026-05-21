@@ -3,18 +3,24 @@
 //
 // Regras:
 //   - Uma request TMDB por série-mãe (nunca por episódio)
-//   - Batches de 10 séries por vez
-//   - 700ms de pausa entre batches
-//   - Máx 15 req/s
-//   - Retry automático em 429/5xx: pausa 5s, batch ÷ 2, nova tentativa
+//   - Concorrência controlada via p-limit (CONCURRENCY_LIMIT simultâneas)
+//   - Máx 15 req/s (throttle global entre requests individuais)
+//   - Retry automático em 429/5xx: pausa 5s, tenta até MAX_RETRIES vezes
 //   - Resultado reaproveitado para todos os episódios do grupo
 // ──────────────────────────────────────────────────────────────────────────────
 
+import pLimit from "p-limit";
 import type { IcsSeriesGroup, TmdbEnrichment } from "./ics-engine";
 import { refineCategoryFromTmdb } from "./ics-engine";
 
 // ── Configuração de rate limit ────────────────────────────────────────────────
 
+// Número máximo de enriquecimentos acontecendo em paralelo.
+// Cada enriquecimento faz 3 requests ao TMDB (search + details + images),
+// portanto CONCURRENCY_LIMIT=5 → até 15 req em voo simultâneo — dentro do
+// limite de 40 req/s da API read da TMDB e bem abaixo do risco de rate-limit.
+const CONCURRENCY_LIMIT     = 5;
+// Mantidas para retrocompatibilidade com enrichTopGroups (não usado no pipeline principal)
 const DEFAULT_BATCH_SIZE    = 10;
 const BATCH_PAUSE_MS        = 700;
 const MAX_RPS               = 15;
@@ -223,11 +229,22 @@ async function enrichGroup(
 // ── Opções do enricher ────────────────────────────────────────────────────────
 
 export interface EnricherOptions {
-  /** Tamanho do batch (padrão: 10) */
+  /**
+   * Número máximo de enriquecimentos simultâneos (padrão: CONCURRENCY_LIMIT=5).
+   * Cada enriquecimento dispara 3 requests TMDB, portanto concurrency=5 →
+   * até 15 requests em voo — confortavelmente abaixo do rate-limit da API.
+   */
+  concurrency?: number;
+  /**
+   * @deprecated Mantido para retrocompatibilidade; ignorado pelo pipeline principal.
+   * Use `concurrency` no lugar.
+   */
   batchSize?: number;
-  /** Pausa entre batches em ms (padrão: 700) */
+  /**
+   * @deprecated Mantido para retrocompatibilidade; ignorado pelo pipeline principal.
+   */
   batchPauseMs?: number;
-  /** Callback chamado após cada batch ser processado */
+  /** Callback chamado após cada grupo ser enriquecido (ordem não garantida) */
   onBatchDone?: (enriched: IcsSeriesGroup[], batchIndex: number, totalBatches: number) => void;
   /** Access token TMDB — se não fornecido, tenta process.env */
   accessToken?: string;
@@ -237,8 +254,12 @@ export interface EnricherOptions {
 
 /**
  * Enriquece um array de IcsSeriesGroup com dados TMDB.
- * Modifica os grupos in-place (preenche group.tmdb) e notifica via callback.
  *
+ * Usa concorrência controlada via p-limit (padrão: 5 simultâneas) em vez de
+ * batches sequenciais, reduzindo drasticamente o tempo total sem sobrecarregar
+ * a API do TMDB. Essencial para evitar timeout em ambiente serverless.
+ *
+ * Modifica os grupos in-place (preenche group.tmdb).
  * Retorna os grupos enriquecidos (mesma referência, modificada).
  */
 export async function enrichSeriesGroups(
@@ -246,8 +267,7 @@ export async function enrichSeriesGroups(
   options: EnricherOptions = {},
 ): Promise<IcsSeriesGroup[]> {
   const {
-    batchSize    = DEFAULT_BATCH_SIZE,
-    batchPauseMs = BATCH_PAUSE_MS,
+    concurrency  = CONCURRENCY_LIMIT,
     onBatchDone,
     accessToken  = process.env.TMDB_ACCESS_TOKEN?.trim() ?? "",
   } = options;
@@ -257,18 +277,13 @@ export async function enrichSeriesGroups(
     return groups;
   }
 
-  // Divide em batches
-  const batches: IcsSeriesGroup[][] = [];
-  for (let i = 0; i < groups.length; i += batchSize) {
-    batches.push(groups.slice(i, i + batchSize));
-  }
+  const limit = pLimit(concurrency);
+  let done = 0;
+  const total = groups.length;
 
-  for (let bi = 0; bi < batches.length; bi++) {
-    const batch = batches[bi];
-
-    // Processa o batch com controle de rate limit interno
-    await Promise.allSettled(
-      batch.map(async (group) => {
+  await Promise.allSettled(
+    groups.map((group) =>
+      limit(async () => {
         try {
           const enrichment = await enrichGroup(group, accessToken);
           if (enrichment) {
@@ -281,24 +296,15 @@ export async function enrichSeriesGroups(
         } catch (err) {
           console.warn(`[ics-enricher] erro ao enriquecer "${group.rawTitle}":`, err);
         }
+        done++;
+        // Compatibilidade com onBatchDone: chama a cada grupo concluído
+        onBatchDone?.(groups, done - 1, total);
       }),
-    );
-
-    // Notifica o caller após cada batch
-    onBatchDone?.(groups, bi, batches.length);
-
-    // Pausa entre batches (exceto no último)
-    if (bi < batches.length - 1) {
-      await sleep(batchPauseMs);
-    }
-  }
+    ),
+  );
 
   return groups;
 }
-
-// ── Enriquecimento parcial (server-side, para a API route) ────────────────────
-// Versão síncrona-sequencial para uso em route handlers Next.js.
-// Enriquece apenas os N primeiros grupos (os mais relevantes para o 1º render).
 
 export async function enrichTopGroups(
   groups: IcsSeriesGroup[],

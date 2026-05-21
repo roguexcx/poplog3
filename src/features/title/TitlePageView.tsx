@@ -2,10 +2,13 @@
 
 import { useState } from "react";
 
+import { buildFinancialBadgeInsight } from "@/lib/editorial-finance";
+
 import TitleCast from "./TitleCast";
 import TitleCommunityHighlights from "./TitleCommunityHighlights";
 import TitleCollectionSection from "./TitleCollectionSection";
 import TitleEpisodeBrowser from "./TitleEpisodeBrowser";
+import TitleFinancialBadge from "./TitleFinancialBadge";
 import TitleHero from "./TitleHero";
 import TitleMetadata from "./TitleMetadata";
 import MovieSocialModal from "./MovieSocialModal";
@@ -30,6 +33,13 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
   const hasMetadata = Boolean(title.metadata);
 
   const isMovie = title.mediaType === "movie";
+
+  const financialInsight = isMovie
+    ? buildFinancialBadgeInsight({
+        budget: title.metadata?.budget,
+        revenue: title.metadata?.revenue,
+      })
+    : null;
 
   const hasSeasonsBlock =
     title.mediaType === "tv" &&
@@ -83,13 +93,7 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
               />
             )}
 
-            {isMovie && (
-              <TitleCommunityHighlights
-  movieTmdbId={Number(title.id)}
-  movieTitle={title.title}
-  onOpenAll={() => setMovieSocialOpen(true)}
-/>
-            )}
+            {isMovie && <TitleFinancialBadge insight={financialInsight} />}
 
             <TitleCast cast={title.cast} />
 
@@ -97,6 +101,14 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
               collection={title.metadata?.collection ?? null}
               currentTitleId={typeof title.id === "number" ? title.id : null}
             />
+
+            {isMovie && (
+              <TitleCommunityHighlights
+                movieTmdbId={Number(title.id)}
+                movieTitle={title.title}
+                onOpenAll={() => setMovieSocialOpen(true)}
+              />
+            )}
 
             <TitleRecommendations recommendations={title.recommendations} />
           </div>

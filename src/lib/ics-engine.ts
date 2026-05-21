@@ -18,6 +18,7 @@ import type { IcsEvent } from "./ics-parser";
 // ── Categorias de conteúdo ────────────────────────────────────────────────────
 
 export type ContentCategory =
+  | "MOVIE"
   | "CINEMATIC"
   | "SERIES"
   | "ANIMATION"
@@ -34,6 +35,7 @@ export type ContentCategory =
   | "UNKNOWN";
 
 export const CATEGORY_PRIORITY: Record<ContentCategory, number> = {
+  MOVIE:           0,
   CINEMATIC:       1,
   SERIES:          2,
   ANIMATION:       3,
@@ -203,6 +205,35 @@ export interface IcsSeriesGroup {
   /** true = passou no threshold de relevância */
   isRelevant: boolean;
   tmdb?: TmdbEnrichment | null;
+  /** Provedor de streaming identificado (ex: Netflix, HBO Max) — opcional, populado pelo pipeline de airing */
+  streamingProvider?: { name: string } | null;
+}
+
+/**
+ * Representa um filme no pipeline da agenda.
+ * Análogo a IcsSeriesGroup, mas para filmes (sem episódios recorrentes).
+ */
+export interface MovieGroup {
+  key: string;
+  movie: {
+    tmdb_id: number;
+    release_date?: string | null;
+    backdrop_path?: string | null;
+    poster_path?: string | null;
+    clean_backdrop_path?: string | null;
+    popularity?: number;
+    vote_average?: number;
+    vote_count?: number;
+    original_language?: string;
+    overview?: string | null;
+    name?: string;
+    original_name?: string;
+    genre_ids?: number[];
+    genres?: string[];
+    origin_country?: string[];
+  };
+  relevanceScore?: number;
+  isRelevant?: boolean;
 }
 
 export interface TmdbEnrichment {
@@ -212,6 +243,8 @@ export interface TmdbEnrichment {
   overview: string | null;
   poster_path: string | null;
   backdrop_path: string | null;
+  /** Backdrop sem texto/logo, obtido via /images?include_image_language=null,xx */
+  clean_backdrop_path?: string | null;
   genre_ids: number[];
   genres: string[];
   popularity: number;
@@ -382,16 +415,36 @@ export function filterEnrichedGroup(
 ): boolean {
   const { tmdb } = group;
 
-  // Sem TMDB → passa (enriquecimento ainda não chegou)
+  // Hard filter: categoria local HIDDEN (VARIETY, PODCAST, SPORTS, NEWS) — nunca passa
+  if (HIDDEN_CATEGORIES.has(group.category)) {
+    group.isRelevant = false;
+    return false;
+  }
+
+  // Sem TMDB → passa se categoria local não for hidden (enriquecimento ainda não chegou)
   if (!tmdb) return true;
 
   // Hard filter: idioma — EN, PT e ES passam (ES com score reduzido); JP para anime
   const lang = tmdb.original_language ?? "";
   if (lang && !["en", "pt", "es", "ja"].includes(lang)) return false;
 
-  // Hard filter: tipo TMDB explícito
+  // Hard filter: tipo TMDB explícito — Talk Show, Game Show e News sempre bloqueados.
   const typ = tmdb.tmdb_type ?? "";
-  if (typ === "Talk Show" || typ === "News" || typ === "Soap") return false;
+  if (typ === "Talk Show" || typ === "Game Show" || typ === "News" || typ === "Soap") {
+    group.isRelevant = false;
+    return false;
+  }
+
+  // Hard filter: refined_category pelo TMDB/enricher — pode diferir da categoria local.
+  // SAFETY: grupos SECONDARY não passam pelo enriquecimento TMDB completo, portanto
+  // tmdb.refined_category pode ser undefined — tratado com fallback para group.category
+  // para garantir que a ausência do campo não cause vazamento nem undefined.
+  const refinedCat = tmdb.refined_category ?? group.category;
+  if (HIDDEN_CATEGORIES.has(refinedCat)) {
+    group.category   = refinedCat;
+    group.isRelevant = false;
+    return false;
+  }
 
   // Score composto
   const score = computeRelevanceScore(group, trendingDay, trendingWeek);
@@ -402,44 +455,98 @@ export function filterEnrichedGroup(
 }
 
 // ── Mapa de genres TMDB → categoria ──────────────────────────────────────────
-
+//
+// Mapeia genre_ids TMDB para categorias locais do pipeline.
+//
+// REGRAS EDITORIAIS:
+//   - CINEMATIC (badge "Prestige") cobre os principais gêneros de drama de qualidade:
+//     Crime (80), Mistério (9648), Drama (18), Sci-Fi (10765), Ação (10759),
+//     Guerra (10768) e Faroeste (37). Géneros amplos que podem resultar em badge
+//     "Prestige" são aceitáveis pois o score de relevância (redes, popularidade)
+//     filtra os títulos de baixa qualidade antes de chegarem ao frontend.
+//   - Talk (10767) → PODCAST, que está em HIDDEN_CATEGORIES → sempre bloqueado.
+//   - Reality (10764) → REALITY (não REALITY_PREMIUM). REALITY está em
+//     HIDDEN_CATEGORIES; apenas REALITY_PREMIUM detectado via título passa.
+//   - Quando múltiplos genres estão presentes, prevalece o de menor CATEGORY_PRIORITY
+//     (i.e., o "mais nobre" na hierarquia editorial).
+//
+// INTERAÇÃO COM O FILTRO FINAL (filterEnrichedGroup):
+//   - O resultado desta função é salvo em tmdb.refined_category pelo enricher.
+//   - filterEnrichedGroup lê refined_category com fallback para group.category
+//     (grupos SECONDARY não passam pelo enriquecimento completo — refined_category
+//     pode ser undefined; o fallback evita undefined e vazamento de conteúdo).
+//   - HIDDEN_CATEGORIES = { SPORTS, NEWS, PODCAST, LIVE_EVENT, VARIETY }
+//
+// BLOQUEIOS AUTOMÁTICOS por tmdb_type (aplicados antes do mapa de gêneros):
+//   - "Talk Show"  → PODCAST  → HIDDEN
+//   - "Game Show"  → PODCAST  → HIDDEN  (via tmdb_type no filterEnrichedGroup)
+//   - "News"       → NEWS     → HIDDEN
+//   - "Reality"    → REALITY  → HIDDEN (salvo REALITY_PREMIUM detectado antes)
+//   - "Soap"       → DAILY_SOAP
+// ─────────────────────────────────────────────────────────────────────────────
 const TMDB_GENRE_CATEGORY: Record<number, ContentCategory> = {
-  10759: "CINEMATIC",
-  16:    "ANIMATION",
-  35:    "SERIES",
-  80:    "CINEMATIC",
+  10759: "CINEMATIC",  // Ação & Aventura
+  16:    "ANIMATION",  // Animação
+  35:    "SERIES",     // Comédia → Série (não prestige automaticamente)
+  80:    "CINEMATIC",  // Crime → prestige (Sopranos, Better Call Saul)
   99:    "DOCUMENTARY",
-  18:    "CINEMATIC",
-  10751: "KIDS",
-  10762: "KIDS",
-  9648:  "CINEMATIC",
-  10763: "NEWS",
-  10764: "REALITY",
-  10765: "CINEMATIC",
-  10766: "DAILY_SOAP",
-  10767: "PODCAST",
-  10768: "CINEMATIC",
-  37:    "CINEMATIC",
+  18:    "CINEMATIC",  // Drama
+  10751: "KIDS",       // Família
+  10762: "KIDS",       // Kids
+  9648:  "CINEMATIC",  // Mistério → prestige (True Detective, Sharp Objects)
+  10763: "NEWS",       // News → HIDDEN
+  10764: "REALITY",    // Reality → HIDDEN (exceto REALITY_PREMIUM detectado antes)
+  10765: "CINEMATIC",  // Sci-Fi & Fantasy
+  10766: "DAILY_SOAP", // Soap
+  10767: "PODCAST",    // Talk → PODCAST → HIDDEN (late night, game shows, etc.)
+  10768: "CINEMATIC",  // Guerra & Política
+  37:    "CINEMATIC",  // Faroeste
 };
 
+/**
+ * Refina a categoria de conteúdo usando dados reais do TMDB.
+ *
+ * BLOQUEIOS AUTOMÁTICOS (resultado em HIDDEN_CATEGORIES):
+ *   - tmdb_type = "Talk Show"  → PODCAST (late night, daytime talk)
+ *   - tmdb_type = "News"       → NEWS
+ *   - genre_id  = 10767 (Talk) → PODCAST → HIDDEN
+ *   - genre_id  = 10763 (News) → NEWS    → HIDDEN
+ *
+ * BLOQUEIOS CONDICIONAIS:
+ *   - tmdb_type = "Reality"    → REALITY (bloqueado; REALITY_PREMIUM detectado antes)
+ *   - genre_id  = 10764        → REALITY (idem)
+ *
+ * PROMOÇÕES (resultado mais nobre que a categoria local):
+ *   - genre_ids 80, 9648, 18, 10759, 10765, 10768, 37 → CINEMATIC
+ *   - genre_id 99 → DOCUMENTARY
+ *   - genre_id 16 → ANIMATION
+ *
+ * @param current  Categoria local determinada pelo classifyTitle() + motor ICS
+ * @param genreIds genre_ids retornados pelo TMDB /search/tv ou /tv/{id}
+ * @param tmdbType campo `type` de GET /tv/{id} (ex: "Scripted", "Reality", "Talk Show")
+ * @returns        Categoria refinada para uso em group.category e tmdb.refined_category
+ */
 export function refineCategoryFromTmdb(
   current: ContentCategory,
   genreIds: number[],
   tmdbType?: string | null,
 ): ContentCategory {
+  // ── Bloqueios por tmdb_type (fonte mais confiável — campo explícito da API) ──
   if (tmdbType === "Soap" || (tmdbType === "Miniseries" && genreIds.includes(10766))) return "DAILY_SOAP";
-  if (tmdbType === "Talk Show")    return "PODCAST";
-  if (tmdbType === "News")         return "NEWS";
-  if (tmdbType === "Reality")      return "REALITY";
-  if (tmdbType === "Documentary")  return "DOCUMENTARY";
+  if (tmdbType === "Talk Show")   return "PODCAST";      // → HIDDEN
+  if (tmdbType === "News")        return "NEWS";         // → HIDDEN
+  if (tmdbType === "Reality")     return "REALITY";      // → HIDDEN (salvo REALITY_PREMIUM)
+  if (tmdbType === "Documentary") return "DOCUMENTARY";  // → visível
 
+  // ── Seleção pela prioridade de gêneros ───────────────────────────────────────
+  // Itera todos os genre_ids e mantém a categoria com menor CATEGORY_PRIORITY
+  // (ou seja, a "mais nobre" na hierarquia editorial).
   let best: ContentCategory = current;
   let bestPriority = CATEGORY_PRIORITY[current];
 
   for (const gid of genreIds) {
     const cat = TMDB_GENRE_CATEGORY[gid];
     if (cat && CATEGORY_PRIORITY[cat] < bestPriority) {
-      best = cat;
       bestPriority = CATEGORY_PRIORITY[cat];
     }
   }

@@ -12,12 +12,6 @@ type TitleMetadataProps = {
   mediaType: TitleMediaType;
 };
 
-const USD = new Intl.NumberFormat("pt-BR", {
-  style: "currency",
-  currency: "USD",
-  maximumFractionDigits: 0,
-});
-
 function cleanName(name?: string | null) {
   const value = name?.trim();
   return value && value.length > 0 ? value : null;
@@ -112,21 +106,7 @@ function buildDetails(
     });
   }
 
-  if (mediaType === "movie") {
-    if (typeof metadata.budget === "number" && metadata.budget > 0) {
-      details.push({
-        label: "Orçamento",
-        value: USD.format(metadata.budget),
-      });
-    }
-
-    if (typeof metadata.revenue === "number" && metadata.revenue > 0) {
-      details.push({
-        label: "Bilheteria",
-        value: USD.format(metadata.revenue),
-      });
-    }
-  } else {
+  if (mediaType === "tv") {
     const runtime = formatEpisodeRuntimeLabel(metadata.episodeRunTimeMinutes, {
       estimated: metadata.episodeRunTimeEstimated,
       spaced: true,

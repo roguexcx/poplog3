@@ -59,6 +59,20 @@ async function fetchTvDetails(tmdbId: number, token: string): Promise<TmdbTvDeta
   } catch { return null; }
 }
 
+async function fetchCleanBackdrop(tmdbId: number, token: string): Promise<string | null> {
+  const res = await throttled(
+    `${TMDB_BASE}/tv/${tmdbId}/images?include_image_language=null,xx`,
+    token,
+  );
+  if (!res) return null;
+  try {
+    const data = await res.json() as { backdrops?: Array<{ file_path: string; vote_average: number }> };
+    const backdrops = data.backdrops ?? [];
+    if (!backdrops.length) return null;
+    return backdrops.sort((a, b) => b.vote_average - a.vote_average)[0].file_path;
+  } catch { return null; }
+}
+
 async function searchTv(title: string, token: string): Promise<TmdbEnrichment | null> {
   const url = new URL(`${TMDB_BASE}/search/tv`);
   url.searchParams.set("query", title);
@@ -97,7 +111,10 @@ async function searchTv(title: string, token: string): Promise<TmdbEnrichment | 
     hit = animExact ?? animAny ?? hit;
   }
 
-  const details = await fetchTvDetails(hit.id, token);
+  const [details, cleanBackdrop] = await Promise.all([
+    fetchTvDetails(hit.id, token),
+    fetchCleanBackdrop(hit.id, token),
+  ]);
   const tmdb_type = details?.type ?? null;
   const localCat: ContentCategory = preferAnimation ? "ANIMATION" : "SERIES";
   const refined: ContentCategory = refineCategoryFromTmdb(localCat, hit.genre_ids ?? [], tmdb_type);
@@ -109,6 +126,7 @@ async function searchTv(title: string, token: string): Promise<TmdbEnrichment | 
     overview:           hit.overview,
     poster_path:        hit.poster_path,
     backdrop_path:      hit.backdrop_path,
+    clean_backdrop_path: cleanBackdrop ?? null,
     genre_ids:          hit.genre_ids ?? [],
     genres:             (hit.genre_ids ?? []).map((id) => GENRE_NAMES[id]).filter(Boolean),
     popularity:         hit.popularity ?? 0,
