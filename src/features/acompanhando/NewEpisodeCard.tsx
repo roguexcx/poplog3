@@ -19,6 +19,9 @@ export type NewEpisodeItem = {
   last_air_date: string | null;
   days_since_new_episode: number | null;
   runtime: number | null;
+  runtime_label: string | null;
+  season_watched: number | null;
+  season_total: number | null;
 };
 
 type Props = {
@@ -26,18 +29,12 @@ type Props = {
   onClick: () => void;
 };
 
-function episodeTag(season: number | null, episode: number | null): string | null {
+function episodeTag(
+  season: number | null,
+  episode: number | null
+): string | null {
   if (season == null || episode == null) return null;
   return `T${season}E${episode}`;
-}
-
-function formatRuntime(minutes: number | null): string | null {
-  if (!minutes) return null;
-  const h = Math.floor(minutes / 60);
-  const m = minutes % 60;
-  if (!h) return `${m}min`;
-  if (!m) return `${h}h`;
-  return `${h}h ${m}min`;
 }
 
 export default function NewEpisodeCard({ item, onClick }: Props) {
@@ -52,8 +49,11 @@ export default function NewEpisodeCard({ item, onClick }: Props) {
     : null;
 
   const epTag = episodeTag(item.next_season, item.next_episode);
-  const runtime = formatRuntime(item.runtime);
-  const progressPct = Math.min(100, Math.max(0, item.progress_pct));
+  const seasonPct =
+    item.season_total != null && item.season_total > 0 && item.season_watched != null
+      ? Math.min(100, Math.round((item.season_watched / item.season_total) * 100))
+      : null;
+  const progressPct = seasonPct ?? Math.min(100, Math.max(0, item.progress_pct));
 
   return (
     <button
@@ -61,7 +61,6 @@ export default function NewEpisodeCard({ item, onClick }: Props) {
       onClick={onClick}
       className="group relative w-full overflow-hidden rounded-2xl border border-white/[0.08] bg-zinc-900/80 text-left transition-all hover:border-white/[0.16] hover:bg-zinc-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
     >
-      {/* Backdrop */}
       {backdropUrl && (
         <div className="absolute inset-0 -z-0">
           <img
@@ -75,9 +74,9 @@ export default function NewEpisodeCard({ item, onClick }: Props) {
       )}
 
       <div className="relative flex min-h-[72px] items-center gap-3 px-4 py-3.5 sm:gap-4 sm:px-5 sm:py-4">
-        {/* Poster thumbnail */}
         {posterUrl && (
-          <div className="hidden shrink-0 overflow-hidden rounded-lg border border-white/[0.10] sm:block"
+          <div
+            className="hidden shrink-0 overflow-hidden rounded-lg border border-white/[0.10] sm:block"
             style={{ width: 40, height: 58 }}
           >
             <img
@@ -88,12 +87,12 @@ export default function NewEpisodeCard({ item, onClick }: Props) {
           </div>
         )}
 
-        {/* Text block */}
         <div className="min-w-0 flex-1">
           <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
             <span className="inline-flex items-center rounded-full bg-rose-500 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] text-white shadow-sm">
               NOVO
             </span>
+
             {epTag && (
               <span className="rounded-full border border-white/[0.15] bg-white/[0.07] px-2 py-0.5 text-[10px] font-bold text-white/75">
                 {epTag}
@@ -112,25 +111,28 @@ export default function NewEpisodeCard({ item, onClick }: Props) {
           )}
         </div>
 
-        {/* Runtime + play */}
         <div className="flex shrink-0 items-center gap-2.5">
-          {runtime && (
+          {item.runtime_label && (
             <span className="text-[12px] font-semibold tabular-nums text-white/45">
-              {runtime}
+              {item.runtime_label}
             </span>
           )}
+
           <span
             aria-hidden
             className="flex h-7 w-7 items-center justify-center rounded-full bg-white/[0.07] text-white/60 transition-all group-hover:bg-rose-500/80 group-hover:text-white"
           >
-            <svg viewBox="0 0 16 16" fill="currentColor" className="h-3 w-3 translate-x-[1px]">
+            <svg
+              viewBox="0 0 16 16"
+              fill="currentColor"
+              className="h-3 w-3 translate-x-[1px]"
+            >
               <path d="M5 3.5l8 4.5-8 4.5V3.5z" />
             </svg>
           </span>
         </div>
       </div>
 
-      {/* Progress bar */}
       <div className="relative h-[3px] w-full overflow-hidden bg-white/[0.05]">
         {progressPct > 0 && (
           <div

@@ -89,9 +89,9 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
   const stats = useMemo(() => ({
     total:      library.length,
     comingSoon: library.filter(isComingSoon).length,
-    watched:    library.filter((i) => i.status === "watched").length,
+    watched:    library.filter(isCompletedOrUpToDate).length,
     watchlist:  library.filter((i) => i.status === "watchlist" && !isComingSoon(i)).length,
-    watching:   library.filter((i) => i.status === "watching").length,
+    watching:   library.filter(isMarathoning).length,
     favorites:  library.filter((i) => i.favorite === true && !isComingSoon(i)).length,
   }), [library]);
 
@@ -107,6 +107,10 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
 
       if (activeTab === "favorites") {
         items = items.filter((i) => i.favorite === true);
+      } else if (activeTab === "watching") {
+        items = items.filter(isMarathoning);
+      } else if (activeTab === "watched") {
+        items = items.filter(isCompletedOrUpToDate);
       } else if (activeTab !== "all") {
         items = items.filter((i) => i.status === activeTab);
       }
@@ -508,9 +512,9 @@ function sortLibraryItems(
     case "popularity-desc":
       return getPopularity(b) - getPopularity(a);
     case "runtime-asc":
-      return getTotalRuntime(a) - getTotalRuntime(b);
+      return compareRuntime(a, b, "asc");
     case "runtime-desc":
-      return getTotalRuntime(b) - getTotalRuntime(a);
+      return compareRuntime(a, b, "desc");
     case "recent":
     default:
       return getAddedTime(b) - getAddedTime(a);
@@ -549,37 +553,35 @@ function getReleaseTime(item: Poplog3UserLibraryItem) {
 }
 
 /**
- * Duração total de conteúdo JÁ DISPONÍVEL (minutos) — regra global:
- * - Filme:  runtime
- * - Série:  aired_episodes × avg_episode_runtime
+ * Duração usada pelo filtro (minutos):
+ * - Filme: runtime oficial
+ * - Série: tempo restante para este usuário concluir a série
  *
- * Para séries usa aired_episodes do estado global (user_title_state), que conta
- * apenas episódios com air_date <= hoje — idêntico ao critério usado em
- * episode-progress-service.ts. Isso garante consistência com Acompanhando e
- * exclui episódios futuros cadastrados no TMDB.
- *
- * NÃO usa item.title.runtime (campo exclusivo de filmes) como fallback.
- * NÃO usa number_of_episodes (pode incluir eps futuros de séries em andamento).
+ * Se a série ainda não começou, remaining_runtime_minutes equivale à previsão
+ * total. Itens sem dado ficam sempre no fim, tanto em Tudo quanto nas abas.
  */
+function compareRuntime(
+  a: Poplog3UserLibraryItem,
+  b: Poplog3UserLibraryItem,
+  direction: "asc" | "desc",
+) {
+  const aRuntime = getTotalRuntime(a);
+  const bRuntime = getTotalRuntime(b);
+
+  if (aRuntime === null && bRuntime === null) return 0;
+  if (aRuntime === null) return 1;
+  if (bRuntime === null) return -1;
+
+  const delta = direction === "asc" ? aRuntime - bRuntime : bRuntime - aRuntime;
+
+  return delta || getTitle(a).localeCompare(getTitle(b), "pt-BR");
+}
+
 function getTotalRuntime(item: Poplog3UserLibraryItem) {
-  if (item.media_type === "movie") {
-    const rt = item.title?.runtime;
-    return typeof rt === "number" && rt > 0 ? rt : Number.MAX_SAFE_INTEGER;
-  }
-
-  // TV: somente episódios já ao ar
-  const avgEp    = item.title?.episode_run_time?.find((v) => typeof v === "number" && v > 0) ?? 45;
-  // aired_episodes (estado global, air_date <= hoje) tem prioridade.
-  // number_of_episodes como último recurso (séries encerradas onde aired_episodes = null).
-  const airedEps =
-    (typeof item.aired_episodes === "number" && item.aired_episodes > 0)
-      ? item.aired_episodes
-      : (typeof item.title?.number_of_episodes === "number" && item.title.number_of_episodes > 0)
-        ? item.title.number_of_episodes
-        : null;
-
-  if (!airedEps) return Number.MAX_SAFE_INTEGER;
-  return airedEps * avgEp;
+  const runtime = item.duration_sort_minutes;
+  return typeof runtime === "number" && Number.isFinite(runtime) && runtime >= 0
+    ? runtime
+    : null;
 }
 
 function getPopularity(item: Poplog3UserLibraryItem) {
@@ -634,6 +636,31 @@ function isInTheaterWindow(item: Poplog3UserLibraryItem): boolean {
  */
 function isComingSoon(item: Poplog3UserLibraryItem): boolean {
   return isUnreleased(item) || isInTheaterWindow(item);
+}
+
+function isMarathoning(item: Poplog3UserLibraryItem): boolean {
+  if (item.media_type === "movie") {
+    return item.status === "watching";
+  }
+
+  return (
+    item.status === "watching" &&
+    item.computed_state === "in_progress" &&
+    typeof item.remaining_runtime_minutes === "number" &&
+    item.remaining_runtime_minutes > 0
+  );
+}
+
+function isCompletedOrUpToDate(item: Poplog3UserLibraryItem): boolean {
+  if (item.media_type === "movie") {
+    return item.status === "watched";
+  }
+
+  return (
+    item.status === "watched" ||
+    item.computed_state === "completed" ||
+    item.computed_state === "up_to_date"
+  );
 }
 
 function isValidLibraryTab(value?: string): value is LibraryTab {

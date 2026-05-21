@@ -1,5 +1,7 @@
 import Link from "next/link";
 
+import { formatEpisodeRuntimeLabel, formatRuntimeLabel } from "@/lib/domain-labels";
+
 import type {
   TitleMediaType,
   TitleMetadataBlock,
@@ -15,16 +17,6 @@ const USD = new Intl.NumberFormat("pt-BR", {
   currency: "USD",
   maximumFractionDigits: 0,
 });
-
-function formatRuntimeMinutes(min: number | null | undefined): string | null {
-  if (!min || !Number.isFinite(min)) return null;
-  if (min < 60) return `${min} min`;
-
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-
-  return m === 0 ? `${h}h` : `${h}h ${m}min`;
-}
 
 function cleanName(name?: string | null) {
   const value = name?.trim();
@@ -135,12 +127,27 @@ function buildDetails(
       });
     }
   } else {
-    const runtime = formatRuntimeMinutes(metadata.episodeRunTimeMinutes);
+    const runtime = formatEpisodeRuntimeLabel(metadata.episodeRunTimeMinutes, {
+      estimated: metadata.episodeRunTimeEstimated,
+      spaced: true,
+    });
 
     if (runtime) {
       details.push({
         label: "Duração média",
         value: runtime,
+      });
+    }
+
+    const totalRuntime = formatRuntimeLabel(metadata.totalRuntimeMinutes, {
+      estimated: metadata.totalRuntimeEstimated,
+      spaced: true,
+    });
+
+    if (totalRuntime) {
+      details.push({
+        label: "Duração prevista",
+        value: totalRuntime,
       });
     }
 
@@ -260,4 +267,3 @@ export default function TitleMetadata({
     </section>
   );
 }
-

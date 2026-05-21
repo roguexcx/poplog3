@@ -42,6 +42,7 @@ export interface UserWatching {
   episodes_watched: number | null;
   next_episode_name: string | null;
   next_episode_duration: number | null;
+  next_episode_duration_label?: string | null;
   next_episode_air_date: string | null;
   series_status: SeriesStatus | null;
   new_episode_available: boolean;
@@ -49,6 +50,8 @@ export interface UserWatching {
 
   // Movie
   runtime: number | null;
+  runtime_label?: string | null;
+  remaining_runtime_label?: string | null;
   watch_progress_minutes: number | null;
 
   // Streaming

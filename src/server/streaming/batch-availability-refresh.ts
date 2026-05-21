@@ -1,17 +1,6 @@
 import { supabaseAdmin } from "@/server/supabase/admin";
-import {
-  buildAvailabilityProviders,
-  getBestAvailabilityProvider,
-} from "./availability-service";
+import { getTitleAvailability } from "./title-availability";
 import type { ProviderPreferenceInput, ProviderRegion } from "./provider-preferences";
-
-const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
-
-function tmdbImage(path: string | null | undefined, size: string): string | null {
-  if (!path) return null;
-  const normalized = path.startsWith("/") ? path : `/${path}`;
-  return `${TMDB_IMAGE_BASE}/${size}${normalized}`;
-}
 
 async function fetchPreferencesAdmin(
   userId: string,
@@ -72,55 +61,39 @@ export async function refreshAllUserTitleAvailability(
   const states = (statesResult.data ?? []) as Array<{ tmdb_id: number; media_type: string }>;
   if (!states.length) return;
 
-  const titleIds = states.map((s) => s.tmdb_id);
-
-  const { data: availRows } = await supabaseAdmin
-    .from("poplog3_title_availability")
-    .select(
-      "tmdb_id, provider_name, provider_logo_path, availability_type, tmdb_provider_id, source, deep_link, quality, country",
-    )
-    .in("tmdb_id", titleIds)
-    .eq("country", country);
-
-  // Agrupa por tmdb_id
-  const byTitle = new Map<number, Array<Record<string, unknown>>>();
-  for (const row of (availRows ?? []) as Array<Record<string, unknown>>) {
-    const key = row.tmdb_id as number;
-    if (!byTitle.has(key)) byTitle.set(key, []);
-    byTitle.get(key)!.push(row);
-  }
-
   const now = new Date().toISOString();
   const updates: Array<Record<string, unknown>> = [];
 
   for (const state of states) {
-    const rows = byTitle.get(state.tmdb_id) ?? [];
+    const result = await getTitleAvailability({
+      tmdbId: state.tmdb_id,
+      mediaType: state.media_type as "movie" | "tv",
+      preferences,
+      contexts: ["library"],
+    }).catch((error) => {
+      console.error("[batch-availability-refresh] title availability failed", {
+        tmdbId: state.tmdb_id,
+        error,
+      });
+      return null;
+    });
 
-    const providers = buildAvailabilityProviders(
-      rows.map((row) => ({
-        name: row.provider_name as string,
-        logoUrl: tmdbImage(row.provider_logo_path as string | null, "w92"),
-        type: row.availability_type as string,
-        deepLink: row.deep_link as string | null,
-        quality: row.quality as string | null,
-        country: row.country as string,
-        source: row.source === "motn" ? "movieofthenight" : (row.source as string),
-        providerId: (row.tmdb_provider_id as number | null) ?? 0,
-        providerName: row.provider_name as string,
-        logoPath: row.provider_logo_path as string | null,
-        deeplink: row.deep_link as string | null,
-      })) as never,
-      { region: country, preferences },
-    );
-
-    const best = getBestAvailabilityProvider(providers);
+    const best =
+      country === "US"
+        ? result?.availability.regions.US.primaryProvider
+        : result?.availability.primaryProvider;
 
     updates.push({
       user_id: userId,
       tmdb_id: state.tmdb_id,
       media_type: state.media_type,
       best_provider_name: best?.name ?? null,
-      best_provider_type: best?.normalizedType ?? null,
+      best_provider_type:
+        best && "normalizedType" in best
+          ? best.normalizedType
+          : best?.type === "streaming"
+            ? "subscription"
+            : best?.type ?? null,
       best_provider_logo: best?.logoUrl ?? null,
       updated_at: now,
     });

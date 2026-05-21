@@ -153,7 +153,7 @@ function WatchlistCard({
   onDismiss,
 }: {
   item: WatchlistTitle & { _slot: WatchlistSlot };
-  onDismiss: (id: string, action: "watched" | "remove") => void;
+  onDismiss: (id: string, action: "watched" | "remove", tmdbId: number, mediaType: "movie" | "tv") => void;
 }) {
   const [imgErr, setImgErr]         = useState(false);
   const [dismissed, setDismissed]   = useState(false);
@@ -176,7 +176,7 @@ function WatchlistCard({
   function dismiss(action: "watched" | "remove") {
     if (action === "watched") setWatched(true);
     setDismissed(true);
-    setTimeout(() => onDismiss(item.id, action), 280);
+    setTimeout(() => onDismiss(item.id, action, item.tmdb_id, item.media_type), 280);
   }
 
   return (
@@ -394,7 +394,7 @@ export default function WatchlistVivaSection() {
     setVisible(selectFive(allTitles));
   }
 
-  function handleDismiss(id: string, action: "watched" | "remove") {
+  function handleDismiss(id: string, action: "watched" | "remove", tmdbId: number, mediaType: "movie" | "tv") {
     const next = allTitles.filter((t) => t.id !== id);
     setAllTitles(next);
     setVisible((prev) => {
@@ -405,19 +405,21 @@ export default function WatchlistVivaSection() {
       return filtered;
     });
 
-    const supabase = createClient();
+    const notifyUpdate = () =>
+      window.dispatchEvent(new Event("poplog:user-titles-updated"));
+
     if (action === "watched") {
-      supabase
-        .from("user_titles")
-        .update({ status: "watched", watched_at: new Date().toISOString() })
-        .eq("id", id)
-        .then(() => {/* fire and forget */});
+      fetch("/api/library/title", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tmdbId, mediaType, status: "watched", favorite: false, liked: null }),
+      }).then(notifyUpdate);
     } else {
-      supabase
-        .from("user_titles")
-        .update({ status: null })
-        .eq("id", id)
-        .then(() => {/* fire and forget */});
+      fetch("/api/library/title", {
+        method: "DELETE",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ tmdbId, mediaType }),
+      }).then(notifyUpdate);
     }
   }
 

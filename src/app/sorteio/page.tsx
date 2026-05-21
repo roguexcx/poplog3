@@ -278,7 +278,7 @@ function MainCard({
             {/* context message */}
             <div className="inline-flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.025] px-3.5 py-2 mb-5">
               <span className="w-1.5 h-1.5 rounded-full bg-violet-400/70 flex-shrink-0" />
-              <span className="text-[10.5px] text-white/45 italic">"{msg}"</span>
+              <span className="text-[10.5px] text-white/45 italic">&quot;{msg}&quot;</span>
             </div>
 
             {/* action buttons */}

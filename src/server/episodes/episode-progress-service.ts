@@ -333,18 +333,12 @@ export async function computeUserSeriesProgress(
 ): Promise<UserSeriesProgress> {
   const now = Date.now();
 
-  const [watchedResult, titleResult, episodesResult] = await Promise.all([
+  const [watchedResult, episodesResult] = await Promise.all([
     supabaseAdmin
       .from("user_episodes")
       .select("season_number, episode_number, watched_at, runtime_minutes")
       .eq("user_id", userId)
       .eq("series_tmdb_id", seriesTmdbId),
-    supabaseAdmin
-      .from("poplog3_titles")
-      .select("number_of_episodes")
-      .eq("media_type", "tv")
-      .eq("tmdb_id", seriesTmdbId)
-      .maybeSingle(),
     supabaseAdmin
       .from("poplog3_episodes")
       .select("season_number, episode_number, air_date")
@@ -361,11 +355,6 @@ export async function computeUserSeriesProgress(
     runtime_minutes: number | null;
   }>;
 
-  const totalEpisodes =
-    typeof titleResult.data?.number_of_episodes === "number"
-      ? titleResult.data.number_of_episodes
-      : null;
-
   const allEpisodes = (episodesResult.data ?? []) as Array<{
     season_number: number;
     episode_number: number;
@@ -380,6 +369,11 @@ export async function computeUserSeriesProgress(
     if (!ep.air_date) return false;
     const t = new Date(ep.air_date).getTime();
     return Number.isFinite(t) && t <= now;
+  });
+  const confirmedEpisodes = allEpisodes.filter((ep) => {
+    if (!ep.air_date) return false;
+    const t = new Date(ep.air_date).getTime();
+    return Number.isFinite(t);
   });
 
   const validSeasonsSet = new Set(airedEps.map((ep) => ep.season_number));
@@ -407,7 +401,7 @@ export async function computeUserSeriesProgress(
   return {
     seriesTmdbId,
     watchedCount: watched.length,
-    totalEpisodes,
+    totalEpisodes: confirmedEpisodes.length > 0 ? confirmedEpisodes.length : null,
     airedEpisodes: airedEps.length,
     lastWatchedAt,
     watchedKeys: watched.map((w) =>
@@ -577,6 +571,11 @@ export async function getUserWatchingSeries(
       const t = new Date(ep.air_date).getTime();
       return Number.isFinite(t) && t <= now;
     });
+    const confirmedEpisodes = catalogEps.filter((ep) => {
+      if (!ep.air_date) return false;
+      const t = new Date(ep.air_date).getTime();
+      return Number.isFinite(t);
+    });
 
     // Temporadas com ao menos 1 episódio aired (guard contra temporadas fantasma)
     const validSeasonsSet = new Set(airedEps.map((ep) => ep.season_number));
@@ -601,7 +600,7 @@ export async function getUserWatchingSeries(
         ? watchedEps.map((w) => w.watched_at).sort().reverse()[0]
         : null;
 
-    const totalEpisodes = meta?.number_of_episodes ?? null;
+    const totalEpisodes = confirmedEpisodes.length > 0 ? confirmedEpisodes.length : null;
 
     results.push({
       seriesTmdbId: seriesId,
@@ -666,5 +665,67 @@ export async function markAllAiredEpisodes(
       episodeNumber: e.episode_number,
     })),
     eventType: "series_completed",
+  });
+}
+
+export async function markEpisodesUntil(input: {
+  userId: string;
+  seriesTmdbId: number;
+  seasonNumber: number;
+  episodeNumber: number;
+}): Promise<UserSeriesProgress> {
+  const now = Date.now();
+
+  const { data: episodes, error } = await supabaseAdmin
+    .from("poplog3_episodes")
+    .select("season_number, episode_number, air_date, runtime")
+    .eq("series_tmdb_id", input.seriesTmdbId)
+    .gt("season_number", 0)
+    .order("season_number", { ascending: true })
+    .order("episode_number", { ascending: true });
+
+  if (error) {
+    console.error("[episode-progress/markUntil/list]", error);
+    throw new Error(error.message);
+  }
+
+  const toMark = ((episodes ?? []) as Array<{
+    season_number: number;
+    episode_number: number;
+    air_date: string | null;
+    runtime: number | null;
+  }>).filter((ep) => {
+    // nunca marcar episódio futuro
+    if (!ep.air_date) return false;
+
+    const airTime = new Date(ep.air_date).getTime();
+
+    if (!Number.isFinite(airTime) || airTime > now) {
+      return false;
+    }
+
+    // temporadas anteriores entram
+    if (ep.season_number < input.seasonNumber) {
+      return true;
+    }
+
+    // temporadas futuras não entram
+    if (ep.season_number > input.seasonNumber) {
+      return false;
+    }
+
+    // mesma temporada: marca até o episódio escolhido
+    return ep.episode_number <= input.episodeNumber;
+  });
+
+  return bulkMarkEpisodesWatched({
+    userId: input.userId,
+    seriesTmdbId: input.seriesTmdbId,
+    episodes: toMark.map((ep) => ({
+      seasonNumber: ep.season_number,
+      episodeNumber: ep.episode_number,
+      runtimeMinutes: ep.runtime ?? null,
+    })),
+    eventType: "episode_watched",
   });
 }

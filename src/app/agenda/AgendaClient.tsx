@@ -4,6 +4,7 @@ import {
   useCallback, useEffect, useMemo, useRef, useState,
 } from "react";
 import { useRouter } from "next/navigation";
+import ContextualAttribution from "@/components/attribution/ContextualAttribution";
 import PageShell from "@/components/layout/PageShell";
 import type { IcsSeriesGroup, ContentCategory } from "@/lib/ics-engine";
 import { FEATURED_CATEGORIES, CATEGORY_PRIORITY, filterEnrichedGroup } from "@/lib/ics-engine";
@@ -1403,11 +1404,12 @@ export default function AgendaClient({ initialData }: { initialData: IcsAgendaRe
         </>
       )}
 
-      <div className="mt-10 pt-6 border-t border-white/[0.05] flex items-center gap-2">
+      <div className="mt-10 flex items-center gap-2 border-t border-white/[0.05] pt-6">
         <span className={`w-1.5 h-1.5 rounded-full ${phase === "done" ? "bg-emerald-400/60" : "bg-amber-400/60 animate-pulse"}`} />
-        <span className="text-[9px] font-bold uppercase tracking-[0.18em] text-white/15">
-          Fonte: bancodeseries.com.br/ical.php · Cache 30 min · Enriquecimento TMDB por série
-        </span>
+        <ContextualAttribution
+          context="calendar"
+          sourcesUsed={["bancodeseries", "tmdb"]}
+        />
       </div>
 
     </PageShell>

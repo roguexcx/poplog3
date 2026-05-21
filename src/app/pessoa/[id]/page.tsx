@@ -2,9 +2,9 @@ import Image from "next/image";
 import Link from "next/link";
 import { headers } from "next/headers";
 
-import PosterCard from "@/components/ui/PosterCard";
 import EmptyState from "@/components/ui/EmptyState";
 import SectionHeader from "@/components/ui/SectionHeader";
+import PersonTitleGrid from "./_components/PersonTitleGrid";
 
 type PersonTitle = {
   tmdb_id: number;
@@ -61,34 +61,6 @@ type PessoaPageProps = {
 function imageUrl(path?: string | null, size = "w500") {
   if (!path) return null;
   return `https://image.tmdb.org/t/p/${size}${path}`;
-}
-
-function getYear(title: PersonTitle) {
-  const date = title.release_date ?? title.first_air_date;
-  if (!date) return undefined;
-
-  const year = new Date(date).getFullYear();
-  return Number.isFinite(year) ? year : undefined;
-}
-
-function TitleGrid({ titles }: { titles: PersonTitle[] }) {
-  if (!titles.length) return null;
-
-  return (
-    <div className="grid grid-cols-2 gap-x-4 gap-y-8 md:grid-cols-4 lg:grid-cols-6">
-      {titles.map((title) => (
-        <PosterCard
-          key={`${title.media_type}-${title.tmdb_id}`}
-          href={`/title/${title.media_type}/${title.tmdb_id}`}
-          mediaType={title.media_type}
-          title={title.title}
-          posterPath={title.poster_path}
-          fallbackPath={title.backdrop_path}
-          year={getYear(title)}
-        />
-      ))}
-    </div>
-  );
 }
 
 export default async function PessoaPage({ params }: PessoaPageProps) {
@@ -229,7 +201,7 @@ export default async function PessoaPage({ params }: PessoaPageProps) {
               title="Conhecido por"
               subtitle="Principais trabalhos da carreira."
             />
-            <TitleGrid titles={data.knownFor} />
+            <PersonTitleGrid titles={data.knownFor} />
           </section>
         ) : null}
 
@@ -239,14 +211,14 @@ export default async function PessoaPage({ params }: PessoaPageProps) {
               title="Atuação"
               subtitle="Filmes e séries com personagens creditados."
             />
-            <TitleGrid titles={data.acting} />
+            <PersonTitleGrid titles={data.acting} />
           </section>
         ) : null}
 
         {data.directing?.length ? (
           <section className="space-y-5">
             <SectionHeader title="Direção" subtitle="Projetos dirigidos." />
-            <TitleGrid titles={data.directing} />
+            <PersonTitleGrid titles={data.directing} />
           </section>
         ) : null}
 
@@ -256,7 +228,7 @@ export default async function PessoaPage({ params }: PessoaPageProps) {
               title="Criação"
               subtitle="Projetos criados ou escritos."
             />
-            <TitleGrid titles={data.creating} />
+            <PersonTitleGrid titles={data.creating} />
           </section>
         ) : null}
 
@@ -266,7 +238,7 @@ export default async function PessoaPage({ params }: PessoaPageProps) {
               title="Participações"
               subtitle="Especiais, documentários, reality shows e aparições de menor prioridade."
             />
-            <TitleGrid titles={data.appearances.slice(0, 12)} />
+            <PersonTitleGrid titles={data.appearances.slice(0, 12)} />
           </section>
         ) : null}
       </div>

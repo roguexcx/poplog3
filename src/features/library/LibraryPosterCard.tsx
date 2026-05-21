@@ -5,11 +5,11 @@ import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";
 
 const STATUS_BADGE: Record<string, string> = {
-  watching:  "border-violet-300/35 bg-violet-500/20 text-violet-100",
+  watching: "border-violet-300/35 bg-violet-500/20 text-violet-100",
   watchlist: "border-cyan-300/30 bg-cyan-500/18 text-cyan-100",
-  watched:   "border-white/[0.12] bg-white/[0.08] text-white/72",
+  watched: "border-white/[0.12] bg-white/[0.08] text-white/72",
   abandoned: "border-rose-300/30 bg-rose-500/16 text-rose-100",
-  fridge:    "border-amber-300/30 bg-amber-500/16 text-amber-100",
+  fridge: "border-amber-300/30 bg-amber-500/16 text-amber-100",
 };
 
 type LibraryPosterCardProps = {
@@ -17,11 +17,18 @@ type LibraryPosterCardProps = {
   priority?: boolean;
 };
 
-export default function LibraryPosterCard({ item, priority }: LibraryPosterCardProps) {
-  const title       = item.title;
-  const isFavorite  = item.favorite === true;
-  const isWatching  = item.status === "watching";
-  const progress    = typeof item.progress_pct === "number" ? item.progress_pct : null;
+export default function LibraryPosterCard({
+  item,
+  priority,
+}: LibraryPosterCardProps) {
+  const title = item.title;
+  const isFavorite = item.favorite === true;
+  const isWatching =
+    item.media_type === "movie"
+      ? item.status === "watching"
+      : item.status === "watching" && item.computed_state === "in_progress";
+  const progress =
+    typeof item.progress_pct === "number" ? item.progress_pct : null;
   const hasProvider = !!item.best_provider_logo;
 
   const displayTitle =
@@ -30,13 +37,11 @@ export default function LibraryPosterCard({ item, priority }: LibraryPosterCardP
     `${item.media_type}/${item.tmdb_id}`;
 
   const subtitle = getPosterSubtitle(item);
-  const runtime  = getRuntimeLabel(item);
+  const runtimeLabels = getRuntimeLabels(item);
 
   return (
     <Link href={`/title/${item.media_type}/${item.tmdb_id}`} className="group block">
       <article className="relative">
-
-        {/* Ambient glow — amber for favorites, neutral for rest */}
         <div
           className={[
             "absolute -inset-2.5 rounded-[2rem] opacity-0 blur-2xl transition duration-500 group-hover:opacity-100",
@@ -46,7 +51,6 @@ export default function LibraryPosterCard({ item, priority }: LibraryPosterCardP
           ].join(" ")}
         />
 
-        {/* Card shell */}
         <div
           className={[
             "relative overflow-hidden rounded-[1.45rem] border bg-white/[0.032] shadow-[0_18px_56px_rgba(0,0,0,0.40)]",
@@ -56,8 +60,6 @@ export default function LibraryPosterCard({ item, priority }: LibraryPosterCardP
               : "border-white/[0.08] group-hover:border-white/[0.20] group-hover:bg-white/[0.06]",
           ].join(" ")}
         >
-
-          {/* ── Poster image area ─────────────────────────────────────────── */}
           <div className="relative aspect-[2/3] overflow-hidden bg-white/[0.04]">
             <TmdbImage
               path={title?.poster_path ?? null}
@@ -69,10 +71,8 @@ export default function LibraryPosterCard({ item, priority }: LibraryPosterCardP
               className="h-full w-full object-cover brightness-[0.88] saturate-[1.08] transition duration-500 group-hover:scale-[1.06] group-hover:brightness-[1.04]"
             />
 
-            {/* Base vignette */}
             <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/90 via-black/10 to-black/24" />
 
-            {/* Hover colour overlay */}
             <div
               className={[
                 "pointer-events-none absolute inset-0 opacity-0 transition duration-500 group-hover:opacity-100",
@@ -82,14 +82,14 @@ export default function LibraryPosterCard({ item, priority }: LibraryPosterCardP
               ].join(" ")}
             />
 
-            {/* Status badge — top left */}
             <div
-              className={`absolute left-3 top-3 rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] shadow-[0_8px_22px_rgba(0,0,0,0.38)] backdrop-blur-md ${STATUS_BADGE[item.status] ?? STATUS_BADGE.watched}`}
+              className={`absolute left-3 top-3 rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] shadow-[0_8px_22px_rgba(0,0,0,0.38)] backdrop-blur-md ${
+                STATUS_BADGE[item.status] ?? STATUS_BADGE.watched
+              }`}
             >
               {formatStatus(item.status)}
             </div>
 
-            {/* Top-right badges (favorite ★ or rating) */}
             <div className="absolute right-3 top-3 flex flex-col items-end gap-1.5">
               {isFavorite ? (
                 <div className="rounded-full border border-amber-300/30 bg-amber-500/22 px-2 py-1 text-[9px] font-black text-amber-200 shadow-[0_0_16px_rgba(251,191,36,0.30)] backdrop-blur-md">
@@ -102,7 +102,6 @@ export default function LibraryPosterCard({ item, priority }: LibraryPosterCardP
               ) : null}
             </div>
 
-            {/* Provider logo — bottom right, always visible */}
             {hasProvider && (
               <div className="absolute bottom-3 right-3 overflow-hidden rounded-lg border border-white/[0.14] bg-black/55 shadow-[0_4px_14px_rgba(0,0,0,0.45)] backdrop-blur-md">
                 <Image
@@ -115,7 +114,6 @@ export default function LibraryPosterCard({ item, priority }: LibraryPosterCardP
               </div>
             )}
 
-            {/* Hover info badges — bottom left */}
             <div className="absolute inset-x-0 bottom-0 p-3 sm:p-4">
               <div className="translate-y-2 opacity-0 transition duration-300 group-hover:translate-y-0 group-hover:opacity-100">
                 <div className="flex flex-wrap items-center gap-1.5">
@@ -124,16 +122,19 @@ export default function LibraryPosterCard({ item, priority }: LibraryPosterCardP
                       {subtitle}
                     </span>
                   )}
-                  {runtime && (
-                    <span className="rounded-full border border-white/[0.12] bg-black/50 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-white/55 backdrop-blur-md">
+
+                  {runtimeLabels.map((runtime) => (
+                    <span
+                      key={runtime}
+                      className="rounded-full border border-white/[0.12] bg-black/50 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-white/55 backdrop-blur-md"
+                    >
                       {runtime}
                     </span>
-                  )}
+                  ))}
                 </div>
               </div>
             </div>
 
-            {/* Watching progress track — thin line at poster bottom edge */}
             {isWatching && progress !== null && progress > 0 && (
               <div className="absolute inset-x-0 bottom-0 h-[3px] bg-black/40">
                 <div
@@ -144,7 +145,6 @@ export default function LibraryPosterCard({ item, priority }: LibraryPosterCardP
             )}
           </div>
 
-          {/* ── Card footer — máx 28px, apenas ano · tipo ────────────────── */}
           <div className="flex h-7 items-center px-[10px]">
             <div className="flex items-center gap-[5px] text-[11px] font-normal leading-none text-white/40">
               <span>{title?.year ?? "—"}</span>
@@ -158,8 +158,6 @@ export default function LibraryPosterCard({ item, priority }: LibraryPosterCardP
   );
 }
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
-
 function getPosterSubtitle(item: Poplog3UserLibraryItem) {
   const releaseTime = getReleaseTime(item);
 
@@ -167,7 +165,11 @@ function getPosterSubtitle(item: Poplog3UserLibraryItem) {
     return "Em breve";
   }
 
-  if (item.media_type === "tv" && item.status === "watching") {
+  if (
+    item.media_type === "tv" &&
+    item.status === "watching" &&
+    item.computed_state === "in_progress"
+  ) {
     return "Continuidade";
   }
 
@@ -178,36 +180,37 @@ function getPosterSubtitle(item: Poplog3UserLibraryItem) {
   return null;
 }
 
-function getRuntimeLabel(item: Poplog3UserLibraryItem) {
-  const runtime =
-    item.media_type === "tv"
-      ? item.title?.episode_run_time?.find(
-          (value) => typeof value === "number" && value > 0,
-        ) ?? null
-      : item.title?.runtime ?? null;
+function getRuntimeLabels(item: Poplog3UserLibraryItem) {
+  if (item.media_type === "tv") {
+    return [item.average_episode_runtime_label ?? null, item.runtime_label ?? null].filter(
+      (label): label is string => Boolean(label),
+    );
+  }
 
-  if (!runtime) return null;
-
-  return item.media_type === "tv" ? `${runtime} min/ep` : `${runtime} min`;
+  return item.runtime_label ? [item.runtime_label] : [];
 }
 
 function getReleaseTime(item: Poplog3UserLibraryItem) {
   const title = item.title;
+
   const date =
     item.media_type === "tv"
       ? title?.first_air_date ?? title?.release_date
       : title?.release_date ?? title?.first_air_date;
+
   const time = date ? new Date(date).getTime() : 0;
+
   return Number.isFinite(time) ? time : 0;
 }
 
 function formatStatus(status: string) {
   const labels: Record<string, string> = {
     watchlist: "Watchlist",
-    watching:  "Assistindo",
-    watched:   "Assistido",
+    watching: "Assistindo",
+    watched: "Assistido",
     abandoned: "Abandonado",
-    fridge:    "Geladeira",
+    fridge: "Geladeira",
   };
+
   return labels[status] ?? status;
 }

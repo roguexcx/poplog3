@@ -5,8 +5,6 @@ import ActionButton from "@/components/ui/ActionButton";
 import EmptyState from "@/components/ui/EmptyState";
 import TitlePageView from "@/features/title/TitlePageView";
 import type { TitlePageData } from "@/features/title/types";
-import { resolveAvailability } from "@/server/streaming/resolve-availability";
-import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
 
 type MediaType = "movie" | "tv";
 
@@ -57,27 +55,6 @@ function pickFlag(value: string | string[] | undefined): boolean {
   return value === "1" || value === "true";
 }
 
-async function applyGlobalAvailability(
-  title: TitlePageData
-): Promise<TitlePageData> {
-  const preferences =
-    await getUserProviderPreferences();
-
-  const availability =
-    resolveAvailability({
-      providers: title.providers ?? [],
-      region:
-        preferences.region ?? "BR",
-      preferences,
-    });
-
-  return {
-    ...title,
-    providers:
-      availability.providers,
-  };
-}
-
 export default async function TitlePage({ params, searchParams }: PageProps) {
   const { mediaType, id } = await params;
   const resolvedSearch = searchParams ? await searchParams : undefined;
@@ -118,10 +95,5 @@ export default async function TitlePage({ params, searchParams }: PageProps) {
     );
   }
 
-  const titleWithAvailability =
-  await applyGlobalAvailability(
-    title
-  );
-
-  return <TitlePageView title={titleWithAvailability} />;
+  return <TitlePageView title={title} />;
 }

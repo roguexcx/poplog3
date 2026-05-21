@@ -12,10 +12,18 @@ export type WatchlistPickItem = {
   number_of_episodes: number | null;
   number_of_seasons: number | null;
   runtime: number | null;
+  runtime_label: string | null;
+  total_runtime_label?: string | null;
   best_provider_name: string | null;
   best_provider_type: string | null;
   best_provider_logo: string | null;
   days_on_watchlist: number;
+  overview?: string | null;
+  genres?: string[];
+  series_status?: string | null;
+  editorial_reason?: string | null;
+  contextual_badges?: string[];
+  award_badges?: string[];
 };
 
 type Props = {
@@ -144,7 +152,9 @@ export default function WatchlistPickCard({ item, onClick }: Props) {
         <p className="mb-0.5 line-clamp-1 text-[12.5px] font-bold leading-tight tracking-[-0.02em] text-white/85 transition-colors group-hover:text-white">
           {item.title}
         </p>
-        <p className="text-[11px] text-white/35">{subtitle}</p>
+        <p className="text-[11px] text-white/35">
+          {item.runtime_label ? `${subtitle} · ${item.runtime_label}` : subtitle}
+        </p>
       </div>
     </button>
   );

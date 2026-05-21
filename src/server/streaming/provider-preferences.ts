@@ -17,6 +17,32 @@ export type RankedAvailabilityProvider = AvailabilityProvider & {
 
 const DEFAULT_REGION: ProviderRegion = "BR";
 
+function providerPreferenceKeys(provider: AvailabilityProvider): string[] {
+  const record = provider as AvailabilityProvider & {
+    providerId?: number | string | null;
+    tmdbProviderId?: number | string | null;
+    providerName?: string | null;
+  };
+
+  return [
+    record.providerId,
+    record.tmdbProviderId,
+    record.providerName,
+    provider.name,
+  ]
+    .filter((value): value is string | number => value !== null && value !== undefined)
+    .map((value) => String(value));
+}
+
+function preferenceIndex(keys: string[], favorites: string[]) {
+  for (const key of keys) {
+    const index = favorites.indexOf(key);
+    if (index >= 0) return index;
+  }
+
+  return -1;
+}
+
 export function normalizeProviderPreferences(
   input?: ProviderPreferenceInput | null
 ): Required<ProviderPreferenceInput> {
@@ -39,12 +65,12 @@ export function rankAvailabilityProviders(
 
   return providers
     .map((provider) => {
-      const favoriteIndex = normalized.favoriteProviderIds.indexOf(
-  provider.name
-);
+      const keys = providerPreferenceKeys(provider);
+      const favoriteIndex = preferenceIndex(keys, normalized.favoriteProviderIds);
+      const hiddenIndex = preferenceIndex(keys, normalized.hiddenProviderIds);
 
-const isFavorite = favoriteSet.has(provider.name);
-const isHidden = hiddenSet.has(provider.name);
+      const isFavorite = favoriteIndex >= 0 || keys.some((key) => favoriteSet.has(key));
+      const isHidden = hiddenIndex >= 0 || keys.some((key) => hiddenSet.has(key));
 
       return {
         ...provider,
@@ -61,6 +87,10 @@ const isHidden = hiddenSet.has(provider.name);
     .sort((a, b) => {
       if (a.isFavorite !== b.isFavorite) {
         return a.isFavorite ? -1 : 1;
+      }
+
+      if (a.preferenceRank !== b.preferenceRank) {
+        return a.preferenceRank - b.preferenceRank;
       }
 
       return a.name.localeCompare(b.name);

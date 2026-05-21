@@ -81,7 +81,12 @@
       "Bash(node -e ' *)",
       "Bash(del I:\\\\poplog-v3\\\\tmp_engine.json)",
       "Bash(curl -s \"http://localhost:3000/api/debug/engine?secret=poplog-admin-local-2026\")",
-      "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\(0,'utf8'\\)\\); console.log\\('OK - totalCalls:', d.summary.totalCalls\\)\")"
+      "Bash(node -e \"const d=JSON.parse\\(require\\('fs'\\).readFileSync\\(0,'utf8'\\)\\); console.log\\('OK - totalCalls:', d.summary.totalCalls\\)\")",
+      "Bash(Get-ChildItem -Path \"I:\\\\poplog-v3\" -Directory)",
+      "Bash(Select-Object Name)",
+      "Bash(ls -la /I:/poplog-v3/src/app/api/)",
+      "Bash(ls -la /I:/poplog-v3/src/server/)",
+      "Bash(xargs grep -l \"filmography\\\\|credits\\\\|person\")"
     ]
   }
 }

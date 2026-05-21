@@ -74,6 +74,7 @@ export default async function HomePage() {
     : null;
 
   const runtime = formatRuntime(
+    featuredType,
     featuredDetails?.runtime,
     featuredDetails?.episode_run_time,
   );

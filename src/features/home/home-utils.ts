@@ -1,4 +1,11 @@
-import { translateGenreName, parseYearLabel } from "@/lib/domain-labels";
+import {
+  formatEpisodeRuntimeLabel,
+  formatRuntimeLabel,
+  parseYearLabel,
+  translateGenreName,
+} from "@/lib/domain-labels";
+
+import { resolveRuntimeByMediaType } from "@/lib/runtime";
 
 const HEADLINES: Record<string, [string, string, string][]> = {
   madrugada: [
@@ -31,17 +38,23 @@ export function getHeroHeadline(): [string, string, string] {
   const hour = getBrasiliaHour();
 
   let pool: [string, string, string][];
-  if (hour >= 6 && hour < 12)       pool = HEADLINES.manha;
-  else if (hour >= 12 && hour < 18)  pool = HEADLINES.tarde;
-  else if (hour >= 18 && hour < 24)  pool = HEADLINES.noite;
-  else                               pool = HEADLINES.madrugada;
+
+  if (hour >= 6 && hour < 12) {
+    pool = HEADLINES.manha;
+  } else if (hour >= 12 && hour < 18) {
+    pool = HEADLINES.tarde;
+  } else if (hour >= 18 && hour < 24) {
+    pool = HEADLINES.noite;
+  } else {
+    pool = HEADLINES.madrugada;
+  }
 
   return pool[Math.floor(Math.random() * pool.length)];
 }
 
 export function translateGenres(
   genres: { name: string }[],
-  limit = 2,
+  limit = 2
 ): string {
   return genres
     .slice(0, limit)
@@ -50,17 +63,34 @@ export function translateGenres(
 }
 
 export function formatRuntime(
+  mediaType: "movie" | "tv",
   runtime?: number | null,
-  episodeRuntime?: number[],
+  episodeRuntime?: number[] | null
 ): string | null {
-  if (runtime) return `${runtime} min`;
-  if (episodeRuntime?.[0]) return `${episodeRuntime[0]} min`;
-  return null;
+  const runtimeResolution = resolveRuntimeByMediaType({
+    mediaType,
+    runtimeMinutes: runtime,
+    episodeRunTime: episodeRuntime,
+  });
+
+  if (runtimeResolution.minutes === null) {
+    return null;
+  }
+
+  if (mediaType === "tv") {
+    return formatEpisodeRuntimeLabel(runtimeResolution.minutes, {
+      estimated: runtimeResolution.estimated,
+    });
+  }
+
+  return formatRuntimeLabel(runtimeResolution.minutes, {
+    estimated: runtimeResolution.estimated,
+  });
 }
 
 export function parseYear(
   releaseDate?: string | null,
-  firstAirDate?: string | null,
+  firstAirDate?: string | null
 ): string | null {
   return parseYearLabel(releaseDate, firstAirDate);
 }

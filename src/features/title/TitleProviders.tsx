@@ -1,5 +1,7 @@
 import Image from "next/image";
 
+import ContextualAttribution from "@/components/attribution/ContextualAttribution";
+import { getProviderSourceIds } from "@/attribution/helpers";
 import type { TitleProvider } from "./types";
 import type { AvailabilityProvider } from "@/server/streaming/availability-service";
 
@@ -163,19 +165,7 @@ export default function TitleProviders({ providers }: TitleProvidersProps) {
   const hasProviders = providers && providers.length > 0;
   const groups = hasProviders ? groupByType(providers!) : [];
 
-  const sourceLabel = (() => {
-    if (!hasProviders) return null;
-
-    const sources = new Set(providers!.map((p) => p.source ?? "tmdb"));
-
-    if (sources.has("tmdb")) return "Fonte: TMDB";
-    if (sources.has("watchmode")) return "Fonte: Watchmode (fallback)";
-    if (sources.has("movieofthenight") || sources.has("motn")) {
-      return "Fonte: MovieOfTheNight (fallback)";
-    }
-
-    return null;
-  })();
+  const sourcesUsed = getProviderSourceIds(providers);
 
   return (
     <section className="relative overflow-hidden rounded-[1.5rem] border border-white/[0.08] bg-white/[0.035] p-5 backdrop-blur-xl sm:p-6">
@@ -195,11 +185,10 @@ export default function TitleProviders({ providers }: TitleProvidersProps) {
             Onde assistir
           </p>
 
-          {sourceLabel && (
-            <p className="text-[9px] font-semibold uppercase tracking-[0.14em] text-white/30">
-              {sourceLabel}
-            </p>
-          )}
+          <ContextualAttribution
+            context="availability"
+            sourcesUsed={sourcesUsed}
+          />
         </div>
 
         {hasProviders ? (

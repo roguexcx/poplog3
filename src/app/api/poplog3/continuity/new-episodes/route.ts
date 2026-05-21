@@ -3,6 +3,9 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { supabaseAdmin } from "@/server/supabase/admin";
 import { getCachedEpisode } from "@/server/cache/season-cache";
+import { formatEpisodeRuntimeLabel } from "@/lib/domain-labels";
+import { resolveRuntimeByMediaType } from "@/lib/runtime";
+import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
 
 // Séries com mais de N episódios por assistir são ignoradas (backlog pesado)
 const MAX_EPISODES_BEHIND = 5;
@@ -31,6 +34,11 @@ export type NewEpisodeItem = {
   last_air_date: string | null;
   days_since_new_episode: number | null;
   runtime: number | null;
+  runtime_label: string | null;
+  /** Episódios assistidos na temporada atual (heurística: next_episode - 1) */
+  season_watched: number | null;
+  /** Total de episódios na temporada atual — null se não sincronizado */
+  season_total: number | null;
 };
 
 type StateRow = {
@@ -105,6 +113,21 @@ export async function GET() {
     const titleMap = new Map<number, TitleRow>(
       ((titlesRaw ?? []) as TitleRow[]).map((t) => [t.tmdb_id, t]),
     );
+    const episodeRuntimesBySeries = await getSeriesEpisodeRuntimesMap(tmdbIds);
+
+    // Batch query para totais de episódios por temporada
+    const { data: seasonsRaw } = await supabaseAdmin
+      .from("title_seasons")
+      .select("series_tmdb_id, season_number, episode_count")
+      .in("series_tmdb_id", tmdbIds);
+
+    type SeasonRow = { series_tmdb_id: number; season_number: number; episode_count: number };
+    const seasonMap = new Map<string, number>(
+      ((seasonsRaw ?? []) as SeasonRow[]).map((r) => [
+        `${r.series_tmdb_id}:${r.season_number}`,
+        r.episode_count,
+      ]),
+    );
 
     // 3. Filtra elegíveis
     const cutoffStr = new Date(Date.now() - NEW_EPISODE_DAYS * 86_400_000)
@@ -139,6 +162,7 @@ export async function GET() {
       // Série em progresso e com distância pequena — tem next_episode válido
       if (
         cs === "in_progress" &&
+        episodesBehind > 0 &&
         episodesBehind <= MAX_EPISODES_BEHIND &&
         state.next_season != null &&
         state.next_episode != null
@@ -181,6 +205,10 @@ export async function GET() {
       }
 
       // up_to_date: usuário está em dia, mas tmdb_payload indica novo episódio disponível hoje
+      // Só entra se o next_episode_to_air ainda não foi assistido, verificando o ponteiro
+      // do estado do usuário. Se state.next_season/next_episode não bate com o episódio
+      // do payload, o usuário já assistiu (estado adiantou) — evita falso positivo após
+      // assistir o último ep de uma temporada encerrada.
       if (cs === "up_to_date" && state.status === "watching") {
         const nextEpToAir = title.tmdb_payload?.next_episode_to_air as Record<string, unknown> | null | undefined;
         if (nextEpToAir) {
@@ -189,6 +217,11 @@ export async function GET() {
           const episodeNum = typeof nextEpToAir.episode_number === "number" ? nextEpToAir.episode_number : null;
           const todayStr = new Date().toISOString().slice(0, 10);
           if (airDate && seasonNum && episodeNum && airDate >= cutoffStr && airDate <= todayStr) {
+            // Só exibe se o ponteiro do usuário ainda aponta para este episódio,
+            // indicando que ele ainda não foi assistido.
+            const userIsAhead =
+              state.next_season !== seasonNum || state.next_episode !== episodeNum;
+            if (userIsAhead) continue;
             eligible.push({
               ...state,
               ...title,
@@ -236,8 +269,14 @@ export async function GET() {
           )
         : null;
 
-      const runtime =
-        item.episode_run_time?.[0] ?? item.runtime ?? null;
+      const runtimeResolution = resolveRuntimeByMediaType({
+        mediaType: "tv",
+        episodeRunTime: item.episode_run_time,
+        episodes: episodeRuntimesBySeries.get(item.tmdb_id) ?? null,
+      });
+      const runtimeLabel = formatEpisodeRuntimeLabel(runtimeResolution.minutes, {
+        estimated: runtimeResolution.estimated,
+      });
 
       // Para up_to_date, next_episode_air_date vem do tmdb_payload
       const nextEpAirDate: string | null =
@@ -265,7 +304,10 @@ export async function GET() {
         next_episode_air_date: nextEpAirDate,
         last_air_date: lastAirDate,
         days_since_new_episode: daysSince,
-        runtime,
+        runtime: runtimeResolution.minutes,
+        runtime_label: runtimeLabel,
+        season_watched: item.effectiveNextEpisode > 1 ? item.effectiveNextEpisode - 1 : 0,
+        season_total: seasonMap.get(`${item.tmdb_id}:${item.effectiveNextSeason}`) ?? null,
       };
     });
 

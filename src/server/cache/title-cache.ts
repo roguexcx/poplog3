@@ -67,11 +67,17 @@ export async function getCachedTitleWithPayload(
       poster_path: data.poster_path,
       backdrop_path: data.backdrop_path,
       release_date: data.release_date,
+      first_air_date: data.first_air_date,
+      last_air_date: data.last_air_date,
       year: data.year,
+      runtime: data.runtime,
+      episode_run_time: data.episode_run_time,
       genres: data.genres ?? [],
       popularity: data.popularity,
       vote_average: data.vote_average,
       vote_count: data.vote_count,
+      number_of_episodes: data.number_of_episodes,
+      number_of_seasons: data.number_of_seasons,
       original_language: data.original_language,
       last_synced_at: data.last_synced_at,
     },
@@ -146,6 +152,9 @@ export async function upsertCachedTitle(
   const nextTitle = title.title ?? existing?.title ?? null;
   const nextOverview = title.overview ?? existing?.overview ?? null;
   const nextYear = title.year ?? existing?.year ?? null;
+  const nextRuntime = title.runtime ?? existing?.runtime ?? null;
+  const nextEpisodeRunTime =
+    title.episode_run_time ?? existing?.episode_run_time ?? null;
 
   const now = new Date().toISOString();
 
@@ -159,11 +168,23 @@ export async function upsertCachedTitle(
       poster_path: nextPoster,
       backdrop_path: nextBackdrop,
       release_date: title.release_date || existing?.release_date || null,
+      first_air_date: title.first_air_date || existing?.first_air_date || null,
+      last_air_date: title.last_air_date || existing?.last_air_date || null,
       year: nextYear,
+      runtime: nextRuntime,
+      episode_run_time: nextEpisodeRunTime,
       genres: title.genres ?? [],
       popularity: title.popularity ?? existing?.popularity ?? null,
       vote_average: title.vote_average ?? existing?.vote_average ?? null,
       vote_count: title.vote_count ?? existing?.vote_count ?? null,
+      number_of_episodes:
+        "number_of_episodes" in title
+          ? title.number_of_episodes ?? null
+          : null,
+      number_of_seasons:
+        "number_of_seasons" in title
+          ? title.number_of_seasons ?? null
+          : null,
       original_language:
         title.original_language ?? existing?.original_language ?? null,
       tmdb_payload: payloadHasContent ? rawPayload : undefined,

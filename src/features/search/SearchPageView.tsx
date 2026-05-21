@@ -463,29 +463,76 @@ export default function SearchPageView({ initialQuery, initialType }: SearchPage
           <div className="flex flex-col gap-10">
             {!discoveryLoading && discovery ? (
               <>
-                {discovery.trending?.length ? (
-                  <section className="space-y-5">
-                    <SectionHeader eyebrow="Tendências" title="Em alta hoje" subtitle="Filmes e séries ganhando atenção agora." accent="indigo" />
-                    <TitleGrid titles={discovery.trending} />
-                  </section>
+                {/* ── Filmes ─────────────────────────────────────────── */}
+                {type === "movie" ? (
+                  <>
+                    {discovery.trending?.filter((t) => t.media_type === "movie").length ? (
+                      <section className="space-y-5">
+                        <SectionHeader eyebrow="Tendências" title="Filmes em alta" subtitle="Filmes ganhando atenção agora." accent="indigo" />
+                        <TitleGrid titles={discovery.trending.filter((t) => t.media_type === "movie")} />
+                      </section>
+                    ) : null}
+
+                    {discovery.trending?.filter((t) => t.media_type === "movie").length && discovery.popularMovies?.length ? <SectionDivider /> : null}
+
+                    {discovery.popularMovies?.length ? (
+                      <section className="space-y-5">
+                        <SectionHeader eyebrow="Populares" title="Filmes populares" subtitle="Os filmes mais assistidos agora." accent="indigo" />
+                        <TitleGrid titles={discovery.popularMovies} />
+                      </section>
+                    ) : null}
+                  </>
                 ) : null}
 
-                {discovery.trending?.length && discovery.popularMovies?.length ? <SectionDivider /> : null}
+                {/* ── Séries ─────────────────────────────────────────── */}
+                {type === "tv" ? (
+                  <>
+                    {discovery.trending?.filter((t) => t.media_type === "tv").length ? (
+                      <section className="space-y-5">
+                        <SectionHeader eyebrow="Tendências" title="Séries em alta" subtitle="Séries ganhando atenção agora." accent="indigo" />
+                        <TitleGrid titles={discovery.trending.filter((t) => t.media_type === "tv")} />
+                      </section>
+                    ) : null}
 
-                {discovery.popularMovies?.length ? (
-                  <section className="space-y-5">
-                    <SectionHeader eyebrow="Filmes" title="Filmes populares" subtitle="Títulos fortes para explorar." accent="indigo" />
-                    <TitleGrid titles={discovery.popularMovies} />
-                  </section>
+                    {discovery.trending?.filter((t) => t.media_type === "tv").length && discovery.popularSeries?.length ? <SectionDivider /> : null}
+
+                    {discovery.popularSeries?.length ? (
+                      <section className="space-y-5">
+                        <SectionHeader eyebrow="Populares" title="Séries populares" subtitle="As séries mais assistidas agora." accent="indigo" />
+                        <TitleGrid titles={discovery.popularSeries} />
+                      </section>
+                    ) : null}
+                  </>
                 ) : null}
 
-                {(discovery.trending?.length || discovery.popularMovies?.length) && discovery.popularSeries?.length ? <SectionDivider /> : null}
+                {/* ── Todos ──────────────────────────────────────────── */}
+                {type === "all" ? (
+                  <>
+                    {discovery.trending?.length ? (
+                      <section className="space-y-5">
+                        <SectionHeader eyebrow="Tendências" title="Em alta hoje" subtitle="Filmes e séries ganhando atenção agora." accent="indigo" />
+                        <TitleGrid titles={discovery.trending} />
+                      </section>
+                    ) : null}
 
-                {discovery.popularSeries?.length ? (
-                  <section className="space-y-5">
-                    <SectionHeader eyebrow="Séries" title="Séries populares" subtitle="Séries em destaque." accent="indigo" />
-                    <TitleGrid titles={discovery.popularSeries} />
-                  </section>
+                    {discovery.trending?.length && discovery.popularMovies?.length ? <SectionDivider /> : null}
+
+                    {discovery.popularMovies?.length ? (
+                      <section className="space-y-5">
+                        <SectionHeader eyebrow="Filmes" title="Filmes populares" subtitle="Títulos fortes para explorar." accent="indigo" />
+                        <TitleGrid titles={discovery.popularMovies} />
+                      </section>
+                    ) : null}
+
+                    {(discovery.trending?.length || discovery.popularMovies?.length) && discovery.popularSeries?.length ? <SectionDivider /> : null}
+
+                    {discovery.popularSeries?.length ? (
+                      <section className="space-y-5">
+                        <SectionHeader eyebrow="Séries" title="Séries populares" subtitle="Séries em destaque." accent="indigo" />
+                        <TitleGrid titles={discovery.popularSeries} />
+                      </section>
+                    ) : null}
+                  </>
                 ) : null}
               </>
             ) : null}

@@ -3,6 +3,11 @@ import { getCurrentUser } from "@/server/auth/get-current-user";
 import { getHeroCandidates } from "@/server/continuity/hero-candidates";
 import { recordHeroImpressions } from "@/server/continuity/hero-impressions";
 import { getCachedEpisode } from "@/server/cache/season-cache";
+import {
+  formatEpisodeRuntimeLabel,
+  formatRemainingRuntimeLabel,
+  formatRuntimeLabel,
+} from "@/lib/domain-labels";
 
 const HERO_VISIBLE_LIMIT = 5;
 const HERO_POOL_LIMIT = 14;
@@ -237,6 +242,21 @@ export async function GET(request: Request) {
       const nextEpisodeNumber = cand.progress?.nextEpisode ?? null;
       const lastWatchedEpisode =
         nextEpisodeNumber !== null ? Math.max(nextEpisodeNumber - 1, 0) : null;
+      const nextEpisodeDuration = isTv
+        ? ep?.runtime ?? cand.progress?.runtimeMinutes ?? null
+        : cand.progress?.runtimeMinutes ?? null;
+      const remainingMovieRuntime =
+        !isTv && typeof cand.progress?.remainingMinutes === "number"
+          ? cand.progress.remainingMinutes
+          : null;
+      const runtimeLabel = isTv
+        ? formatEpisodeRuntimeLabel(nextEpisodeDuration, {
+            estimated: ep?.runtime ? false : true,
+          })
+        : formatRuntimeLabel(cand.progress?.runtimeMinutes ?? null);
+      const remainingRuntimeLabel = !isTv
+        ? formatRemainingRuntimeLabel(remainingMovieRuntime)
+        : null;
 
       return {
         id: cand.id,
@@ -268,13 +288,21 @@ export async function GET(request: Request) {
         next_episode_name: isTv && nextEpisodeNumber
           ? (ep?.name ?? `Episódio ${nextEpisodeNumber}`)
           : null,
-        next_episode_duration: isTv ? 45 : cand.progress?.runtimeMinutes ?? null,
+        next_episode_duration: nextEpisodeDuration,
+        next_episode_duration_label: isTv ? runtimeLabel : null,
         next_episode_air_date: cand.progress?.nextEpisodeAirDate ?? null,
         next_episode_still_path: ep?.still_path ?? null,
         new_episode_available: cand.context === "new_episode",
 
         runtime: cand.progress?.runtimeMinutes ?? null,
-        watch_progress_minutes: cand.context === "resume" && !isTv ? 45 : null,
+        runtime_label: runtimeLabel,
+        remaining_runtime_label: remainingRuntimeLabel,
+        watch_progress_minutes:
+          !isTv &&
+          typeof cand.progress?.runtimeMinutes === "number" &&
+          typeof cand.progress?.remainingMinutes === "number"
+            ? Math.max(cand.progress.runtimeMinutes - cand.progress.remainingMinutes, 0)
+            : null,
 
         streaming_platform: cand.availability?.providerName ?? null,
         streaming_type: cand.availability?.type ?? null,

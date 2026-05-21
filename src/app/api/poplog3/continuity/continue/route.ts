@@ -3,8 +3,13 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { supabaseAdmin } from "@/server/supabase/admin";
 import { getCachedEpisode } from "@/server/cache/season-cache";
+import {
+  formatEpisodeRuntimeLabel,
+  formatRemainingRuntimeLabel,
+} from "@/lib/domain-labels";
+import { resolveRuntimeByMediaType } from "@/lib/runtime";
+import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
 
-const DEFAULT_EPISODE_RUNTIME = 45;
 const NEW_EPISODE_DAYS = 30;
 const MAX_ITEMS = 24;
 
@@ -31,9 +36,11 @@ export type ContinueItem = {
   next_episode_still_path: string | null;
   next_episode_air_date: string | null;
   last_watched_at: string | null;
-  remaining_minutes: number;
+  remaining_minutes: number | null;
+  remaining_runtime_label: string | null;
   status_signal: ContinueStatusSignal;
   runtime: number | null;
+  runtime_label: string | null;
   /** Episódios assistidos na temporada atual (= next_episode - 1) */
   season_watched: number;
   /** Total de episódios na temporada atual — de title_seasons; null se não sincronizado */
@@ -120,6 +127,7 @@ export async function GET() {
     const titleMap = new Map<number, TitleRow>(
       ((titlesRaw ?? []) as TitleRow[]).map((t) => [t.tmdb_id, t]),
     );
+    const episodeRuntimesBySeries = await getSeriesEpisodeRuntimesMap(tmdbIds);
 
     // Batch query para totais de episódios por temporada
     const { data: seasonsRaw } = await supabaseAdmin
@@ -151,10 +159,25 @@ export async function GET() {
     const items: ContinueItem[] = top.map((state, i) => {
       const title = titleMap.get(state.tmdb_id)!;
       const ep = epData[i];
-      const avgRuntime =
-        title.episode_run_time?.[0] ?? title.runtime ?? DEFAULT_EPISODE_RUNTIME;
+      const runtimeResolution = resolveRuntimeByMediaType({
+        mediaType: "tv",
+        episodeRunTime: title.episode_run_time,
+        episodes: episodeRuntimesBySeries.get(state.tmdb_id) ?? null,
+      });
       const episodesBehind = Math.max(0, state.aired_episodes - state.watched_episodes);
-      const remainingMinutes = episodesBehind * avgRuntime;
+      const remainingMinutes =
+        runtimeResolution.minutes === null
+          ? null
+          : episodesBehind * runtimeResolution.minutes;
+      const runtimeLabel = formatEpisodeRuntimeLabel(runtimeResolution.minutes, {
+        estimated: runtimeResolution.estimated,
+      });
+      const remainingRuntimeLabel = formatRemainingRuntimeLabel(
+        remainingMinutes,
+        {
+          estimated: runtimeResolution.estimated,
+        },
+      );
 
       return {
         content_id: `tv-${state.tmdb_id}`,
@@ -174,8 +197,10 @@ export async function GET() {
         next_episode_air_date: state.next_episode_air_date ?? null,
         last_watched_at: state.last_watched_at ?? null,
         remaining_minutes: remainingMinutes,
+        remaining_runtime_label: remainingRuntimeLabel,
         status_signal: resolveSignal(episodesBehind, state.next_episode_air_date, cutoffStr),
-        runtime: avgRuntime,
+        runtime: runtimeResolution.minutes,
+        runtime_label: runtimeLabel,
         season_watched: state.next_episode - 1,
         season_total: seasonMap.get(`${state.tmdb_id}:${state.next_season}`) ?? null,
       };

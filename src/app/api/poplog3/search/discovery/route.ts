@@ -40,7 +40,7 @@ async function getTitleSection(
     })
   );
 
-  const titles = filterValidTitles(normalized).slice(0, 12);
+  const titles = filterValidTitles(normalized).slice(0, 20);
 
   await Promise.all(
     titles.map(async (title) => {
@@ -78,7 +78,7 @@ async function getTrendingSection() {
   );
 
   const normalized = onlyTitles.map((item) => normalizeTmdbTitle(item));
-  const titles = filterValidTitles(normalized).slice(0, 12);
+  const titles = filterValidTitles(normalized).slice(0, 20);
 
   await Promise.all(
     titles.map(async (title) => {

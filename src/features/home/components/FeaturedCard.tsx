@@ -71,7 +71,7 @@ export default function FeaturedCard({
                 <span>• {seasons} {seasons === 1 ? "temporada" : "temporadas"}</span>
               )}
 
-              {mediaType === "tv" && runtime && <span>• ~{runtime}/ep</span>}
+              {mediaType === "tv" && runtime && <span>• {runtime}</span>}
 
               {genres && <span className="text-zinc-400">• {genres}</span>}
             </div>

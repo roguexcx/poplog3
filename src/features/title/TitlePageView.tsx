@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import TitleCast from "./TitleCast";
+import TitleCommunityHighlights from "./TitleCommunityHighlights";
 import TitleCollectionSection from "./TitleCollectionSection";
 import TitleEpisodeBrowser from "./TitleEpisodeBrowser";
 import TitleHero from "./TitleHero";
@@ -67,44 +68,6 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
         }
       />
 
-{isMovie && (
-  <section className="relative z-10 -mt-8 mb-2 px-5 sm:px-8 md:px-12 lg:px-16">
-    <div className="mx-auto max-w-[1180px]">
-      <button
-        type="button"
-        onClick={() => setMovieSocialOpen(true)}
-        className="group flex w-full items-center justify-between overflow-hidden rounded-[1.6rem] border border-fuchsia-300/14 bg-[linear-gradient(135deg,rgba(217,70,239,0.10),rgba(99,102,241,0.08))] p-4 backdrop-blur-xl transition hover:border-fuchsia-300/24 hover:bg-[linear-gradient(135deg,rgba(217,70,239,0.14),rgba(99,102,241,0.12))]"
-      >
-        <div className="flex items-center gap-4">
-          <div className="relative flex h-11 w-11 items-center justify-center rounded-full bg-fuchsia-500/14">
-            <span className="absolute inset-0 animate-ping rounded-full bg-fuchsia-500/18" />
-            <span className="relative h-3 w-3 rounded-full bg-fuchsia-300" />
-          </div>
-
-          <div className="text-left">
-            <p className="text-[10px] font-black uppercase tracking-[0.24em] text-fuchsia-300/55">
-              Contexto social
-            </p>
-
-            <h3 className="mt-1 text-[15px] font-bold tracking-[-0.02em] text-white/92">
-              Veja como o público está reagindo ao filme
-            </h3>
-
-            <p className="mt-1 text-[12px] text-white/42">
-              Comentários reais traduzidos automaticamente para PT-BR
-            </p>
-          </div>
-        </div>
-
-        <div className="hidden shrink-0 items-center gap-2 rounded-full border border-white/[0.08] bg-white/[0.04] px-4 py-2 text-[11px] font-bold uppercase tracking-[0.14em] text-white/55 transition group-hover:border-white/[0.16] group-hover:bg-white/[0.08] group-hover:text-white/82 sm:flex">
-          Abrir
-          <span aria-hidden>→</span>
-        </div>
-      </button>
-    </div>
-  </section>
-)}
-
       <section className="mx-auto w-full max-w-[1600px] px-5 pb-24 pt-8 sm:px-8 sm:pt-10 md:px-12 md:pt-12 lg:px-16">
         <div className="grid min-w-0 gap-8 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_420px] xl:gap-10">
           <div className="flex min-w-0 flex-col gap-8 sm:gap-10 lg:gap-12">
@@ -120,6 +83,14 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
               />
             )}
 
+            {isMovie && (
+              <TitleCommunityHighlights
+  movieTmdbId={Number(title.id)}
+  movieTitle={title.title}
+  onOpenAll={() => setMovieSocialOpen(true)}
+/>
+            )}
+
             <TitleCast cast={title.cast} />
 
             <TitleCollectionSection
@@ -132,7 +103,7 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
 
           <aside className="flex min-w-0 flex-col gap-5 sm:gap-6 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:self-start lg:pr-1">
             {hasTrailer && title.trailer && (
-              <TitleTrailer trailer={title.trailer} />
+              <TitleTrailer trailer={title.trailer} title={title.title} />
             )}
 
             {hasRatings && <TitleScoreCard ratings={title.ratings} />}
@@ -150,24 +121,20 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
       </section>
 
       {isMovie && movieSocialOpen && typeof title.id === "number" && (
-  <MovieSocialModal
-    movieTmdbId={Number(title.id)}
-    movieTitle={title.title}
-    overview={title.overview ?? null}
-    backdropUrl={title.backdropUrl ?? null}
-    year={title.year ?? null}
-    runtime={
-      typeof title.runtime === "number"
-        ? `${title.runtime} min`
-        : null
-    }
-    voteAverage={title.voteAverage ?? null}
-    watched={Boolean(title.userState?.watched)}
-    saving={false}
-    onToggleWatched={() => {}}
-    onClose={() => setMovieSocialOpen(false)}
-  />
-)}
+        <MovieSocialModal
+          movieTmdbId={Number(title.id)}
+          movieTitle={title.title}
+          overview={title.overview ?? null}
+          backdropUrl={title.backdropUrl ?? null}
+          year={title.year ?? null}
+          runtime={typeof title.runtime === "number" ? `${title.runtime} min` : null}
+          voteAverage={title.voteAverage ?? null}
+          watched={Boolean(title.userState?.watched)}
+          saving={false}
+          onToggleWatched={() => {}}
+          onClose={() => setMovieSocialOpen(false)}
+        />
+      )}
 
       <TitleSyncBar
         lastSyncedAt={title.lastSyncedAt ?? null}

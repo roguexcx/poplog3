@@ -189,7 +189,7 @@ export default function LoginDrawer({
             </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
+          <form onSubmit={handleSubmit} className="flex flex-col gap-4" suppressHydrationWarning>
             <div className="flex flex-col gap-1.5">
               <label className="text-[11px] font-medium uppercase tracking-widest text-zinc-500">
                 E-mail

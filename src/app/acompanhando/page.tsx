@@ -15,6 +15,7 @@ import ContinueCard, {
 import WatchlistPickCard, {
   type WatchlistPickItem,
 } from "@/features/acompanhando/WatchlistPickCard";
+import StartSeriesBanner from "@/features/acompanhando/StartSeriesBanner";
 
 import type { ScoredItem, SignalType } from "@/components/HeroSpotlight/types";
 
@@ -143,14 +144,17 @@ export default function AcompanhandoPage() {
 
   const [continueItems, setContinueItems] = useState<ContinueItem[]>([]);
   const [isContinueLoading, setIsContinueLoading] = useState(true);
-  const [continueSortMode, setContinueSortMode] = useState<ContinueSortMode>("recent");
+  const [continueSortMode, setContinueSortMode] = useState<ContinueSortMode>("easy");
   const [continuePage, setContinuePage] = useState(1);
   const continueItemsPerPage = useContinueItemsPerPage();
 
   const [watchlistPicks, setWatchlistPicks] = useState<WatchlistPickItem[]>([]);
   const [isWatchlistPicksLoading, setIsWatchlistPicksLoading] = useState(true);
+  const [startSeriesPicks, setStartSeriesPicks] = useState<WatchlistPickItem[]>([]);
+  const [isStartSeriesLoading, setIsStartSeriesLoading] = useState(true);
   // IDs já exibidos na sessão — usados para cooldown de refresh
   const shownWatchlistIds = useRef<Set<string>>(new Set());
+  const shownStartSeriesIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     fetch("/api/poplog3/continuity/hero")
@@ -202,8 +206,11 @@ export default function AcompanhandoPage() {
 
   const fetchWatchlistPicks = useCallback((excludeIds: string[] = []) => {
     setIsWatchlistPicksLoading(true);
-    const params = excludeIds.length
-      ? `?exclude=${excludeIds.join(",")}`
+    const allExcludeIds = Array.from(
+      new Set([...excludeIds, ...Array.from(shownStartSeriesIds.current)]),
+    );
+    const params = allExcludeIds.length
+      ? `?exclude=${allExcludeIds.join(",")}`
       : "";
     fetch(`/api/poplog3/continuity/watchlist-picks${params}`)
       .then((res) => res.json())
@@ -225,14 +232,48 @@ export default function AcompanhandoPage() {
   }, []);
 
   useEffect(() => {
-    fetchWatchlistPicks();
-  }, [fetchWatchlistPicks]);
+    if (!isStartSeriesLoading) {
+      Promise.resolve().then(() => fetchWatchlistPicks());
+    }
+  }, [fetchWatchlistPicks, isStartSeriesLoading]);
+
+  const fetchStartSeriesPicks = useCallback((excludeIds: string[] = []) => {
+    setIsStartSeriesLoading(true);
+    const params = new URLSearchParams({ seriesStart: "1" });
+    if (excludeIds.length) params.set("exclude", excludeIds.join(","));
+
+    fetch(`/api/poplog3/continuity/watchlist-picks?${params.toString()}`)
+      .then((res) => res.json())
+      .then((data) => {
+        if (data && Array.isArray(data.items)) {
+          setStartSeriesPicks(data.items);
+          data.items.forEach((item: WatchlistPickItem) =>
+            shownStartSeriesIds.current.add(item.content_id),
+          );
+        }
+      })
+      .catch((err) => {
+        console.error("[AcompanhandoPage] Falha ao carregar séries para começar:", err);
+      })
+      .finally(() => {
+        setIsStartSeriesLoading(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    Promise.resolve().then(() => fetchStartSeriesPicks());
+  }, [fetchStartSeriesPicks]);
 
   const refreshWatchlistPicks = useCallback(() => {
     // Passa os IDs atualmente exibidos como "cooldown"
     const excludeIds = Array.from(shownWatchlistIds.current);
     fetchWatchlistPicks(excludeIds);
   }, [fetchWatchlistPicks]);
+
+  const refreshStartSeriesPicks = useCallback(() => {
+    const excludeIds = Array.from(shownStartSeriesIds.current);
+    fetchStartSeriesPicks(excludeIds);
+  }, [fetchStartSeriesPicks]);
 
   const snoozeItem = useCallback(
     async (contentId: string, durationHours = 4) => {
@@ -276,10 +317,16 @@ export default function AcompanhandoPage() {
     router.push(`/title/${item.media_type}/${item.tmdb_id}`);
   }
 
+  function handleStartSeriesNavigate(item: WatchlistPickItem) {
+    router.push(`/title/tv/${item.tmdb_id}`);
+  }
+
   const sortedContinueItems = useMemo(() => {
     if (continueSortMode === "easy") {
       return [...continueItems].sort(
-        (a, b) => a.remaining_minutes - b.remaining_minutes,
+        (a, b) =>
+          (a.remaining_minutes ?? Number.MAX_SAFE_INTEGER) -
+          (b.remaining_minutes ?? Number.MAX_SAFE_INTEGER),
       );
     }
     // "recent": já vem ordenado por last_watched_at DESC do servidor
@@ -294,7 +341,9 @@ export default function AcompanhandoPage() {
   }, [sortedContinueItems, safeContinuePage, continueItemsPerPage]);
 
   // Reseta para a primeira página ao trocar ordenação ou tamanho de tela
-  useEffect(() => { setContinuePage(1); }, [continueSortMode, continueItemsPerPage]);
+  useEffect(() => {
+    Promise.resolve().then(() => setContinuePage(1));
+  }, [continueSortMode, continueItemsPerPage]);
 
   return (
     <PageShell variant="wide">
@@ -427,6 +476,36 @@ export default function AcompanhandoPage() {
                 />
               </div>
             )}
+          </section>
+        )}
+
+        {/* Boa hora pra começar */}
+        {(isStartSeriesLoading || startSeriesPicks.length > 0) && (
+          <section>
+            <SectionHeader
+              eyebrow="Da sua watchlist"
+              accent="amber"
+              title="Boa hora pra começar"
+              subtitle="Séries salvas que ainda estão intactas, priorizadas por duração, disponibilidade e sinais de relevância."
+              size="sm"
+              action={
+                <button
+                  type="button"
+                  onClick={refreshStartSeriesPicks}
+                  disabled={isStartSeriesLoading}
+                  className="rounded-full border border-white/[0.10] bg-white/[0.04] px-3 py-1 text-[11px] font-bold text-white/45 transition-all hover:text-white/70 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Trocar
+                </button>
+              }
+              className="mb-4"
+            />
+
+            <StartSeriesBanner
+              items={startSeriesPicks}
+              loading={isStartSeriesLoading}
+              onPick={handleStartSeriesNavigate}
+            />
           </section>
         )}
 

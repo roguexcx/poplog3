@@ -15,10 +15,73 @@ export type TitleProvider = {
   name: string;
   logoUrl: string | null;
   type: TitleProviderType;
+  providerId?: number | string | null;
+  tmdbProviderId?: number | string | null;
+  providerName?: string | null;
+  logoPath?: string | null;
   deepLink?: string | null;
+  deeplink?: string | null;
   quality?: string | null;
   country?: string;
   source?: TitleProviderSource | string;
+  normalizedType?: "subscription" | "rent" | "buy" | "free" | "ads";
+  confidence?: string;
+  priorityScore?: number;
+  isPreferred?: boolean;
+};
+
+export type TitleAvailabilityWindowStatus =
+  | "no_data"
+  | "unavailable"
+  | "cinema"
+  | "digital_prediction"
+  | "pvod_available_us"
+  | "vod_available_us"
+  | "vod_available_br"
+  | "streaming_confirmed_us"
+  | "streaming_confirmed_br"
+  | "partial"
+  | "regional";
+
+export type TitleAvailabilityRegion = {
+  region: "BR" | "US";
+  providers: TitleProvider[];
+  primaryProvider: TitleProvider | null;
+  subscriptionProviders: TitleProvider[];
+  vodProviders: TitleProvider[];
+  hasSubscription: boolean;
+  hasVod: boolean;
+  source: string;
+  lastSyncedAt: string | null;
+};
+
+export type TitleAvailability = {
+  tmdbId: number;
+  mediaType: TitleMediaType;
+  primaryRegion: "BR";
+  radarRegion: "US";
+  status: TitleAvailabilityWindowStatus;
+  offerType:
+    | "subscription"
+    | "rent"
+    | "buy"
+    | "free"
+    | "ads"
+    | "pvod"
+    | "cinema"
+    | "none"
+    | "unknown";
+  primaryProvider: TitleProvider | null;
+  regions: {
+    BR: TitleAvailabilityRegion;
+    US: TitleAvailabilityRegion;
+  };
+  isFallback: boolean;
+  fallbackSource: "watchmode" | "movieofthenight" | null;
+  confidence: string;
+  refreshedAt: string;
+  nextRefreshAfterDays: number;
+  explanation: string;
 };
 
 export type TitleCastMember = {
@@ -136,6 +199,9 @@ export type TitleMetadataBlock = {
   collection?: TitleCollection | null;
   networks?: TitleNetwork[];
   episodeRunTimeMinutes?: number | null;
+  episodeRunTimeEstimated?: boolean;
+  totalRuntimeMinutes?: number | null;
+  totalRuntimeEstimated?: boolean;
   productionStatus?: string | null;
   inProduction?: boolean | null;
   seriesType?: string | null;
@@ -192,6 +258,10 @@ export type TitlePageData = {
   posterUrl?: string | null;
   backdropUrl?: string | null;
   runtime?: number | null;
+  episodeRunTimeMinutes?: number | null;
+  runtimeEstimated?: boolean;
+  totalRuntimeMinutes?: number | null;
+  totalRuntimeEstimated?: boolean;
   voteAverage?: number | null;
   genres?: string[];
   status?: string | null;
@@ -205,6 +275,7 @@ export type TitlePageData = {
   /** Apenas para series, quando o usuario esta logado. */
   userSeriesProgress?: TitleSeriesProgress | null;
   providers?: TitleProvider[];
+  availability?: TitleAvailability;
   country?: string;
   cast?: TitleCastMember[];
   crew?: TitleCrewMember[];

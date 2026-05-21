@@ -1,6 +1,7 @@
 import { logApiCall } from "@/server/engine-logger";
 import { motnFetch } from "@/server/api-clients/movieofthenight/client";
 import type { MotnTitleResponse } from "@/server/api-clients/movieofthenight/types";
+import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import { watchmodeFetch } from "@/server/api-clients/watchmode/client";
 import type { WatchmodeSource } from "@/server/api-clients/watchmode/types";
 
@@ -59,6 +60,27 @@ export type SyncAvailabilityResult = {
     motn: "ok" | "empty" | "failed" | "not_attempted";
   };
 };
+
+async function fetchTmdbWatchProviders(
+  tmdbId: number,
+  mediaType: MediaType,
+): Promise<TmdbWatchProvidersPayload | null> {
+  try {
+    return await tmdbFetch<TmdbWatchProvidersPayload>(
+      `/${mediaType}/${tmdbId}/watch/providers`,
+      {
+        params: { language: "en-US" },
+        revalidate: 60 * 60 * 12,
+      },
+    );
+  } catch (error) {
+    console.warn(
+      "[sync-availability] TMDB watch/providers falhou:",
+      error instanceof Error ? error.message : error,
+    );
+    return null;
+  }
+}
 
 function tmdbCategoryToType(category: string): AvailabilityType | null {
   switch (category) {
@@ -300,7 +322,11 @@ export async function syncAvailability(
     motn: "not_attempted",
   };
 
-  const tmdbRows = extractTmdbRows(input.tmdbPayload?.["watch/providers"], country);
+  const tmdbPayload =
+    input.tmdbPayload?.["watch/providers"] ??
+    (await fetchTmdbWatchProviders(tmdbId, mediaType));
+
+  const tmdbRows = extractTmdbRows(tmdbPayload, country);
 
   if (tmdbRows.length > 0) {
     diagnostics.tmdb = "ok";

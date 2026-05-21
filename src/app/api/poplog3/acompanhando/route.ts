@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { supabaseAdmin } from "@/server/supabase/admin";
+import { upsertTitleState } from "@/server/state/user-title-state";
 import { isValidSeason, mapSeriesStatus, type SeriesStatus } from "@/lib/series";
 import type {
   ContentType,
@@ -79,6 +80,13 @@ type DbCuradoriaOverlay = {
   streaming_platform: string | null;
   streaming_available_since: string | null;
   available_on_vod: boolean | null;
+  vod_available_since: string | null;
+};
+
+type AvailabilityOverlay = {
+  streaming_platform: string | null;
+  streaming_available_since: string | null;
+  available_on_vod: boolean;
   vod_available_since: string | null;
 };
 
@@ -567,6 +575,49 @@ export async function GET() {
     overlayByContentId.set(ov.content_id, ov);
   }
 
+  const availabilityByContentId = new Map<string, AvailabilityOverlay>();
+  if (tmdbIds.length > 0) {
+    const { data: availabilityRows } = await supabaseAdmin
+      .from("poplog3_title_availability")
+      .select("tmdb_id, media_type, provider_name, availability_type, country, last_synced_at")
+      .in("tmdb_id", tmdbIds)
+      .in("media_type", mediaTypeValues)
+      .in("country", ["BR", "US"]);
+
+    for (const row of (availabilityRows ?? []) as Array<{
+      tmdb_id: number;
+      media_type: MediaType;
+      provider_name: string | null;
+      availability_type: string | null;
+      country: string | null;
+      last_synced_at: string | null;
+    }>) {
+      const contentId = toContentId(row.media_type, row.tmdb_id);
+      const current = availabilityByContentId.get(contentId) ?? {
+        streaming_platform: null,
+        streaming_available_since: null,
+        available_on_vod: false,
+        vod_available_since: null,
+      };
+      const isSubscription =
+        row.country === "BR" &&
+        ["streaming", "subscription", "free", "ads"].includes(row.availability_type ?? "");
+      const isVod =
+        ["rent", "buy"].includes(row.availability_type ?? "") &&
+        (row.country === "BR" || row.country === "US");
+
+      availabilityByContentId.set(contentId, {
+        streaming_platform:
+          current.streaming_platform ?? (isSubscription ? row.provider_name : null),
+        streaming_available_since:
+          current.streaming_available_since ?? (isSubscription ? row.last_synced_at : null),
+        available_on_vod: current.available_on_vod || isVod,
+        vod_available_since:
+          current.vod_available_since ?? (isVod ? row.last_synced_at : null),
+      });
+    }
+  }
+
   const items: UserWatching[] = [];
 
   for (const ut of userTitles) {
@@ -579,6 +630,7 @@ export async function GET() {
     const contentId = toContentId(ut.media_type, ut.tmdb_id);
     const contentType: ContentType = ut.media_type === "tv" ? "serie" : "filme";
     const overlay = overlayByContentId.get(contentId);
+    const availabilityOverlay = availabilityByContentId.get(contentId);
 
     const watchedEpisodes = watchedBySeries.get(ut.tmdb_id) ?? [];
     const episodeRows = episodesBySeries.get(ut.tmdb_id) ?? [];
@@ -632,10 +684,16 @@ export async function GET() {
       runtime: meta.runtime ?? null,
       watch_progress_minutes: null,
 
-      streaming_platform: overlay?.streaming_platform ?? null,
-      streaming_available_since: overlay?.streaming_available_since ?? null,
-      available_on_vod: overlay?.available_on_vod ?? false,
-      vod_available_since: overlay?.vod_available_since ?? null,
+      streaming_platform:
+        availabilityOverlay?.streaming_platform ?? overlay?.streaming_platform ?? null,
+      streaming_available_since:
+        availabilityOverlay?.streaming_available_since ??
+        overlay?.streaming_available_since ??
+        null,
+      available_on_vod:
+        availabilityOverlay?.available_on_vod ?? overlay?.available_on_vod ?? false,
+      vod_available_since:
+        availabilityOverlay?.vod_available_since ?? overlay?.vod_available_since ?? null,
 
       tmdb_rating: meta.vote_average ?? null,
       user_rating: ut.rating ? Math.round(Number(ut.rating)) : null,
@@ -789,6 +847,15 @@ export async function POST(request: NextRequest) {
         });
 
       if (error) throw new Error(error.message);
+
+      // Sincroniza engine global de estado
+      upsertTitleState({
+        userId: user.id,
+        tmdbId: parsed.tmdbId,
+        mediaType: parsed.mediaType,
+        libraryEntry: { status: "watched", favorite: false, liked: null },
+        event: { type: parsed.mediaType === "movie" ? "movie_watched" : "series_completed" },
+      }).catch((err) => console.error("[acompanhando] upsertTitleState failed", err));
 
       await logCuradoriaSignal(user.id, parsed.contentId, "finished", {
         finishedAt: now,

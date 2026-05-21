@@ -107,7 +107,7 @@ function scoreItem(item: any, prefs: any, now: Date): number {
   }
   const f8 = clamp(f8Base * Math.max(0, 1 - item.hero_shown_count * 0.05));
 
-  let score =
+  const score =
     f1 * 22 + f2 * 20 + f3 * 18 + f4 * 12 + f5 * 10 + f6 * 8 + f7 * 7 + f8 * 8;
 
   const mult =

@@ -10,7 +10,13 @@ import {
 } from "react";
 
 import SectionHeader from "@/components/ui/SectionHeader";
+import { formatRuntimeLabel } from "@/lib/domain-labels";
 
+import {
+  dispatchLibraryStatusChanged as dispatchGlobalLibraryStatusChanged,
+  episodeKey,
+  postEpisodeProgress,
+} from "./episodeProgressClient";
 import type { TitleSeasonInfo, TitleSeriesProgress } from "./types";
 
 type EpisodeDto = {
@@ -145,21 +151,6 @@ function formatAirDate(date: string | null) {
     month: "short",
     year: "numeric",
   });
-}
-
-function formatRuntime(min: number | null) {
-  if (!min || !Number.isFinite(min)) return null;
-
-  if (min < 60) return `${min} min`;
-
-  const h = Math.floor(min / 60);
-  const m = min % 60;
-
-  return m === 0 ? `${h}h` : `${h}h ${m}min`;
-}
-
-function episodeKey(season: number, episode: number) {
-  return `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`;
 }
 
 function getOriginalTmdbImageUrl(url: string | null) {
@@ -354,12 +345,7 @@ export default function TitleEpisodeBrowser({
     Boolean(season) && visibleCount < (season?.episodes.length ?? 0);
 
   function dispatchLibraryStatusChanged(status: string) {
-    if (typeof window === "undefined") return;
-    window.dispatchEvent(
-      new CustomEvent("poplog3:library-status-changed", {
-        detail: { tmdbId: seriesTmdbId, status },
-      }),
-    );
+    dispatchGlobalLibraryStatusChanged(seriesTmdbId, status);
   }
 
   async function doToggleEpisode(
@@ -381,24 +367,13 @@ export default function TitleEpisodeBrowser({
 
     startTransition(async () => {
       try {
-        const res = await fetch("/api/poplog3/episodes", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            seriesTmdbId,
-            seasonNumber,
-            episodeNumber,
-            watched: nextWatched,
-            runtimeMinutes,
-          }),
+        const body = await postEpisodeProgress({
+          seriesTmdbId,
+          seasonNumber,
+          episodeNumber,
+          watched: nextWatched,
+          runtimeMinutes,
         });
-
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-        const body = (await res.json()) as {
-          ok: boolean;
-          progress?: { watchedKeys?: string[] };
-        };
 
         if (body.ok && body.progress?.watchedKeys) {
           setWatchedKeys(new Set(body.progress.watchedKeys));
@@ -435,21 +410,10 @@ export default function TitleEpisodeBrowser({
 
     startTransition(async () => {
       try {
-        const res = await fetch("/api/poplog3/episodes", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            seriesTmdbId,
-            bulk: episodes,
-          }),
+        const body = await postEpisodeProgress({
+          seriesTmdbId,
+          bulk: episodes,
         });
-
-        if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-        const body = (await res.json()) as {
-          ok: boolean;
-          progress?: { watchedKeys?: string[] };
-        };
 
         if (body.ok && body.progress?.watchedKeys) {
           setWatchedKeys(new Set(body.progress.watchedKeys));
@@ -526,25 +490,14 @@ export default function TitleEpisodeBrowser({
     setSeasonSaving(true);
 
     try {
-      const res = await fetch("/api/poplog3/episodes", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          seriesTmdbId,
-          bulk: episodesToMark.map((ep) => ({
-            seasonNumber,
-            episodeNumber: ep.episodeNumber,
-            runtimeMinutes: ep.runtime ?? null,
-          })),
-        }),
+      const body = await postEpisodeProgress({
+        seriesTmdbId,
+        bulk: episodesToMark.map((ep) => ({
+          seasonNumber,
+          episodeNumber: ep.episodeNumber,
+          runtimeMinutes: ep.runtime ?? null,
+        })),
       });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const body = (await res.json()) as {
-        ok: boolean;
-        progress?: { watchedKeys?: string[] };
-      };
 
       if (body.ok && body.progress?.watchedKeys) {
         setWatchedKeys(new Set(body.progress.watchedKeys));
@@ -578,18 +531,10 @@ export default function TitleEpisodeBrowser({
     setSeasonSaving(true);
 
     try {
-      const res = await fetch("/api/poplog3/episodes", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ seriesTmdbId, clearSeason: seasonNumber }),
+      const body = await postEpisodeProgress({
+        seriesTmdbId,
+        clearSeason: seasonNumber,
       });
-
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-
-      const body = (await res.json()) as {
-        ok: boolean;
-        progress?: { watchedKeys?: string[] };
-      };
 
       if (body.ok && body.progress?.watchedKeys) {
         setWatchedKeys(new Set(body.progress.watchedKeys));
@@ -976,7 +921,7 @@ function EpisodeCard({
   onOpen,
 }: EpisodeCardProps) {
   const airDate = formatAirDate(episode.airDate);
-  const runtime = formatRuntime(episode.runtime);
+  const runtime = formatRuntimeLabel(episode.runtime, { spaced: true });
   const isFinale = episode.episodeType === "finale";
   const isPremiere =
     episode.episodeType === "season_premiere" ||
@@ -1166,7 +1111,7 @@ function EpisodeModal({
   onToggle,
 }: EpisodeModalProps) {
   const airDate = formatAirDate(episode.airDate);
-  const runtime = formatRuntime(episode.runtime);
+  const runtime = formatRuntimeLabel(episode.runtime, { spaced: true });
   const aired =
     !episode.airDate || new Date(episode.airDate).getTime() <= Date.now();
 

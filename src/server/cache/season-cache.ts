@@ -34,10 +34,15 @@ export async function getCachedEpisode(
   seriesTmdbId: number,
   seasonNumber: number,
   episodeNumber: number
-): Promise<{ name: string | null; still_path: string | null } | null> {
+): Promise<{
+  name: string | null;
+  still_path: string | null;
+  air_date: string | null;
+  runtime: number | null;
+} | null> {
   const { data, error } = await supabaseAdmin
     .from("poplog3_episodes")
-    .select("name, still_path")
+    .select("name, still_path, air_date, runtime")
     .eq("series_tmdb_id", seriesTmdbId)
     .eq("season_number", seasonNumber)
     .eq("episode_number", episodeNumber)

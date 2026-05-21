@@ -81,6 +81,7 @@ export function normalizeAvailabilityType(
   switch (type) {
     case "flatrate":
     case "subscription":
+    case "streaming":
       return "subscription";
 
     case "free":
@@ -106,6 +107,7 @@ export function normalizeAvailabilityTypeOrNull(
   switch (type) {
     case "flatrate":
     case "subscription":
+    case "streaming":
       return "subscription";
 
     case "free":

@@ -2,7 +2,7 @@ import type { LeavingItem } from "@/app/api/poplog3/agenda/leaving-soon/route";
 import type { NewEpisodeItem } from "@/app/api/poplog3/continuity/new-episodes/route";
 import type { UpcomingEpisodeItem } from "@/app/api/poplog3/continuity/upcoming-episodes/route";
 import { tmdbFetch } from "@/server/api-clients/tmdb/client";
-import { discoverService, type DiscoverMediaItem } from "@/server/agenda/discover-service";
+import type { DiscoverMediaItem } from "@/server/agenda/discover-service";
 import {
   buildTemporalTimeline,
   classifyAirDate,
@@ -21,6 +21,10 @@ import type {
 import { getCachedEpisode, getCachedSeason } from "@/server/cache/season-cache";
 import { getUserTitleStates, type UserTitleState } from "@/server/state/user-title-state";
 import { supabaseAdmin } from "@/server/supabase/admin";
+import { formatEpisodeRuntimeLabel } from "@/lib/domain-labels";
+import { resolveRuntimeByMediaType } from "@/lib/runtime";
+import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
+import { getLeavingSoonAvailabilityEvents } from "@/server/streaming/availability-events";
 
 type TmdbPageResult<T> = {
   page: number;
@@ -332,6 +336,9 @@ async function buildNewEpisodeItems(userId: string | null): Promise<NewEpisodeIt
       getCachedEpisode(state.tmdb_id, state.next_season ?? 1, state.next_episode ?? 1),
     ),
   );
+  const episodeRuntimesBySeries = await getSeriesEpisodeRuntimesMap(
+    active.map((state) => state.tmdb_id),
+  );
 
   return active.slice(0, 12).map((state, index) => {
     const title = titleMap.get(state.tmdb_id);
@@ -341,8 +348,13 @@ async function buildNewEpisodeItems(userId: string | null): Promise<NewEpisodeIt
       ? Math.floor((Date.now() - new Date(lastAirDate).getTime()) / DAY_MS)
       : null;
     const episodeRunTime = Array.isArray(title?.episode_run_time)
-      ? (title.episode_run_time[0] as number | undefined)
-      : undefined;
+      ? (title.episode_run_time as number[])
+      : null;
+    const runtimeResolution = resolveRuntimeByMediaType({
+      mediaType: "tv",
+      episodeRunTime,
+      episodes: episodeRuntimesBySeries.get(state.tmdb_id) ?? null,
+    });
 
     return {
       content_id: `tv-${state.tmdb_id}`,
@@ -362,7 +374,12 @@ async function buildNewEpisodeItems(userId: string | null): Promise<NewEpisodeIt
       next_episode_air_date: state.next_episode_air_date,
       last_air_date: lastAirDate ?? null,
       days_since_new_episode: daysSince,
-      runtime: episodeRunTime ?? (typeof title?.runtime === "number" ? title.runtime : null),
+      runtime: runtimeResolution.minutes,
+      runtime_label: formatEpisodeRuntimeLabel(runtimeResolution.minutes, {
+        estimated: runtimeResolution.estimated,
+      }),
+      season_watched: null,
+      season_total: null,
     };
   });
 }
@@ -432,76 +449,106 @@ async function buildUpcomingEpisodeItems(userId: string | null): Promise<Upcomin
   });
 }
 
-async function fetchLeavingSoon(): Promise<LeavingItem[]> {
-  const apiKey = process.env.MOVIEOFTHENIGHT_API_KEY;
-  if (!apiKey) return [];
+type AvailabilityAgendaRow = {
+  tmdb_id: number;
+  media_type: "movie" | "tv";
+  provider_name: string;
+  provider_logo_path: string | null;
+  availability_type: string;
+  country: string;
+  last_synced_at: string | null;
+};
 
-  try {
-    const url = new URL("https://api.movieofthenight.com/v4/changes");
-    url.searchParams.set("country", "br");
-    url.searchParams.set("change_type", "expiring");
-    for (const catalog of ["netflix", "prime", "disney", "paramount", "apple", "hbo"]) {
-      url.searchParams.append("catalogs", catalog);
-    }
+type AvailabilityTitleRow = {
+  tmdb_id: number;
+  media_type: "movie" | "tv";
+  title: string | null;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  release_date: string | null;
+  first_air_date: string | null;
+  popularity: number | null;
+  vote_average: number | null;
+};
 
-    const response = await fetch(url.toString(), {
-      headers: { "X-API-Key": apiKey },
-      next: { revalidate: 86_400 },
-    });
-    if (!response.ok) return [];
+async function fetchAvailabilityAgendaEvents(input: {
+  country: "BR" | "US";
+  availabilityTypes: string[];
+  eventType: AgendaEventType;
+  baseScore: number;
+  limit?: number;
+}): Promise<AgendaEvent[]> {
+  const { data: availabilityRows } = await supabaseAdmin
+    .from("poplog3_title_availability")
+    .select("tmdb_id, media_type, provider_name, provider_logo_path, availability_type, country, last_synced_at")
+    .eq("country", input.country)
+    .in("availability_type", input.availabilityTypes)
+    .order("last_synced_at", { ascending: false })
+    .limit(input.limit ?? 30);
 
-    const data = (await response.json()) as {
-      changes?: Array<{
-        showId?: string;
-        service?: {
-          id?: string;
-          name?: string;
-          imageSet?: { lightThemeImage?: string };
-        };
-        expiresOn?: number;
-      }>;
-      shows?: Record<
-        string,
-        {
-          title?: string;
-          showType?: string;
-          tmdbId?: string;
-          imageSet?: {
-            verticalPoster?: { w240?: string; w360?: string };
-            horizontalBackdrop?: { w720?: string };
-          };
-        }
-      >;
-    };
+  const rows = (availabilityRows ?? []) as AvailabilityAgendaRow[];
+  if (!rows.length) return [];
 
-    const items: LeavingItem[] = [];
-    const seen = new Set<string>();
-    for (const change of data.changes ?? []) {
-      if (!change.showId || !change.expiresOn) continue;
-      const show = data.shows?.[change.showId];
-      const tmdbId = show?.tmdbId ? Number(show.tmdbId) : null;
-      if (!show || !tmdbId) continue;
-      const daysLeft = Math.ceil((change.expiresOn * 1000 - Date.now()) / DAY_MS);
-      if (daysLeft < 0 || daysLeft > 30) continue;
-      const key = `${change.showId}-${change.service?.id ?? ""}`;
-      if (seen.has(key)) continue;
+  const titleKeys = rows.map((row) => `${row.media_type}:${row.tmdb_id}`);
+  const movieIds = rows.filter((row) => row.media_type === "movie").map((row) => row.tmdb_id);
+  const tvIds = rows.filter((row) => row.media_type === "tv").map((row) => row.tmdb_id);
+
+  const [movieTitles, tvTitles] = await Promise.all([
+    movieIds.length
+      ? supabaseAdmin
+          .from("poplog3_titles")
+          .select("tmdb_id, media_type, title, poster_path, backdrop_path, release_date, first_air_date, popularity, vote_average")
+          .eq("media_type", "movie")
+          .in("tmdb_id", movieIds)
+      : Promise.resolve({ data: [] }),
+    tvIds.length
+      ? supabaseAdmin
+          .from("poplog3_titles")
+          .select("tmdb_id, media_type, title, poster_path, backdrop_path, release_date, first_air_date, popularity, vote_average")
+          .eq("media_type", "tv")
+          .in("tmdb_id", tvIds)
+      : Promise.resolve({ data: [] }),
+  ]);
+
+  const titleMap = new Map<string, AvailabilityTitleRow>(
+    ([...(movieTitles.data ?? []), ...(tvTitles.data ?? [])] as AvailabilityTitleRow[]).map((title) => [
+      `${title.media_type}:${title.tmdb_id}`,
+      title,
+    ]),
+  );
+
+  const seen = new Set<string>();
+
+  return rows
+    .filter((row) => {
+      const key = `${row.media_type}:${row.tmdb_id}:${row.provider_name}`;
+      if (seen.has(key)) return false;
       seen.add(key);
-      items.push({
-        id: tmdbId,
-        media_type: show.showType === "movie" ? "movie" : "tv",
-        title: show.title ?? `Título ${tmdbId}`,
-        poster_url: show.imageSet?.verticalPoster?.w360 ?? show.imageSet?.verticalPoster?.w240 ?? null,
-        backdrop_url: show.imageSet?.horizontalBackdrop?.w720 ?? null,
-        platform_name: change.service?.name ?? change.service?.id ?? "Streaming",
-        platform_logo: change.service?.imageSet?.lightThemeImage ?? null,
-        leaving_date: new Date(change.expiresOn * 1000).toISOString().slice(0, 10),
-        days_left: daysLeft,
-      });
-    }
-    return items.sort((a, b) => a.days_left - b.days_left).slice(0, 20);
-  } catch {
-    return [];
-  }
+      return titleKeys.includes(`${row.media_type}:${row.tmdb_id}`);
+    })
+    .map((row) => {
+      const title = titleMap.get(`${row.media_type}:${row.tmdb_id}`);
+      const airDate = row.last_synced_at?.slice(0, 10) ?? null;
+      return {
+        id: `${input.eventType}-${row.country}-${row.media_type}-${row.tmdb_id}-${row.provider_name}`,
+        type: input.eventType,
+        tmdbId: row.tmdb_id,
+        mediaType: row.media_type,
+        title: title?.title ?? `Título ${row.tmdb_id}`,
+        posterPath: title?.poster_path ?? null,
+        backdropPath: title?.backdrop_path ?? null,
+        layer: classifyAirDate(airDate),
+        airDate,
+        daysUntil: airDate ? daysBetweenDates(airDate) : null,
+        provider: {
+          name: row.provider_name,
+          logo: row.provider_logo_path,
+          type: row.availability_type,
+        },
+        visualWeight: (title?.popularity ?? 0) > 300 ? "hero" : "card",
+        score: input.baseScore + (title?.popularity ?? 0) / 20 + (title?.vote_average ?? 0),
+      } satisfies AgendaEvent;
+    });
 }
 
 async function enrichPersonalEvents(
@@ -603,21 +650,10 @@ export class AgendaEngine {
     const now = new Date();
     const weekRange: DateRange = { start: dateAdd(0, now), end: dateAdd(7, now) };
 
-    const providerTasks = PROVIDERS.map(async (provider) => {
-      const items = await discoverService
-        .discoverByProvider([provider.id], region, weekRange, "tv")
-        .catch(() => []);
-      return {
-        provider,
-        events: items
-          .slice(0, 12)
-          .map((item) => eventFromDiscover(item, "tv", "episode_new", 45, provider)),
-      };
-    });
-
     const [
       legacy,
-      providerResults,
+      streamingArrivals,
+      digitalRadar,
       userStates,
       userLibraryIds,
       newEpisodes,
@@ -625,12 +661,23 @@ export class AgendaEngine {
       leavingSoonItems,
     ] = await Promise.all([
       fetchLegacyAgenda(),
-      Promise.all(providerTasks),
+      fetchAvailabilityAgendaEvents({
+        country: "BR",
+        availabilityTypes: ["streaming", "subscription", "free", "ads"],
+        eventType: "movie_streaming",
+        baseScore: 70,
+      }),
+      fetchAvailabilityAgendaEvents({
+        country: "US",
+        availabilityTypes: ["rent", "buy"],
+        eventType: "movie_digital",
+        baseScore: 62,
+      }),
       userId ? getUserTitleStates(userId, { limit: 250 }) : Promise.resolve([]),
       fetchUserLibraryIds(userId),
       buildNewEpisodeItems(userId),
       buildUpcomingEpisodeItems(userId),
-      fetchLeavingSoon(),
+      getLeavingSoonAvailabilityEvents(),
     ]);
 
     const personalEvents = await enrichPersonalEvents(
@@ -661,12 +708,18 @@ export class AgendaEngine {
     const cinemaHighlights = legacy.nowPlaying
       .slice(0, 12)
       .map((movie) => eventFromLegacyMovie(movie, "movie_theatrical", 50));
-    const soonOnStreaming = legacy.upcoming
-      .slice(0, 12)
-      .map((movie) => eventFromLegacyMovie(movie, "movie_streaming", 35));
+    const soonOnStreaming = [...streamingArrivals, ...digitalRadar]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 24);
 
     const byProvider = Object.fromEntries(
-      providerResults.map(({ provider, events }) => [provider.name, events]),
+      [...streamingArrivals, ...digitalRadar].reduce((groups, event) => {
+        const key = event.provider?.name ?? "Disponibilidade";
+        const list = groups.get(key) ?? [];
+        list.push(event);
+        groups.set(key, list);
+        return groups;
+      }, new Map<string, AgendaEvent[]>()),
     );
 
     const personal = [...personalEvents, ...leavingEvents].sort((a, b) => b.score - a.score);
@@ -674,7 +727,6 @@ export class AgendaEngine {
       ...personal,
       ...cinemaHighlights,
       ...soonOnStreaming,
-      ...providerResults.flatMap((result) => result.events),
     ];
 
     return {

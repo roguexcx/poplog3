@@ -27,13 +27,13 @@ const TABS: {
   description: string;
   getCount:    (s: LibraryTabsProps["stats"]) => number | null;
 }[] = [
-  { id: "watchlist",    shortLabel: "Lista",     description: "Separados para depois",     getCount: (s) => s.watchlist  },
+  { id: "watchlist",    shortLabel: "Watchlist",     description: "Separados para depois",     getCount: (s) => s.watchlist  },
   { id: "favorites",    shortLabel: "Favoritos", description: "O que você mais gosta",     getCount: (s) => s.favorites  },
-  { id: "watching",     shortLabel: "Vendo",     description: "Em andamento",              getCount: (s) => s.watching   },
-  { id: "coming-soon",  shortLabel: "Breve",     description: "Ainda não lançados",        getCount: (s) => s.comingSoon },
-  { id: "watched",      shortLabel: "Vistos",    description: "Histórico finalizado",      getCount: (s) => s.watched    },
+  { id: "watching",     shortLabel: "Maratonando",     description: "Em andamento",              getCount: (s) => s.watching   },
+  { id: "coming-soon",  shortLabel: "Em Breve",     description: "Ainda não lançados",        getCount: (s) => s.comingSoon },
+  { id: "watched",      shortLabel: "Concluídos",    description: "Histórico finalizado",      getCount: (s) => s.watched    },
   { id: "all",          shortLabel: "Tudo",      description: "Toda sua coleção",          getCount: (s) => s.total      },
-  { id: "abandoned",    shortLabel: "Dropados",  description: "Ficaram pelo caminho",      getCount: () => null          },
+  { id: "abandoned",    shortLabel: "Abandonados",  description: "Ficaram pelo caminho",      getCount: () => null          },
   { id: "fridge",       shortLabel: "Geladeira", description: "Guardados para outro clima",getCount: () => null          },
 ];
 

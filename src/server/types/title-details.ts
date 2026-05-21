@@ -21,6 +21,8 @@ export type PoplogTitleVideo = {
   name: string;
   site: string;
   type: string;
+  official?: boolean | null;
+  iso_639_1?: string | null;
 };
 
 export type PoplogTitleGenre = {

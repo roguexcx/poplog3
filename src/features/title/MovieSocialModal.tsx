@@ -1,5 +1,7 @@
 "use client";
 
+import ContextualAttribution from "@/components/attribution/ContextualAttribution";
+import SourceChip from "@/components/attribution/SourceChip";
 import Image from "next/image";
 import { useEffect, useMemo, useState } from "react";
 
@@ -13,29 +15,46 @@ type MovieSocialModalProps = {
   voteAverage?: number | null;
   watched: boolean;
   saving?: boolean;
+  mediaType?: "movie" | "tv";
   onClose: () => void;
   onToggleWatched: (next: boolean) => void;
 };
 
-type MovieCommentDto = {
-  id: number | string;
-  originalComment?: string | null;
-  translatedComment?: string | null;
-  displayComment?: string | null;
-  translationStatus?: string | null;
+type UnifiedSocialComment = {
+  id: string;
+  source: "tmdb" | "trakt";
+  author: string;
+  content: string;
+  originalContent?: string;
+  translationStatus?: "translated" | "original";
+  sourceLanguage?: string | null;
   spoiler?: boolean;
-  review?: boolean;
   likes?: number;
-  user?: {
-    username?: string | null;
-  } | null;
 };
 
-type MovieCommentsResponse = {
-  total?: number;
-  comments?: MovieCommentDto[];
+type SocialCommentsResponse = {
+  ok?: boolean;
+  counts?: {
+    all?: number;
+    tmdb?: number;
+    trakt?: number;
+  };
+  comments?: {
+    all?: UnifiedSocialComment[];
+    tmdb?: UnifiedSocialComment[];
+    trakt?: UnifiedSocialComment[];
+  };
   error?: string;
+  message?: string;
 };
+
+type CommentsCount = {
+  all: number;
+  tmdb: number;
+  trakt: number;
+};
+
+type SocialTab = "all" | "tmdb" | "trakt" | "reddit";
 
 type RedditCommentDto = {
   id: string;
@@ -83,13 +102,20 @@ function getOriginalTmdbImageUrl(url: string | null) {
 
 function getRedditCategoryLabel(category: string) {
   switch (category) {
-    case "movie_official_discussion": return "Discussão oficial";
-    case "review":    return "Review";
-    case "reaction":  return "Reação";
-    case "explained": return "Explicação";
-    case "theory":    return "Teoria";
-    case "movie_general": return "Geral";
-    default: return category;
+    case "movie_official_discussion":
+      return "Discussão oficial";
+    case "review":
+      return "Review";
+    case "reaction":
+      return "Reação";
+    case "explained":
+      return "Explicação";
+    case "theory":
+      return "Teoria";
+    case "movie_general":
+      return "Geral";
+    default:
+      return category;
   }
 }
 
@@ -99,22 +125,22 @@ function getRedditHeatLabel(thread: RedditThreadDto) {
     (thread.totalUsefulComments || 0) +
     (thread.topComments?.length || 0) * 4;
 
-  if (heat >= 300) return "Comunidade em choque";
+  if (heat >= 300) return "Comunidade em alta";
   if (heat >= 180) return "Discussão intensa";
-  if (heat >= 90)  return "Muito comentado";
+  if (heat >= 90) return "Muito comentado";
   return "Conversando sobre";
 }
 
 export default function MovieSocialModal({
   movieTmdbId,
   movieTitle,
-  overview,
   backdropUrl,
   year,
   runtime,
   voteAverage,
   watched,
   saving = false,
+  mediaType = "movie",
   onClose,
   onToggleWatched,
 }: MovieSocialModalProps) {
@@ -123,61 +149,102 @@ export default function MovieSocialModal({
     [backdropUrl],
   );
 
-  // ── Trakt ──────────────────────────────────────────────────────────
-  const [comments, setComments] = useState<MovieCommentDto[]>([]);
-  const [commentsTotal, setCommentsTotal] = useState<number | null>(null);
+  const [allComments, setAllComments] = useState<UnifiedSocialComment[]>([]);
+  const [tmdbComments, setTmdbComments] = useState<UnifiedSocialComment[]>([]);
+  const [traktComments, setTraktComments] = useState<UnifiedSocialComment[]>([]);
+  const [commentsCount, setCommentsCount] = useState<CommentsCount>({
+    all: 0,
+    tmdb: 0,
+    trakt: 0,
+  });
+
   const [commentsLoading, setCommentsLoading] = useState(true);
   const [commentsError, setCommentsError] = useState<string | null>(null);
+  const [commentsRefreshToken, setCommentsRefreshToken] = useState(0);
+
+  const [redditThreads, setRedditThreads] = useState<RedditThreadDto[]>([]);
+  const [redditLoading, setRedditLoading] = useState(false);
+  const [redditError, setRedditError] = useState<string | null>(null);
+  const [redditRequested, setRedditRequested] = useState(false);
+
+  const [socialTab, setSocialTab] = useState<SocialTab>("all");
+
   const [originalCommentIds, setOriginalCommentIds] = useState<Set<string>>(
     () => new Set(),
   );
   const [revealedSpoilers, setRevealedSpoilers] = useState<Set<string>>(
     () => new Set(),
   );
-  const [commentsRefreshToken, setCommentsRefreshToken] = useState(0);
 
-  // ── Reddit ─────────────────────────────────────────────────────────
-  const [redditThreads, setRedditThreads] = useState<RedditThreadDto[]>([]);
-  const [redditLoading, setRedditLoading] = useState(false);
-  const [redditError, setRedditError] = useState<string | null>(null);
+  const mixedAllComments = useMemo(() => {
+  const mixed = [...tmdbComments, ...traktComments];
 
-  // ── UI ─────────────────────────────────────────────────────────────
-  const [socialTab, setSocialTab] = useState<"trakt" | "reddit">("trakt");
+  return mixed.sort(() => Math.random() - 0.5);
+}, [tmdbComments, traktComments]);
 
-  // ── Trakt useEffect ────────────────────────────────────────────────
+const activeComments =
+  socialTab === "tmdb"
+    ? tmdbComments
+    : socialTab === "trakt"
+      ? traktComments
+      : mixedAllComments;
+
   useEffect(() => {
     let cancelled = false;
 
     setCommentsLoading(true);
     setCommentsError(null);
 
-    const params = new URLSearchParams({ tmdbId: String(movieTmdbId) });
+    const params = new URLSearchParams({
+      tmdbId: String(movieTmdbId),
+    });
 
-    fetch(`/api/dev/trakt-movie-comments-translated?${params.toString()}`, {
+    fetch(`/api/social/movie-comments?${params.toString()}`, {
       cache: "no-store",
     })
       .then(async (res) => {
-        const body = (await res.json().catch(() => null)) as MovieCommentsResponse | null;
+        const body = (await res.json().catch(() => null)) as
+          | SocialCommentsResponse
+          | null;
+
         if (cancelled) return null;
-        if (!res.ok) throw new Error(body?.error || `HTTP ${res.status}`);
-        if (body?.error) throw new Error(body.error);
+        if (!res.ok) throw new Error(body?.message || body?.error || `HTTP ${res.status}`);
+        if (body?.error) throw new Error(body.message || body.error);
+
         return body;
       })
       .then((body) => {
         if (cancelled || !body) return;
-        const nextComments = Array.isArray(body.comments) ? body.comments : [];
-        const nextTotal =
-          typeof body.total === "number" ? body.total : nextComments.length;
-        setComments(nextComments);
-        setCommentsTotal(nextTotal);
+
+        const nextAll = Array.isArray(body.comments?.all)
+          ? body.comments.all
+          : [];
+        const nextTmdb = Array.isArray(body.comments?.tmdb)
+          ? body.comments.tmdb
+          : [];
+        const nextTrakt = Array.isArray(body.comments?.trakt)
+          ? body.comments.trakt
+          : [];
+
+        setAllComments(nextAll);
+        setTmdbComments(nextTmdb);
+        setTraktComments(nextTrakt);
+        setCommentsCount({
+          all: body.counts?.all ?? nextAll.length,
+          tmdb: body.counts?.tmdb ?? nextTmdb.length,
+          trakt: body.counts?.trakt ?? nextTrakt.length,
+        });
       })
       .catch((err) => {
         if (cancelled) return;
+
         setCommentsError(
-          err instanceof Error ? err.message : "Erro ao carregar reações",
+          err instanceof Error ? err.message : "Erro ao carregar comentários",
         );
-        setComments([]);
-        setCommentsTotal(0);
+        setAllComments([]);
+        setTmdbComments([]);
+        setTraktComments([]);
+        setCommentsCount({ all: 0, tmdb: 0, trakt: 0 });
       })
       .finally(() => {
         if (cancelled) return;
@@ -190,17 +257,17 @@ export default function MovieSocialModal({
     };
   }, [movieTmdbId, commentsRefreshToken]);
 
-  // ── Reddit useEffect ───────────────────────────────────────────────
-  useEffect(() => {
-    let cancelled = false;
+  function loadReddit() {
+    if (redditRequested || redditLoading) return;
 
+    setRedditRequested(true);
     setRedditThreads([]);
     setRedditError(null);
     setRedditLoading(true);
 
     const params = new URLSearchParams({
       tmdbId: String(movieTmdbId),
-      mediaType: "movie",
+      mediaType,
     });
 
     fetch(`/api/social/reddit/contextual?${params.toString()}`, {
@@ -208,105 +275,96 @@ export default function MovieSocialModal({
     })
       .then(async (res) => {
         const body = (await res.json().catch(() => null)) as RedditResponse | null;
-        if (cancelled) return null;
-        if (!res.ok)
+
+        if (!res.ok) {
           throw new Error(body?.message || body?.error || `HTTP ${res.status}`);
-        if (body?.error) throw new Error(body.message || body.error);
+        }
+
+        if (body?.error) {
+          throw new Error(body.message || body.error);
+        }
+
         return body;
       })
       .then((body) => {
-        if (cancelled || !body) return;
-        setRedditThreads(Array.isArray(body.threads) ? body.threads : []);
+        setRedditThreads(Array.isArray(body?.threads) ? body.threads : []);
       })
       .catch((err) => {
-        if (cancelled) return;
         setRedditError(
           err instanceof Error ? err.message : "Erro ao carregar Reddit",
         );
         setRedditThreads([]);
       })
       .finally(() => {
-        if (cancelled) return;
         setRedditLoading(false);
       });
+  }
 
-    return () => {
-      cancelled = true;
-    };
-  }, [movieTmdbId]);
-
-  // ── Keyboard / scroll lock ─────────────────────────────────────────
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === "Escape") onClose();
     }
+
     document.addEventListener("keydown", handleKeyDown);
     document.body.style.overflow = "hidden";
+
     return () => {
       document.removeEventListener("keydown", handleKeyDown);
       document.body.style.overflow = "";
     };
   }, [onClose]);
 
-  const topRedditThread = redditThreads[0] ?? null;
-
-  const socialTabs = [
-    {
-      id: "trakt" as const,
-      label: "Trakt",
-      count: commentsTotal || comments.length || 0,
-    },
-    {
-      id: "reddit" as const,
-      label: "Reddit",
-      count: redditThreads.length,
-    },
+  const socialTabs: Array<{
+    id: SocialTab;
+    label: string;
+    count?: number;
+    loading?: boolean;
+  }> = [
+    { id: "all", label: "Todos", count: commentsCount.all, loading: commentsLoading },
+    { id: "tmdb", label: "TMDB", count: commentsCount.tmdb, loading: commentsLoading },
+    { id: "trakt", label: "Trakt", count: commentsCount.trakt, loading: commentsLoading },
+    { id: "reddit", label: "Reddit", count: redditThreads.length, loading: redditLoading },
   ];
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/78 px-3 py-3 backdrop-blur-xl sm:items-center sm:px-5 sm:py-6"
+      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/70 px-3 py-3 backdrop-blur-sm sm:items-center sm:px-5 sm:py-6"
       role="dialog"
       aria-modal="true"
       aria-label={`Contexto social de ${movieTitle}`}
       onMouseDown={onClose}
     >
       <div
-        className="relative flex max-h-[92vh] w-full max-w-5xl flex-col overflow-hidden rounded-[1.7rem] border border-white/[0.10] bg-zinc-950 shadow-[0_28px_120px_rgba(0,0,0,0.75)]"
+        className="relative flex max-h-[92vh] w-full max-w-6xl flex-col overflow-hidden rounded-[1.7rem] border border-white/[0.10] bg-zinc-950 shadow-[0_20px_80px_rgba(0,0,0,0.55)]"
         onMouseDown={(event) => event.stopPropagation()}
       >
         <button
           type="button"
           onClick={onClose}
-          className="absolute right-3 top-3 z-20 grid h-9 w-9 place-items-center rounded-full border border-white/[0.12] bg-black/55 text-lg leading-none text-white/80 backdrop-blur-md transition hover:border-white/[0.25] hover:bg-white/[0.10] hover:text-white"
+          className="absolute right-3 top-3 z-20 grid h-9 w-9 place-items-center rounded-full border border-white/[0.12] bg-black/55 text-lg leading-none text-white/80 backdrop-blur-sm transition hover:border-white/[0.25] hover:bg-white/[0.10] hover:text-white"
           aria-label="Fechar modal"
         >
           ×
         </button>
 
         <div className="max-h-[92vh] overflow-y-auto overscroll-contain scrollbar-thin scrollbar-track-white/[0.03] scrollbar-thumb-white/[0.16]">
-          {/* Hero */}
-          <div className="relative min-h-[260px] overflow-hidden sm:min-h-[360px]">
+          <div className="relative min-h-[330px] overflow-hidden sm:min-h-[430px]">
             {modalBackdropUrl ? (
               <Image
                 src={modalBackdropUrl}
                 alt={movieTitle}
                 fill
                 unoptimized
-                sizes="(max-width: 768px) 100vw, 1024px"
-                className="object-cover brightness-[0.75] saturate-[1.05]"
+                sizes="(max-width: 768px) 100vw, 1180px"
+                className="object-cover brightness-[0.78] saturate-[1.04]"
                 priority
               />
             ) : (
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_15%,rgba(99,102,241,0.22),transparent_42%),linear-gradient(135deg,#111827,#020617_65%,#000)]" />
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_15%,rgba(99,102,241,0.20),transparent_42%),linear-gradient(135deg,#111827,#020617_65%,#000)]" />
             )}
 
             <div
-              className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/42 to-black/20"
-              aria-hidden
-            />
-            <div
-              className="absolute inset-0 bg-[radial-gradient(circle_at_20%_100%,rgba(99,102,241,0.18),transparent_44%)]"
+              className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-zinc-950/42 to-black/18"
               aria-hidden
             />
 
@@ -317,7 +375,7 @@ export default function MovieSocialModal({
                   onClick={() => onToggleWatched(!watched)}
                   disabled={saving}
                   className={[
-                    "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] backdrop-blur-md transition duration-200",
+                    "inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[10px] font-black uppercase tracking-[0.16em] backdrop-blur-sm transition duration-200",
                     watched
                       ? "border-emerald-300/40 bg-emerald-500/22 text-emerald-100 hover:border-emerald-300/60 hover:bg-emerald-500/35"
                       : "border-white/[0.14] bg-black/45 text-white/60 hover:border-indigo-300/40 hover:bg-indigo-500/20 hover:text-indigo-100",
@@ -333,8 +391,8 @@ export default function MovieSocialModal({
                   )}
                 </button>
 
-                <span className="rounded-md border border-white/[0.10] bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white/40">
-                  Filme
+                <span className="rounded-md border border-white/[0.10] bg-white/[0.04] px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white/45">
+                  {mediaType === "tv" ? "Série" : "Filme"}
                 </span>
               </div>
 
@@ -346,13 +404,17 @@ export default function MovieSocialModal({
                 <div className="mt-3 flex flex-wrap items-center gap-2 text-[11px] font-bold uppercase tracking-[0.16em] text-white/55">
                   {year && <span>{year}</span>}
                   {year && runtime && (
-                    <span aria-hidden className="text-white/25">·</span>
+                    <span aria-hidden className="text-white/25">
+                      ·
+                    </span>
                   )}
                   {runtime && <span>{runtime}</span>}
                   {typeof voteAverage === "number" && voteAverage > 0 && (
                     <>
                       {(year || runtime) && (
-                        <span aria-hidden className="text-white/25">·</span>
+                        <span aria-hidden className="text-white/25">
+                          ·
+                        </span>
                       )}
                       <span className="text-amber-100">
                         ★ {voteAverage.toFixed(1)}
@@ -364,37 +426,14 @@ export default function MovieSocialModal({
             </div>
           </div>
 
-          {/* Conteúdo */}
           <div className="flex flex-col gap-6 p-5 sm:p-7">
-            {/* Sinopse */}
-            <div className="w-full">
-              <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] p-4 sm:p-5">
-                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-200/80">
-                  Sinopse
-                </p>
-                <p className="mt-3 text-[13.5px] leading-7 text-white/68 sm:text-[14px]">
-                  {overview ||
-                    "Ainda não há sinopse disponível para esta produção cinematográfica."}
-                </p>
-              </div>
-            </div>
-
-            {/* Área social */}
             <div className="flex flex-col gap-4">
-              {/* Header */}
               <div className="flex items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div className="relative flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-fuchsia-500/10">
-                    {commentsLoading ? (
+                    {commentsLoading || redditLoading ? (
                       <span className="h-2 w-2 animate-pulse rounded-full bg-fuchsia-400/70" />
-                    ) : comments.length > 0 ? (
-                      <>
-                        <span className="absolute inset-0 animate-ping rounded-full bg-fuchsia-500/20" />
-                        <span className="h-2 w-2 rounded-full bg-fuchsia-400" />
-                      </>
-                    ) : redditLoading ? (
-                      <span className="h-2 w-2 animate-pulse rounded-full bg-fuchsia-400/40" />
-                    ) : redditThreads.length > 0 ? (
+                    ) : commentsCount.all > 0 || redditThreads.length > 0 ? (
                       <>
                         <span className="absolute inset-0 animate-ping rounded-full bg-fuchsia-500/20" />
                         <span className="h-2 w-2 rounded-full bg-fuchsia-400" />
@@ -410,18 +449,18 @@ export default function MovieSocialModal({
                     </p>
                     <h3 className="mt-0.5 text-[15px] font-bold tracking-[-0.025em] text-white/90">
                       {commentsLoading
-                        ? "Medindo o buzz do público…"
-                        : commentsTotal && commentsTotal > 0
-                          ? `${commentsTotal} ${commentsTotal === 1 ? "reação no Trakt" : "reações no Trakt"} · ${
-                              redditLoading
-                                ? "Reddit carregando…"
-                                : `${redditThreads.length} ${redditThreads.length === 1 ? "thread" : "threads"} no Reddit`
-                            }`
-                          : redditLoading
-                            ? "Reddit carregando…"
-                            : redditThreads.length > 0
-                              ? `${redditThreads.length} ${redditThreads.length === 1 ? "thread" : "threads"} no Reddit`
-                              : "Sem reações catalogadas por enquanto"}
+                        ? "Carregando comentários do público…"
+                        : `${commentsCount.all} ${
+                            commentsCount.all === 1 ? "comentário" : "comentários"
+                          } entre TMDB e Trakt${
+                            redditRequested
+                              ? ` · ${redditThreads.length} ${
+                                  redditThreads.length === 1
+                                    ? "thread no Reddit"
+                                    : "threads no Reddit"
+                                }`
+                              : ""
+                          }`}
                     </h3>
                   </div>
                 </div>
@@ -430,51 +469,48 @@ export default function MovieSocialModal({
                   type="button"
                   onClick={() => setCommentsRefreshToken((prev) => prev + 1)}
                   disabled={commentsLoading}
-                  className="shrink-0 rounded-full border border-white/[0.09] bg-white/[0.03] px-3 py-1.5 text-[9.5px] font-black uppercase tracking-[0.18em] text-white/40 transition hover:border-white/[0.18] hover:bg-white/[0.07] hover:text-white/70 disabled:opacity-35"
+                  className="shrink-0 rounded-full border border-white/[0.09] bg-white/[0.03] px-3 py-1.5 text-[9.5px] font-black uppercase tracking-[0.18em] text-white/45 transition hover:border-white/[0.18] hover:bg-white/[0.07] hover:text-white/70 disabled:opacity-35"
                 >
                   ↺ Atualizar
                 </button>
               </div>
 
-              <p className="text-[11px] leading-5 text-white/25">
-                Trakt reúne reviews e opiniões curadas. Reddit traz discussões, teorias e temperatura da comunidade. Ambos traduzidos automaticamente para PT-BR.
-              </p>
-
-              {/* Tabs */}
               <div className="flex flex-wrap gap-2">
                 {socialTabs.map((tab) => {
                   const active = socialTab === tab.id;
-                  const isLoading =
-                    tab.id === "trakt" ? commentsLoading : redditLoading;
 
                   return (
                     <button
                       key={tab.id}
                       type="button"
-                      onClick={() => setSocialTab(tab.id)}
+                      onClick={() => {
+                        setSocialTab(tab.id);
+                        if (tab.id === "reddit") loadReddit();
+                      }}
                       className={[
                         "rounded-full border px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] transition",
                         active
                           ? "border-fuchsia-300/35 bg-fuchsia-500/18 text-fuchsia-50"
-                          : "border-white/[0.08] bg-white/[0.03] text-white/42 hover:border-white/[0.16] hover:bg-white/[0.06] hover:text-white/70",
+                          : "border-white/[0.08] bg-white/[0.03] text-white/45 hover:border-white/[0.16] hover:bg-white/[0.06] hover:text-white/72",
                       ].join(" ")}
                     >
                       {tab.label}
-                      {isLoading ? (
+                      {tab.loading ? (
                         <span className="ml-1.5 inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-current opacity-50" />
-                      ) : tab.count > 0 ? (
-                        <span className="ml-1.5 text-white/40">{tab.count}</span>
+                      ) : tab.id === "reddit" && !redditRequested ? (
+                        <span className="ml-1.5 text-white/30">buscar</span>
+                      ) : typeof tab.count === "number" && tab.count > 0 ? (
+                        <span className="ml-1.5 text-white/45">{tab.count}</span>
                       ) : null}
                     </button>
                   );
                 })}
               </div>
 
-              {/* ── Tab: Trakt ── */}
-              {socialTab === "trakt" && (
+              {socialTab !== "reddit" && (
                 <>
                   {commentsLoading && (
-                    <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
+                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
                       {Array.from({ length: 4 }).map((_, i) => (
                         <div
                           key={i}
@@ -493,42 +529,47 @@ export default function MovieSocialModal({
 
                   {!commentsLoading && commentsError && (
                     <div className="flex items-start gap-3 rounded-2xl border border-rose-300/14 bg-rose-500/[0.07] p-4">
-                      <span className="mt-0.5 text-base leading-none text-rose-400/60">⚠</span>
+                      <span className="mt-0.5 text-base leading-none text-rose-400/60">
+                        ⚠
+                      </span>
                       <p className="text-[12.5px] leading-6 text-rose-100/68">
-                        Não conseguimos conectar com a central de reações: {commentsError}
+                        Não conseguimos carregar os comentários: {commentsError}
                       </p>
                     </div>
                   )}
 
-                  {!commentsLoading && !commentsError && comments.length === 0 && (
-                    <p className="text-[12.5px] leading-6 text-white/35">
-                      O Trakt ainda não tem reações úteis para este filme. Quando aparecerem, entram aqui traduzidas para PT-BR.
+                  {!commentsLoading && !commentsError && activeComments.length === 0 && (
+                    <p className="text-[12.5px] leading-6 text-white/38">
+                      Nenhum comentário encontrado nesta aba.
                     </p>
                   )}
 
-                  {!commentsLoading && comments.length > 0 && (
-                    <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-                      {comments.map((comment) => {
-                        const id = String(comment.id);
+                  {!commentsLoading && activeComments.length > 0 && (
+                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                      {activeComments.map((comment) => {
+                        const id = `${comment.source}-${comment.id}`;
                         const isSpoiler = Boolean(comment.spoiler);
                         const spoilerRevealed = revealedSpoilers.has(id);
                         const showingOriginal = originalCommentIds.has(id);
 
-                        const originalText = comment.originalComment?.trim();
-                        const translatedText =
-                          comment.displayComment?.trim() ||
-                          comment.translatedComment?.trim() ||
-                          originalText;
-                        const text = showingOriginal
-                          ? originalText || translatedText
-                          : translatedText || originalText;
+                        const originalText = comment.originalContent?.trim();
+                        const translatedText = comment.content?.trim();
+                        const text =
+                          showingOriginal && originalText
+                            ? originalText
+                            : translatedText || originalText || "";
 
-                        const username = comment.user?.username ?? "trakt_user";
-                        const initial = username[0].toUpperCase();
+                        const username = comment.author?.trim() || "user";
+                        const initial = username[0]?.toUpperCase() || "?";
                         const hue =
                           username
                             .split("")
                             .reduce((acc, c) => acc + c.charCodeAt(0), 0) % 360;
+
+                        const hasTranslationToggle =
+                          Boolean(originalText) &&
+                          Boolean(translatedText) &&
+                          originalText !== translatedText;
 
                         return (
                           <div
@@ -561,24 +602,35 @@ export default function MovieSocialModal({
                                     @{username}
                                   </span>
 
+                                  <SourceChip
+                                    sourceId={comment.source}
+                                    className="border border-white/[0.07] bg-white/[0.03] px-2 py-0.5 text-white/36 ring-0"
+                                  />
+
+                                  {typeof comment.likes === "number" && comment.likes > 0 && (
+                                    <span className="text-[10px] font-semibold text-white/32">
+                                      ♥ {comment.likes}
+                                    </span>
+                                  )}
+
                                   {isSpoiler && (
                                     <span className="inline-flex items-center gap-1 rounded-full border border-amber-300/18 bg-amber-400/[0.08] px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.13em] text-amber-200/75">
                                       ⚠ Spoiler
                                     </span>
                                   )}
 
-                                  {!showingOriginal &&
-                                    comment.translationStatus !== "translated" && (
-                                      <span className="rounded-full border border-white/[0.06] bg-white/[0.025] px-2 py-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-white/28">
-                                        original
+                                  {comment.translationStatus === "translated" &&
+                                    !showingOriginal && (
+                                      <span className="rounded-full border border-emerald-300/12 bg-emerald-500/[0.06] px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-emerald-100/55">
+                                        PT-BR
                                       </span>
                                     )}
                                 </div>
 
                                 {isSpoiler && !spoilerRevealed ? (
                                   <div className="mt-2.5 rounded-xl border border-amber-300/10 bg-amber-400/[0.04] px-3.5 py-3">
-                                    <p className="text-[12px] leading-5 text-white/40">
-                                      Esta reação descreve momentos cruciais do enredo.
+                                    <p className="text-[12px] leading-5 text-white/42">
+                                      Este comentário pode revelar partes importantes da história.
                                     </p>
                                     <button
                                       type="button"
@@ -591,35 +643,33 @@ export default function MovieSocialModal({
                                       }
                                       className="mt-2 rounded-full border border-amber-300/18 bg-amber-400/[0.08] px-3 py-1.5 text-[9.5px] font-black uppercase tracking-[0.16em] text-amber-200/85 transition hover:bg-amber-400/12"
                                     >
-                                      Revelar reação
+                                      Revelar comentário
                                     </button>
                                   </div>
                                 ) : (
                                   <div className="mt-2">
-                                    <p className="whitespace-pre-line text-[13px] leading-[1.68] text-white/58">
+                                    <p className="whitespace-pre-line text-[13px] leading-[1.68] text-white/60">
                                       {text}
                                     </p>
 
-                                    {originalText &&
-                                      translatedText &&
-                                      originalText !== translatedText && (
-                                        <button
-                                          type="button"
-                                          onClick={() =>
-                                            setOriginalCommentIds((prev) => {
-                                              const next = new Set(prev);
-                                              if (next.has(id)) next.delete(id);
-                                              else next.add(id);
-                                              return next;
-                                            })
-                                          }
-                                          className="mt-2.5 rounded-full border border-white/[0.07] bg-white/[0.025] px-3 py-1.5 text-[9.5px] font-black uppercase tracking-[0.16em] text-white/36 transition hover:border-white/[0.14] hover:bg-white/[0.06] hover:text-white/62"
-                                        >
-                                          {showingOriginal
-                                            ? "← Ver tradução"
-                                            : "Ver original →"}
-                                        </button>
-                                      )}
+                                    {hasTranslationToggle && (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          setOriginalCommentIds((prev) => {
+                                            const next = new Set(prev);
+                                            if (next.has(id)) next.delete(id);
+                                            else next.add(id);
+                                            return next;
+                                          })
+                                        }
+                                        className="mt-2.5 rounded-full border border-white/[0.07] bg-white/[0.025] px-3 py-1.5 text-[9.5px] font-black uppercase tracking-[0.16em] text-white/38 transition hover:border-white/[0.14] hover:bg-white/[0.06] hover:text-white/64"
+                                      >
+                                        {showingOriginal
+                                          ? "← Ver tradução"
+                                          : "Ver original →"}
+                                      </button>
+                                    )}
                                   </div>
                                 )}
                               </div>
@@ -632,9 +682,24 @@ export default function MovieSocialModal({
                 </>
               )}
 
-              {/* ── Tab: Reddit ── */}
               {socialTab === "reddit" && (
                 <>
+                  {!redditRequested && (
+                    <div className="rounded-2xl border border-white/[0.07] bg-white/[0.025] p-4">
+                      <p className="text-[12.5px] leading-6 text-white/45">
+                        O Reddit só é carregado quando esta aba é aberta.
+                      </p>
+
+                      <button
+                        type="button"
+                        onClick={loadReddit}
+                        className="mt-3 rounded-full border border-fuchsia-300/20 bg-fuchsia-500/10 px-4 py-2 text-[10px] font-black uppercase tracking-[0.16em] text-fuchsia-100/75 transition hover:border-fuchsia-300/35 hover:bg-fuchsia-500/18 hover:text-white"
+                      >
+                        Buscar Reddit
+                      </button>
+                    </div>
+                  )}
+
                   {redditLoading && (
                     <div className="grid gap-3">
                       {Array.from({ length: 3 }).map((_, i) => (
@@ -648,18 +713,24 @@ export default function MovieSocialModal({
 
                   {!redditLoading && redditError && (
                     <div className="flex items-start gap-3 rounded-2xl border border-rose-300/14 bg-rose-500/[0.07] p-4">
-                      <span className="mt-0.5 text-base leading-none text-rose-400/60">⚠</span>
+                      <span className="mt-0.5 text-base leading-none text-rose-400/60">
+                        ⚠
+                      </span>
                       <p className="text-[12.5px] leading-6 text-rose-100/68">
-                        Não consegui carregar discussões do Reddit agora: {redditError}
+                        Não consegui carregar discussões do Reddit agora:{" "}
+                        {redditError}
                       </p>
                     </div>
                   )}
 
-                  {!redditLoading && !redditError && redditThreads.length === 0 && (
-                    <p className="text-[12.5px] leading-6 text-white/35">
-                      Nenhuma discussão relevante do Reddit foi encontrada para este filme.
-                    </p>
-                  )}
+                  {!redditLoading &&
+                    redditRequested &&
+                    !redditError &&
+                    redditThreads.length === 0 && (
+                      <p className="text-[12.5px] leading-6 text-white/38">
+                        Nenhuma discussão relevante do Reddit foi encontrada.
+                      </p>
+                    )}
 
                   {!redditLoading && redditThreads.length > 0 && (
                     <div className="flex flex-col gap-4">
@@ -698,7 +769,7 @@ export default function MovieSocialModal({
                           </div>
 
                           {thread.topComments.length > 0 && (
-                            <div className="grid gap-3 p-4 xl:grid-cols-2">
+                            <div className="grid gap-3 p-4 lg:grid-cols-2">
                               {thread.topComments.map((comment) => (
                                 <div
                                   key={comment.id}
@@ -719,16 +790,16 @@ export default function MovieSocialModal({
                                     )}
                                   </div>
 
-                                  <p className="mt-2 whitespace-pre-line text-[12.5px] leading-6 text-white/55">
+                                  <p className="mt-2 whitespace-pre-line text-[12.5px] leading-6 text-white/58">
                                     {comment.bodyTranslated || comment.body}
                                   </p>
 
                                   {comment.translated && comment.bodyOriginal && (
                                     <details className="mt-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
-                                      <summary className="cursor-pointer text-[9px] font-black uppercase tracking-[0.16em] text-white/32">
+                                      <summary className="cursor-pointer text-[9px] font-black uppercase tracking-[0.16em] text-white/35">
                                         Ver original
                                       </summary>
-                                      <p className="mt-2 whitespace-pre-line text-[12px] leading-6 text-white/38">
+                                      <p className="mt-2 whitespace-pre-line text-[12px] leading-6 text-white/42">
                                         {comment.bodyOriginal}
                                       </p>
                                     </details>
@@ -743,7 +814,7 @@ export default function MovieSocialModal({
                               href={thread.permalink}
                               target="_blank"
                               rel="noreferrer"
-                              className="text-[10px] font-black uppercase tracking-[0.16em] text-white/38 underline decoration-white/20 underline-offset-4 transition hover:text-white/70"
+                              className="text-[10px] font-black uppercase tracking-[0.16em] text-white/42 underline decoration-white/20 underline-offset-4 transition hover:text-white/70"
                             >
                               Abrir thread no Reddit
                             </a>
@@ -754,6 +825,12 @@ export default function MovieSocialModal({
                   )}
                 </>
               )}
+
+              <ContextualAttribution
+                context="community"
+                sourcesUsed={["tmdb", "trakt"]}
+                className="pt-1"
+              />
             </div>
           </div>
         </div>

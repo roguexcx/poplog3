@@ -27,6 +27,7 @@ interface TrendingItem {
   year: string | null;
   media_label: string;
   season_label: string | null;
+  runtime_label: string | null;
   is_new: boolean;
   new_label: string | null;
   userFeedback?: { notInterested?: boolean };
@@ -43,6 +44,7 @@ interface RawItem {
   release_date?: string | null;
   first_air_date?: string | null;
   last_air_date?: string | null;
+  runtime_label?: string | null;
   userFeedback?: { notInterested?: boolean };
 }
 
@@ -84,6 +86,7 @@ function toTrendingItem(raw: RawItem): TrendingItem {
     year,
     media_label: isMovie ? "Filme" : "Série",
     season_label,
+    runtime_label: raw.runtime_label ?? null,
     is_new,
     new_label,
     userFeedback: raw.userFeedback,
@@ -149,11 +152,19 @@ const THIS_YEAR = String(new Date().getFullYear());
 function MetaLine({ item }: { item: TrendingItem }) {
   const showYear = item.year && item.year !== THIS_YEAR;
   const label = item.season_label ?? item.media_label;
+  const runtime = item.runtime_label ?? null;
+
   return (
     <p className="mt-1 flex items-center gap-[5px] text-[11px] text-[#52526a] truncate">
       {showYear && <span>{item.year}</span>}
       {showYear && <span className="inline-block h-[2px] w-[2px] shrink-0 rounded-full bg-[#3a3a50]" />}
       <span className="truncate">{label}</span>
+      {runtime && (
+        <>
+          <span className="inline-block h-[2px] w-[2px] shrink-0 rounded-full bg-[#3a3a50]" />
+          <span className="truncate">{runtime}</span>
+        </>
+      )}
     </p>
   );
 }
@@ -234,13 +245,7 @@ function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
               <span className="text-[12px] font-black leading-none tracking-tight text-white tabular-nums">{rank}</span>
             </div>
 
-            <div className="absolute inset-0 z-20 flex items-center justify-center opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-              <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/[0.18] bg-black/[0.72] backdrop-blur-[10px]">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="white">
-                  <path d="M8 5v14l11-7z" />
-                </svg>
-              </div>
-            </div>
+            
           </div>
         </Link>
 

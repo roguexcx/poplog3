@@ -3,16 +3,19 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 
 import ActionButton from "@/components/ui/ActionButton";
-import {
-  IconBookmark,
-  IconCheck,
-  IconX,
-} from "@/components/ui/icons";
+import { IconBookmark, IconCheck } from "@/components/ui/icons";
 
-import type {
-  TitleMediaType,
-  TitleUserState,
-} from "./types";
+import ProgressMenu from "./ProgressMenu";
+import ProgressUpdateModal from "./ProgressUpdateModal";
+import {
+  clearSeriesProgress,
+  dispatchSeriesProgressRefresh,
+  markEpisodesUntil,
+  markSeasonProgress as markSeasonEpisodeProgress,
+  postEpisodeProgress,
+  toPositiveTmdbId,
+} from "./episodeProgressClient";
+import type { TitleMediaType, TitleUserState } from "./types";
 
 type LibraryStatus =
   | "watchlist"
@@ -21,10 +24,17 @@ type LibraryStatus =
   | "abandoned"
   | "fridge";
 
+type TitleSeasonSummary = {
+  seasonNumber: number;
+  name?: string | null;
+  episodeCount: number | null;
+};
+
 type TitleActionsProps = {
   tmdbId: number | string;
   mediaType: TitleMediaType;
   initialState?: TitleUserState;
+  seasons?: TitleSeasonSummary[];
 };
 
 function userStateToStatus(
@@ -32,12 +42,11 @@ function userStateToStatus(
 ): LibraryStatus | null {
   if (!state) return null;
 
-  // Fast path: usa computedState materializado para evitar recalcular localmente
   switch (state.computedState) {
     case "watched":
     case "completed":
-      return "watched";
     case "up_to_date":
+      return "watched";
     case "in_progress":
       return "watching";
     case "watchlist":
@@ -48,7 +57,6 @@ function userStateToStatus(
       return "fridge";
   }
 
-  // Fallback para usuários sem computedState ainda (pré-migração)
   if (state.watched) return "watched";
   if (state.watching) return "watching";
   if (state.inWatchlist) return "watchlist";
@@ -56,30 +64,65 @@ function userStateToStatus(
   return null;
 }
 
-function emitSeriesProgressRefresh(seriesTmdbId: number) {
-  if (typeof window === "undefined") return;
+const LikeIcon = ({ active = false }: { active?: boolean }) => (
+  <svg
+    width="15"
+    height="15"
+    viewBox="0 0 24 24"
+    fill={active ? "currentColor" : "none"}
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden
+  >
+    <path
+      d="M7.5 21H5.25A2.25 2.25 0 0 1 3 18.75V11.5a2.25 2.25 0 0 1 2.25-2.25H7.5V21Z"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M7.5 10.25L11.2 3.7c.35-.62 1.02-.98 1.73-.9 1.04.11 1.79 1.05 1.65 2.08l-.52 3.87h4.2a2.7 2.7 0 0 1 2.63 3.3l-1.35 5.9A3.9 3.9 0 0 1 15.74 21H7.5V10.25Z"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
 
-  window.dispatchEvent(
-    new CustomEvent("poplog3:series-progress-refresh", {
-      detail: {
-        seriesTmdbId,
-      },
-    })
-  );
-}
+const DislikeIcon = ({ active = false }: { active?: boolean }) => (
+  <svg
+    width="15"
+    height="15"
+    viewBox="0 0 24 24"
+    fill={active ? "currentColor" : "none"}
+    xmlns="http://www.w3.org/2000/svg"
+    aria-hidden
+  >
+    <path
+      d="M16.5 3h2.25A2.25 2.25 0 0 1 21 5.25v7.25a2.25 2.25 0 0 1-2.25 2.25H16.5V3Z"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M16.5 13.75l-3.7 6.55c-.35.62-1.02.98-1.73.9-1.04-.11-1.79-1.05-1.65-2.08l.52-3.87h-4.2a2.7 2.7 0 0 1-2.63-3.3l1.35-5.9A3.9 3.9 0 0 1 8.26 3h8.24v10.75Z"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinejoin="round"
+    />
+  </svg>
+);
 
 export default function TitleActions({
   tmdbId,
   mediaType,
   initialState,
+  seasons = [],
 }: TitleActionsProps) {
   const [status, setStatus] = useState<LibraryStatus | null>(
     userStateToStatus(initialState)
   );
 
-  const [favorite, setFavorite] = useState(
-    Boolean(initialState?.favorite)
-  );
+  const [favorite, setFavorite] = useState(Boolean(initialState?.favorite));
 
   const [liked, setLiked] = useState<boolean | null>(() => {
     if (initialState?.liked === true) return true;
@@ -89,90 +132,90 @@ export default function TitleActions({
 
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
+  const [progressModalOpen, setProgressModalOpen] = useState(false);
 
   const [, startTransition] = useTransition();
 
-  const id = Number(tmdbId);
+  const id = toPositiveTmdbId(tmdbId);
+  const isAuthenticated = initialState?.isAuthenticated === true;
+  const isTv = mediaType === "tv";
 
-  // Quando um episódio é marcado em TitleEpisodeBrowser, o estado "Assistindo"
-  // deve refletir imediatamente nos botões de ação sem reload.
+  const modalSeasons = useMemo(
+    () =>
+      seasons
+        .filter(
+          (season) =>
+            season.seasonNumber > 0 &&
+            typeof season.episodeCount === "number" &&
+            season.episodeCount > 0
+        )
+        .map((season) => ({
+          ...season,
+          episodeCount: season.episodeCount ?? 0,
+        }))
+        .sort((a, b) => a.seasonNumber - b.seasonNumber),
+    [seasons]
+  );
+
   useEffect(() => {
-    if (mediaType !== "tv") return;
+    if (!isTv) return;
 
     function handleLibraryStatusChanged(event: Event) {
       const e = event as CustomEvent<{ tmdbId: number; status: string }>;
+
       if (e.detail?.tmdbId !== id) return;
+
       if (e.detail.status === "watching") {
-        setStatus((prev) => (prev === null || prev === "watchlist" ? "watching" : prev));
+        setStatus((prev) =>
+          prev === null || prev === "watchlist" ? "watching" : prev
+        );
       }
     }
 
-    window.addEventListener("poplog3:library-status-changed", handleLibraryStatusChanged);
+    window.addEventListener(
+      "poplog3:library-status-changed",
+      handleLibraryStatusChanged
+    );
+
     return () => {
-      window.removeEventListener("poplog3:library-status-changed", handleLibraryStatusChanged);
+      window.removeEventListener(
+        "poplog3:library-status-changed",
+        handleLibraryStatusChanged
+      );
     };
-  }, [id, mediaType]);
-
-  const isAuthenticated = initialState?.isAuthenticated === true;
-
-  const isWatched = status === "watched";
-  const showWatchingButton = !isWatched;
+  }, [id, isTv]);
 
   const labels = useMemo(
     () => ({
-      watchlist:
-        status === "watchlist"
-          ? "Na watchlist"
-          : "Watchlist",
-
-      watched:
-        status === "watched"
-          ? "Assistido"
-          : "Marcar assistido",
-
+      watchlist: status === "watchlist" ? "Na watchlist" : "Watchlist",
       watching:
-        status === "watching"
-          ? "Assistindo"
-          : "Assistir",
-
-      favorite:
-        favorite
-          ? "Favoritado"
-          : "Favorito",
-
+        status === "fridge"
+          ? "Série pausada"
+          : status === "watched"
+            ? "Em dia"
+            : "Assistindo",
+      progress: "Progresso",
+      watched: status === "watched" ? "Assistido" : "Marcar assistido",
+      favorite: favorite ? "Favoritado" : "Favorito",
       liked: "Gostei",
-
       disliked: "Não curti",
+      fridge: status === "fridge" ? "Em pausa" : "Pausar série",
     }),
     [status, favorite]
   );
 
   async function syncEpisodes(target: LibraryStatus | null) {
-    if (mediaType !== "tv") return;
+    if (!isTv) return;
 
     try {
       if (target === "watched") {
-        const res = await fetch("/api/poplog3/episodes", {
-          method: "POST",
-          headers: {
-            "content-type": "application/json",
-          },
-          body: JSON.stringify({
-            seriesTmdbId: id,
-            markAllAired: true,
-          }),
+        await postEpisodeProgress({
+          seriesTmdbId: id,
+          markAllAired: true,
         });
-
-        if (!res.ok) {
-          throw new Error(`episodes ${res.status}`);
-        }
-
-        emitSeriesProgressRefresh(id);
       }
 
-      if (target !== "watched") {
-        emitSeriesProgressRefresh(id);
-      }
+      dispatchSeriesProgressRefresh(id);
     } catch (err) {
       console.warn("[title-actions] sync episodes falhou:", err);
     }
@@ -188,20 +231,10 @@ export default function TitleActions({
   ) {
     setError(null);
 
-    const targetStatus =
-      payload.status === undefined
-        ? status
-        : payload.status;
-
+    const targetStatus = payload.status === undefined ? status : payload.status;
     const targetFavorite =
-      payload.favorite === undefined
-        ? favorite
-        : payload.favorite;
-
-    const targetLiked =
-      payload.liked === undefined
-        ? liked
-        : payload.liked;
+      payload.favorite === undefined ? favorite : payload.favorite;
+    const targetLiked = payload.liked === undefined ? liked : payload.liked;
 
     setPendingAction(action);
 
@@ -246,11 +279,7 @@ export default function TitleActions({
           await syncEpisodes(targetStatus);
         }
       } catch (err) {
-        setError(
-          err instanceof Error
-            ? err.message
-            : "Erro inesperado"
-        );
+        setError(err instanceof Error ? err.message : "Erro inesperado");
       } finally {
         setPendingAction(null);
       }
@@ -258,14 +287,38 @@ export default function TitleActions({
   }
 
   function toggleStatus(target: LibraryStatus) {
-    const next =
-      status === target
-        ? null
-        : target;
+    const next = status === target ? null : target;
 
     setStatus(next);
 
     commit(target, {
+      status: next,
+    });
+  }
+
+  function startWatching() {
+    setStatus("watching");
+    setProgressModalOpen(true);
+
+    commit("watching", {
+      status: "watching",
+    });
+  }
+
+  function markAiredEpisodesWatched() {
+    setStatus("watched");
+
+    commit("mark-aired-watched", {
+      status: "watched",
+    });
+  }
+
+  function toggleFridge() {
+    const next: LibraryStatus = status === "fridge" ? "watching" : "fridge";
+
+    setStatus(next);
+
+    commit("fridge", {
       status: next,
     });
   }
@@ -289,10 +342,7 @@ export default function TitleActions({
   }
 
   function toggleLiked(value: boolean) {
-    const next =
-      liked === value
-        ? null
-        : value;
+    const next = liked === value ? null : value;
 
     setLiked(next);
 
@@ -307,6 +357,99 @@ export default function TitleActions({
       liked: next,
       status: ensureStatus,
     });
+  }
+
+  async function confirmProgress(payload: {
+    seasonNumber: number;
+    episodeNumber: number;
+  }) {
+    setError(null);
+    setPendingAction("update-progress");
+    setStatus("watching");
+    setProgressModalOpen(false);
+
+    try {
+      if (id <= 0) {
+        throw new Error("ID TMDB invalido");
+      }
+
+      const seasonNumber = Number(payload.seasonNumber);
+      const episodeNumber = Number(payload.episodeNumber);
+
+      if (
+        !Number.isFinite(seasonNumber) ||
+        seasonNumber < 0 ||
+        !Number.isFinite(episodeNumber) ||
+        episodeNumber <= 0
+      ) {
+        throw new Error("Progresso invalido");
+      }
+
+      await markEpisodesUntil({
+        seriesTmdbId: id,
+        seasonNumber: Math.floor(seasonNumber),
+        episodeNumber: Math.floor(episodeNumber),
+      });
+
+      dispatchSeriesProgressRefresh(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro inesperado");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function markSeasonProgress(payload: { seasonNumber: number }) {
+    setError(null);
+    setPendingAction("mark-season");
+    setStatus("watching");
+    setProgressModalOpen(false);
+
+    try {
+      if (id <= 0) {
+        throw new Error("ID TMDB invalido");
+      }
+
+      const seasonNumber = Number(payload.seasonNumber);
+
+      if (!Number.isFinite(seasonNumber) || seasonNumber <= 0) {
+        throw new Error("Temporada invalida");
+      }
+
+      await markSeasonEpisodeProgress({
+        seriesTmdbId: id,
+        seasonNumber: Math.floor(seasonNumber),
+      });
+
+      dispatchSeriesProgressRefresh(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro inesperado");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
+  async function clearEpisodeProgress() {
+    setError(null);
+    setPendingAction("clear-progress");
+    setStatus("watching");
+    setProgressModalOpen(false);
+
+    try {
+      if (id <= 0) {
+        throw new Error("ID TMDB invalido");
+      }
+
+      await clearSeriesProgress({
+        seriesTmdbId: id,
+      });
+
+      dispatchSeriesProgressRefresh(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro inesperado");
+    } finally {
+      setPendingAction(null);
+    }
   }
 
   if (!isAuthenticated) {
@@ -326,11 +469,7 @@ export default function TitleActions({
         <ActionButton
           variant="primary"
           size="md"
-          leftIcon={
-            <IconBookmark
-              filled={status === "watchlist"}
-            />
-          }
+          leftIcon={<IconBookmark filled={status === "watchlist"} />}
           active={status === "watchlist"}
           loading={pendingAction === "watchlist"}
           onClick={() => toggleStatus("watchlist")}
@@ -338,40 +477,56 @@ export default function TitleActions({
           {labels.watchlist}
         </ActionButton>
 
-        <ActionButton
-          variant="secondary"
-          size="md"
-          leftIcon={<IconCheck />}
-          active={status === "watched"}
-          loading={pendingAction === "watched"}
-          onClick={() => toggleStatus("watched")}
-        >
-          {labels.watched}
-        </ActionButton>
+        {isTv ? (
+          <>
+            <ActionButton
+              variant={status === "fridge" ? "utility" : "secondary"}
+              size="md"
+              active={
+                status === "watching" ||
+                status === "watched" ||
+                status === "fridge"
+              }
+              loading={pendingAction === "watching"}
+              onClick={startWatching}
+            >
+              {labels.watching}
+            </ActionButton>
 
-        {showWatchingButton && (
+            <ProgressMenu
+              statusLabel={labels.progress}
+              isUpToDate={status === "watched"}
+              loading={
+                pendingAction === "mark-aired-watched" ||
+                pendingAction === "update-progress"
+              }
+              onUpdateProgress={() => setProgressModalOpen(true)}
+              onMarkUpToDate={markAiredEpisodesWatched}
+            />
+          </>
+        ) : (
           <ActionButton
             variant="secondary"
             size="md"
-            active={status === "watching"}
-            loading={pendingAction === "watching"}
-            onClick={() => toggleStatus("watching")}
+            leftIcon={<IconCheck />}
+            active={status === "watched"}
+            loading={pendingAction === "watched"}
+            onClick={() => toggleStatus("watched")}
           >
-            {labels.watching}
+            {labels.watched}
           </ActionButton>
         )}
+      </div>
 
+      <div className="flex flex-wrap gap-2 sm:gap-2.5">
         <ActionButton
-          variant="secondary"
-          size="md"
+          variant="social"
+          size="sm"
           active={favorite}
           loading={pendingAction === "favorite"}
           onClick={toggleFavorite}
           leftIcon={
-            <span
-              aria-hidden
-              className="text-[13px]"
-            >
+            <span aria-hidden className="text-[13px]">
               {favorite ? "★" : "☆"}
             </span>
           }
@@ -380,36 +535,80 @@ export default function TitleActions({
         </ActionButton>
 
         <ActionButton
-          variant="secondary"
-          size="md"
+          variant="social"
+          size="sm"
           active={liked === true}
           loading={pendingAction === "liked"}
           onClick={() => toggleLiked(true)}
-          leftIcon={
-            <span
-              aria-hidden
-              className="text-[13px]"
-            >
-              ↑
-            </span>
-          }
+          leftIcon={<LikeIcon active={liked === true} />}
         >
           {labels.liked}
         </ActionButton>
 
         <ActionButton
-          variant="secondary"
-          size="md"
+          variant={liked === false ? "danger" : "social"}
+          size="sm"
           active={liked === false}
           loading={pendingAction === "disliked"}
           onClick={() => toggleLiked(false)}
-          leftIcon={<IconX />}
+          leftIcon={<DislikeIcon active={liked === false} />}
         >
           {labels.disliked}
         </ActionButton>
+
+        {isTv && (
+          <ActionButton
+            variant="utility"
+            size="sm"
+            active={status === "fridge"}
+            loading={pendingAction === "fridge"}
+            onClick={toggleFridge}
+            leftIcon={
+              <span aria-hidden className="text-[13px]">
+                ❄
+              </span>
+            }
+          >
+            {labels.fridge}
+          </ActionButton>
+        )}
       </div>
 
-      {error && (
+      {status === "fridge" && isTv && (
+        <div className="inline-flex w-fit max-w-full items-center gap-2 rounded-full border border-cyan-200/[0.14] bg-cyan-950/[0.16] px-3.5 py-2 text-xs font-medium text-cyan-50/78 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-xl">
+          <span aria-hidden className="text-cyan-100">
+            ❄
+          </span>
+          Série pausada e fora do radar. Retorne quando quiser continuar.
+        </div>
+      )}
+
+      {isTv && (
+        <ProgressUpdateModal
+          open={progressModalOpen}
+          title="Atualizar progresso"
+          seasons={modalSeasons}
+          loading={
+            pendingAction === "update-progress" ||
+            pendingAction === "mark-season" ||
+            pendingAction === "clear-progress"
+          }
+          error={
+            pendingAction === "update-progress" ||
+            pendingAction === "mark-season" ||
+            pendingAction === "clear-progress" ||
+            progressModalOpen
+              ? error
+              : null
+          }
+          onClose={() => setProgressModalOpen(false)}
+          onConfirm={confirmProgress}
+          onMarkSeason={markSeasonProgress}
+          onClearProgress={clearEpisodeProgress}
+        />
+      )}
+
+      {error && !progressModalOpen && (
         <p className="text-xs font-semibold text-rose-200/90">
           Falha ao sincronizar: {error}
         </p>

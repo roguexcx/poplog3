@@ -4,6 +4,9 @@ import {
   deleteTitleState,
   getUserTitleStates,
 } from "@/server/state/user-title-state";
+import { formatEpisodeRuntimeLabel, formatRuntimeLabel } from "@/lib/domain-labels";
+import { resolveRuntimeByMediaType, type RuntimeResolution } from "@/lib/runtime";
+import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
 
 import {
   Poplog3UserTitle,
@@ -15,7 +18,18 @@ export type Poplog3UserLibraryItem = Poplog3UserTitle & {
   computed_state?: string | null;
   watched_episodes?: number;
   aired_episodes?: number;
+  total_episodes?: number | null;
   progress_pct?: number;
+  duration_sort_minutes?: number | null;
+  runtime_label?: string | null;
+  remaining_runtime_minutes?: number | null;
+  remaining_runtime_label?: string | null;
+  remaining_runtime_estimated?: boolean;
+  average_episode_runtime_minutes?: number | null;
+  average_episode_runtime_label?: string | null;
+  total_runtime_minutes?: number | null;
+  total_runtime_label?: string | null;
+  total_runtime_estimated?: boolean;
   best_provider_name?: string | null;
   best_provider_type?: string | null;
   best_provider_logo?: string | null;
@@ -32,12 +46,123 @@ export type Poplog3UserLibraryItem = Poplog3UserTitle & {
     last_air_date: string | null;
     runtime: number | null;
     episode_run_time: number[] | null;
+    runtime_minutes: number | null;
+    runtime_estimated: boolean;
+    total_runtime_minutes: number | null;
+    total_runtime_estimated: boolean;
     vote_average: number | null;
     popularity: number | null;
     number_of_episodes: number | null;
     number_of_seasons: number | null;
   } | null;
 };
+
+function getPositiveNumber(value: number | null | undefined) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : null;
+}
+
+async function getAiredEpisodeCountsMap(seriesTmdbIds: number[]) {
+  const ids = Array.from(
+    new Set(seriesTmdbIds.filter((id) => Number.isFinite(id) && id > 0)),
+  );
+  const counts = new Map<number, number>();
+
+  if (ids.length === 0) return counts;
+
+  const today = new Date().toISOString().slice(0, 10);
+  const { data, error } = await supabaseAdmin
+    .from("poplog3_episodes")
+    .select("series_tmdb_id")
+    .in("series_tmdb_id", ids)
+    .gt("season_number", 0)
+    .not("air_date", "is", null)
+    .lte("air_date", today);
+
+  if (error) {
+    console.warn("[library] aired episode count lookup failed", error);
+    return counts;
+  }
+
+  for (const row of (data ?? []) as Array<{ series_tmdb_id: number }>) {
+    counts.set(row.series_tmdb_id, (counts.get(row.series_tmdb_id) ?? 0) + 1);
+  }
+
+  return counts;
+}
+
+function resolveLibraryRuntimeFields(input: {
+  mediaType: "movie" | "tv";
+  runtimeResolution: RuntimeResolution;
+  airedEpisodes?: number | null;
+  watchedEpisodes?: number | null;
+}) {
+  if (input.mediaType === "movie") {
+    const runtimeMinutes = getPositiveNumber(input.runtimeResolution.minutes);
+    const runtimeLabel = formatRuntimeLabel(runtimeMinutes, { spaced: true });
+
+    return {
+      runtime_minutes: runtimeMinutes,
+      runtime_estimated: false,
+      total_runtime_minutes: runtimeMinutes,
+      total_runtime_estimated: false,
+      total_runtime_label: runtimeLabel,
+      remaining_runtime_minutes: runtimeMinutes,
+      remaining_runtime_estimated: false,
+      remaining_runtime_label: runtimeLabel,
+      average_episode_runtime_minutes: null,
+      average_episode_runtime_label: null,
+      duration_sort_minutes: runtimeMinutes,
+      runtime_label: runtimeLabel,
+    };
+  }
+
+  const runtimeMinutes = getPositiveNumber(input.runtimeResolution.minutes);
+  const availableEpisodeCount = getPositiveNumber(input.airedEpisodes);
+  const watchedEpisodes = Math.max(input.watchedEpisodes ?? 0, 0);
+  const remainingEpisodeCount =
+    availableEpisodeCount !== null
+      ? Math.max(availableEpisodeCount - watchedEpisodes, 0)
+      : null;
+  const totalRuntimeMinutes =
+    runtimeMinutes !== null && availableEpisodeCount !== null
+      ? runtimeMinutes * availableEpisodeCount
+      : null;
+  const remainingRuntimeMinutes =
+    runtimeMinutes !== null && remainingEpisodeCount !== null
+      ? runtimeMinutes * remainingEpisodeCount
+      : null;
+  const averageEpisodeRuntimeLabel = formatEpisodeRuntimeLabel(runtimeMinutes, {
+    estimated: input.runtimeResolution.estimated,
+  });
+  const totalRuntimeLabel = formatRuntimeLabel(totalRuntimeMinutes, {
+    estimated: input.runtimeResolution.estimated,
+    suffix: " total",
+  });
+  const remainingRuntimeLabel =
+    remainingRuntimeMinutes !== null && remainingRuntimeMinutes > 0
+      ? formatRuntimeLabel(remainingRuntimeMinutes, {
+          estimated: input.runtimeResolution.estimated,
+          suffix: " restantes",
+        })
+      : null;
+
+  return {
+    runtime_minutes: runtimeMinutes,
+    runtime_estimated: input.runtimeResolution.estimated,
+    total_runtime_minutes: totalRuntimeMinutes,
+    total_runtime_estimated: input.runtimeResolution.estimated,
+    total_runtime_label: totalRuntimeLabel,
+    remaining_runtime_minutes: remainingRuntimeMinutes,
+    remaining_runtime_estimated: input.runtimeResolution.estimated,
+    remaining_runtime_label: remainingRuntimeLabel,
+    average_episode_runtime_minutes: runtimeMinutes,
+    average_episode_runtime_label: averageEpisodeRuntimeLabel,
+    duration_sort_minutes: remainingRuntimeMinutes,
+    runtime_label: watchedEpisodes > 0 ? remainingRuntimeLabel : totalRuntimeLabel,
+  };
+}
 
 /**
  * Lê a biblioteca do usuário a partir de user_title_state (estado materializado).
@@ -98,6 +223,9 @@ export async function getUserLibraryState(
     }
   }
 
+  const episodeRuntimesBySeries =
+    tvIds.length > 0 ? await getSeriesEpisodeRuntimesMap(tvIds) : new Map();
+
   type TitleData = {
     tmdb_id: number;
     media_type: string;
@@ -126,6 +254,22 @@ export async function getUserLibraryState(
 
   return stateRows.map((row) => {
     const titleData = titleMap.get(`${row.tmdb_id}:${row.media_type}`) ?? null;
+    const runtimeResolution = titleData
+      ? resolveRuntimeByMediaType({
+          mediaType: row.media_type,
+          runtimeMinutes: titleData.runtime,
+          episodeRunTime: titleData.episode_run_time,
+          episodes: episodeRuntimesBySeries.get(row.tmdb_id) ?? null,
+        })
+      : null;
+    const runtimeFields = runtimeResolution
+      ? resolveLibraryRuntimeFields({
+          mediaType: row.media_type,
+          runtimeResolution,
+          airedEpisodes: row.aired_episodes,
+          watchedEpisodes: row.watched_episodes,
+        })
+      : null;
 
     return {
       // Campos de Poplog3UserTitle — id/user_id/rating/notes não usados pela UI
@@ -147,7 +291,18 @@ export async function getUserLibraryState(
       computed_state: row.computed_state,
       watched_episodes: row.watched_episodes,
       aired_episodes: row.aired_episodes,
+      total_episodes: row.total_episodes,
       progress_pct: row.progress_pct,
+      duration_sort_minutes: runtimeFields?.duration_sort_minutes ?? null,
+      runtime_label: runtimeFields?.runtime_label ?? null,
+      remaining_runtime_minutes: runtimeFields?.remaining_runtime_minutes ?? null,
+      remaining_runtime_label: runtimeFields?.remaining_runtime_label ?? null,
+      remaining_runtime_estimated: runtimeFields?.remaining_runtime_estimated ?? false,
+      average_episode_runtime_minutes: runtimeFields?.average_episode_runtime_minutes ?? null,
+      average_episode_runtime_label: runtimeFields?.average_episode_runtime_label ?? null,
+      total_runtime_minutes: runtimeFields?.total_runtime_minutes ?? null,
+      total_runtime_label: runtimeFields?.total_runtime_label ?? null,
+      total_runtime_estimated: runtimeFields?.total_runtime_estimated ?? false,
       best_provider_name: row.best_provider_name,
       best_provider_type: row.best_provider_type,
       best_provider_logo: row.best_provider_logo,
@@ -175,6 +330,10 @@ export async function getUserLibraryState(
                 : null),
             runtime: titleData.runtime,
             episode_run_time: titleData.episode_run_time,
+            runtime_minutes: runtimeFields?.runtime_minutes ?? null,
+            runtime_estimated: runtimeFields?.runtime_estimated ?? false,
+            total_runtime_minutes: runtimeFields?.total_runtime_minutes ?? null,
+            total_runtime_estimated: runtimeFields?.total_runtime_estimated ?? false,
             vote_average: titleData.vote_average,
             popularity: titleData.popularity,
             number_of_episodes: titleData.number_of_episodes,
@@ -207,11 +366,14 @@ export async function getUserLibrary(
 
   const tmdbIds = rows.map((r) => r.tmdb_id as number);
   const mediaTypes = [...new Set(rows.map((r) => r.media_type as string))];
+  const tvIds = rows
+    .filter((r) => r.media_type === "tv")
+    .map((r) => r.tmdb_id as number);
 
   const { data: titles } = await supabaseAdmin
     .from("poplog3_titles")
     .select(
-      "tmdb_id, media_type, title, original_title, poster_path, backdrop_path, year, release_date, first_air_date, last_air_date, runtime, episode_run_time, vote_average"
+      "tmdb_id, media_type, title, original_title, poster_path, backdrop_path, year, release_date, first_air_date, last_air_date, runtime, episode_run_time, vote_average, popularity, number_of_episodes, number_of_seasons"
     )
     .in("tmdb_id", tmdbIds)
     .in("media_type", mediaTypes);
@@ -223,8 +385,30 @@ export async function getUserLibrary(
     ])
   );
 
+  const episodeRuntimesBySeries =
+    tvIds.length > 0 ? await getSeriesEpisodeRuntimesMap(tvIds) : new Map();
+  const airedEpisodeCountsBySeries =
+    tvIds.length > 0 ? await getAiredEpisodeCountsMap(tvIds) : new Map();
+
   return rows.map((row) => {
     const titleData = titleMap.get(`${row.tmdb_id}:${row.media_type}`) ?? null;
+    const runtimeResolution = titleData
+      ? resolveRuntimeByMediaType({
+          mediaType: row.media_type as "movie" | "tv",
+          runtimeMinutes: titleData.runtime as number | null,
+          episodeRunTime: titleData.episode_run_time as number[] | null,
+          episodes: episodeRuntimesBySeries.get(row.tmdb_id as number) ?? null,
+        })
+      : null;
+    const runtimeFields = runtimeResolution
+      ? resolveLibraryRuntimeFields({
+          mediaType: row.media_type as "movie" | "tv",
+          runtimeResolution,
+          airedEpisodes: airedEpisodeCountsBySeries.get(row.tmdb_id as number) ?? null,
+          watchedEpisodes: 0,
+        })
+      : null;
+
     return {
       id: row.id as string,
       user_id: row.user_id as string,
@@ -240,6 +424,16 @@ export async function getUserLibrary(
       abandoned_at: null,
       created_at: row.created_at as string,
       updated_at: (row.watched_at as string | null) ?? (row.created_at as string),
+      duration_sort_minutes: runtimeFields?.duration_sort_minutes ?? null,
+      runtime_label: runtimeFields?.runtime_label ?? null,
+      remaining_runtime_minutes: runtimeFields?.remaining_runtime_minutes ?? null,
+      remaining_runtime_label: runtimeFields?.remaining_runtime_label ?? null,
+      remaining_runtime_estimated: runtimeFields?.remaining_runtime_estimated ?? false,
+      average_episode_runtime_minutes: runtimeFields?.average_episode_runtime_minutes ?? null,
+      average_episode_runtime_label: runtimeFields?.average_episode_runtime_label ?? null,
+      total_runtime_minutes: runtimeFields?.total_runtime_minutes ?? null,
+      total_runtime_label: runtimeFields?.total_runtime_label ?? null,
+      total_runtime_estimated: runtimeFields?.total_runtime_estimated ?? false,
       title: titleData
         ? {
             tmdb_id: titleData.tmdb_id as number,
@@ -254,10 +448,14 @@ export async function getUserLibrary(
             last_air_date: titleData.last_air_date as string | null,
             runtime: titleData.runtime as number | null,
             episode_run_time: titleData.episode_run_time as number[] | null,
+            runtime_minutes: runtimeFields?.runtime_minutes ?? null,
+            runtime_estimated: runtimeFields?.runtime_estimated ?? false,
+            total_runtime_minutes: runtimeFields?.total_runtime_minutes ?? null,
+            total_runtime_estimated: runtimeFields?.total_runtime_estimated ?? false,
             vote_average: titleData.vote_average as number | null,
-            popularity: null,
-            number_of_episodes: null,
-            number_of_seasons: null,
+            popularity: titleData.popularity as number | null,
+            number_of_episodes: titleData.number_of_episodes as number | null,
+            number_of_seasons: titleData.number_of_seasons as number | null,
           }
         : null,
     } as Poplog3UserLibraryItem;

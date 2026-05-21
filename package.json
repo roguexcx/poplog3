@@ -6,7 +6,9 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "backfill:state": "npx tsx scripts/backfill-user-title-state.ts",
+    "backfill:state:dry": "npx tsx scripts/backfill-user-title-state.ts --dry-run"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",

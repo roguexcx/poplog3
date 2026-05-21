@@ -49,13 +49,13 @@ function ProgressContext({ item }: { item: ScoredItem }) {
 
     const remaining = Math.max(runtime - progress, 0);
     const pct = Math.round((progress / runtime) * 100);
-    const mins = remaining % 60;
+    const remainingLabel = item.remaining_runtime_label;
 
     return (
       <div className="flex flex-col gap-1.5">
         <div className="flex items-center justify-between text-xs text-white/55">
           <span>{pct}% assistido</span>
-          {remaining > 0 ? <span>Faltam {mins}min</span> : null}
+          {remaining > 0 && remainingLabel ? <span>{remainingLabel}</span> : null}
         </div>
         <ProgressBar value={progress} max={runtime} color={(item as any).serverEyebrow?.color ?? "#a07ee0"} />
       </div>
@@ -97,6 +97,7 @@ function NextEpisodeBox({ item }: { item: ScoredItem }) {
   const episode = (item.current_episode ?? 0) + 1;
   const season = item.current_season ?? 1;
   const episodeName = item.next_episode_name ?? `Episódio ${episode}`;
+  const runtimeLabel = item.next_episode_duration_label;
 
   return (
     <div className="flex items-start gap-3 rounded-xl border border-white/10 bg-black/30 p-3 backdrop-blur-sm">
@@ -109,6 +110,7 @@ function NextEpisodeBox({ item }: { item: ScoredItem }) {
       <div className="min-w-0 flex-1">
         <p className="text-[10px] font-semibold uppercase tracking-wide text-white/40">
           T{season}E{episode} · PRÓXIMO DA CONTINUIDADE
+          {runtimeLabel ? ` · ${runtimeLabel}` : ""}
         </p>
         <p className="mt-0.5 truncate text-sm font-semibold text-white/90">
           {episodeName}
@@ -135,6 +137,7 @@ export default function HeroSlide({
   const genres = Array.isArray(item.genres) ? item.genres.join(" · ") : "";
   const platform = item.streaming_platform ?? "";
   const yearStr = item.year?.toString() ?? "";
+  const runtimeLabel = item.runtime_label;
 
   // Alterna entre backdrop e still a cada 6 segundos quando ambos estão disponíveis
   const [showStill, setShowStill] = useState(false);
@@ -243,6 +246,15 @@ export default function HeroSlide({
                 <span className="rounded-md bg-white/10 px-2 py-0.5 font-medium text-white/70">
                   {platform}
                 </span>
+              </>
+            ) : null}
+
+            {runtimeLabel ? (
+              <>
+                {yearStr || genres || platform ? (
+                  <span className="text-white/25">·</span>
+                ) : null}
+                <span>{runtimeLabel}</span>
               </>
             ) : null}
           </div>

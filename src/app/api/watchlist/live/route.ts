@@ -1,6 +1,15 @@
 import { NextResponse } from "next/server";
 import { tmdbFetch } from "@/lib/tmdb";
-import { formatRuntimeLabel, translateGenreName } from "@/lib/domain-labels";
+import {
+  formatEpisodeRuntimeLabel,
+  formatRuntimeLabel,
+  translateGenreName,
+} from "@/lib/domain-labels";
+import { resolveRuntimeByMediaType } from "@/lib/runtime";
+import { getCurrentUser } from "@/server/auth/get-current-user";
+import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
+import { getTitleAvailability } from "@/server/streaming/title-availability";
+import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,7 +71,19 @@ type EnrichedTitle = {
 function inferStreamStatus(
   releaseDate: string | null,
   row: WatchlistRow,
+  availabilityStatus?: string,
 ): EnrichedTitle["stream_status"] {
+  if (availabilityStatus === "streaming_confirmed_br") return "streaming";
+  if (availabilityStatus === "vod_available_br") return "confirmado";
+  if (
+    availabilityStatus === "vod_available_us" ||
+    availabilityStatus === "pvod_available_us" ||
+    availabilityStatus === "streaming_confirmed_us" ||
+    availabilityStatus === "digital_prediction"
+  ) {
+    return "chegando";
+  }
+  if (availabilityStatus === "cinema") return "cinemas";
   if (row.stream_status === "streaming" || row.stream_status === "confirmado") return "streaming";
   if (row.stream_status === "chegando") return "chegando";
   if (row.stream_status === "cinemas") return "cinemas";
@@ -97,6 +118,13 @@ export async function POST(request: Request) {
     }
 
     const rows = titles as WatchlistRow[];
+    const currentUser = await getCurrentUser();
+    const preferences = currentUser ? await getUserProviderPreferences().catch(() => null) : null;
+    const tvIds = rows
+      .filter((row) => row.media_type === "tv")
+      .map((row) => row.tmdb_id);
+    const episodeRuntimesBySeries =
+      tvIds.length > 0 ? await getSeriesEpisodeRuntimesMap(tvIds) : new Map();
 
     const enriched = await Promise.all(
       rows.map(async (row): Promise<EnrichedTitle | null> => {
@@ -106,11 +134,47 @@ export async function POST(request: Request) {
           const releaseDate =
             details.release_date ?? details.first_air_date ??
             (row.release_year ? `${row.release_year}-01-01` : null);
+          const availabilityResult = await getTitleAvailability({
+            tmdbId: row.tmdb_id,
+            mediaType: row.media_type,
+            releaseDate: details.release_date ?? null,
+            firstAirDate: details.first_air_date ?? null,
+            preferences,
+            contexts: ["watchlist", "home"],
+          }).catch(() => null);
 
           const genre = translateGenreName(details.genres?.[0]?.name) ?? null;
           const seasons = row.media_type === "tv" ? (details.number_of_seasons ?? null) : null;
-          const rawRuntime = details.runtime ?? details.episode_run_time?.[0] ?? null;
-          const streamStatus = inferStreamStatus(releaseDate, row);
+          const runtimeResolution = resolveRuntimeByMediaType({
+            mediaType: row.media_type,
+            runtimeMinutes: details.runtime ?? null,
+            episodeRunTime: details.episode_run_time ?? null,
+            episodes: episodeRuntimesBySeries.get(row.tmdb_id) ?? null,
+          });
+          const runtimeLabel =
+            row.media_type === "tv"
+              ? formatEpisodeRuntimeLabel(runtimeResolution.minutes, {
+                  estimated: runtimeResolution.estimated,
+                })
+              : formatRuntimeLabel(runtimeResolution.minutes, {
+                  estimated: runtimeResolution.estimated,
+                });
+          const streamStatus = inferStreamStatus(
+            releaseDate,
+            row,
+            availabilityResult?.availability.status,
+          );
+          const providers: EnrichedTitle["providers"] =
+            availabilityResult?.providers.map((provider) => ({
+              name: provider.name,
+              logo: provider.logoPath ?? provider.logoUrl ?? "",
+              type:
+                provider.normalizedType === "subscription"
+                  ? "flatrate"
+                  : provider.normalizedType === "buy"
+                    ? "buy"
+                    : "rent",
+            })) ?? [];
 
           return {
             id:                    row.id,
@@ -121,14 +185,14 @@ export async function POST(request: Request) {
             poster_path:           details.poster_path ?? null,
             year:                  releaseDate ? String(new Date(releaseDate).getFullYear()) : null,
             genre,
-            runtime:               rawRuntime,
-            runtime_label:         formatRuntimeLabel(rawRuntime),
+            runtime:               runtimeResolution.minutes,
+            runtime_label:         runtimeLabel,
             seasons,
             origin:                "streaming",
             release_date:          releaseDate ?? `${row.release_year ?? new Date().getFullYear()}-01-01`,
             created_at:            row.created_at,
             stream_status:         streamStatus,
-            providers:             [],
+            providers,
             estimated_platform:    null,
             estimated_month:       null,
             context_pool:          buildContextPool(

@@ -1,13 +1,16 @@
 "use client";
 
-import type {
-  ButtonHTMLAttributes,
-  ForwardedRef,
-  ReactNode,
-} from "react";
+import type { ButtonHTMLAttributes, ForwardedRef, ReactNode } from "react";
 import { forwardRef } from "react";
 
-type ActionButtonVariant = "primary" | "secondary" | "ghost" | "danger";
+type ActionButtonVariant =
+  | "primary"
+  | "secondary"
+  | "social"
+  | "utility"
+  | "ghost"
+  | "danger";
+
 type ActionButtonSize = "sm" | "md" | "lg";
 
 type ActionButtonProps = Omit<
@@ -17,43 +20,85 @@ type ActionButtonProps = Omit<
   children: ReactNode;
   variant?: ActionButtonVariant;
   size?: ActionButtonSize;
-  /** Glyph à esquerda */
   leftIcon?: ReactNode;
-  /** Glyph à direita */
   rightIcon?: ReactNode;
-  /** Estado de loading */
   loading?: boolean;
-  /** Estado ativo (pill toggleável) */
   active?: boolean;
-  /** Ocupar largura inteira */
   full?: boolean;
 };
 
+const BASE =
+  "group relative isolate inline-flex items-center justify-center overflow-hidden rounded-full font-semibold tracking-[-0.015em] outline-none";
+
+const MOTION =
+  "transition-[transform,background,border-color,box-shadow,opacity,color] duration-200 ease-out active:scale-[0.97] hover:-translate-y-0.5";
+
+const DISABLED =
+  "disabled:cursor-not-allowed disabled:opacity-55 disabled:hover:translate-y-0";
+
 const VARIANT_STYLES: Record<ActionButtonVariant, string> = {
   primary:
-    "bg-white text-zinc-950 hover:bg-white/92 active:bg-white/85 shadow-[0_8px_28px_rgba(255,255,255,0.18)]",
+    "border border-white/[0.18] bg-white text-zinc-950 shadow-[0_14px_36px_rgba(255,255,255,0.18)] hover:bg-white/95 hover:shadow-[0_18px_46px_rgba(255,255,255,0.24)]",
+
   secondary:
-    "border border-white/[0.14] bg-white/[0.06] text-white/90 hover:border-white/[0.22] hover:bg-white/[0.10] backdrop-blur-md",
+    "border border-white/[0.14] bg-white/[0.065] text-white/88 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-xl hover:border-white/[0.25] hover:bg-white/[0.105] hover:text-white hover:shadow-[0_12px_34px_rgba(0,0,0,0.22)]",
+
+  social:
+    "border border-white/[0.11] bg-white/[0.045] text-white/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)] backdrop-blur-xl hover:border-white/[0.22] hover:bg-white/[0.085] hover:text-white",
+
+  utility:
+    "border border-white/[0.11] bg-white/[0.045] text-white/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)] backdrop-blur-xl hover:border-cyan-200/[0.28] hover:bg-cyan-950/[0.18] hover:text-cyan-50",
+
   ghost:
-    "text-white/70 hover:text-white hover:bg-white/[0.06]",
+    "border border-transparent text-white/62 hover:border-white/[0.10] hover:bg-white/[0.055] hover:text-white",
+
   danger:
-    "border border-rose-300/30 bg-rose-500/15 text-rose-100 hover:bg-rose-500/22",
+    "border border-white/[0.11] bg-white/[0.045] text-white/70 shadow-[inset_0_1px_0_rgba(255,255,255,0.07)] backdrop-blur-xl hover:border-rose-300/30 hover:bg-rose-500/10 hover:text-rose-100",
 };
 
 const ACTIVE_OVERRIDE: Record<ActionButtonVariant, string> = {
   primary:
-    "bg-indigo-400 text-zinc-950 hover:bg-indigo-300 shadow-[0_8px_28px_rgba(129,140,248,0.35)]",
+    "border-cyan-200/45 bg-gradient-to-r from-cyan-200 via-white to-indigo-200 text-zinc-950 shadow-[0_16px_44px_rgba(103,232,249,0.28)] hover:shadow-[0_20px_54px_rgba(103,232,249,0.36)]",
+
   secondary:
-    "border-indigo-300/45 bg-indigo-500/22 text-indigo-50 hover:bg-indigo-500/30",
-  ghost: "text-indigo-200 bg-indigo-500/14",
+    "border-indigo-200/35 bg-indigo-500/22 text-indigo-50 shadow-[0_12px_34px_rgba(99,102,241,0.20),inset_0_1px_0_rgba(255,255,255,0.10)] hover:border-indigo-200/48 hover:bg-indigo-500/30",
+
+  social:
+    "border-amber-200/32 bg-amber-400/[0.14] text-amber-50 shadow-[0_10px_28px_rgba(251,191,36,0.14),inset_0_1px_0_rgba(255,255,255,0.10)] hover:border-amber-200/45 hover:bg-amber-400/[0.20]",
+
+  utility:
+    "border-cyan-200/55 bg-cyan-400/[0.20] text-cyan-50 shadow-[0_0_0_1px_rgba(103,232,249,0.18),0_14px_38px_rgba(34,211,238,0.22),inset_0_1px_0_rgba(255,255,255,0.14)] hover:border-cyan-200/70 hover:bg-cyan-400/[0.26]",
+
+  ghost:
+    "border-white/[0.12] bg-white/[0.075] text-white",
+
   danger:
-    "border-rose-300/45 bg-rose-500/30 text-rose-50 hover:bg-rose-500/40",
+    "border-rose-300/55 bg-rose-500/28 text-rose-50 shadow-[0_0_0_1px_rgba(253,164,175,0.18),0_14px_38px_rgba(244,63,94,0.22)] hover:bg-rose-500/36",
 };
 
 const SIZE_STYLES: Record<ActionButtonSize, string> = {
   sm: "h-9 px-3.5 text-[12px] gap-1.5",
   md: "h-11 px-5 text-[13px] gap-2",
-  lg: "h-12 px-6 text-sm gap-2",
+  lg: "h-12 px-6 text-sm gap-2.5",
+};
+
+const GLOW_STYLES: Record<ActionButtonVariant, string> = {
+  primary:
+    "before:absolute before:inset-0 before:-z-10 before:bg-[radial-gradient(circle_at_50%_0%,rgba(255,255,255,0.38),transparent_54%)] before:opacity-80",
+
+  secondary:
+    "before:absolute before:inset-0 before:-z-10 before:bg-[radial-gradient(circle_at_50%_0%,rgba(129,140,248,0.18),transparent_58%)] before:opacity-0 before:transition-opacity before:duration-200 hover:before:opacity-100",
+
+  social:
+    "before:absolute before:inset-0 before:-z-10 before:bg-[radial-gradient(circle_at_50%_0%,rgba(251,191,36,0.14),transparent_60%)] before:opacity-0 before:transition-opacity before:duration-200 hover:before:opacity-100",
+
+  utility:
+    "before:absolute before:inset-0 before:-z-10 before:bg-[radial-gradient(circle_at_50%_0%,rgba(34,211,238,0.20),transparent_60%)] before:opacity-0 before:transition-opacity before:duration-200 hover:before:opacity-100",
+
+  ghost: "",
+
+  danger:
+    "before:absolute before:inset-0 before:-z-10 before:bg-[radial-gradient(circle_at_50%_0%,rgba(244,63,94,0.18),transparent_60%)] before:opacity-0 before:transition-opacity before:duration-200 hover:before:opacity-100",
 };
 
 const ActionButton = forwardRef(function ActionButton(
@@ -84,10 +129,11 @@ const ActionButton = forwardRef(function ActionButton(
       aria-busy={isBusy}
       aria-pressed={active}
       className={[
-        "inline-flex items-center justify-center rounded-full font-semibold tracking-[-0.01em]",
-        "transition-[transform,background,border-color,box-shadow,opacity] duration-200",
-        "disabled:cursor-not-allowed disabled:opacity-60",
+        BASE,
+        MOTION,
+        DISABLED,
         active ? ACTIVE_OVERRIDE[variant] : VARIANT_STYLES[variant],
+        GLOW_STYLES[variant],
         SIZE_STYLES[size],
         full ? "w-full" : "",
         isBusy ? "cursor-wait" : "",
@@ -103,12 +149,20 @@ const ActionButton = forwardRef(function ActionButton(
           aria-hidden
         />
       ) : (
-        leftIcon && <span className="inline-flex">{leftIcon}</span>
+        leftIcon && (
+          <span className="inline-flex shrink-0 items-center justify-center text-current/90 transition-transform duration-200 group-hover:scale-105">
+            {leftIcon}
+          </span>
+        )
       )}
 
-      <span className="inline-flex items-center">{children}</span>
+      <span className="inline-flex items-center whitespace-nowrap">{children}</span>
 
-      {!isBusy && rightIcon && <span className="inline-flex">{rightIcon}</span>}
+      {!isBusy && rightIcon && (
+        <span className="inline-flex shrink-0 items-center justify-center text-current/80 transition-transform duration-200 group-hover:translate-x-0.5">
+          {rightIcon}
+        </span>
+      )}
     </button>
   );
 });

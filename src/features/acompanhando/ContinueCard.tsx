@@ -23,9 +23,11 @@ export type ContinueItem = {
   next_episode_still_path: string | null;
   next_episode_air_date: string | null;
   last_watched_at: string | null;
-  remaining_minutes: number;
+  remaining_minutes: number | null;
+  remaining_runtime_label: string | null;
   status_signal: ContinueStatusSignal;
   runtime: number | null;
+  runtime_label: string | null;
   /** Episódios assistidos na temporada atual (= next_episode - 1) */
   season_watched: number;
   /** Total de episódios na temporada atual — null se não sincronizado */
@@ -76,7 +78,11 @@ export default function ContinueCard({ item, onClick }: Props) {
         : null;
 
   const cfg = SIGNAL_CONFIG[item.status_signal];
-  const progressPct = Math.min(100, Math.max(0, item.progress_pct));
+  const seasonPct =
+    item.season_total != null && item.season_total > 0
+      ? Math.min(100, Math.round((item.season_watched / item.season_total) * 100))
+      : null;
+  const progressPct = seasonPct ?? Math.min(100, Math.max(0, item.progress_pct));
 
   const statusLabel =
     item.status_signal === "reta_final"
@@ -156,6 +162,7 @@ export default function ContinueCard({ item, onClick }: Props) {
             {item.season_total != null && (
               <p className="mt-0.5 truncate text-[10px] text-white/35">
                 {item.season_watched} de {item.season_total} eps na T{item.next_season}
+                {item.remaining_runtime_label ? ` · ${item.remaining_runtime_label}` : ""}
               </p>
             )}
           </div>

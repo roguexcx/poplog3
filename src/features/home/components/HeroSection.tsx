@@ -1,6 +1,5 @@
 import SearchBar from "@/features/search/SearchBar";
 import FeaturedCard from "@/features/home/components/FeaturedCard";
-import FilterChips from "@/features/home/components/FilterChips";
 import { getHeroHeadline } from "@/features/home/home-utils";
 import type { TMDBItem } from "@/types/tmdb";
 
@@ -69,7 +68,6 @@ export default function HeroSection({
             <SearchBar />
           </div>
 
-          <FilterChips />
         </div>
 
         {featuredItem && (

@@ -1,30 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
-import {
-  buildAvailabilityProviders,
-  getBestAvailabilityProvider,
-  type AvailabilityProvider,
-} from "@/server/streaming/availability-service";
+import type { AvailabilityProvider } from "@/server/streaming/availability-service";
 
 import {
   availabilityStateFromTitle,
   isValidSeason,
   type TitleAvailabilityState,
 } from "@/lib/series";
+import { resolveRuntimeByMediaType } from "@/lib/runtime";
 import { getCurrentUser } from "@/server/auth/get-current-user";
-import { getAvailability } from "@/server/cache/availability-cache";
 import { getExternalIds } from "@/server/cache/external-ids-cache";
 import { computeUserSeriesProgress } from "@/server/episodes/episode-progress-service";
 import { readTitleState, refreshTitleStateAvailability } from "@/server/state/user-title-state";
 import { getUserTitleStatus } from "@/server/library/library-service";
 import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
+import { getTitleAvailability } from "@/server/streaming/title-availability";
 import { withOrigin } from "@/server/engine-logger";
-import {
-  syncAvailability,
-  type TmdbPayloadWithWatch,
-} from "@/server/sync/sync-availability";
+import type { TmdbPayloadWithWatch } from "@/server/sync/sync-availability";
 import { syncOmdbRatings } from "@/server/sync/sync-omdb-ratings";
 import { syncTmdbTitle } from "@/server/sync/sync-tmdb-title";
 import { fetchTmdbCollection } from "@/server/api-clients/tmdb/client";
+import { findOfficialTrailerOnYouTube } from "@/server/trailers/youtube-trailer";
+import { getSeriesEpisodeRuntimes } from "@/server/runtime/series-episode-runtimes";
 import type { PoplogTitleDetails } from "@/server/types/title-details";
 
 type MediaType = "movie" | "tv";
@@ -45,13 +41,6 @@ function hasDetailFields(
     title !== null &&
     ("cast" in title || "recommendations" in title || "runtime" in title)
   );
-}
-
-function avgRuntime(items: number[] | null | undefined): number | null {
-  if (!items || items.length === 0) return null;
-  const valid = items.filter((n) => Number.isFinite(n) && n > 0);
-  if (valid.length === 0) return null;
-  return Math.round(valid.reduce((a, b) => a + b, 0) / valid.length);
 }
 
 function uniqueNames(names: Array<string | null | undefined>, limit = 4) {
@@ -269,6 +258,9 @@ export async function GET(
     } | null = null;
 
     let providers: AvailabilityProvider[] = [];
+    let availability:
+      | Awaited<ReturnType<typeof getTitleAvailability>>["availability"]
+      | null = null;
 
     // Carrega preferências do usuário para ranking personalizado de streaming
     let userStreamingPreferences: Awaited<ReturnType<typeof getUserProviderPreferences>> | undefined;
@@ -281,54 +273,36 @@ export async function GET(
     }
 
     try {
-      const result = await syncAvailability({
+      const result = await getTitleAvailability({
         tmdbId: id,
         mediaType,
-        country,
         tmdbPayload: (synced.rawPayload ?? null) as TmdbPayloadWithWatch | null,
         imdbId,
         force: refresh,
+        preferences: userStreamingPreferences,
+        releaseDate: title.release_date ?? null,
+        firstAirDate: details?.first_air_date ?? null,
+        popularity: title.popularity ?? null,
+        contexts: ["title_page"],
       });
 
-      availabilityCache = {
-        source: result.source,
-        tmdb: result.diagnostics.tmdb,
-        watchmode: result.diagnostics.watchmode,
-        motn: result.diagnostics.motn,
-      };
-
-      const rows =
-        result.rows.length > 0
-          ? result.rows
-          : await getAvailability(mediaType, id, country);
-
-      providers = buildAvailabilityProviders(
-        rows.map((row) => ({
-          name: row.provider_name,
-          logoUrl: tmdbImage(row.provider_logo_path, "w92"),
-          type: row.availability_type,
-          deepLink: row.deep_link,
-          quality: row.quality,
-          country: row.country,
-          source: row.source === "motn" ? "movieofthenight" : row.source,
-
-          providerId: row.tmdb_provider_id ?? 0,
-          providerName: row.provider_name,
-          logoPath: row.provider_logo_path,
-          deeplink: row.deep_link,
-        })) as never,
-        {
-          region: country,
-          preferences: userStreamingPreferences,
-        },
-      );
+      availabilityCache = result.cacheInfo;
+      availability = result.availability;
+      providers = result.providers;
 
       // Persiste o melhor provedor no estado do usuário (fire-and-forget)
       if (currentUser) {
-        const best = getBestAvailabilityProvider(providers);
+        const best = availability.primaryProvider;
+        const providerType: string | null =
+          best && "normalizedType" in best
+            ? best.normalizedType ?? null
+            : best?.type === "streaming"
+              ? "subscription"
+              : best?.type ?? null;
+
         refreshTitleStateAvailability(currentUser.id, id, mediaType, best ? {
           providerName: best.name,
-          providerType: best.normalizedType,
+          providerType,
           providerLogo: best.logoUrl ?? null,
         } : null).catch(console.error);
       }
@@ -352,22 +326,140 @@ export async function GET(
       console.warn("[poplog3/titles] availabilityState falhou:", error);
     }
 
-    const trailer = (() => {
+    const trailer = await (async () => {
       try {
         const videos = details?.videos ?? [];
         const youTube = videos.filter((v) => v.site === "YouTube");
-        const preferred = youTube.find((v) => v.type === "Trailer");
-        const pick = preferred ?? youTube[0] ?? null;
 
-        if (!pick) return null;
+        const normalize = (value: string | null | undefined) =>
+          (value ?? "")
+            .toLowerCase()
+            .normalize("NFD")
+            .replace(/[\u0300-\u036f]/g, "")
+            .replace(/&amp;/g, "&")
+            .replace(/[^\p{L}\p{N}]+/gu, " ")
+            .trim();
+
+        const includesAny = (text: string, terms: string[]) =>
+          terms.some((term) => text.includes(normalize(term)));
+
+        const getVideoScore = (v: (typeof youTube)[number]) => {
+          const name = normalize(v.name);
+          let score = 0;
+
+          const badTerms = [
+            "globo",
+            "telecine",
+            "megapix",
+            "tnt",
+            "warner channel",
+            "sessao da tarde",
+            "temperatura maxima",
+            "cinemaco",
+            "supercine",
+            "chamada",
+            "exibicao",
+            "na tv",
+            "hoje",
+            "amanha",
+            "review",
+            "reaction",
+            "explained",
+            "breakdown",
+            "interview",
+            "entrevista",
+            "scene",
+            "cena",
+            "clip",
+            "recap",
+            "making of",
+            "behind the scenes",
+            "featurette",
+            "bloopers",
+            "fanmade",
+            "fandub",
+            "trailer fan",
+            "dublagem caseira",
+            "redublado",
+          ];
+
+          if (includesAny(name, badTerms)) return -999;
+
+          if (v.type === "Trailer") score += 140;
+          if (v.type === "Teaser") score += 25;
+          if (v.official === true) score += 120;
+
+          if (name.includes("trailer oficial")) score += 130;
+          if (name.includes("official trailer")) score += 120;
+          if (name.includes("trailer")) score += 80;
+
+          // Preferência: dublado > legendado > português > inglês/original
+          if (
+            name.includes("dublado") ||
+            name.includes("dubbed") ||
+            name.includes("pt br") ||
+            name.includes("portugues brasileiro")
+          ) {
+            score += 140;
+          } else if (
+            name.includes("legendado") ||
+            name.includes("subtitulado") ||
+            name.includes("subtitled") ||
+            name.includes("legendas")
+          ) {
+            score += 95;
+          } else if (v.iso_639_1 === "pt") {
+            score += 65;
+          } else if (v.iso_639_1 === "en") {
+            score += 40;
+          }
+
+          if (name.includes("teaser")) score -= 35;
+
+          return score;
+        };
+
+        const tmdbPick = youTube
+          .map((video) => ({ video, score: getVideoScore(video) }))
+          .filter((item) => item.score >= 160)
+          .sort((a, b) => b.score - a.score)[0];
+
+        if (tmdbPick?.video) {
+          return {
+            key: tmdbPick.video.key,
+            name: tmdbPick.video.name,
+            url: `https://www.youtube.com/watch?v=${tmdbPick.video.key}`,
+            embedUrl: `https://www.youtube.com/embed/${tmdbPick.video.key}`,
+            source: "tmdb",
+            confidence:
+              tmdbPick.score >= 420
+                ? "high"
+                : tmdbPick.score >= 280
+                  ? "medium"
+                  : "low",
+            score: tmdbPick.score,
+          };
+        }
+
+        const youtubeKey = await findOfficialTrailerOnYouTube({
+          title: title.title ?? title.original_title ?? "Título",
+          year: title.year ? String(title.year) : null,
+          mediaType,
+        });
+
+        if (!youtubeKey) return null;
 
         return {
-          key: pick.key,
-          name: pick.name,
-          url: `https://www.youtube.com/watch?v=${pick.key}`,
-          embedUrl: `https://www.youtube.com/embed/${pick.key}`,
+          key: youtubeKey,
+          name: `Trailer de ${title.title ?? title.original_title ?? "Título"}`,
+          url: `https://www.youtube.com/watch?v=${youtubeKey}`,
+          embedUrl: `https://www.youtube.com/embed/${youtubeKey}`,
+          source: "youtube",
+          confidence: "medium",
+          score: null,
         };
-      } catch {
+      } catch (error) {
+        console.warn("[poplog3/titles] trailer lookup falhou:", error);
         return null;
       }
     })();
@@ -400,6 +492,28 @@ export async function GET(
     const collectionDetails =
       details?.belongs_to_collection && mediaType === "movie"
         ? await fetchTmdbCollection(details.belongs_to_collection.id)
+        : null;
+
+    const seriesEpisodeRuntimes =
+      mediaType === "tv" ? await getSeriesEpisodeRuntimes(id) : null;
+
+    const runtimeResolution = resolveRuntimeByMediaType({
+      mediaType,
+      runtimeMinutes: details?.runtime ?? null,
+      episodeRunTime: details?.episode_run_time ?? null,
+      episodes: seriesEpisodeRuntimes,
+    });
+
+    const numberOfEpisodes = validSeasons.reduce(
+      (total, season) => total + (season.episode_count ?? 0),
+      0,
+    );
+
+    const totalRuntimeMinutes =
+      mediaType === "tv" &&
+      runtimeResolution.minutes !== null &&
+      numberOfEpisodes > 0
+        ? runtimeResolution.minutes * numberOfEpisodes
         : null;
 
     const metadata = details
@@ -464,7 +578,13 @@ export async function GET(
               originCountry: n.origin_country ?? null,
             })) ?? [],
 
-          episodeRunTimeMinutes: avgRuntime(details.episode_run_time ?? null),
+          episodeRunTimeMinutes:
+            mediaType === "tv" ? runtimeResolution.minutes : null,
+          episodeRunTimeEstimated:
+            mediaType === "tv" ? runtimeResolution.estimated : false,
+          totalRuntimeMinutes,
+          totalRuntimeEstimated:
+            mediaType === "tv" ? runtimeResolution.estimated : false,
           productionStatus: details.status ?? null,
           inProduction: details.in_production ?? null,
           seriesType: details.type ?? null,
@@ -527,14 +647,17 @@ export async function GET(
         validSeasons.length > 0
           ? validSeasons.length
           : details?.number_of_seasons ?? null,
-      numberOfEpisodes: validSeasons.reduce(
-        (total, season) => total + (season.episode_count ?? 0),
-        0,
-      ),
+      numberOfEpisodes,
       overview: title.overview ?? null,
       posterUrl: tmdbImage(title.poster_path, "w780"),
       backdropUrl: tmdbImage(title.backdrop_path, "original"),
-      runtime: details?.runtime ?? null,
+      runtime: mediaType === "movie" ? runtimeResolution.minutes : null,
+      episodeRunTimeMinutes:
+        mediaType === "tv" ? runtimeResolution.minutes : null,
+      runtimeEstimated: runtimeResolution.estimated,
+      totalRuntimeMinutes,
+      totalRuntimeEstimated:
+        mediaType === "tv" ? runtimeResolution.estimated : false,
       voteAverage: title.vote_average ?? null,
       genres: details?.genres?.map((g) => g.name) ?? [],
       status: details?.status ?? null,
@@ -547,6 +670,7 @@ export async function GET(
       userState,
       userSeriesProgress,
       providers,
+      availability,
       country,
 
       cast:

@@ -271,7 +271,7 @@ export async function GET() {
       ? trendingTvRes.value.results.filter((t) => !isTalkOrNews(t)).map(normalizeTv) : [];
 
     // ── user library (optional) ───────────────────────────────────────────────
-    let userLibraryIds: Record<string, string> = {};
+    const userLibraryIds: Record<string, string> = {};
     try {
       const user = await getCurrentUser();
       if (user) {

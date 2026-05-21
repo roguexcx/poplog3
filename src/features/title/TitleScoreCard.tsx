@@ -1,3 +1,5 @@
+import ContextualAttribution from "@/components/attribution/ContextualAttribution";
+import { getRatingSourceIds } from "@/attribution/helpers";
 import type { TitleRatings } from "./types";
 
 type TitleScoreCardProps = {
@@ -110,6 +112,7 @@ export default function TitleScoreCard({ ratings }: TitleScoreCardProps) {
 
   const componentsUsed =
     ratings.poplogComponents ?? visibleRatings.length;
+  const sourcesUsed = getRatingSourceIds(ratings);
 
   return (
     <section className="relative overflow-hidden rounded-[1.5rem] border border-white/[0.08] bg-white/[0.035] p-5 backdrop-blur-xl sm:p-6">
@@ -127,6 +130,11 @@ export default function TitleScoreCard({ ratings }: TitleScoreCardProps) {
         <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-200/70">
           POPLOG Score
         </p>
+        <ContextualAttribution
+          context="ratings"
+          sourcesUsed={sourcesUsed}
+          className="mt-1"
+        />
 
         <div className="mt-4 flex items-end gap-4">
           {score !== null && tone ? (
