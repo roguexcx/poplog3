@@ -122,6 +122,7 @@ async function getGenres() {
   return Array.from(merged.values()).slice(0, 18);
 }
 
+
 export async function GET() {
   try {
     const [trending, popularMovies, popularSeries, genres] =

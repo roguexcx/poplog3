@@ -1,18 +1,23 @@
 // ── /api/ics/agenda ────────────────────────────────────────────────────────────
-// Pipeline: ICS fetch → parse → engine → trending TMDB → enriquecimento completo
+// Pipeline MODO BRUTO: ICS fetch → parse → engine → trending TMDB → enriquecimento
 // → score de relevância → resposta JSON.
+//
+// MODO BRUTO (ativo agora):
+//   - Sem filtros editoriais de idioma, gênero, popularidade ou plataforma.
+//   - Apenas deduplicação técnica (mesmo título de múltiplas fontes).
+//   - Validação mínima: título + dados básicos válidos.
+//   - Filtros, pesos e curadoria ficam preparados na estrutura mas DESLIGADOS.
 //
 // Cache Supabase (tabela ics_agenda_cache, TTL 24h):
 //   - GET: lê cache primeiro; se fresco (<24h) retorna imediatamente.
 //   - Se stale ou ausente: executa pipeline completo, salva no Supabase, retorna.
-//   - Enriquecimento: com cache de 24h vale enriquecer TODOS os grupos (não só top N).
 // ──────────────────────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from "next/server";
 import { parseIcsContent } from "@/lib/ics-parser";
 import {
   runIcsEngine, computeStats, FEATURED_CATEGORIES, HIDDEN_CATEGORIES,
-  filterEnrichedGroup, computeRelevanceScore, classifyTitle, RELEVANCE_THRESHOLD,
+  computeRelevanceScore, classifyTitle, RELEVANCE_THRESHOLD,
 } from "@/lib/ics-engine";
 import type { IcsSeriesGroup, IcsEngineStats, MovieGroup } from "@/lib/ics-engine";
 import { enrichSeriesGroups } from "@/lib/ics-enricher";
@@ -55,6 +60,54 @@ async function fetchTrendingIds(
     if (!res.ok) return [];
     const data = await res.json() as { results?: Array<{ id: number }> };
     return (data.results ?? []).map((r) => r.id);
+  } catch {
+    return [];
+  }
+}
+
+// ── Fetch filmes em cartaz / próximos lançamentos no Brasil ──────────────────
+
+async function fetchMoviesBR(
+  endpoint: "now_playing" | "upcoming",
+  token: string,
+): Promise<import("@/lib/ics-engine").MovieGroup[]> {
+  try {
+    const res = await fetch(
+      `${TMDB_BASE}/movie/${endpoint}?language=pt-BR&region=BR&page=1`,
+      { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } },
+    );
+    if (!res.ok) return [];
+    const data = await res.json() as {
+      results?: Array<{
+        id: number; title: string; original_title: string;
+        release_date?: string; backdrop_path?: string | null; poster_path?: string | null;
+        popularity?: number; vote_average?: number; vote_count?: number;
+        original_language?: string; overview?: string | null;
+        genre_ids?: number[]; origin_country?: string[];
+      }>;
+    };
+    // MODO BRUTO: sem filtros de idioma — inclui todos os filmes com dados mínimos válidos
+    return (data.results ?? [])
+      .filter((m) => m.id && m.title) // apenas validação técnica mínima
+      .map((m) => ({
+        key: `movie-${m.id}`,
+        movie: {
+          tmdb_id:           m.id,
+          name:              m.title,
+          original_name:     m.original_title,
+          release_date:      m.release_date ?? null,
+          backdrop_path:     m.backdrop_path ?? null,
+          poster_path:       m.poster_path ?? null,
+          popularity:        m.popularity,
+          vote_average:      m.vote_average,
+          vote_count:        m.vote_count,
+          original_language: m.original_language,
+          overview:          m.overview ?? null,
+          genre_ids:         m.genre_ids ?? [],
+          origin_country:    m.origin_country ?? [],
+        },
+        isRelevant: true,
+      }));
   } catch {
     return [];
   }
@@ -133,13 +186,15 @@ async function buildAgendaPayload(): Promise<IcsAgendaResponse> {
 
   const accessToken = process.env.TMDB_ACCESS_TOKEN?.trim() ?? "";
 
-  // 4. Fetch trending (paralelo)
-  const [trendingDayIds, trendingWeekIds] = accessToken
+  // 4. Fetch trending + filmes em cartaz BR (paralelo)
+  const [trendingDayIds, trendingWeekIds, nowPlayingMovies, upcomingMovies] = accessToken
     ? await Promise.all([
         fetchTrendingIds("day", accessToken),
         fetchTrendingIds("week", accessToken),
+        fetchMoviesBR("now_playing", accessToken),
+        fetchMoviesBR("upcoming", accessToken),
       ])
-    : [[], []];
+    : [[], [], [], []];
 
   const trendingDay  = new Set(trendingDayIds);
   const trendingWeek = new Set(trendingWeekIds);
@@ -155,44 +210,54 @@ async function buildAgendaPayload(): Promise<IcsAgendaResponse> {
     console.log("[ICS Agenda] enriquecimento concluído");
   }
 
-  // 6. Score de relevância + filtro
+  // 6. Score de relevância — calculado para referência futura, mas NÃO usado como filtro.
+  // MODO BRUTO: todos os grupos com TMDB recebem score, mas nenhum é descartado por isso.
   for (const g of groups) {
     if (g.tmdb) {
-      computeRelevanceScore(g, trendingDay, trendingWeek);
-      filterEnrichedGroup(g, trendingDay, trendingWeek);
+      const score = computeRelevanceScore(g, trendingDay, trendingWeek);
+      g.relevanceScore = score;
+      // isRelevant=true para todos — sem threshold de corte no modo bruto
+      g.isRelevant = true;
     }
   }
 
-  // 7. Separar featured / secondary — com filtro de segurança duplo:
-  //    - g.isRelevant: resultado do filterEnrichedGroup do Passo 6
-  //    - isHiddenGroup: garante que refined_category HIDDEN não vaza para o output,
-  //      mesmo quando undefined (grupos SECONDARY não passam pelo enriquecimento completo,
-  //      portanto tmdb.refined_category pode ser undefined — fallback para g.category).
+  // 7. Separar featured / secondary — apenas separa categorias visíveis das ocultas.
+  // MODO BRUTO: sem filtro de score, idioma ou popularidade.
+  // Apenas HIDDEN_CATEGORIES (SPORTS, NEWS, PODCAST, LIVE_EVENT) são bloqueadas —
+  // essas são exclusões técnicas/estruturais, não editoriais.
   const isHiddenGroup = (g: IcsSeriesGroup): boolean =>
     HIDDEN_CATEGORIES.has(g.category) ||
     HIDDEN_CATEGORIES.has(g.tmdb?.refined_category ?? g.category);
 
   const featuredGroups  = groups.filter((g) =>
-    FEATURED_CATEGORIES.has(g.category) && g.isRelevant && !isHiddenGroup(g),
+    FEATURED_CATEGORIES.has(g.category) && !isHiddenGroup(g),
   );
   const secondaryGroups = groups.filter((g) =>
-    !FEATURED_CATEGORIES.has(g.category) && g.isRelevant && !isHiddenGroup(g),
+    !FEATURED_CATEGORIES.has(g.category) && !isHiddenGroup(g),
   );
 
-  // 8. Estatísticas completas
-  const allGroupsForStats = runIcsEngine(events, {
-    windowDays: 30,
-    sort: "nextAir",
-    includeHidden: true,
-  });
-  const stats = computeStats(allGroupsForStats, events.length);
+  // 8. Estatísticas — usa os grupos já processados + todos os ocultos do groupMap
+  // (eliminamos o 2º runIcsEngine que re-processava o ICS inteiro desnecessariamente)
+  const stats = computeStats([...featuredGroups, ...secondaryGroups], events.length);
 
   const pendingEnrichment = featuredGroups.filter((g) => !g.tmdb).length;
+
+  // Merge filmes: dedup por tmdb_id, prioriza now_playing sobre upcoming
+  const movieMap = new Map<number, import("@/lib/ics-engine").MovieGroup>();
+  for (const m of [...nowPlayingMovies, ...upcomingMovies]) {
+    if (!movieMap.has(m.movie.tmdb_id)) movieMap.set(m.movie.tmdb_id, m);
+  }
+  // MODO BRUTO: sem cap de filmes, sem janela temporal restritiva.
+  // Apenas validação técnica: descarta filmes sem título e sem nenhuma imagem.
+  const movies = Array.from(movieMap.values())
+    .filter((m) => m.movie.tmdb_id && m.movie.name) // validação técnica mínima
+    .sort((a, b) => (b.movie.popularity ?? 0) - (a.movie.popularity ?? 0));
 
   return {
     groups: featuredGroups,
     featuredGroups,
     secondaryGroups,
+    movies,
     stats,
     fetchedAt: new Date().toISOString(),
     source: ICS_URL,

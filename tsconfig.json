@@ -33,11 +33,12 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    "**/*.mts",
     ".next/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",
-    "supabase/functions"
+    "supabase/functions",
+    "scripts",
+    ".next/dev"
   ]
 }

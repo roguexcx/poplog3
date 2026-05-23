@@ -389,11 +389,19 @@ export function computeRelevanceScore(
   score += Math.max(networkBoost, studioBoost);
 
   // ── 4. Trending boost (0-20 pts) ────────────────────────────────────────────
-  if (trendingDay.has(tmdb.tmdb_id))        score += 20;
-  else if (trendingWeek.has(tmdb.tmdb_id))  score += 10;
+  // Idiomas asiáticos (ko/zh/th) excluídos do trending boost — TMDB trending global
+  // é dominado por K-dramas e causa oversaturation. Japonês (ja/anime) mantém boost reduzido.
+  const lang = tmdb.original_language ?? "";
+  const ASIAN_NO_BOOST = new Set(["ko", "zh", "th", "hi", "tl"]);
+  if (!ASIAN_NO_BOOST.has(lang)) {
+    if (trendingDay.has(tmdb.tmdb_id))        score += 20;
+    else if (trendingWeek.has(tmdb.tmdb_id))  score += 10;
+  } else if (lang === "ja") {
+    // Anime JP recebe boost mínimo (5) — trending JP pode ser legítimo
+    if (trendingDay.has(tmdb.tmdb_id) || trendingWeek.has(tmdb.tmdb_id)) score += 5;
+  }
 
   // ── 5. Origem (0-10 pts) ────────────────────────────────────────────────────
-  const lang = tmdb.original_language ?? "";
   if (lang === "en" || lang === "pt")  score += 10;
   else if (lang === "es" || lang === "ja") score += 5; // ES e JP (anime) passam com desconto
 
@@ -404,8 +412,14 @@ export function computeRelevanceScore(
 export const RELEVANCE_THRESHOLD = 38;
 
 /**
- * Hard filters + score composto.
- * Retorna true se o grupo deve aparecer na Agenda.
+ * Filtro técnico mínimo — MODO BRUTO.
+ * Sem hard filters editoriais de idioma, tipo ou score.
+ * Apenas bloqueia HIDDEN_CATEGORIES (SPORTS, NEWS, PODCAST, LIVE_EVENT) —
+ * exclusões estruturais, não editoriais.
+ *
+ * O score é calculado para referência e ordenação futura, mas não corta conteúdo.
+ * Filtros editoriais ficam preparados abaixo como camada comentada.
+ *
  * Atualiza group.relevanceScore e group.isRelevant in-place.
  */
 export function filterEnrichedGroup(
@@ -415,30 +429,19 @@ export function filterEnrichedGroup(
 ): boolean {
   const { tmdb } = group;
 
-  // Hard filter: categoria local HIDDEN (VARIETY, PODCAST, SPORTS, NEWS) — nunca passa
+  // Bloqueio técnico: categorias estruturalmente ocultas
   if (HIDDEN_CATEGORIES.has(group.category)) {
     group.isRelevant = false;
     return false;
   }
 
-  // Sem TMDB → passa se categoria local não for hidden (enriquecimento ainda não chegou)
-  if (!tmdb) return true;
-
-  // Hard filter: idioma — EN, PT e ES passam (ES com score reduzido); JP para anime
-  const lang = tmdb.original_language ?? "";
-  if (lang && !["en", "pt", "es", "ja"].includes(lang)) return false;
-
-  // Hard filter: tipo TMDB explícito — Talk Show, Game Show e News sempre bloqueados.
-  const typ = tmdb.tmdb_type ?? "";
-  if (typ === "Talk Show" || typ === "Game Show" || typ === "News" || typ === "Soap") {
-    group.isRelevant = false;
-    return false;
+  // Sem TMDB → passa (enriquecimento ainda não chegou)
+  if (!tmdb) {
+    group.isRelevant = true;
+    return true;
   }
 
-  // Hard filter: refined_category pelo TMDB/enricher — pode diferir da categoria local.
-  // SAFETY: grupos SECONDARY não passam pelo enriquecimento TMDB completo, portanto
-  // tmdb.refined_category pode ser undefined — tratado com fallback para group.category
-  // para garantir que a ausência do campo não cause vazamento nem undefined.
+  // Bloqueio via refined_category — HIDDEN_CATEGORIES nunca passam
   const refinedCat = tmdb.refined_category ?? group.category;
   if (HIDDEN_CATEGORIES.has(refinedCat)) {
     group.category   = refinedCat;
@@ -446,12 +449,29 @@ export function filterEnrichedGroup(
     return false;
   }
 
-  // Score composto
+  // Score composto — calculado para ordenação, sem threshold de corte
   const score = computeRelevanceScore(group, trendingDay, trendingWeek);
   group.relevanceScore = score;
-  group.isRelevant = score >= RELEVANCE_THRESHOLD;
+  group.isRelevant = true; // MODO BRUTO: todos passam independente do score
 
-  return group.isRelevant;
+  // ── Camada futura de filtros editoriais (DESLIGADA) ──────────────────────────
+  // Para reativar filtros graduais descomente conforme necessário:
+  //
+  // // Filtro de idioma:
+  // const lang = tmdb.original_language ?? "";
+  // if (lang && !["en", "pt", "es", "ja"].includes(lang)) {
+  //   group.isRelevant = false; return false;
+  // }
+  // // Filtro de tipo TMDB:
+  // const typ = tmdb.tmdb_type ?? "";
+  // if (typ === "Talk Show" || typ === "Game Show" || typ === "News" || typ === "Soap") {
+  //   group.isRelevant = false; return false;
+  // }
+  // // Threshold de score:
+  // group.isRelevant = score >= RELEVANCE_THRESHOLD;
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  return true;
 }
 
 // ── Mapa de genres TMDB → categoria ──────────────────────────────────────────
@@ -548,6 +568,7 @@ export function refineCategoryFromTmdb(
     const cat = TMDB_GENRE_CATEGORY[gid];
     if (cat && CATEGORY_PRIORITY[cat] < bestPriority) {
       bestPriority = CATEGORY_PRIORITY[cat];
+      best = cat;  // ← BUG FIX: atualiza `best`, não só `bestPriority`
     }
   }
 
