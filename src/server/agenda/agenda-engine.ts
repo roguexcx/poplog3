@@ -3,6 +3,15 @@ import type { NewEpisodeItem } from "@/app/api/poplog3/continuity/new-episodes/r
 import type { UpcomingEpisodeItem } from "@/app/api/poplog3/continuity/upcoming-episodes/route";
 import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import type { DiscoverMediaItem } from "@/server/agenda/discover-service";
+import { normalizeTmdbPopularity, popularityToVisualWeight } from "@/lib/score/tmdb-popularity";
+import {
+  editorialBalanceEngine,
+  type EditorialContext,
+} from "@/server/agenda/editorial-balance-engine";
+import {
+  computeBrazilianProductionBonus,
+  applyLegacyBrazilianBonus,
+} from "@/server/agenda/editorial-regional-bonus";
 import {
   buildTemporalTimeline,
   classifyAirDate,
@@ -25,6 +34,7 @@ import { formatEpisodeRuntimeLabel } from "@/lib/domain-labels";
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
 import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
 import { getLeavingSoonAvailabilityEvents } from "@/server/streaming/availability-events";
+import { editorialCacheTTL } from "@/server/cache/cache-config";
 
 type TmdbPageResult<T> = {
   page: number;
@@ -86,6 +96,7 @@ function normalizeMovie(movie: TmdbMovie): LegacyAgendaMovie {
     id: movie.id,
     media_type: "movie",
     title: movie.title,
+    original_language: movie.original_language,
     poster_path: movie.poster_path,
     backdrop_path: movie.backdrop_path,
     release_date: movie.release_date ?? "",
@@ -131,8 +142,11 @@ function eventFromLegacyMovie(
     layer: classifyAirDate(airDate),
     airDate,
     daysUntil: airDate ? daysBetweenDates(airDate) : null,
-    visualWeight: movie.popularity > 500 || movie.vote_count > 1000 ? "hero" : "card",
-    score: baseScore + movie.popularity / 20 + movie.vote_average,
+    visualWeight:
+      movie.vote_count > 1000
+        ? "hero"
+        : popularityToVisualWeight(movie.popularity, "movie"),
+    score: baseScore + normalizeTmdbPopularity(movie.popularity) * 40 + movie.vote_average,
   };
 }
 
@@ -153,8 +167,8 @@ function eventFromLegacyTv(
     layer: classifyAirDate(airDate),
     airDate,
     daysUntil: airDate ? daysBetweenDates(airDate) : null,
-    visualWeight: tv.popularity > 250 ? "hero" : "card",
-    score: baseScore + tv.popularity / 15 + tv.vote_average,
+    visualWeight: popularityToVisualWeight(tv.popularity, "tv"),
+    score: baseScore + normalizeTmdbPopularity(tv.popularity) * 40 + tv.vote_average,
   };
 }
 
@@ -181,17 +195,19 @@ function eventFromDiscover(
     airDate,
     daysUntil: airDate ? daysBetweenDates(airDate) : null,
     provider,
-    visualWeight: item.popularity > 300 ? "hero" : "card",
-    score: baseScore + item.popularity / 20 + item.vote_average,
+    visualWeight: popularityToVisualWeight(item.popularity, mediaType),
+    score: baseScore + normalizeTmdbPopularity(item.popularity) * 40 + item.vote_average,
   };
 }
 
 async function fetchLegacyAgenda() {
   const now = new Date();
   const today = dateAdd(0, now);
-  const fortyFiveDaysAgo = dateAdd(-45, now);
+  // Janela alinhada com a UI: 30 dias para trás (newSeries) e 30 dias para frente (soonToReturn).
+  // A janela antiga de 45/90 dias processava dados que a interface raramente exibia.
+  const thirtyDaysAgo  = dateAdd(-30, now);
   const eightDaysAhead = dateAdd(8, now);
-  const ninetyDaysAhead = dateAdd(90, now);
+  const thirtyDaysAhead = dateAdd(30, now);
 
   const [
     nowPlayingRes,
@@ -230,39 +246,41 @@ async function fetchLegacyAgenda() {
     }),
     tmdbFetch<TmdbPageResult<TmdbTv>>("/discover/tv", {
       params: {
-        "first_air_date.gte": fortyFiveDaysAgo,
+        "first_air_date.gte": thirtyDaysAgo,   // 30 dias (era 45)
         "first_air_date.lte": today,
         sort_by: "popularity.desc",
         "vote_count.gte": "3",
         without_genres: WITHOUT_TALK,
         page: 1,
       },
-      revalidate: 3600 * 6,
+      revalidate: editorialCacheTTL(),
     }),
     tmdbFetch<TmdbPageResult<TmdbTv>>("/discover/tv", {
       params: {
         "air_date.gte": eightDaysAhead,
-        "air_date.lte": ninetyDaysAhead,
+        "air_date.lte": thirtyDaysAhead,        // 30 dias (era 90)
         sort_by: "popularity.desc",
         "vote_count.gte": "20",
         without_genres: WITHOUT_TALK,
         page: 1,
       },
-      revalidate: 3600 * 6,
+      revalidate: editorialCacheTTL(),
     }),
     tmdbFetch<TmdbPageResult<TmdbTv>>("/discover/tv", {
       params: {
         "air_date.gte": eightDaysAhead,
-        "air_date.lte": ninetyDaysAhead,
+        "air_date.lte": thirtyDaysAhead,        // 30 dias (era 90)
         sort_by: "popularity.desc",
         "vote_count.gte": "20",
         without_genres: WITHOUT_TALK,
         page: 2,
       },
-      revalidate: 3600 * 6,
+      revalidate: editorialCacheTTL(),
     }),
   ]);
 
+  // Bônus BR aplicado nos arrays legados: adiciona editorial_score e br_bonus
+  // e reordena por editorial_score antes de retornar. Consistente com route.ts.
   return {
     nowPlaying:
       nowPlayingRes.status === "fulfilled"
@@ -270,17 +288,28 @@ async function fetchLegacyAgenda() {
         : [],
     upcoming:
       upcomingRes.status === "fulfilled" ? upcomingRes.value.results.map(normalizeMovie) : [],
-    airingToday: mergeDedup(airingTodayRes1, airingTodayRes2)
-      .filter((item) => !isTalkOrNews(item))
-      .map(normalizeTv),
-    onTheAir: mergeDedup(onTheAirRes1, onTheAirRes2)
-      .filter((item) => !isTalkOrNews(item))
-      .map(normalizeTv),
-    newSeries:
+    airingToday: applyLegacyBrazilianBonus(
+      mergeDedup(airingTodayRes1, airingTodayRes2)
+        .filter((item) => !isTalkOrNews(item))
+        .map(normalizeTv),
+      normalizeTmdbPopularity,
+    ),
+    onTheAir: applyLegacyBrazilianBonus(
+      mergeDedup(onTheAirRes1, onTheAirRes2)
+        .filter((item) => !isTalkOrNews(item))
+        .map(normalizeTv),
+      normalizeTmdbPopularity,
+    ),
+    newSeries: applyLegacyBrazilianBonus(
       newSeriesRes.status === "fulfilled"
         ? newSeriesRes.value.results.filter((item) => !isTalkOrNews(item)).map(normalizeTv)
         : [],
-    soonToReturn: mergeDedup(soonToReturnRes1, soonToReturnRes2).map(normalizeTv),
+      normalizeTmdbPopularity,
+    ),
+    soonToReturn: applyLegacyBrazilianBonus(
+      mergeDedup(soonToReturnRes1, soonToReturnRes2).map(normalizeTv),
+      normalizeTmdbPopularity,
+    ),
   };
 }
 
@@ -388,7 +417,7 @@ async function buildUpcomingEpisodeItems(userId: string | null): Promise<Upcomin
   if (!userId) return [];
 
   const tomorrow = dateAdd(1);
-  const cutoff = dateAdd(90);
+  const cutoff = dateAdd(30); // 30 dias (era 90) — alinhado com a janela da UI
   const states = (
     await getUserTitleStates(userId, {
       mediaType: "tv",
@@ -545,8 +574,8 @@ async function fetchAvailabilityAgendaEvents(input: {
           logo: row.provider_logo_path,
           type: row.availability_type,
         },
-        visualWeight: (title?.popularity ?? 0) > 300 ? "hero" : "card",
-        score: input.baseScore + (title?.popularity ?? 0) / 20 + (title?.vote_average ?? 0),
+        visualWeight: popularityToVisualWeight(title?.popularity ?? 0, row.media_type),
+        score: input.baseScore + normalizeTmdbPopularity(title?.popularity ?? 0) * 40 + (title?.vote_average ?? 0),
       } satisfies AgendaEvent;
     });
 }
@@ -705,12 +734,63 @@ export class AgendaEngine {
       score: 90 - item.days_left,
     })) satisfies AgendaEvent[];
 
-    const cinemaHighlights = legacy.nowPlaying
+    // ── Bônus regional BR nos eventos de cinema e streaming ───────────────────
+    // Os eventos legados carregam original_language via LegacyAgendaTv/Movie.
+    // Aplicamos o bônus antes do balanceamento editorial para que ele
+    // influencie a ordenação sem distorcer o score base de outros eventos.
+    const rawCinemaHighlights = legacy.nowPlaying
       .slice(0, 12)
-      .map((movie) => eventFromLegacyMovie(movie, "movie_theatrical", 50));
-    const soonOnStreaming = [...streamingArrivals, ...digitalRadar]
+      .map((movie) => {
+        const event = eventFromLegacyMovie(movie, "movie_theatrical", 50);
+        const brBonus = computeBrazilianProductionBonus({
+          originalLanguage: movie.original_language,
+          genreIds: movie.genre_ids,
+          voteAverage: movie.vote_average,
+          voteCount: movie.vote_count,
+        });
+        return { ...event, score: event.score + brBonus.bonus };
+      });
+
+    const rawSoonOnStreaming = [...streamingArrivals, ...digitalRadar]
+      .map((event) => {
+        // streamingArrivals / digitalRadar vêm de fetchAvailabilityAgendaEvents
+        // sem original_language — o bônus não é aplicável aqui sem payload extra.
+        // Mantemos o score como está; produções BR aparecem via bônus nos legados.
+        return event;
+      })
       .sort((a, b) => b.score - a.score)
       .slice(0, 24);
+
+    // ── Balanceamento editorial global ────────────────────────────────────────
+    // Aplicamos penalidades de diversidade/repetição nos eventos editoriais
+    // (cinema + streaming), preservando o score dos eventos pessoais intacto.
+    const editorialCtx: EditorialContext = {
+      composedInThisCycle: new Set(),
+      diversity: editorialBalanceEngine.createDiversityContext(),
+      now: now.getTime(),
+    };
+
+    const balancedCinema = editorialBalanceEngine
+      .rankEditorial(rawCinemaHighlights, editorialCtx)
+      .map((e) => {
+        editorialBalanceEngine.recordExposure(e, editorialCtx, {
+          isHero: e.visualWeight === "hero",
+        });
+        // Preserva score original no objeto AgendaEvent; editorialScore é interno.
+        return { ...e, score: e.editorialScore } as AgendaEvent;
+      });
+
+    const balancedStreaming = editorialBalanceEngine
+      .rankEditorial(rawSoonOnStreaming, editorialCtx)
+      .map((e) => {
+        editorialBalanceEngine.recordExposure(e, editorialCtx, {
+          isHero: e.visualWeight === "hero",
+        });
+        return { ...e, score: e.editorialScore } as AgendaEvent;
+      });
+
+    const cinemaHighlights = balancedCinema;
+    const soonOnStreaming = balancedStreaming;
 
     const byProvider = Object.fromEntries(
       [...streamingArrivals, ...digitalRadar].reduce((groups, event) => {

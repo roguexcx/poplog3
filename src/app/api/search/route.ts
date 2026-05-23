@@ -9,6 +9,9 @@ import {
   shouldUseFuzzyFallback,
 } from "@/server/search/fuzzy-title-search";
 import type { TmdbTitleSummary } from "@/server/api-clients/tmdb/types";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getUserFeedbackMap } from "@/lib/personalization/feedback";
+import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
 
 function fuzzyMatchToTmdbSummary(
   title: Awaited<ReturnType<typeof findCachedFuzzyTitles>>[number]
@@ -49,6 +52,20 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Resolve authenticated user for feedback metadata (best-effort).
+    let userId: string | undefined;
+    let feedbackMap: Awaited<ReturnType<typeof getUserFeedbackMap>> | undefined;
+    try {
+      const supabase = await createSupabaseServerClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        userId = user.id;
+        feedbackMap = await getUserFeedbackMap(user.id, supabase);
+      }
+    } catch {
+      // Unauthenticated -- proceed without personalization.
+    }
+
     const data = await tmdbFetch<{
       results: TmdbTitleSummary[];
     }>("/search/multi", {
@@ -67,8 +84,7 @@ export async function GET(request: NextRequest) {
       rawResults.map((item) => normalizeTmdbTitle(item))
     );
 
-    // Cache é best-effort no search — não queremos quebrar o resultado da
-    // busca se uma persistência específica falhar.
+    // Cache is best-effort -- do not block search results on cache failures.
     Promise.all(
       titles.map(async (title, index) => {
         try {
@@ -92,7 +108,20 @@ export async function GET(request: NextRequest) {
           excludeKeys: seenTitleKeys,
         })
       : [];
-    const results = [...rawResults, ...fuzzyTitles.map(fuzzyMatchToTmdbSummary)];
+    const rawCombined = [...rawResults, ...fuzzyTitles.map(fuzzyMatchToTmdbSummary)];
+
+    // Apply editorial feedback in search context: preserves TMDB order,
+    // attaches userFeedback metadata (notInterested, activeTypes) for UI.
+    // Hidden titles are NOT excluded from search (users can still find them).
+    const results = applyUserFeedbackScoring(
+      rawCombined.map((item) => ({ ...item, id: item.id })),
+      {
+        userId,
+        feedbackMap,
+        context: "search",
+        preserveOrder: true,
+      },
+    );
 
     return NextResponse.json({
       ok: true,

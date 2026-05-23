@@ -1,5 +1,5 @@
 import { supabaseAdmin } from "@/server/supabase/admin";
-import { getTitleAvailability } from "./title-availability";
+import { getAvailabilityForDisplay } from "./title-availability";
 import type { ProviderPreferenceInput, ProviderRegion } from "./provider-preferences";
 
 async function fetchPreferencesAdmin(
@@ -65,11 +65,12 @@ export async function refreshAllUserTitleAvailability(
   const updates: Array<Record<string, unknown>> = [];
 
   for (const state of states) {
-    const result = await getTitleAvailability({
+    const result = await getAvailabilityForDisplay({
       tmdbId: state.tmdb_id,
       mediaType: state.media_type as "movie" | "tv",
       preferences,
       contexts: ["library"],
+      endpoint: "user_streaming_preferences",
     }).catch((error) => {
       console.error("[batch-availability-refresh] title availability failed", {
         tmdbId: state.tmdb_id,

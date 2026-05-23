@@ -13,6 +13,7 @@ type InteractivePosterCardProps = {
   id: number;
   mediaType: "movie" | "tv";
   title: string;
+  originalTitle?: string | null;
   year?: number | string | null;
   posterPath?: string | null;
   fallbackPath?: string | null;
@@ -102,6 +103,7 @@ export default function InteractivePosterCard({
   id,
   mediaType,
   title,
+  originalTitle,
   year,
   posterPath,
   fallbackPath,
@@ -118,6 +120,7 @@ export default function InteractivePosterCard({
       posterPath={posterPath}
       fallbackPath={fallbackPath}
       title={title}
+      originalTitle={originalTitle}
       year={year}
       mediaType={mediaType}
       href={href}

@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 
 import SynopsisText from "@/features/home/components/SynopsisText";
 import { CardActionButton } from "@/components/ui/CardActionButton";
@@ -284,24 +284,19 @@ export default function ForYouSection() {
   const [items, setItems] = useState<ForYouItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const didFetchRef = useRef(false);
+  const didInitRef = useRef(false);
+  const [refreshCount, setRefreshCount] = useState(0);
 
-  useEffect(() => {
-    if (titlesLoading) return;
-    if (didFetchRef.current) return;
-    didFetchRef.current = true;
-
-    if (titles.length === 0) {
+  const fetchForYou = useCallback((titlesSnapshot: typeof titles) => {
+    if (titlesSnapshot.length === 0) {
       setLoading(false);
       return;
     }
-
     setLoading(true);
-
     fetch("/api/user/for-you", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ titles }),
+      body: JSON.stringify({ titles: titlesSnapshot }),
     })
       .then((res) => (res.ok ? res.json() : null))
       .then((json) => {
@@ -311,8 +306,21 @@ export default function ForYouSection() {
         }
       })
       .finally(() => setLoading(false));
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [titlesLoading]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (titlesLoading) return;
+    if (didInitRef.current && refreshCount === 0) return;
+    didInitRef.current = true;
+    fetchForYou(titles);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [titlesLoading, refreshCount]);
+
+  function handleRefresh() {
+    if (loading) return;
+    setRefreshCount((c) => c + 1);
+  }
 
   if (!loading && !featured && items.length === 0) return null;
 
@@ -323,12 +331,33 @@ export default function ForYouSection() {
         subtitle="Escolhas personalizadas com base no que você ama."
         className="mb-6"
         action={
-          <Link
-            href="/profile?tab=recommendations"
-            className="hidden text-xs font-bold text-sky-300 transition hover:text-white md:block"
-          >
-            Ver todos →
-          </Link>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleRefresh}
+              disabled={loading}
+              className={[
+                "flex items-center gap-2 rounded-full border px-4 py-1.5 backdrop-blur-[8px]",
+                "text-[10px] font-semibold uppercase tracking-[0.08em]",
+                "transition-[transform,background,border-color] duration-200 hover:scale-105",
+                "border-white/[0.18] bg-black/[0.72] text-white/60",
+                "hover:border-sky-500/40 hover:text-white/85",
+                "disabled:pointer-events-none disabled:opacity-30",
+              ].join(" ")}
+              aria-label="Atualizar recomendações"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.2}>
+                <path d="M1 4v6h6M23 20v-6h-6" />
+                <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15" />
+              </svg>
+              Novos títulos
+            </button>
+            <Link
+              href="/profile?tab=recommendations"
+              className="hidden text-xs font-bold text-sky-300 transition hover:text-white md:block"
+            >
+              Ver todos →
+            </Link>
+          </div>
         }
       />
 

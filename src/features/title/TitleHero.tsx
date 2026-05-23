@@ -233,13 +233,15 @@ export default function TitleHero({
             </div>
 
             <h1 className="break-words text-[clamp(1.875rem,5vw,4.25rem)] font-black leading-[0.95] tracking-[-0.05em] text-white">
-              {title.title}
+              {title.originalTitle && title.originalTitle !== title.title
+                ? title.originalTitle
+                : title.title}
             </h1>
 
             {title.originalTitle &&
               title.originalTitle !== title.title && (
                 <p className="mt-2 break-words text-sm font-medium tracking-[-0.01em] text-white/45 sm:text-base">
-                  {title.originalTitle}
+                  {title.title}
                 </p>
               )}
 

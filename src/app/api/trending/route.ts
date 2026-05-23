@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { filterValidTitles } from "@/server/utils/filter-valid-titles";
 import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import { normalizeTmdbTitle } from "@/server/normalizers/tmdb-title";
@@ -10,9 +10,26 @@ import {
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
 import { supabaseAdmin } from "@/server/supabase/admin";
 import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getUserFeedbackMap } from "@/lib/personalization/feedback";
+import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
 
-export async function GET() {
+export async function GET(_request: NextRequest) {
   try {
+    // Resolve authenticated user for editorial feedback scoring (best-effort).
+    let userId: string | undefined;
+    let feedbackMap: Awaited<ReturnType<typeof getUserFeedbackMap>> | undefined;
+    try {
+      const supabase = await createSupabaseServerClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        userId = user.id;
+        feedbackMap = await getUserFeedbackMap(user.id, supabase);
+      }
+    } catch {
+      // Unauthenticated or session error -- proceed without personalization.
+    }
+
     const data = await tmdbFetch<{
       results: TmdbTitleSummary[];
     }>("/trending/all/week", {
@@ -52,7 +69,7 @@ export async function GET() {
     const episodeRuntimesBySeries =
       tvIds.length > 0 ? await getSeriesEpisodeRuntimesMap(tvIds) : new Map();
 
-    const results = titles.map((title) => {
+    const withRuntime = titles.map((title) => {
       const cached = runtimeMap.get(`${title.media_type}-${title.tmdb_id}`);
       const runtimeResolution = resolveRuntimeByMediaType({
         mediaType: title.media_type,
@@ -71,9 +88,20 @@ export async function GET() {
 
       return {
         ...title,
+        id: title.tmdb_id,
         runtime: runtimeResolution.minutes,
         runtime_label: runtimeLabel,
       };
+    });
+
+    // Apply editorial feedback scoring when user is authenticated.
+    // preserveOrder: true keeps TMDB global rank but surfaces
+    // userFeedback metadata (notInterested, activeTypes) for UI affordances.
+    const results = applyUserFeedbackScoring(withRuntime, {
+      userId,
+      feedbackMap,
+      context: "trending",
+      preserveOrder: true,
     });
 
     return NextResponse.json({

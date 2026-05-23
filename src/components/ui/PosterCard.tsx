@@ -8,8 +8,10 @@ type PosterCardProps = {
   posterPath: string | null | undefined;
   /** Caminho de fallback (geralmente backdrop) caso o poster falte. */
   fallbackPath?: string | null;
-  /** Texto principal do card */
+  /** Texto principal do card (localizado PT-BR) */
   title: string;
+  /** Título original/inglês — exibido como nome principal quando diferente */
+  originalTitle?: string | null;
   /** Subtítulo discreto (ano, status, etc) */
   subtitle?: string;
   /** Tipo de mídia (afeta meta-row no rodapé) */
@@ -55,6 +57,7 @@ export default function PosterCard({
   posterPath,
   fallbackPath = null,
   title,
+  originalTitle,
   subtitle,
   mediaType,
   year,
@@ -112,8 +115,13 @@ export default function PosterCard({
 
       <div className="px-1 pb-1 pt-3">
         <h3 className="line-clamp-2 text-[13px] font-semibold leading-[1.35] tracking-[-0.015em] text-white/92">
-          {title}
+          {originalTitle && originalTitle !== title ? originalTitle : title}
         </h3>
+        {originalTitle && originalTitle !== title && (
+          <p className="mt-0.5 line-clamp-1 text-[10px] font-light leading-snug text-white/35">
+            {title}
+          </p>
+        )}
 
         {(subtitle || year || mediaType) && (
           <div className="mt-1.5 flex items-center gap-2 text-[11px] text-white/36">

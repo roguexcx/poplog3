@@ -67,14 +67,15 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: "Invalid body" }, { status: 400 });
     }
 
+    // liked and favorite are managed exclusively via /api/user/feedback
+    // (central feedback engine). Ignoring them here prevents bypassing the
+    // editorial engine and ensures raw feedback is never overwritten outside it.
     const title = await upsertUserTitleStatus({
       userId: user.id,
       tmdbId,
       mediaType,
       status,
       rating: body.rating ?? null,
-      liked: body.liked ?? null,
-      favorite: body.favorite ?? false,
       notes: body.notes ?? null,
     });
 

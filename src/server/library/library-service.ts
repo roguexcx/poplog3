@@ -2,11 +2,13 @@ import { supabaseAdmin } from "@/server/supabase/admin";
 import {
   upsertTitleState,
   deleteTitleState,
-  getUserTitleStates,
+  refreshTitleStateAvailability,
 } from "@/server/state/user-title-state";
 import { formatEpisodeRuntimeLabel, formatRuntimeLabel } from "@/lib/domain-labels";
 import { resolveRuntimeByMediaType, type RuntimeResolution } from "@/lib/runtime";
 import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
+import { refreshAvailabilityForUserTitle } from "@/server/streaming/title-availability";
+import { formatError, isDebugEnabled, rateLimitedWarn } from "@/server/logging/log-control";
 
 import {
   Poplog3UserTitle,
@@ -21,6 +23,7 @@ export type Poplog3UserLibraryItem = Poplog3UserTitle & {
   total_episodes?: number | null;
   progress_pct?: number;
   duration_sort_minutes?: number | null;
+  duration_sort_unavailable?: boolean | null;
   runtime_label?: string | null;
   remaining_runtime_minutes?: number | null;
   remaining_runtime_label?: string | null;
@@ -63,6 +66,228 @@ function getPositiveNumber(value: number | null | undefined) {
     : null;
 }
 
+function readPositiveNumber(value: unknown) {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.round(value)
+    : null;
+}
+
+function getTitleRuntime(title: { runtime: number | null } | null) {
+  return readPositiveNumber(title?.runtime) ?? null;
+}
+
+type LibraryStateRow = {
+  tmdb_id: number;
+  media_type: "movie" | "tv";
+  status: string | null;
+  favorite: boolean;
+  liked: boolean | null;
+  computed_state: string | null;
+  watched_episodes: number;
+  aired_episodes: number;
+  total_episodes: number | null;
+  progress_pct: number;
+  duration_sort_minutes: number | null;
+  duration_sort_unavailable: boolean | null;
+  best_provider_name: string | null;
+  best_provider_type: string | null;
+  best_provider_logo: string | null;
+  last_event_at: string;
+  created_at: string;
+};
+
+type TitleData = {
+  tmdb_id: number;
+  media_type: string;
+  title: string | null;
+  original_title: string | null;
+  poster_path: string | null;
+  backdrop_path: string | null;
+  year: number | null;
+  release_date: string | null;
+  first_air_date: string | null;
+  last_air_date: string | null;
+  runtime: number | null;
+  episode_run_time: number[] | null;
+  vote_average: number | null;
+  popularity: number | null;
+  number_of_episodes: number | null;
+  number_of_seasons: number | null;
+};
+
+const LIBRARY_STATE_SELECT = [
+  "tmdb_id",
+  "media_type",
+  "status",
+  "favorite",
+  "liked",
+  "computed_state",
+  "watched_episodes",
+  "aired_episodes",
+  "total_episodes",
+  "progress_pct",
+  "duration_sort_minutes",
+  "duration_sort_unavailable",
+  "best_provider_name",
+  "best_provider_type",
+  "best_provider_logo",
+  "last_event_at",
+  "created_at",
+].join(", ");
+
+const LIBRARY_TITLE_SELECT = [
+  "tmdb_id",
+  "media_type",
+  "title",
+  "original_title",
+  "poster_path",
+  "backdrop_path",
+  "year",
+  "release_date",
+  "first_air_date",
+  "last_air_date",
+  "runtime",
+  "episode_run_time",
+  "vote_average",
+  "popularity",
+  "number_of_episodes",
+  "number_of_seasons",
+].join(", ");
+
+const LIBRARY_BATCH_SIZE = 80;
+const LOG_TTL_MS = 5 * 60 * 1000;
+
+function chunkArray<T>(items: T[], size: number) {
+  const chunks: T[][] = [];
+  for (let index = 0; index < items.length; index += size) {
+    chunks.push(items.slice(index, index + size));
+  }
+  return chunks;
+}
+
+function isTimeoutError(error: unknown) {
+  const normalized = formatError(error);
+  return /timeout|canceling statement/i.test(
+    [normalized.message, normalized.details, normalized.hint].filter(Boolean).join(" "),
+  );
+}
+
+async function getLibraryStateRows(userId: string, statusFilter: string[]) {
+  const { data, error } = await supabaseAdmin
+    .from("user_title_state")
+    .select(LIBRARY_STATE_SELECT)
+    .eq("user_id", userId)
+    .in("status", statusFilter)
+    .order("last_event_at", { ascending: false });
+
+  if (error) {
+    rateLimitedWarn(
+      "library:state-query-failed",
+      LOG_TTL_MS,
+      [
+        "[library] state query failed",
+        `- query stage: read user state`,
+        `- fallback aplicado: biblioteca legada`,
+      ].join("\n"),
+      formatError(error),
+    );
+    return [];
+  }
+
+  return (data ?? []) as unknown as LibraryStateRow[];
+}
+
+async function getLibraryTitleRows(input: {
+  stateRows: LibraryStateRow[];
+  userTitleCount: number;
+}) {
+  const rows: TitleData[] = [];
+  const idsByType = input.stateRows.reduce<Record<"movie" | "tv", Set<number>>>(
+    (acc, row) => {
+      acc[row.media_type].add(row.tmdb_id);
+      return acc;
+    },
+    { movie: new Set<number>(), tv: new Set<number>() },
+  );
+
+  for (const mediaType of ["movie", "tv"] as const) {
+    for (const batch of chunkArray(Array.from(idsByType[mediaType]), LIBRARY_BATCH_SIZE)) {
+      if (batch.length === 0) continue;
+
+      const { data, error } = await supabaseAdmin
+        .from("poplog3_titles")
+        .select(LIBRARY_TITLE_SELECT)
+        .eq("media_type", mediaType)
+        .in("tmdb_id", batch);
+
+      if (error) {
+        const label = isTimeoutError(error)
+          ? "[library] titles query timeout"
+          : "[library] titles query failed";
+        rateLimitedWarn(
+          `library:title-query:${mediaType}:${isTimeoutError(error) ? "timeout" : "error"}`,
+          LOG_TTL_MS,
+          [
+            label,
+            `- user titles: ${input.userTitleCount}`,
+            `- query stage: enrich titles`,
+            `- media type: ${mediaType}`,
+            `- batch size: ${batch.length}`,
+            `- fallback aplicado: partial payload`,
+          ].join("\n"),
+          formatError(error),
+        );
+        continue;
+      }
+
+      rows.push(...((data ?? []) as unknown as TitleData[]));
+    }
+  }
+
+  if (isDebugEnabled("DEBUG_LIBRARY_PERF")) {
+    console.log(
+      [
+        "[library] TITLE ENRICHMENT",
+        `- Estados do usuário: ${input.stateRows.length}`,
+        `- Títulos encontrados: ${rows.length}`,
+        `- Batch size: ${LIBRARY_BATCH_SIZE}`,
+      ].join("\n"),
+    );
+  }
+
+  return rows;
+}
+
+function logMovieDurationAnalysis(items: Poplog3UserLibraryItem[]) {
+  if (!isDebugEnabled("DEBUG_LIBRARY_PERF")) return;
+
+  const movies = items.filter((item) => item.media_type === "movie");
+  const sortable = movies.filter((item) => getPositiveNumber(item.duration_sort_minutes)).length;
+  const withRuntime = movies.filter((item) => getPositiveNumber(item.title?.runtime)).length;
+  const pending = movies.filter(
+    (item) => getPositiveNumber(item.title?.runtime) && !getPositiveNumber(item.duration_sort_minutes),
+  ).length;
+  const unavailable = movies.filter(
+    (item) => !getPositiveNumber(item.title?.runtime) && !getPositiveNumber(item.duration_sort_minutes),
+  ).length;
+
+  console.log(
+    [
+      "[duration-movies] MOVIE DURATION ANALYSIS",
+      `- Total filmes na biblioteca/watchlist: ${movies.length}`,
+      `- Com runtime válido: ${withRuntime}`,
+      `- Com duration_sort_minutes preenchido: ${sortable}`,
+      `- Pendentes de backfill: ${pending}`,
+      `- Duração indisponível real: ${unavailable}`,
+      "[duration-movies] FINAL STATUS",
+      `✓ Filmes ordenáveis: ${sortable}`,
+      unavailable > 0 ? `⚠ Filmes sem duração: ${unavailable}` : "✓ Nenhum filme sem duração",
+      "✓ Séries não alteradas",
+      "✓ Ordenação unificada preservada",
+    ].join("\n"),
+  );
+}
+
 async function getAiredEpisodeCountsMap(seriesTmdbIds: number[]) {
   const ids = Array.from(
     new Set(seriesTmdbIds.filter((id) => Number.isFinite(id) && id > 0)),
@@ -81,7 +306,16 @@ async function getAiredEpisodeCountsMap(seriesTmdbIds: number[]) {
     .lte("air_date", today);
 
   if (error) {
-    console.warn("[library] aired episode count lookup failed", error);
+    rateLimitedWarn(
+      "library:aired-episode-count-failed",
+      LOG_TTL_MS,
+      [
+        "[library] contagem de episódios falhou",
+        "- query stage: aired episode counts",
+        "- fallback aplicado: state materializado",
+      ].join("\n"),
+      formatError(error),
+    );
     return counts;
   }
 
@@ -97,6 +331,10 @@ function resolveLibraryRuntimeFields(input: {
   runtimeResolution: RuntimeResolution;
   airedEpisodes?: number | null;
   watchedEpisodes?: number | null;
+  /** Total de episódios do TMDB — usado como fallback quando aired_episodes está indisponível */
+  totalEpisodes?: number | null;
+  /** Contagem de episódios com runtime real em poplog3_episodes — fallback final para ordenação */
+  knownEpisodeCount?: number | null;
 }) {
   if (input.mediaType === "movie") {
     const runtimeMinutes = getPositiveNumber(input.runtimeResolution.minutes);
@@ -119,20 +357,37 @@ function resolveLibraryRuntimeFields(input: {
   }
 
   const runtimeMinutes = getPositiveNumber(input.runtimeResolution.minutes);
-  const availableEpisodeCount = getPositiveNumber(input.airedEpisodes);
   const watchedEpisodes = Math.max(input.watchedEpisodes ?? 0, 0);
+
+  // Melhor contagem de episódios disponíveis em cascata:
+  // 1. aired_episodes do state  2. number_of_episodes TMDB  3. poplog3_episodes count
+  const airedEpisodeCount   = getPositiveNumber(input.airedEpisodes);
+  const totalEpisodesCount  = getPositiveNumber(input.totalEpisodes);
+  const knownEpisodesCount  = getPositiveNumber(input.knownEpisodeCount);
+  const bestEpisodeCount    = airedEpisodeCount ?? totalEpisodesCount ?? knownEpisodesCount;
+
   const remainingEpisodeCount =
-    availableEpisodeCount !== null
-      ? Math.max(availableEpisodeCount - watchedEpisodes, 0)
+    bestEpisodeCount !== null
+      ? Math.max(bestEpisodeCount - watchedEpisodes, 0)
       : null;
+
   const totalRuntimeMinutes =
-    runtimeMinutes !== null && availableEpisodeCount !== null
-      ? runtimeMinutes * availableEpisodeCount
+    runtimeMinutes !== null && bestEpisodeCount !== null
+      ? runtimeMinutes * bestEpisodeCount
       : null;
+
   const remainingRuntimeMinutes =
     runtimeMinutes !== null && remainingEpisodeCount !== null
       ? runtimeMinutes * remainingEpisodeCount
       : null;
+
+  // durationSortMinutes: tempo restante se > 0, senão total (ex: série 100% assistida
+  // na watchlist = foi ressetada, ordena pelo total)
+  const durationSortMinutes =
+    (remainingRuntimeMinutes ?? 0) > 0
+      ? remainingRuntimeMinutes
+      : totalRuntimeMinutes ?? null;
+
   const averageEpisodeRuntimeLabel = formatEpisodeRuntimeLabel(runtimeMinutes, {
     estimated: input.runtimeResolution.estimated,
   });
@@ -148,6 +403,15 @@ function resolveLibraryRuntimeFields(input: {
         })
       : null;
 
+  // runtime_label exibido no card:
+  // - não iniciada (watchedEpisodes = 0) → total da série
+  // - iniciada e com restante → tempo restante até o fim
+  // - concluída / sem restante → total da série
+  const effectiveRuntimeLabel =
+    watchedEpisodes === 0
+      ? totalRuntimeLabel
+      : remainingRuntimeLabel ?? totalRuntimeLabel;
+
   return {
     runtime_minutes: runtimeMinutes,
     runtime_estimated: input.runtimeResolution.estimated,
@@ -159,8 +423,8 @@ function resolveLibraryRuntimeFields(input: {
     remaining_runtime_label: remainingRuntimeLabel,
     average_episode_runtime_minutes: runtimeMinutes,
     average_episode_runtime_label: averageEpisodeRuntimeLabel,
-    duration_sort_minutes: remainingRuntimeMinutes,
-    runtime_label: watchedEpisodes > 0 ? remainingRuntimeLabel : totalRuntimeLabel,
+    duration_sort_minutes: durationSortMinutes,
+    runtime_label: effectiveRuntimeLabel,
   };
 }
 
@@ -176,30 +440,18 @@ export async function getUserLibraryState(
     ? [status]
     : ["watchlist", "watching", "watched", "abandoned", "fridge"];
 
-  const stateRows = await getUserTitleStates(userId, { status: statusFilter });
+  const stateRows = await getLibraryStateRows(userId, statusFilter);
 
   if (stateRows.length === 0) return null;
 
-  const tmdbIds  = stateRows.map((r) => r.tmdb_id);
   const tvIds    = stateRows.filter((r) => r.media_type === "tv").map((r) => r.tmdb_id);
   const today    = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
 
   // ── Batch 1: metadados dos títulos ───────────────────────────────────────
-  // Filtra por media_type para evitar cruzamento de IDs entre filmes e séries
-  const mediaTypes = [...new Set(stateRows.map((r) => r.media_type))];
-
-  const { data: titles, error: titlesError } = await supabaseAdmin
-    .from("poplog3_titles")
-    .select(
-      "tmdb_id, media_type, title, original_title, poster_path, backdrop_path, year, release_date, first_air_date, last_air_date, runtime, episode_run_time, vote_average, popularity, number_of_episodes, number_of_seasons, tmdb_payload",
-    )
-    .in("tmdb_id", tmdbIds)
-    .in("media_type", mediaTypes);
-
-  if (titlesError) {
-    console.error("[getUserLibraryState] titles query failed", titlesError);
-    return null;
-  }
+  const titles = await getLibraryTitleRows({
+    stateRows,
+    userTitleCount: stateRows.length,
+  });
 
   // ── Batch 2: data do último episódio aired por série (regra global) ──────
   // Usa poplog3_episodes como fonte de verdade — evita o last_air_date do TMDB
@@ -223,41 +475,24 @@ export async function getUserLibraryState(
     }
   }
 
-  const episodeRuntimesBySeries =
-    tvIds.length > 0 ? await getSeriesEpisodeRuntimesMap(tvIds) : new Map();
-
-  type TitleData = {
-    tmdb_id: number;
-    media_type: string;
-    title: string | null;
-    original_title: string | null;
-    poster_path: string | null;
-    backdrop_path: string | null;
-    year: number | null;
-    release_date: string | null;
-    first_air_date: string | null;
-    last_air_date: string | null;
-    runtime: number | null;
-    episode_run_time: number[] | null;
-    vote_average: number | null;
-    popularity: number | null;
-    number_of_episodes: number | null;
-    number_of_seasons: number | null;
-    tmdb_payload: Record<string, unknown> | null;
-  };
+  const [episodeRuntimesBySeries, airedEpisodeCountsBySeriesState] = await Promise.all([
+    tvIds.length > 0 ? getSeriesEpisodeRuntimesMap(tvIds, { includeUnaired: true }) : Promise.resolve(new Map()),
+    tvIds.length > 0 ? getAiredEpisodeCountsMap(tvIds)    : Promise.resolve(new Map()),
+  ]);
 
   // Key MUST include media_type — TMDB IDs are NOT globally unique across movie/tv
   // (e.g. movie 550 = Fight Club, tv 550 = Till Death Us Do Part 1966)
   const titleMap = new Map(
-    ((titles ?? []) as TitleData[]).map((t) => [`${t.tmdb_id}:${t.media_type}`, t]),
+    titles.map((t) => [`${t.tmdb_id}:${t.media_type}`, t]),
   );
 
-  return stateRows.map((row) => {
+  const result = stateRows.map((row) => {
     const titleData = titleMap.get(`${row.tmdb_id}:${row.media_type}`) ?? null;
+    const movieRuntime = getTitleRuntime(titleData);
     const runtimeResolution = titleData
       ? resolveRuntimeByMediaType({
           mediaType: row.media_type,
-          runtimeMinutes: titleData.runtime,
+          runtimeMinutes: row.media_type === "movie" ? movieRuntime : titleData.runtime,
           episodeRunTime: titleData.episode_run_time,
           episodes: episodeRuntimesBySeries.get(row.tmdb_id) ?? null,
         })
@@ -266,10 +501,23 @@ export async function getUserLibraryState(
       ? resolveLibraryRuntimeFields({
           mediaType: row.media_type,
           runtimeResolution,
-          airedEpisodes: row.aired_episodes,
+          // Prefere a contagem real de poplog3_episodes (sempre atualizada) sobre o
+          // state materializado, que pode ficar stale quando novos eps são ao ar.
+          airedEpisodes: airedEpisodeCountsBySeriesState.get(row.tmdb_id) || row.aired_episodes || null,
           watchedEpisodes: row.watched_episodes,
+          totalEpisodes: titleData?.number_of_episodes ?? null,
+          knownEpisodeCount: episodeRuntimesBySeries.get(row.tmdb_id)?.length ?? null,
         })
       : null;
+
+    // duration_sort_minutes: fast path — usa o valor já persistido em user_title_state
+    // quando disponível (calculado por upsertTitleState em todo evento de escrita).
+    // Fallback: valor recalculado em runtime pelo resolveLibraryRuntimeFields
+    // (usado para séries recém-adicionadas antes do primeiro upsertTitleState).
+    const persistedDurationSort = typeof (row as Record<string, unknown>).duration_sort_minutes === "number"
+      ? (row as Record<string, unknown>).duration_sort_minutes as number
+      : null;
+    const effectiveDurationSortMinutes = persistedDurationSort ?? runtimeFields?.duration_sort_minutes ?? null;
 
     return {
       // Campos de Poplog3UserTitle — id/user_id/rating/notes não usados pela UI
@@ -293,7 +541,8 @@ export async function getUserLibraryState(
       aired_episodes: row.aired_episodes,
       total_episodes: row.total_episodes,
       progress_pct: row.progress_pct,
-      duration_sort_minutes: runtimeFields?.duration_sort_minutes ?? null,
+      duration_sort_minutes: effectiveDurationSortMinutes,
+      duration_sort_unavailable: Boolean((row as Record<string, unknown>).duration_sort_unavailable),
       runtime_label: runtimeFields?.runtime_label ?? null,
       remaining_runtime_minutes: runtimeFields?.remaining_runtime_minutes ?? null,
       remaining_runtime_label: runtimeFields?.remaining_runtime_label ?? null,
@@ -321,14 +570,10 @@ export async function getUserLibraryState(
             // last_air_date — cadeia de prioridade (regra global):
             // 1. poplog3_episodes: último ep com air_date <= hoje (fonte de verdade)
             // 2. coluna direta last_air_date do poplog3_titles
-            // 3. tmdb_payload.last_air_date (fallback legado)
             last_air_date:
               (row.media_type === "tv" ? (lastAiredMap.get(row.tmdb_id) ?? null) : null) ??
-              titleData.last_air_date ??
-              (typeof titleData.tmdb_payload?.last_air_date === "string"
-                ? titleData.tmdb_payload.last_air_date
-                : null),
-            runtime: titleData.runtime,
+              titleData.last_air_date,
+            runtime: row.media_type === "movie" ? movieRuntime : titleData.runtime,
             episode_run_time: titleData.episode_run_time,
             runtime_minutes: runtimeFields?.runtime_minutes ?? null,
             runtime_estimated: runtimeFields?.runtime_estimated ?? false,
@@ -342,6 +587,9 @@ export async function getUserLibraryState(
         : null,
     } as Poplog3UserLibraryItem;
   });
+
+  logMovieDurationAnalysis(result);
+  return result;
 }
 
 export async function getUserLibrary(
@@ -385,17 +633,27 @@ export async function getUserLibrary(
     ])
   );
 
-  const episodeRuntimesBySeries =
-    tvIds.length > 0 ? await getSeriesEpisodeRuntimesMap(tvIds) : new Map();
-  const airedEpisodeCountsBySeries =
-    tvIds.length > 0 ? await getAiredEpisodeCountsMap(tvIds) : new Map();
+  const [episodeRuntimesBySeries, airedEpisodeCountsBySeries] = await Promise.all([
+    tvIds.length > 0 ? getSeriesEpisodeRuntimesMap(tvIds, { includeUnaired: true }) : Promise.resolve(new Map()),
+    tvIds.length > 0 ? getAiredEpisodeCountsMap(tvIds)    : Promise.resolve(new Map()),
+  ]);
 
   return rows.map((row) => {
     const titleData = titleMap.get(`${row.tmdb_id}:${row.media_type}`) ?? null;
+    const movieRuntime = getTitleRuntime(
+      titleData
+        ? {
+            runtime: titleData.runtime as number | null,
+          }
+        : null,
+    );
     const runtimeResolution = titleData
       ? resolveRuntimeByMediaType({
           mediaType: row.media_type as "movie" | "tv",
-          runtimeMinutes: titleData.runtime as number | null,
+          runtimeMinutes:
+            row.media_type === "movie"
+              ? movieRuntime
+              : titleData.runtime as number | null,
           episodeRunTime: titleData.episode_run_time as number[] | null,
           episodes: episodeRuntimesBySeries.get(row.tmdb_id as number) ?? null,
         })
@@ -406,6 +664,8 @@ export async function getUserLibrary(
           runtimeResolution,
           airedEpisodes: airedEpisodeCountsBySeries.get(row.tmdb_id as number) ?? null,
           watchedEpisodes: 0,
+          totalEpisodes: (titleData?.number_of_episodes as number | null) ?? null,
+          knownEpisodeCount: episodeRuntimesBySeries.get(row.tmdb_id as number)?.length ?? null,
         })
       : null;
 
@@ -425,6 +685,7 @@ export async function getUserLibrary(
       created_at: row.created_at as string,
       updated_at: (row.watched_at as string | null) ?? (row.created_at as string),
       duration_sort_minutes: runtimeFields?.duration_sort_minutes ?? null,
+      duration_sort_unavailable: runtimeFields?.duration_sort_minutes === null,
       runtime_label: runtimeFields?.runtime_label ?? null,
       remaining_runtime_minutes: runtimeFields?.remaining_runtime_minutes ?? null,
       remaining_runtime_label: runtimeFields?.remaining_runtime_label ?? null,
@@ -446,7 +707,7 @@ export async function getUserLibrary(
             release_date: titleData.release_date as string | null,
             first_air_date: titleData.first_air_date as string | null,
             last_air_date: titleData.last_air_date as string | null,
-            runtime: titleData.runtime as number | null,
+            runtime: row.media_type === "movie" ? movieRuntime : titleData.runtime as number | null,
             episode_run_time: titleData.episode_run_time as number[] | null,
             runtime_minutes: runtimeFields?.runtime_minutes ?? null,
             runtime_estimated: runtimeFields?.runtime_estimated ?? false,
@@ -564,6 +825,38 @@ export async function upsertUserTitleStatus(
       payload: { status: result.status },
     },
   }).catch((err) => console.error("[state] upsertTitleState failed", err));
+
+  refreshAvailabilityForUserTitle({
+    userId: input.userId,
+    tmdbId: input.tmdbId,
+    mediaType: input.mediaType,
+    action: `library_status:${result.status}`,
+    endpoint: "/api/library/title",
+    contexts: ["library"],
+  })
+    .then((availabilityResult) => {
+      const best = availabilityResult.availability.primaryProvider;
+      const providerType: string | null =
+        best && "normalizedType" in best
+          ? best.normalizedType ?? null
+          : best?.type === "streaming"
+            ? "subscription"
+            : best?.type ?? null;
+
+      return refreshTitleStateAvailability(
+        input.userId,
+        input.tmdbId,
+        input.mediaType,
+        best
+          ? {
+              providerName: best.name,
+              providerType,
+              providerLogo: best.logoUrl ?? null,
+            }
+          : null,
+      );
+    })
+    .catch((err) => console.error("[availability] refreshAvailabilityForUserTitle failed", err));
 
   return result;
 }

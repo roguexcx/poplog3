@@ -76,7 +76,7 @@ export async function toggleWatchlist({
   const res = await fetch("/api/library/title", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ tmdbId, mediaType, status: "watchlist", favorite: false, liked: null }),
+    body: JSON.stringify({ tmdbId, mediaType, status: "watchlist" }),
   });
   if (!res.ok) throw new Error(`POST ${res.status}`);
   return true;
@@ -126,7 +126,7 @@ export async function toggleWatched({
   const res = await fetch("/api/library/title", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ tmdbId, mediaType, status: "watched", favorite: false, liked: null }),
+    body: JSON.stringify({ tmdbId, mediaType, status: "watched" }),
   });
   if (!res.ok) throw new Error(`POST ${res.status}`);
   return true;

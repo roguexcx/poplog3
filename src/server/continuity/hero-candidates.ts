@@ -12,6 +12,8 @@ import {
   resolveProviderConfidence,
 } from "@/server/streaming/availability-service";
 import { applyHeroTemporalCooldown } from "./hero-impressions";
+import { getUserFeedbackMap, feedbackKey } from "@/lib/personalization/feedback";
+import { resolveEditorialPolicy } from "@/lib/personalization/editorial-policy";
 
 import type {
   ContinuityAvailability,
@@ -1289,10 +1291,13 @@ export async function getHeroCandidates(
   );
   const region = options.region ?? preferences.region;
 
-  // Fase 1: busca de dados do usuário.
-  // Fast path: 1 query em user_title_state (estado materializado).
-  // Fallback: batch clássico de 3 funções para usuários sem estado ainda.
-  const stateData = await getUserLibraryFromState(userId, 150, region);
+  // Phase 1: fetch user library data + editorial feedbackMap in parallel.
+  // Fast path: 1 query in user_title_state (materialized state).
+  // Fallback: classic batch of 3 functions for users without state yet.
+  const [stateData, feedbackMap] = await Promise.all([
+    getUserLibraryFromState(userId, 150, region),
+    getUserFeedbackMap(userId).catch(() => new Map()),
+  ]);
 
   let watchingSeries: UserWatchingSeriesRow[];
   let movieUserTitles: UserTitleRow[];
@@ -1303,13 +1308,34 @@ export async function getHeroCandidates(
     movieUserTitles = stateData.movieUserTitles;
     tvUserTitles = stateData.tvUserTitles;
   } else {
-    // Fallback: usuário ainda não tem estado materializado (pré-migração ou novo).
     [watchingSeries, movieUserTitles, tvUserTitles] = await Promise.all([
       getUserWatchingSeries(userId, 30),
       getMovieUserTitles(userId, 60),
       getTvUserTitles(userId, 60),
     ]);
   }
+
+  // Editorial filter: titles marked as hidden are excluded from Hero even if
+  // they are in the library (watchlist/watching). User intent prevails.
+  // Titles with not_interested are not excluded -- user may still want to
+  // continue watching something they previously marked.
+  function isHeroEditoriallyExcluded(tmdbId: number, mediaType: MediaType): boolean {
+    if (feedbackMap.size === 0) return false;
+    const key = feedbackKey(tmdbId, mediaType);
+    const rows = feedbackMap.get(key) ?? [];
+    const policy = resolveEditorialPolicy({ feedback: rows, surface: "hero" });
+    return policy.shouldExclude;
+  }
+
+  movieUserTitles = movieUserTitles.filter(
+    (t) => !isHeroEditoriallyExcluded(t.tmdb_id, t.media_type),
+  );
+  tvUserTitles = tvUserTitles.filter(
+    (t) => !isHeroEditoriallyExcluded(t.tmdb_id, t.media_type),
+  );
+  watchingSeries = watchingSeries.filter(
+    (s) => !isHeroEditoriallyExcluded(s.seriesTmdbId, "tv"),
+  );
 
   // Mapeia atividade recente para boost
   const latestActivityByTitle = new Map<

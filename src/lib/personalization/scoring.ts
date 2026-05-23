@@ -18,9 +18,9 @@ export type FeedbackScoringContext =
 export type ScorableTitle = {
   id: number;
   media_type?: MediaType | string;
-  popularity?: number;
-  vote_average?: number;
-  vote_count?: number;
+  popularity?: number | null;
+  vote_average?: number | null;
+  vote_count?: number | null;
   personalScore?: number;
   feedbackPenaltyApplied?: number;
   userFeedback?: {

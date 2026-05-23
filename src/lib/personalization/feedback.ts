@@ -21,6 +21,15 @@ export type UserTitleFeedback = {
   weight: number;
   reason: string | null;
   source: string | null;
+  // Fields added by feedback engine migration (20260522000100)
+  active: boolean;
+  scope: string;
+  surface: string | null;
+  section_key: string | null;
+  expires_at: string | null;
+  metadata: Record<string, unknown>;
+  strength: number | null;
+  confidence: number | null;
   created_at: string;
   updated_at: string;
 };
@@ -61,12 +70,14 @@ export function getTitleFeedbackState(
   mediaType: MediaType,
 ): TitleFeedbackState {
   const entries = feedbackMap?.get(feedbackKey(tmdbId, mediaType)) ?? [];
-  const activeFeedbackTypes = entries.map((entry) => entry.feedback_type);
+  // Only consider rows where active !== false (handles both true and legacy rows without the column)
+  const activeEntries = entries.filter((entry) => entry.active !== false);
+  const activeFeedbackTypes = activeEntries.map((entry) => entry.feedback_type);
 
   return {
     notInterested: activeFeedbackTypes.includes("not_interested"),
     activeFeedbackTypes,
-    latestFeedback: entries[0],
+    latestFeedback: activeEntries[0],
   };
 }
 
@@ -82,6 +93,7 @@ export async function getUserFeedbackMap(
     .from("user_title_feedback")
     .select("*")
     .eq("user_id", userId)
+    .eq("active", true)
     .order("updated_at", { ascending: false });
 
   if (error) {
@@ -105,10 +117,12 @@ export async function removeNegativeFeedbackForTitle(
   mediaType: MediaType,
   supabase?: SupabaseLike,
 ) {
+  // Soft-delete: mark active=false to preserve raw feedback history.
+  // Physical deletes are never used in the feedback engine.
   const client = supabase ?? await createSupabaseServerClient();
   await client
     .from("user_title_feedback")
-    .delete()
+    .update({ active: false })
     .eq("user_id", userId)
     .eq("tmdb_id", tmdbId)
     .eq("media_type", mediaType)

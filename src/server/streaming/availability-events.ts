@@ -1,3 +1,10 @@
+import {
+  completePremiumApiBudget,
+  reservePremiumApiBudget,
+  runPremiumApiQueued,
+} from "@/server/rate-limits/premium-api-budget";
+import { debugLog, rateLimitedWarn } from "@/server/logging/log-control";
+
 export type LeavingAvailabilityItem = {
   id: number;
   media_type: "movie" | "tv";
@@ -37,9 +44,40 @@ type MotnChangesResponse = {
 const MOTN_BASE = "https://api.movieofthenight.com/v4";
 const BR_CATALOGS = ["netflix", "prime", "disney", "paramount", "apple", "hbo", "globoplay", "star"];
 
-export async function getLeavingSoonAvailabilityEvents(): Promise<LeavingAvailabilityItem[]> {
+export async function getLeavingSoonAvailabilityEvents(input?: {
+  allowExternalRefresh?: boolean;
+  endpoint?: string;
+  reason?: string;
+}): Promise<LeavingAvailabilityItem[]> {
+  if (!input?.allowExternalRefresh) {
+    const payload = {
+      endpoint: input?.endpoint ?? "display",
+      reason: input?.reason ?? "ui_render_no_premium_refresh",
+    };
+    debugLog("DEBUG_AVAILABILITY", "[availability-events:debug] MOTN changes blocked", payload);
+    rateLimitedWarn(
+      "availability-events:motn-blocked",
+      5 * 60 * 1000,
+      [
+        "[availability] fallback externo bloqueado",
+        "- fonte: MOTN changes",
+        "- motivo: render cache-first",
+      ].join("\n"),
+    );
+    return [];
+  }
+
   const apiKey = process.env.MOVIEOFTHENIGHT_API_KEY;
   if (!apiKey) return [];
+
+  const budget = await reservePremiumApiBudget("movieofthenight", {
+    endpoint: input.endpoint ?? "availability-events",
+    action: "leaving_soon_events",
+    reason: input.reason ?? "controlled_catalog_event_refresh",
+    region: "BR",
+  });
+
+  if (!budget.ok) return [];
 
   try {
     const url = new URL(`${MOTN_BASE}/changes`);
@@ -49,11 +87,16 @@ export async function getLeavingSoonAvailabilityEvents(): Promise<LeavingAvailab
       url.searchParams.append("catalogs", catalog);
     }
 
-    const response = await fetch(url.toString(), {
-      headers: { "X-API-Key": apiKey },
-      next: { revalidate: 86_400 },
-    });
-    if (!response.ok) return [];
+    const response = await runPremiumApiQueued("movieofthenight", () =>
+      fetch(url.toString(), {
+        headers: { "X-API-Key": apiKey },
+        next: { revalidate: 86_400 },
+      }),
+    );
+    if (!response.ok) {
+      await completePremiumApiBudget(budget.reservation, "failed", `HTTP ${response.status}`);
+      return [];
+    }
 
     const data = (await response.json()) as MotnChangesResponse;
     const items: LeavingAvailabilityItem[] = [];
@@ -85,8 +128,14 @@ export async function getLeavingSoonAvailabilityEvents(): Promise<LeavingAvailab
       });
     }
 
+    await completePremiumApiBudget(budget.reservation, items.length > 0 ? "success" : "empty");
     return items.sort((a, b) => a.days_left - b.days_left).slice(0, 20);
-  } catch {
+  } catch (error) {
+    await completePremiumApiBudget(
+      budget.reservation,
+      "failed",
+      error instanceof Error ? error.message : String(error),
+    );
     return [];
   }
 }

@@ -225,16 +225,11 @@ export default function TitleActions({
     action: string,
     payload: {
       status?: LibraryStatus | null;
-      favorite?: boolean;
-      liked?: boolean | null;
     }
   ) {
     setError(null);
 
     const targetStatus = payload.status === undefined ? status : payload.status;
-    const targetFavorite =
-      payload.favorite === undefined ? favorite : payload.favorite;
-    const targetLiked = payload.liked === undefined ? liked : payload.liked;
 
     setPendingAction(action);
 
@@ -265,8 +260,6 @@ export default function TitleActions({
               tmdbId: id,
               mediaType,
               status: targetStatus,
-              favorite: targetFavorite,
-              liked: targetLiked,
             }),
           });
 
@@ -328,16 +321,30 @@ export default function TitleActions({
 
     setFavorite(next);
 
-    const ensureStatus: LibraryStatus | null =
-      status ?? (next ? "watched" : null);
-
-    if (ensureStatus !== status) {
-      setStatus(ensureStatus);
-    }
-
-    commit("favorite", {
-      favorite: next,
-      status: ensureStatus,
+    // favorite/liked are managed exclusively by the feedback engine.
+    // Do NOT force status here -- liked/favorite don't imply watched.
+    startTransition(async () => {
+      try {
+        const command = next ? "favorite" : "unfavorite";
+        const res = await fetch("/api/user/feedback", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            tmdb_id: id,
+            media_type: mediaType,
+            command,
+            surface: "title_page",
+          }),
+        });
+        if (!res.ok) {
+          setFavorite(!next);
+          const json = await res.json().catch(() => ({}));
+          setError(json?.error ?? `Favorite failed: ${res.status}`);
+        }
+      } catch (err) {
+        setFavorite(!next);
+        setError(err instanceof Error ? err.message : "Erro inesperado");
+      }
     });
   }
 
@@ -346,16 +353,30 @@ export default function TitleActions({
 
     setLiked(next);
 
-    const ensureStatus: LibraryStatus | null =
-      status ?? (next !== null ? "watched" : null);
-
-    if (ensureStatus !== status) {
-      setStatus(ensureStatus);
-    }
-
-    commit(value ? "liked" : "disliked", {
-      liked: next,
-      status: ensureStatus,
+    // liked/disliked are managed exclusively by the feedback engine.
+    // Do NOT force status here -- liked/disliked don't imply watched.
+    startTransition(async () => {
+      try {
+        const command = next === null ? "clear_like" : next ? "liked" : "disliked";
+        const res = await fetch("/api/user/feedback", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            tmdb_id: id,
+            media_type: mediaType,
+            command,
+            surface: "title_page",
+          }),
+        });
+        if (!res.ok) {
+          setLiked(liked);
+          const json = await res.json().catch(() => ({}));
+          setError(json?.error ?? `Like failed: ${res.status}`);
+        }
+      } catch (err) {
+        setLiked(liked);
+        setError(err instanceof Error ? err.message : "Erro inesperado");
+      }
     });
   }
 

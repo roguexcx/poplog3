@@ -61,17 +61,17 @@ type Phase =
   | "done";
 
 const PHASE_LABELS: Record<Phase, string> = {
-  idle:         "Iniciando…",
-  fetching_ics: "Lendo calendário…",
+  idle:         "Iniciando radar…",
+  fetching_ics: "Lendo sinais…",
   grouping:     "Agrupando séries…",
   cache_check:  "Consultando cache…",
   enriching:    "Enriquecendo dados…",
-  done:         "Agenda pronta",
+  done:         "Radar ativo",
 };
 
 // ── Tipos de view ──────────────────────────────────────────────────────────────
 
-type ViewMode = "day" | "week" | "month" | "range";
+type ViewMode = "day" | "week" | "month";
 
 // ── Helpers de data ────────────────────────────────────────────────────────────
 
@@ -125,7 +125,10 @@ function dateLabelFromDays(days: number): string {
   if (days <= 0) return "Hoje";
   if (days === 1) return "Amanhã";
   if (days <= 7) return `Em ${days} dias`;
-  return `Em ${days} dias`;
+  // Mais de 7 dias: mostra data formatada (ex: "12 de jun.")
+  const d = new Date();
+  d.setDate(d.getDate() + days);
+  return d.toLocaleDateString("pt-BR", { day: "numeric", month: "short" });
 }
 
 function getDaysInMonth(y: number, m: number) { return new Date(y, m + 1, 0).getDate(); }
@@ -133,6 +136,17 @@ function getDaysInMonth(y: number, m: number) { return new Date(y, m + 1, 0).get
 function getFirstDayOfMonth(y: number, m: number) {
   const d = new Date(y, m, 1).getDay();
   return d === 0 ? 6 : d - 1; // 0=Seg
+}
+
+// ── Janela ativa de 30 dias a partir de hoje ──────────────────────────────────
+// Usado pelo modo "month" como feed editorial contínuo (não calendário fixo).
+
+function activeWindow(): { start: string; end: string } {
+  const now = new Date();
+  const start = toLocalDateStr(now);
+  const end30 = new Date(now);
+  end30.setDate(end30.getDate() + 30);
+  return { start, end: toLocalDateStr(end30) };
 }
 
 // ── Filtro: só mostra grupos com poster + nome TMDB ───────────────────────────
@@ -184,6 +198,31 @@ function isSeasonFinaleGuess(group: IcsSeriesGroup, dateStr: string): boolean {
   return maxEp > 1 && ep.episode === maxEp;
 }
 
+// ── Helpers de normalização editorial ─────────────────────────────────────────
+
+/** Normaliza popularity TMDB com curva log + teto para evitar que títulos virais
+ *  (popularity > 500) monopolizem o feed. Cap efetivo: ~28 pontos. */
+function normalizePopularity(raw: number): number {
+  if (!raw || raw <= 0) return 0;
+  const capped = Math.min(raw, 500);          // teto: pop 500 → mesmo peso que 3000
+  return Math.log10(capped + 1) * 10;         // log10(501) ≈ 2.7 → ~27 pts
+}
+
+/** Bônus para produções brasileiras que não sejam novela/reality/talk show. */
+function brazilBonus(group: IcsSeriesGroup): number {
+  const tmdb = group.tmdb;
+  if (!tmdb) return 0;
+  const countries: string[] = (tmdb as unknown as Record<string, unknown>).origin_country as string[] ?? [];
+  if (!countries.includes("BR")) return 0;
+  // Categorias bloqueadas para bônus BR
+  const cat = group.category;
+  if (cat === "REALITY" || cat === "PODCAST" || cat === "DAILY_SOAP") return 0;
+  // Penalidade leve em vez de bloqueio para SOAP / formatos de novela
+  const genres: number[] = (tmdb as unknown as Record<string, unknown>).genre_ids as number[] ?? [];
+  const isSoap = genres.includes(10766);  // TMDB genre 10766 = Soap
+  return isSoap ? 5 : 18;  // +18 pts para produções BR legítimas, +5 para ambíguas
+}
+
 function groupEditorialScore(
   group: IcsSeriesGroup,
   dateStr: string,
@@ -199,13 +238,14 @@ function groupEditorialScore(
   const imgPenalty  = hasBackdrop ? 0 : hasPoster ? -25 : -60;
   return (
     (group.relevanceScore ?? 0) +
-    ((group.tmdb?.popularity ?? 0) / 10) +
-    (trendingDay.has(tmdbId ?? -1) ? 38 : 0) +
-    (trendingWeek.has(tmdbId ?? -1) ? 20 : 0) +
+    normalizePopularity(group.tmdb?.popularity ?? 0) +   // log-normalizado (era /10 linear)
+    // K-dramas (ko/zh/th) sem boost trending — TMDB trending global é distorcido
+    ((() => { const l = group.tmdb?.original_language ?? ""; const asian = new Set(["ko","zh","th","hi","tl"]); if (asian.has(l)) return 0; if (l === "ja") return (trendingDay.has(tmdbId ?? -1) || trendingWeek.has(tmdbId ?? -1)) ? 5 : 0; return trendingDay.has(tmdbId ?? -1) ? 38 : trendingWeek.has(tmdbId ?? -1) ? 20 : 0; })()) +
     (isPremiereEpisode(group, dateStr) ? 34 : 0) +
     (isSeasonFinaleGuess(group, dateStr) ? 30 : 0) +
     (isSeasonStart(group, dateStr) ? 12 : 0) +
     (group.episodeCount > 1 ? Math.min(12, group.episodeCount * 2) : 0) +
+    brazilBonus(group) +
     timeBoost +
     imgPenalty
   );
@@ -281,7 +321,7 @@ function movieEditorialScore(
 
   const rawScore =
     (movie.relevanceScore ?? 0) +
-    ((m.popularity ?? 0) / 10) +
+    normalizePopularity(m.popularity ?? 0) +   // log-normalizado
     (trendingDay.has(tmdbId)  ? 35 : 0) +
     (trendingWeek.has(tmdbId) ? 18 : 0) +
     (isPremiereToday          ? 28 : 0) +
@@ -307,11 +347,13 @@ function buildEditorialGroups(
   },
 ): EditorialGroup[] {
   const today = todayStr();
+  // "month" agora é um feed editorial contínuo de 30 dias a partir de hoje.
+  // "day" e "week" mantêm a lógica de navegação por datas existente.
+  const { start: windowStart, end: windowEnd } = activeWindow();
   const rangeStart =
     options.mode === "day" ? options.selectedDay :
     options.mode === "week" ? toLocalDateStr(options.weekStart) :
-    options.mode === "month" ? `${options.year}-${String(options.month + 1).padStart(2, "0")}-01` :
-    today;
+    /* month */ windowStart;
   const rangeEnd = (() => {
     if (options.mode === "day") return options.selectedDay;
     if (options.mode === "week") {
@@ -319,16 +361,21 @@ function buildEditorialGroups(
       end.setDate(end.getDate() + 6);
       return toLocalDateStr(end);
     }
-    if (options.mode === "month") {
-      return `${options.year}-${String(options.month + 1).padStart(2, "0")}-${String(getDaysInMonth(options.year, options.month)).padStart(2, "0")}`;
-    }
-    const end = new Date();
-    end.setDate(end.getDate() + 30);
-    return toLocalDateStr(end);
+    // month → 30-day rolling window
+    return windowEnd;
   })();
 
   const seen = new Set<string>();
   const items: EditorialGroup[] = [];
+
+  // ── Contadores de diversidade (decay editorial) ───────────────────────────
+  // Usados para penalizar repetição de provider, idioma e gênero no feed final.
+  const providerCount = new Map<string, number>();   // e.g. "Netflix" → 3
+  const langCount     = new Map<string, number>();   // e.g. "ko" → 2
+  const genreCount    = new Map<number, number>();   // e.g. 18 (drama) → 5
+  // Hard cap: idiomas asiáticos (ko/ja/zh/th) — máx 2 itens no feed completo
+  const ASIAN_LANGS   = new Set(["ko", "ja", "zh", "th", "hi", "tl"]);
+  const asianLangCount = new Map<string, number>();
 
   // ── Séries ──────────────────────────────────────────────────────────────────
   for (const group of sourceGroups) {
@@ -345,7 +392,26 @@ function buildEditorialGroups(
     seen.add(key);
     const dateStr = ep.startAt.slice(0, 10);
     const score = groupEditorialScore(group, dateStr, options.trendingDay, options.trendingWeek);
-    items.push({ group, dateStr, score, visualWeight: "compact" });
+    // ── Decay editorial por diversidade ──────────────────────────────────────
+    const provider   = group.streamingProvider?.name ?? "_";
+    const lang       = group.tmdb?.original_language ?? "_";
+    const genres     = ((group.tmdb as unknown as Record<string,unknown>)?.genre_ids as number[]) ?? [];
+    const pCount     = providerCount.get(provider) ?? 0;
+    const lCount     = langCount.get(lang) ?? 0;
+    const maxGCount  = genres.reduce((mx, g) => Math.max(mx, genreCount.get(g) ?? 0), 0);
+    // Idiomas asiáticos: hard cap de 2 itens — excedente bloqueado completamente
+    if (ASIAN_LANGS.has(lang)) {
+      const aCount = asianLangCount.get(lang) ?? 0;
+      if (aCount >= 2) continue;
+      asianLangCount.set(lang, aCount + 1);
+    }
+    // Penalty de diversidade: provider (8pt×n, cap 32), idioma (10pt×n, cap 30), gênero (4pt×n, cap 16)
+    const diversityPenalty = Math.min(pCount * 8, 32) + Math.min(lCount * 10, 30) + Math.min(maxGCount * 4, 16);
+    providerCount.set(provider, pCount + 1);
+    langCount.set(lang, lCount + 1);
+    genres.forEach(g => genreCount.set(g, (genreCount.get(g) ?? 0) + 1));
+
+    items.push({ group, dateStr, score: score - diversityPenalty, visualWeight: "compact" });
   }
 
   // ── Filmes — incluídos SOMENTE se a data de lançamento cair dentro do range ──
@@ -535,7 +601,8 @@ function SeriesCard({
 }) {
   const router = useRouter();
   const tmdb = group.tmdb;
-  const poster   = tmdb ? TMDB_IMG(tmdb.poster_path, "w185") : null;
+  // Language-aware: JP/KR/CN series get backdrop instead of logo-heavy poster
+  const poster   = tmdb ? bestVerticalImg({ ...tmdb, poster_path: tmdb.poster_path ?? null, backdrop_path: tmdb.backdrop_path ?? null }) : null;
   const backdrop = tmdb ? TMDB_IMG(tmdb.backdrop_path, "w780") : null;
   const name     = tmdb?.name ?? group.rawTitle;
   const { label: catLabel, color: catColor } = resolveCatLabel(group);
@@ -607,7 +674,8 @@ function SeriesCard({
     );
   }
 
-  // Card grande (carrossel)
+  // Card grande (carrossel) — poster is already language-aware via bestVerticalImg
+  const cardImg = poster ?? backdrop;
   return (
     <a
       href={href}
@@ -615,10 +683,10 @@ function SeriesCard({
       className="group relative w-[160px] sm:w-[176px] text-left shrink-0 block"
     >
       <div className="relative aspect-[2/3] rounded-2xl overflow-hidden border border-white/[0.08] mb-3 bg-white/[0.04]">
-        {poster ? (
+        {cardImg ? (
           <img
-            src={poster} alt={name}
-            className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-[1.05]"
+            src={cardImg} alt={name}
+            className="h-full w-full object-cover object-center transition-transform duration-500 group-hover:scale-[1.05]"
             loading="lazy"
           />
         ) : (
@@ -802,261 +870,43 @@ function buildSpotlightItems(
     return (b.group.tmdb?.popularity ?? 0) - (a.group.tmdb?.popularity ?? 0);
   });
 
-  // Máx 20 itens no spotlight
-  return items.slice(0, 20);
-}
-
-function SpotlightHero({
-  items,
-  isLoading,
-}: {
-  items: SpotlightItem[];
-  isLoading: boolean;
-}) {
-  const router = useRouter();
-  const [idx, setIdx]         = useState(0);
-  const [visible, setVisible] = useState(true);
-  const timerRef              = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const goTo = useCallback((nextIdx: number) => {
-    setVisible(false);
-    setTimeout(() => {
-      setIdx(nextIdx);
-      setVisible(true);
-    }, 300);
-  }, []);
-
-  useEffect(() => {
-    if (items.length === 0) return;
-    timerRef.current = setTimeout(() => {
-      goTo((idx + 1) % items.length);
-    }, SPOTLIGHT_MS);
-    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
-  }, [idx, items.length, goTo]);
-
-  if (isLoading && items.length === 0) {
-    return (
-      <div className="relative rounded-[28px] overflow-hidden bg-white/[0.02] border border-white/[0.06] min-h-[280px] animate-pulse" />
-    );
+  // ── Filtro de diversidade no spotlight ──────────────────────────────────────
+  // Idiomas asiáticos: máx 1 item por idioma no hero (ko, ja, zh, th, hi, tl)
+  // Garante que o carrossel seja dominantemente ocidental/BR.
+  const ASIAN_SPOTLIGHT = new Set(["ko", "ja", "zh", "th", "hi", "tl"]);
+  const asianSpotCount  = new Map<string, number>();
+  const filtered: SpotlightItem[] = [];
+  for (const item of items) {
+    const lang = item.group.tmdb?.original_language ?? "";
+    if (ASIAN_SPOTLIGHT.has(lang)) {
+      const c = asianSpotCount.get(lang) ?? 0;
+      if (c >= 1) continue;                     // bloqueia 2º+ item do mesmo idioma asiático
+      asianSpotCount.set(lang, c + 1);
+    }
+    filtered.push(item);
+    if (filtered.length >= 20) break;
   }
 
-  if (items.length === 0) return null;
-
-  const item = items[idx];
-  const { group, label, isPremiere, isFinale, isTrendingDay, isTrendingWeek } = item;
-  const tmdb = group.tmdb!;
-  const backdrop = TMDB_IMG(tmdb.backdrop_path, "w1280");
-  const poster   = TMDB_IMG(tmdb.poster_path,   "w342");
-  const name     = tmdb.name;
-  const { label: catLabel, color: catColor } = resolveCatLabel(group);
-
-  // Badge de destaque: prioridade nos badges
-  const badge =
-    isTrendingDay  ? { text: "Em alta hoje",    cls: "bg-rose-500/20 text-rose-300 border-rose-500/25" } :
-    isPremiere     ? { text: "Estreia",          cls: "bg-emerald-500/20 text-emerald-300 border-emerald-500/25" } :
-    isFinale       ? { text: "Final de temporada", cls: "bg-violet-500/20 text-violet-300 border-violet-500/25" } :
-    isTrendingWeek ? { text: "Em alta na semana", cls: "bg-amber-500/20 text-amber-300 border-amber-500/25" } :
-    null;
-
-  const href = `/title/tv/${tmdb.tmdb_id}`;
-
-  return (
-    <section className="mb-10">
-      <div className="flex items-end justify-between mb-4">
-        <div>
-          <SectionEyebrow color="sky">Destaques</SectionEyebrow>
-          <h2 className="text-xl font-black tracking-[-0.03em] text-white/90 leading-tight">Em destaque</h2>
-        </div>
-        {/* Dots de navegação */}
-        {items.length > 1 && (
-          <div className="flex items-center gap-1.5">
-            {items.slice(0, Math.min(items.length, 8)).map((_, i) => (
-              <button
-                key={i}
-                type="button"
-                onClick={() => { if (timerRef.current) clearTimeout(timerRef.current); goTo(i); }}
-                className={`h-1.5 rounded-full transition-all duration-300 ${
-                  i === idx ? "w-5 bg-white/60" : "w-1.5 bg-white/20 hover:bg-white/35"
-                }`}
-                aria-label={`Slide ${i + 1}`}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-
-      <div
-        className="relative rounded-[28px] overflow-hidden border border-white/[0.08] cursor-pointer"
-        style={{ minHeight: 280 }}
-        onClick={() => router.push(href)}
-      >
-        {/* Botões de navegação mobile (overlay nas bordas) */}
-        {items.length > 1 && (
-          <>
-            <button
-              type="button"
-              aria-label="Anterior"
-              onClick={(e) => { e.stopPropagation(); if (timerRef.current) clearTimeout(timerRef.current); goTo((idx - 1 + items.length) % items.length); }}
-              className="sm:hidden absolute left-3 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-8 h-8 rounded-full border border-white/[0.20] bg-black/50 backdrop-blur-sm"
-            >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5 text-white/70">
-                <path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-            <button
-              type="button"
-              aria-label="Próximo"
-              onClick={(e) => { e.stopPropagation(); if (timerRef.current) clearTimeout(timerRef.current); goTo((idx + 1) % items.length); }}
-              className="sm:hidden absolute right-3 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-8 h-8 rounded-full border border-white/[0.20] bg-black/50 backdrop-blur-sm"
-            >
-              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5 text-white/70">
-                <path d="M6 3l5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
-            </button>
-          </>
-        )}
-        {/* Backdrop */}
-        <div
-          className="absolute inset-0 transition-opacity duration-300"
-          style={{ opacity: visible ? 1 : 0 }}
-        >
-          {backdrop ? (
-            <img src={backdrop} alt="" className="h-full w-full object-cover" />
-          ) : (
-            <div className="h-full w-full bg-gradient-to-br from-sky-950 to-black" />
-          )}
-          <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/60 to-black/20" />
-          <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-transparent to-transparent" />
-        </div>
-
-        {/* Conteúdo */}
-        <div
-          className="relative flex items-end gap-5 p-6 sm:p-8 min-h-[280px] transition-opacity duration-300"
-          style={{ opacity: visible ? 1 : 0 }}
-        >
-          {/* Poster */}
-          {poster && (
-            <div className="hidden sm:block w-[90px] shrink-0 rounded-2xl overflow-hidden border border-white/[0.10] shadow-xl shadow-black/40">
-              <img src={poster} alt={name} className="w-full aspect-[2/3] object-cover" />
-            </div>
-          )}
-
-          {/* Info */}
-          <div className="flex-1 min-w-0">
-            {/* Badges */}
-            <div className="flex flex-wrap items-center gap-2 mb-3">
-              <span className={`text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-lg border ${catColor}`}>
-                {catLabel}
-              </span>
-              {group.streamingProvider && (
-                <span className="text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-lg border bg-emerald-500/15 text-emerald-300/80 border-emerald-500/20">
-                  {group.streamingProvider.name}
-                </span>
-              )}
-              {badge && (
-                <span className={`text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-lg border ${badge.cls}`}>
-                  {badge.text}
-                </span>
-              )}
-              <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-white/35 border border-white/[0.08] rounded-lg px-2 py-0.5">
-                {label}
-              </span>
-              <span className="text-[9px] text-white/20 tabular-nums">
-                {new Date(item.dateStr + "T12:00:00").toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" })}
-              </span>
-            </div>
-
-            <h3 className="text-2xl sm:text-3xl font-black tracking-[-0.04em] text-white/95 leading-none mb-2 line-clamp-2">
-              {name}
-            </h3>
-
-            {tmdb.overview && (
-              <p className="text-[12px] text-white/45 leading-relaxed line-clamp-2 max-w-lg mb-3">
-                {tmdb.overview}
-              </p>
-            )}
-
-            <div className="flex items-center gap-3 flex-wrap">
-              {tmdb.vote_average > 0 && (
-                <div className="flex items-center gap-1">
-                  <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" className="text-amber-400">
-                    <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-                  </svg>
-                  <span className="text-[12px] font-black text-amber-300">{tmdb.vote_average.toFixed(1)}</span>
-                </div>
-              )}
-              {tmdb.networks && tmdb.networks.length > 0 && (
-                <span className="text-[11px] text-white/35">{tmdb.networks[0].name}</span>
-              )}
-              {tmdb.number_of_seasons && (
-                <span className="text-[11px] text-white/25">{tmdb.number_of_seasons} temporada{tmdb.number_of_seasons !== 1 ? "s" : ""}</span>
-              )}
-            </div>
-          </div>
-
-          {/* Setas de navegação ← → */}
-          {items.length > 1 && (
-            <div className="hidden sm:flex flex-col gap-2 shrink-0 self-center">
-              <button
-                type="button"
-                aria-label="Anterior"
-                onClick={(e) => { e.stopPropagation(); if (timerRef.current) clearTimeout(timerRef.current); goTo((idx - 1 + items.length) % items.length); }}
-                className="flex items-center justify-center w-9 h-9 rounded-full border border-white/[0.15] bg-white/[0.06] hover:bg-white/[0.14] transition-all"
-              >
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4 text-white/60">
-                  <path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-              <button
-                type="button"
-                aria-label="Próximo"
-                onClick={(e) => { e.stopPropagation(); if (timerRef.current) clearTimeout(timerRef.current); goTo((idx + 1) % items.length); }}
-                className="flex items-center justify-center w-9 h-9 rounded-full border border-white/[0.15] bg-white/[0.06] hover:bg-white/[0.14] transition-all"
-              >
-                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-4 h-4 text-white/60">
-                  <path d="M6 3l5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Barra de progresso do timer */}
-        <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/[0.06]">
-          <div
-            className="h-full bg-white/30 rounded-full"
-            style={{
-              animation: `spotlight-progress ${SPOTLIGHT_MS}ms linear`,
-              animationPlayState: "running",
-              width: "100%",
-              transformOrigin: "left",
-            }}
-            key={idx}
-          />
-        </div>
-      </div>
-
-      {/* CSS animation keyframes via style tag */}
-      <style>{`
-        @keyframes spotlight-progress {
-          from { transform: scaleX(0); }
-          to   { transform: scaleX(1); }
-        }
-      `}</style>
-    </section>
-  );
+  // Máx 20 itens no spotlight
+  return filtered;
 }
 
-// ── Editorial agenda feed ─────────────────────────────────────────────────────
+
+// ── Vista Mensal ───────────────────────────────────────────────────────────────
+
+// ── RadarHero — painel unificado: identidade + métricas + tabs + hero cinematográfico ──
+// Substitui AgendaHero (separado) + SpotlightHero (separado) por um único bloco premium.
+
+// ── Editorial feed ────────────────────────────────────────────────────────────
 
 const SIGNAL_STYLES = {
-  rose: "border-rose-400/25 bg-rose-500/15 text-rose-200",
-  violet: "border-violet-400/25 bg-violet-500/15 text-violet-200",
+  rose:    "border-rose-400/25 bg-rose-500/15 text-rose-200",
+  violet:  "border-violet-400/25 bg-violet-500/15 text-violet-200",
   emerald: "border-emerald-400/25 bg-emerald-500/15 text-emerald-200",
-  cyan: "border-cyan-400/25 bg-cyan-500/15 text-cyan-200",
-  amber: "border-amber-400/25 bg-amber-500/15 text-amber-200",
-  sky: "border-sky-400/25 bg-sky-500/15 text-sky-200",
-  slate: "border-white/[0.08] bg-white/[0.05] text-white/50",
+  cyan:    "border-cyan-400/25 bg-cyan-500/15 text-cyan-200",
+  amber:   "border-amber-400/25 bg-amber-500/15 text-amber-200",
+  sky:     "border-sky-400/25 bg-sky-500/15 text-sky-200",
+  slate:   "border-white/[0.08] bg-white/[0.05] text-white/50",
 };
 
 function SignalBadge({
@@ -1135,7 +985,8 @@ function resolveItemData(item: EditorialGroup): NormalizedItem {
     name:      tmdb.name,
     overview:  tmdb.overview ?? null,
     backdrop,
-    poster:    TMDB_IMG(tmdb.poster_path, "w342") || TMDB_IMG(tmdb.backdrop_path, "w780"),
+    // Language-aware: non-latin series get backdrop to avoid logo-heavy posters
+    poster:    bestVerticalImg(tmdb),
     voteAvg:   tmdb.vote_average ?? 0,
     category:  group.category,
     href:      `/title/tv/${tmdb.tmdb_id}`,
@@ -1428,7 +1279,7 @@ function AgendaCompactCluster({ items }: { items: EditorialGroup[] }) {
               className="flex min-w-0 items-center gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.035] p-2.5 text-left transition-colors hover:border-white/[0.10] hover:bg-white/[0.05]"
             >
               <div className="h-14 w-10 shrink-0 overflow-hidden rounded-lg bg-white/[0.05]">
-                {d.poster && <img src={d.poster} alt="" className="h-full w-full object-cover" loading="lazy" />}
+                {(d.backdrop ?? d.poster) && <img src={(d.backdrop ?? d.poster)!} alt="" className="h-full w-full object-cover object-center" loading="lazy" />}
               </div>
               <div className="min-w-0 flex-1">
                 <p className="truncate text-[13px] font-black text-white/85">{d.name}</p>
@@ -1720,10 +1571,9 @@ function AgendaEditorialFeed({
 }
 
 
-// ── AgendaHero ─────────────────────────────────────────────────────────────────
-
-function AgendaHero({
+function RadarHero({
   phase, mode, onChangeMode, filteredCount, filteredEps, enrichProgress,
+  spotlightItems,
 }: {
   phase: Phase;
   mode: ViewMode;
@@ -1731,87 +1581,254 @@ function AgendaHero({
   filteredCount: number;
   filteredEps: number;
   enrichProgress: number;
+  spotlightItems: SpotlightItem[];
 }) {
+  const router = useRouter();
   const today = new Date().toLocaleDateString("pt-BR", {
     weekday: "long", day: "2-digit", month: "long", year: "numeric",
   });
 
+  const [idx, setIdx]         = useState(0);
+  const [visible, setVisible] = useState(true);
+  const timerRef              = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const goTo = useCallback((nextIdx: number) => {
+    setVisible(false);
+    setTimeout(() => { setIdx(nextIdx); setVisible(true); }, 280);
+  }, []);
+
+  useEffect(() => {
+    if (spotlightItems.length === 0) return;
+    timerRef.current = setTimeout(() => {
+      goTo((idx + 1) % spotlightItems.length);
+    }, SPOTLIGHT_MS);
+    return () => { if (timerRef.current) clearTimeout(timerRef.current); };
+  }, [idx, spotlightItems.length, goTo]);
+
+  const item     = spotlightItems[idx] ?? null;
+  const tmdb     = item?.group.tmdb ?? null;
+  const backdrop = tmdb ? bestHorizontalImg(tmdb, "w1280") : null;
+  const poster   = tmdb ? bestVerticalImg(tmdb) : null;
+  const itemName = tmdb?.name ?? null;
+  const { label: catLabel, color: catColor } = item ? resolveCatLabel(item.group) : { label: "", color: "" };
+  const badge = item
+    ? (item.isTrendingDay  ? { text: "Em alta hoje",       cls: "bg-rose-500/20 text-rose-300 border-rose-500/25" }
+    : item.isPremiere      ? { text: "Estreia",            cls: "bg-emerald-500/20 text-emerald-300 border-emerald-500/25" }
+    : item.isFinale        ? { text: "Final de temporada", cls: "bg-violet-500/20 text-violet-300 border-violet-500/25" }
+    : item.isTrendingWeek  ? { text: "Em alta na semana",  cls: "bg-amber-500/20 text-amber-300 border-amber-500/25" }
+    : null)
+    : null;
+  const href = tmdb ? `/title/tv/${tmdb.tmdb_id}` : "#";
+
   return (
-    <div className="relative isolate mb-9 flex min-h-[260px] flex-col justify-between overflow-hidden rounded-[2rem] border border-white/10 bg-white/[0.035] p-6 shadow-[0_24px_90px_rgba(0,0,0,0.35)] backdrop-blur-xl sm:min-h-[320px] sm:p-9">
+    <div className="relative isolate mb-9 overflow-hidden rounded-[2rem] border border-white/[0.10] shadow-[0_32px_100px_rgba(0,0,0,0.55)]">
+      {/* Fundo base */}
       <div className="absolute inset-0 -z-10 bg-zinc-950" />
-      <div className="absolute inset-0 -z-10" style={{ background: "radial-gradient(ellipse at 18% 0%, rgba(56,189,248,0.18) 0%, transparent 56%)" }} />
-      <div className="absolute inset-0 -z-10" style={{ background: "radial-gradient(ellipse at 88% 100%, rgba(16,185,129,0.12) 0%, transparent 52%)" }} />
-      <div className="absolute inset-0 -z-10 opacity-[0.025]"
+
+      {/* Backdrop contínuo — cobre TODO o painel como fundo infinito */}
+      <div
+        className="absolute inset-0 -z-10 transition-opacity duration-700"
+        style={{ opacity: visible ? 1 : 0.6 }}
+      >
+        {backdrop
+          ? <img src={backdrop} alt="" className="h-full w-full object-cover object-center" />
+          : <div className="h-full w-full bg-gradient-to-br from-zinc-900 to-black" />
+        }
+        {/* Overlay base escuro sobre o fundo inteiro */}
+        <div className="absolute inset-0 bg-black/75" />
+        {/* Overlay extra na metade superior — torna faixa de métricas mais escura/legível */}
+        <div className="absolute inset-x-0 top-0 h-1/2 bg-gradient-to-b from-black/60 to-transparent" />
+        {/* Overlay lateral esquerdo para legibilidade do texto */}
+        <div className="absolute inset-0 bg-gradient-to-r from-black/50 via-transparent to-transparent" />
+      </div>
+
+      {/* Glows editoriais sobre o backdrop */}
+      <div className="absolute inset-0 -z-10" style={{ background: "radial-gradient(ellipse at 15% 0%, rgba(56,189,248,0.18) 0%, transparent 55%)" }} />
+      <div className="absolute inset-0 -z-10" style={{ background: "radial-gradient(ellipse at 90% 100%, rgba(16,185,129,0.10) 0%, transparent 50%)" }} />
+      <div className="absolute inset-0 -z-10 opacity-[0.015]"
         style={{ backgroundImage: "linear-gradient(0deg,white 1px,transparent 1px),linear-gradient(90deg,white 1px,transparent 1px)", backgroundSize: "64px 64px" }} />
 
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <SectionEyebrow color="sky">Agenda · POPLOG</SectionEyebrow>
-          <p className="text-[12px] text-white/30 capitalize">{today}</p>
-        </div>
-        {/* Toggle de período */}
-        <div className="flex items-center gap-1 rounded-2xl border border-white/[0.09] bg-black/25 p-1 backdrop-blur-md">
-          {(["day", "week", "month", "range"] as ViewMode[]).map((v) => (
-            <button key={v} type="button" onClick={() => onChangeMode(v)}
-              className={`text-[11px] font-bold px-3.5 py-1.5 rounded-lg transition-all duration-200 ${
-                mode === v
-                  ? "border border-sky-300/25 bg-sky-300/[0.14] text-sky-100 shadow-[0_0_18px_rgba(56,189,248,0.12)]"
-                  : "text-white/30 hover:text-white/55"
+      {/* ── Faixa superior: identidade + métricas + tabs ── */}
+      <div className="relative px-6 pt-6 pb-0 sm:px-9 sm:pt-8">
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          {/* Identidade + data + status */}
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 mb-1 flex-wrap">
+              <span className="text-[10px] font-black uppercase tracking-[0.18em] text-sky-400/80">Radar · POPLOG</span>
+              <span className={`flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${
+                phase === "done"
+                  ? "border-emerald-500/20 bg-emerald-500/10 text-emerald-400/70"
+                  : "border-sky-500/20 bg-sky-500/10 text-sky-400/70"
               }`}>
-              {v === "day" ? "Hoje" : v === "week" ? "Semana" : v === "month" ? "Mês" : "30 dias"}
-            </button>
-          ))}
+                <span className={`w-1 h-1 rounded-full ${phase === "done" ? "bg-emerald-400/80" : "bg-sky-400/80 animate-pulse"}`} />
+                {phase === "done" ? "Engine ativa" : PHASE_LABELS[phase]}
+              </span>
+            </div>
+            <p className="text-[12px] text-white/25 capitalize">{today}</p>
+          </div>
+
+          {/* Tabs de período */}
+          <div className="flex items-center gap-1 rounded-2xl border border-white/[0.09] bg-black/30 p-1 backdrop-blur-md shrink-0">
+            {(["day", "week", "month"] as ViewMode[]).map((v) => (
+              <button key={v} type="button" onClick={() => onChangeMode(v)}
+                className={`text-[11px] font-bold px-3.5 py-1.5 rounded-lg transition-all duration-200 ${
+                  mode === v
+                    ? "border border-sky-300/25 bg-sky-300/[0.14] text-sky-100 shadow-[0_0_18px_rgba(56,189,248,0.12)]"
+                    : "text-white/30 hover:text-white/55"
+                }`}>
+                {v === "day" ? "Hoje" : v === "week" ? "Semana" : "30 dias"}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Título + métricas */}
+        <div className="flex items-center gap-4 flex-wrap mt-4 mb-6">
+          <h1 className="text-4xl sm:text-5xl font-black text-white leading-none tracking-[-0.06em]">Radar</h1>
+          {filteredCount > 0 && (
+            <>
+              <div className="h-6 w-px bg-white/10 ml-1" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-2xl font-black text-white/75 tabular-nums">{filteredCount}</span>
+                <span className="text-[11px] text-white/30">séries</span>
+              </div>
+              <div className="h-4 w-px bg-white/10" />
+              <div className="flex items-center gap-1.5">
+                <span className="text-2xl font-black text-emerald-300 tabular-nums">{filteredEps.toLocaleString("pt-BR")}</span>
+                <span className="text-[11px] text-white/30">episódios</span>
+              </div>
+              {phase === "enriching" && (
+                <>
+                  <div className="h-4 w-px bg-white/10" />
+                  <span className="text-[11px] text-white/30">Enriquecendo… {Math.round(enrichProgress)}%</span>
+                </>
+              )}
+            </>
+          )}
+          {filteredCount === 0 && phase !== "done" && (
+            <span className="text-[13px] text-white/35 ml-2">{PHASE_LABELS[phase]}</span>
+          )}
         </div>
       </div>
 
-      <div className="mt-4">
-        <h1 className="text-5xl sm:text-7xl font-black text-white leading-[0.9] tracking-[-0.07em] mb-3">Agenda</h1>
-        <p className="text-[13px] sm:text-[14px] text-white/55 leading-relaxed max-w-2xl">
-          {phase !== "done"
-            ? PHASE_LABELS[phase]
-            : filteredCount > 0
-              ? `${filteredCount} séries curadas · ${filteredEps.toLocaleString("pt-BR")} episódios comprimidos por relevância`
-              : "Feed editorial de entretenimento"}
-        </p>
-      </div>
+      {/* ── Hero cinematográfico — continua o mesmo fundo, sem borda separada ── */}
+      {spotlightItems.length > 0 && item && tmdb && (
+        <div
+          className="relative cursor-pointer overflow-hidden"
+          style={{ minHeight: 220 }}
+          onClick={() => router.push(href)}
+        >
+          {/* Linha sutil de separação visual entre faixa superior e hero */}
+          <div className="absolute top-0 inset-x-6 sm:inset-x-9 h-px bg-white/[0.06]" />
+          {/* Nav mobile */}
+          {spotlightItems.length > 1 && (
+            <>
+              <button type="button" aria-label="Anterior"
+                onClick={(e) => { e.stopPropagation(); if (timerRef.current) clearTimeout(timerRef.current); goTo((idx - 1 + spotlightItems.length) % spotlightItems.length); }}
+                className="sm:hidden absolute left-3 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-8 h-8 rounded-full border border-white/[0.20] bg-black/50 backdrop-blur-sm">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5 text-white/70"><path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              </button>
+              <button type="button" aria-label="Próximo"
+                onClick={(e) => { e.stopPropagation(); if (timerRef.current) clearTimeout(timerRef.current); goTo((idx + 1) % spotlightItems.length); }}
+                className="sm:hidden absolute right-3 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-8 h-8 rounded-full border border-white/[0.20] bg-black/50 backdrop-blur-sm">
+                <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5 text-white/70"><path d="M6 3l5 5-5 5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+              </button>
+            </>
+          )}
 
-      {/* Stats row */}
-      {filteredCount > 0 && (
-        <div className="flex items-center gap-4 flex-wrap mt-4">
-          <div className="flex items-center gap-2">
-            <span className="text-xl font-black text-white/80">{filteredCount}</span>
-            <span className="text-[11px] text-white/30">séries</span>
-          </div>
-          <div className="h-3 w-px bg-white/10" />
-          <div className="flex items-center gap-2">
-            <span className="text-xl font-black text-emerald-300">{filteredEps.toLocaleString("pt-BR")}</span>
-            <span className="text-[11px] text-white/30">episódios</span>
-          </div>
-          {phase === "enriching" && (
-            <>
-              <div className="h-3 w-px bg-white/10" />
-              <div className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-sky-400/90 animate-pulse" />
-                <span className="text-[11px] text-white/25">Enriquecendo… {Math.round(enrichProgress)}%</span>
+          {/* Overlay direcional sobre o backdrop compartilhado — escurece embaixo para legibilidade */}
+          <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
+          <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-transparent to-transparent" />
+
+          {/* Conteúdo */}
+          <div className="relative flex items-end gap-5 p-5 sm:p-7 min-h-[240px] transition-opacity duration-300" style={{ opacity: visible ? 1 : 0 }}>
+            {poster && (
+              <div className="hidden sm:block w-[80px] shrink-0 rounded-xl overflow-hidden border border-white/[0.10] shadow-xl shadow-black/40">
+                <img src={poster} alt={itemName ?? ""} className="w-full aspect-[2/3] object-cover" />
               </div>
-            </>
-          )}
-          {phase === "done" && (
-            <>
-              <div className="h-3 w-px bg-white/10" />
-              <div className="flex items-center gap-2">
-                <span className="w-1.5 h-1.5 rounded-full bg-[#10B981]" />
-                <span className="text-[9.5px] font-bold uppercase text-white/25">Engine editorial ativa</span>
+            )}
+            <div className="flex-1 min-w-0">
+              <div className="flex flex-wrap items-center gap-1.5 mb-2.5">
+                <span className={`text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-lg border ${catColor}`}>{catLabel}</span>
+                {item.group.streamingProvider && (
+                  <span className="text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-lg border bg-emerald-500/15 text-emerald-300/80 border-emerald-500/20">
+                    {item.group.streamingProvider.name}
+                  </span>
+                )}
+                {badge && <span className={`text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-lg border ${badge.cls}`}>{badge.text}</span>}
+                <span className="text-[9px] font-bold uppercase tracking-[0.15em] text-white/35 border border-white/[0.08] rounded-lg px-2 py-0.5">{item.label}</span>
               </div>
-            </>
-          )}
+              <h3 className="text-2xl sm:text-[28px] font-black tracking-[-0.04em] text-white/95 leading-none mb-2 line-clamp-2">{itemName}</h3>
+              {tmdb.overview && (
+                <p className="text-[12px] text-white/40 leading-relaxed line-clamp-2 max-w-lg mb-2.5">{tmdb.overview}</p>
+              )}
+              <div className="flex items-center gap-3 flex-wrap">
+                {(tmdb.vote_average ?? 0) > 0 && (
+                  <div className="flex items-center gap-1">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="currentColor" className="text-amber-400">
+                      <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
+                    </svg>
+                    <span className="text-[12px] font-black text-amber-300">{tmdb.vote_average.toFixed(1)}</span>
+                  </div>
+                )}
+                {tmdb.networks && tmdb.networks.length > 0 && (
+                  <span className="text-[11px] text-white/30">{tmdb.networks[0].name}</span>
+                )}
+                {(tmdb.number_of_seasons ?? 0) > 0 && (
+                  <span className="text-[11px] text-white/20">{tmdb.number_of_seasons} temporada{(tmdb.number_of_seasons ?? 0) !== 1 ? "s" : ""}</span>
+                )}
+              </div>
+            </div>
+
+            {/* Setas + dots desktop */}
+            {spotlightItems.length > 1 && (
+              <div className="hidden sm:flex flex-col items-center gap-2 shrink-0 self-center">
+                <button type="button" aria-label="Anterior"
+                  onClick={(e) => { e.stopPropagation(); if (timerRef.current) clearTimeout(timerRef.current); goTo((idx - 1 + spotlightItems.length) % spotlightItems.length); }}
+                  className="flex items-center justify-center w-8 h-8 rounded-full border border-white/[0.15] bg-white/[0.06] hover:bg-white/[0.14] transition-all">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5 text-white/60"><path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                </button>
+                <button type="button" aria-label="Próximo"
+                  onClick={(e) => { e.stopPropagation(); if (timerRef.current) clearTimeout(timerRef.current); goTo((idx + 1) % spotlightItems.length); }}
+                  className="flex items-center justify-center w-8 h-8 rounded-full border border-white/[0.15] bg-white/[0.06] hover:bg-white/[0.14] transition-all">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5 text-white/60"><path d="M6 3l5 5-5 5" strokeLinecap="round" strokeLinejoin="round" /></svg>
+                </button>
+                <div className="flex flex-col gap-1 mt-1">
+                  {spotlightItems.slice(0, Math.min(spotlightItems.length, 8)).map((_, i) => (
+                    <button key={i} type="button"
+                      onClick={(e) => { e.stopPropagation(); if (timerRef.current) clearTimeout(timerRef.current); goTo(i); }}
+                      className={`rounded-full transition-all duration-300 ${i === idx ? "h-4 w-1.5 bg-white/60" : "h-1.5 w-1.5 bg-white/20 hover:bg-white/35"}`}
+                      aria-label={`Slide ${i + 1}`} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Barra de progresso */}
+          <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-white/[0.05]">
+            <div className="h-full bg-white/25 rounded-full"
+              style={{ animation: `spotlight-progress ${SPOTLIGHT_MS}ms linear`, animationPlayState: "running", width: "100%", transformOrigin: "left" }}
+              key={idx} />
+          </div>
         </div>
       )}
+
+      {/* Skeleton quando carregando */}
+      {spotlightItems.length === 0 && phase !== "done" && (
+        <div className="min-h-[180px] animate-pulse" />
+      )}
+
+      <style>{`
+        @keyframes spotlight-progress {
+          from { transform: scaleX(0); }
+          to   { transform: scaleX(1); }
+        }
+      `}</style>
     </div>
   );
 }
 
-// ── Vista Mensal ───────────────────────────────────────────────────────────────
 
 const WEEK_HEADERS = ["Seg", "Ter", "Qua", "Qui", "Sex", "Sáb", "Dom"];
 
@@ -2061,9 +2078,9 @@ function DayView({
               onClick={() => g.tmdb?.tmdb_id && router.push(`/title/tv/${g.tmdb.tmdb_id}`)}
             >
               {g.tmdb?.backdrop_path && (
-                <div className="absolute inset-0 opacity-[0.06]">
+                <div className="absolute inset-0 opacity-[0.12]">
                   <img src={TMDB_IMG(g.tmdb.backdrop_path, "w780")!} alt="" className="h-full w-full object-cover" />
-                  <div className="absolute inset-0 bg-gradient-to-r from-black/80 to-transparent" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-black/70 to-black/20" />
                 </div>
               )}
               <div className="relative flex items-start gap-4 p-4">
@@ -2325,8 +2342,7 @@ export default function AgendaClient({ initialData }: { initialData: IcsAgendaRe
   }, []);
 
   const periodLabel = useMemo(() => {
-    if (mode === "range") return "Próximos 30 dias";
-    if (mode === "month") return formatMonthYear(navYear, navMonth);
+    if (mode === "month") return "Próximos 30 dias";
     if (mode === "week") return `Semana de ${formatWeekRange(navWeekStart)}`;
     return formatDayFull(selectedDay);
   }, [mode, navYear, navMonth, navWeekStart, selectedDay]);
@@ -2353,13 +2369,14 @@ export default function AgendaClient({ initialData }: { initialData: IcsAgendaRe
   return (
     <PageShell variant="wide">
 
-      <AgendaHero
+      <RadarHero
         phase={phase}
         mode={mode}
         onChangeMode={setMode}
         filteredCount={filteredCount}
         filteredEps={filteredEps}
         enrichProgress={enrichProgress}
+        spotlightItems={spotlightItems}
       />
 
       {error && (
@@ -2367,9 +2384,6 @@ export default function AgendaClient({ initialData }: { initialData: IcsAgendaRe
           Erro ao carregar feed: {error}
         </div>
       )}
-
-      {/* Spotlight — destaques editoriais do período */}
-      <SpotlightHero items={spotlightItems} isLoading={isLoading} />
 
       <SectionDivider />
 

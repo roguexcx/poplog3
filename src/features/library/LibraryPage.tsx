@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 
 import SectionHeader from "@/components/ui/SectionHeader";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";
@@ -86,11 +87,13 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
   const [page, setPage] = useState(1);
   const itemsPerPage    = useLibraryItemsPerPage();
 
+  useWatchlistHydration(library, activeTab);
+
   const stats = useMemo(() => ({
     total:      library.length,
     comingSoon: library.filter(isComingSoon).length,
     watched:    library.filter(isCompletedOrUpToDate).length,
-    watchlist:  library.filter((i) => i.status === "watchlist" && !isComingSoon(i)).length,
+    watchlist:  library.filter((i) => isPureWatchlist(i) && !isComingSoon(i)).length,
     watching:   library.filter(isMarathoning).length,
     favorites:  library.filter((i) => i.favorite === true && !isComingSoon(i)).length,
   }), [library]);
@@ -111,6 +114,11 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
         items = items.filter(isMarathoning);
       } else if (activeTab === "watched") {
         items = items.filter(isCompletedOrUpToDate);
+      } else if (activeTab === "watchlist") {
+        // Watchlist real = nao iniciada (watched_episodes = 0).
+        // Series iniciadas com status=watchlist no DB sao anomalias de dados
+        // e devem aparecer em "Maratonando", nao aqui.
+        items = items.filter(isPureWatchlist);
       } else if (activeTab !== "all") {
         items = items.filter((i) => i.status === activeTab);
       }
@@ -120,7 +128,7 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
       items = items.filter((i) => i.media_type === mediaFilter);
     }
 
-    items.sort((a, b) => sortLibraryItems(a, b, sortBy, activeTab));
+    items.sort((a, b) => sortLibraryItems(a, b, sortBy));
     return items;
   }, [library, activeTab, mediaFilter, sortBy]);
 
@@ -477,6 +485,112 @@ function getSectionDescription(tab: LibraryTab) {
 
 // ── Hook responsivo ───────────────────────────────────────────────────────────
 
+/**
+ * Hidratação silenciosa e definitiva da watchlist.
+ *
+ * Comportamento:
+ * - Só dispara quando a aba "watchlist" abre E há séries TV não iniciadas.
+ * - Chama a rota uma vez para checar quantas séries precisam de hidratação
+ *   (a rota consulta poplog3_episodes — fonte de verdade persistida).
+ * - Se to_hydrate === 0, para imediatamente sem fazer nada.
+ * - Se to_hydrate > 0, processa em loop até remaining === 0, depois recarrega.
+ * - Uma vez processada, a série tem episódios em poplog3_episodes para sempre.
+ *   Nas próximas aberturas a rota retorna to_hydrate = 0 e o hook para.
+ * - Flag de sessão (sessionAlreadyChecked) evita re-checar dentro da mesma
+ *   sessão de navegação, mesmo que o usuário alterne abas várias vezes.
+ */
+function useWatchlistHydration(library: Poplog3UserLibraryItem[], activeTab: string) {
+  const router = useRouter();
+  const hydratingRef    = useRef(false);
+  const sessionChecked  = useRef(false); // uma checagem por sessão de navegação
+  const maxBatches = 30;
+
+  useEffect(() => {
+    if (activeTab !== "watchlist") return;
+
+    // Há séries TV não iniciadas na watchlist?
+    const hasTvWatchlist = library.some(
+      (item) => item.media_type === "tv" && isPureWatchlist(item),
+    );
+    if (!hasTvWatchlist) return;
+
+    // Já checou nesta sessão e não havia nada para hidratar?
+    if (sessionChecked.current) return;
+    if (hydratingRef.current) return;
+
+    hydratingRef.current = true;
+
+    async function runHydration() {
+      try {
+        let remaining = 1;
+        let refreshNeeded = false;
+        let previousRemaining: number | null = null;
+        let batchCount = 0;
+
+        // Loop de hidratação em batches.
+        // GARANTIA: router.refresh() é chamado UMA ÚNICA VEZ após o loop completo
+        // (quando remaining === 0 ou quando a API pede parada), nunca durante batches intermediários.
+        // Isso evita revalidação parcial do Server Component enquanto ainda há
+        // séries sendo processadas, prevenindo flicker visual e reordenação em tempo real.
+        while (remaining > 0 && batchCount < maxBatches) {
+          batchCount++;
+          const res = await fetch("/api/library/watchlist-hydrate", { method: "POST" });
+          if (!res.ok) break;
+          const data = await res.json() as {
+            remaining?: number;
+            hydrated?: number;
+            durationBackfilled?: number;
+            stopped?: boolean;
+            reason?: string;
+          };
+          const nextRemaining = data.remaining ?? 0;
+          if ((data.hydrated ?? 0) > 0 || (data.durationBackfilled ?? 0) > 0) {
+            refreshNeeded = true;
+          }
+
+          if (data.stopped || (previousRemaining !== null && nextRemaining >= previousRemaining)) {
+            console.warn("[watchlist-hydrate] loop interrompido no cliente", {
+              batchCount,
+              previousRemaining,
+              nextRemaining,
+              reason: data.reason ?? "remaining_not_decreasing",
+            });
+            remaining = nextRemaining;
+            break;
+          }
+
+          previousRemaining = nextRemaining;
+          remaining = nextRemaining;
+          // Throttle entre batches — apenas aguarda, nunca dispara refresh aqui
+          if (remaining > 0) await new Promise((r) => setTimeout(r, 500));
+        }
+
+        if (remaining > 0 && batchCount >= maxBatches) {
+          console.warn("[watchlist-hydrate] loop interrompido por maxBatches", {
+            maxBatches,
+            remaining,
+          });
+        }
+
+        // Marca que já checou nesta sessão — não re-dispara mesmo trocando de aba
+        sessionChecked.current = true;
+
+        // Refresh único e final — só quando algo foi efetivamente hidratado
+        // e o loop está completo (remaining === 0 ou erro que encerrou o loop)
+        if (refreshNeeded) router.refresh();
+      } catch {
+        // falha silenciosa — não quebra a UI
+      } finally {
+        hydratingRef.current = false;
+      }
+    }
+
+    void runHydration();
+  // activeTab é a única dependência intencional — library é estável (vem do servidor)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+}
+
 function useLibraryItemsPerPage() {
   const [itemsPerPage, setItemsPerPage] = useState(28);
 
@@ -500,7 +614,6 @@ function sortLibraryItems(
   a:         Poplog3UserLibraryItem,
   b:         Poplog3UserLibraryItem,
   sortBy:    SortBy,
-  activeTab: LibraryTab,
 ) {
   switch (sortBy) {
     case "title-asc":
@@ -578,10 +691,24 @@ function compareRuntime(
 }
 
 function getTotalRuntime(item: Poplog3UserLibraryItem) {
-  const runtime = item.duration_sort_minutes;
-  return typeof runtime === "number" && Number.isFinite(runtime) && runtime >= 0
-    ? runtime
-    : null;
+  const candidates = [
+    item.duration_sort_minutes,
+    item.media_type === "tv" && item.watched_episodes && item.watched_episodes > 0
+      ? item.remaining_runtime_minutes
+      : item.total_runtime_minutes,
+    item.remaining_runtime_minutes,
+    item.title?.total_runtime_minutes,
+    item.title?.runtime_minutes,
+    item.title?.runtime,
+  ];
+
+  for (const runtime of candidates) {
+    if (typeof runtime === "number" && Number.isFinite(runtime) && runtime >= 0) {
+      return runtime;
+    }
+  }
+
+  return null;
 }
 
 function getPopularity(item: Poplog3UserLibraryItem) {
@@ -638,19 +765,31 @@ function isComingSoon(item: Poplog3UserLibraryItem): boolean {
   return isUnreleased(item) || isInTheaterWindow(item);
 }
 
+/**
+ * Serie/filme "em andamento" para a aba Maratonando/Assistindo.
+ *
+ * Para series, considera iniciada qualquer item com watched_episodes > 0 OU
+ * computed_state === "in_progress", independente de remaining_runtime_minutes
+ * (que pode ser null quando o runtime ainda nao foi hidratado).
+ * Geladeira (status=fridge) e um estado manual -- nunca entra aqui.
+ */
 function isMarathoning(item: Poplog3UserLibraryItem): boolean {
   if (item.media_type === "movie") {
     return item.status === "watching";
   }
 
-  return (
-    item.status === "watching" &&
-    item.computed_state === "in_progress" &&
-    typeof item.remaining_runtime_minutes === "number" &&
-    item.remaining_runtime_minutes > 0
-  );
+  if (item.status !== "watching") return false;
+
+  // Serie iniciada = tem episodios assistidos OU state diz in_progress
+  const hasProgress = (item.watched_episodes ?? 0) > 0;
+  const isInProgress = item.computed_state === "in_progress";
+
+  return hasProgress || isInProgress;
 }
 
+/**
+ * Serie/filme concluido ou em dia com os episodios disponiveis.
+ */
 function isCompletedOrUpToDate(item: Poplog3UserLibraryItem): boolean {
   if (item.media_type === "movie") {
     return item.status === "watched";
@@ -661,6 +800,14 @@ function isCompletedOrUpToDate(item: Poplog3UserLibraryItem): boolean {
     item.computed_state === "completed" ||
     item.computed_state === "up_to_date"
   );
+}
+
+/**
+ * Watchlist REAL: salva para ver mas ainda nao iniciada.
+ * watched_episodes = 0 e o criterio definitivo.
+ */
+function isPureWatchlist(item: Poplog3UserLibraryItem): boolean {
+  return item.status === "watchlist" && (item.watched_episodes ?? 0) === 0;
 }
 
 function isValidLibraryTab(value?: string): value is LibraryTab {

@@ -53,6 +53,14 @@ function episodeKey(season: number, episode: number): EpisodeKey {
 /**
  * Garante que a série esteja como "watching" na biblioteca após marcar episódio.
  * Retorna o entry de biblioteca resultante para reutilizar no upsertTitleState.
+ *
+ * Regra: série com qualquer status diferente de "watched" ou "watching" deve
+ * ser promovida para "watching" automaticamente quando o usuário marca episódios.
+ * Isso cobre os casos de:
+ *   - status="watchlist" (série que o usuário começou a assistir sem mudar status)
+ *   - status="fridge" (série na geladeira que voltou para foco)
+ *   - status="abandoned" (série retomada via marcação de episódio)
+ *   - status=null (série sem entrada prévia na biblioteca)
  */
 async function syncLibraryStatusAfterEpisodeMark(
   userId: string,
@@ -74,7 +82,12 @@ async function syncLibraryStatusAfterEpisodeMark(
   const favorite = Boolean((data as Record<string, unknown> | null)?.favorite);
   const liked = ((data as Record<string, unknown> | null)?.liked as boolean | null) ?? null;
 
-  if (currentStatus !== "watched" && currentStatus !== "watching") {
+  // Qualquer status que não seja "watching" ou "watched" deve ser promovido.
+  // Inclui explicitamente "watchlist" — série iniciada via marcação de episódio
+  // deve sair da watchlist e entrar em "watching".
+  const needsPromotion = currentStatus !== "watched" && currentStatus !== "watching";
+
+  if (needsPromotion) {
     await upsertUserTitleStatus({
       userId,
       tmdbId: seriesTmdbId,

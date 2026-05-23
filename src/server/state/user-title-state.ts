@@ -10,6 +10,8 @@
 
 import { supabaseAdmin } from "@/server/supabase/admin";
 import type { UserSeriesProgress } from "@/server/episodes/episode-progress-service";
+import { resolveRuntimeByMediaType } from "@/lib/runtime";
+import { formatError, rateLimitedWarn } from "@/server/logging/log-control";
 
 // ── Tipos públicos ────────────────────────────────────────────────────────────
 
@@ -77,6 +79,10 @@ export type UserTitleState = {
   franchise_name: string | null;
   franchise_watched: number | null;
   franchise_total: number | null;
+
+  // Duração para ordenação
+  duration_sort_minutes: number | null;
+  duration_sort_unavailable: boolean;
 
   // Streaming
   best_provider_name: string | null;
@@ -171,6 +177,12 @@ function deriveMovieComputedState(status: string | null): ComputedState | null {
   return null;
 }
 
+function readPositiveNumber(value: unknown): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  const rounded = Math.round(value);
+  return rounded > 0 ? rounded : null;
+}
+
 async function fetchLibraryEntry(
   userId: string,
   tmdbId: number,
@@ -200,18 +212,18 @@ async function fetchTitleMeta(
 ): Promise<{
   mediaStatus: string | null;
   collection: { id?: number; name?: string } | null;
+  runtimeMinutes: number | null;
+  episodeRunTime: number[] | null;
 }> {
   const { data } = await supabaseAdmin
     .from("poplog3_titles")
-    .select("tmdb_payload")
+    .select("tmdb_payload, runtime, episode_run_time")
     .eq("media_type", mediaType)
     .eq("tmdb_id", tmdbId)
     .maybeSingle();
 
-  const payload = (data as Record<string, unknown> | null)?.tmdb_payload as Record<
-    string,
-    unknown
-  > | null;
+  const row = data as Record<string, unknown> | null;
+  const payload = row?.tmdb_payload as Record<string, unknown> | null;
 
   const mediaStatus = (payload?.status as string | null) ?? null;
   const collection = (payload?.belongs_to_collection as {
@@ -219,7 +231,89 @@ async function fetchTitleMeta(
     name?: string;
   } | null) ?? null;
 
-  return { mediaStatus, collection };
+  return {
+    mediaStatus,
+    collection,
+    runtimeMinutes:
+      readPositiveNumber(row?.runtime) ??
+      readPositiveNumber(payload?.runtime) ??
+      null,
+    episodeRunTime: (row?.episode_run_time as number[] | null) ?? null,
+  };
+}
+
+/**
+ * Calcula duration_sort_minutes para persistência em user_title_state.
+ *
+ * Semântica:
+ *   - Filme: runtime do filme
+ *   - Série não iniciada (watched=0): tempo total previsto
+ *   - Série em andamento (watched>0): tempo restante até o fim
+ *   - Série concluída / up-to-date: tempo total histórico (para referência)
+ *
+ * Retorna null se não há dados de runtime disponíveis.
+ * O campo na DB será NULL até a série ser hidratada — o library-service
+ * continua recalculando via query quando NULL, servindo como fallback seguro.
+ */
+async function computeDurationSortMinutes(
+  tmdbId: number,
+  mediaType: MediaType,
+  watchedEpisodes: number,
+  airedEpisodes: number,
+  totalEpisodes: number | null,
+  runtimeMinutes: number | null,
+  episodeRunTime: number[] | null,
+): Promise<number | null> {
+  // Busca episódios com runtime para calcular média real (série TV)
+  let episodes: Array<{ seasonNumber: number | null; episodeNumber: number | null; runtimeMinutes: number | null; airDate: string | null }> | null = null;
+
+  if (mediaType === "tv") {
+    const { data: epRows } = await supabaseAdmin
+      .from("poplog3_episodes")
+      .select("season_number, episode_number, runtime, air_date")
+      .eq("series_tmdb_id", tmdbId)
+      .gt("season_number", 0)
+      .not("runtime", "is", null);
+
+    episodes = ((epRows ?? []) as Array<{
+      season_number: number | null;
+      episode_number: number | null;
+      runtime: number | null;
+      air_date: string | null;
+    }>).map((ep) => ({
+      seasonNumber: ep.season_number,
+      episodeNumber: ep.episode_number,
+      runtimeMinutes: ep.runtime,
+      aired: true,
+      airDate: ep.air_date,
+    }));
+  }
+
+  const resolution = resolveRuntimeByMediaType({
+    mediaType,
+    runtimeMinutes,
+    episodeRunTime,
+    episodes: episodes ?? undefined,
+  });
+
+  const avgRuntime = resolution.minutes;
+  if (avgRuntime === null || avgRuntime <= 0) return null;
+
+  if (mediaType === "movie") {
+    return avgRuntime;
+  }
+
+  // Série: escolhe entre tempo restante e tempo total
+  const bestEpisodeCount = airedEpisodes > 0 ? airedEpisodes : (totalEpisodes ?? null);
+  if (bestEpisodeCount === null) return null;
+
+  const totalRuntime = avgRuntime * bestEpisodeCount;
+  const remainingEpisodes = Math.max(bestEpisodeCount - watchedEpisodes, 0);
+  const remainingRuntime = avgRuntime * remainingEpisodes;
+
+  // Se há tempo restante, usa o restante (série em andamento ou não iniciada)
+  // Se não há (concluída/up-to-date), usa o total como referência histórica
+  return remainingRuntime > 0 ? remainingRuntime : totalRuntime;
 }
 
 /**
@@ -309,6 +403,16 @@ export async function upsertTitleState(
           )
         : 0;
 
+    const durationSortMinutesTV = await computeDurationSortMinutes(
+      tmdbId,
+      "tv",
+      progress.watchedCount,
+      progress.airedEpisodes,
+      progress.totalEpisodes ?? null,
+      titleMeta.runtimeMinutes,
+      titleMeta.episodeRunTime,
+    );
+
     row = {
       user_id: userId,
       tmdb_id: tmdbId,
@@ -332,6 +436,8 @@ export async function upsertTitleState(
       next_episode_air_date: progress.nextEpisode?.airDate ?? null,
       last_watched_at: progress.lastWatchedAt ?? null,
       watched_keys: progress.watchedKeys,
+      duration_sort_minutes: durationSortMinutesTV,
+      duration_sort_unavailable: durationSortMinutesTV === null,
       last_event_at: now,
       updated_at: now,
     };
@@ -351,6 +457,16 @@ export async function upsertTitleState(
       franchise_total = prog.total;
     }
 
+    const durationSortMinutesMovie = await computeDurationSortMinutes(
+      tmdbId,
+      "movie",
+      0, // watched não relevante para filme
+      0,
+      null,
+      titleMeta.runtimeMinutes,
+      null,
+    );
+
     row = {
       user_id: userId,
       tmdb_id: tmdbId,
@@ -363,6 +479,8 @@ export async function upsertTitleState(
       franchise_name,
       franchise_watched,
       franchise_total,
+      duration_sort_minutes: durationSortMinutesMovie,
+      duration_sort_unavailable: durationSortMinutesMovie === null,
       last_event_at: now,
       updated_at: now,
     };
@@ -391,6 +509,75 @@ export async function upsertTitleState(
       payload: input.event.payload ?? {},
     });
   }
+}
+
+export async function backfillDurationSortMinutesForUserTitles(input: {
+  userId: string;
+  tmdbIds: number[];
+  mediaType?: MediaType;
+}): Promise<{
+  processedTmdbIds: number[];
+  updatedTmdbIds: number[];
+  unavailableTmdbIds: number[];
+  failed: Array<{ tmdbId: number; error: string }>;
+}> {
+  const mediaType = input.mediaType ?? "tv";
+  const tmdbIds = Array.from(
+    new Set(input.tmdbIds.filter((id) => Number.isFinite(id) && id > 0)),
+  );
+  const processedTmdbIds: number[] = [];
+  const updatedTmdbIds: number[] = [];
+  const unavailableTmdbIds: number[] = [];
+  const failed: Array<{ tmdbId: number; error: string }> = [];
+  const { data: stateRows } = tmdbIds.length > 0
+    ? await supabaseAdmin
+        .from("user_title_state")
+        .select("tmdb_id, status, favorite, liked")
+        .eq("user_id", input.userId)
+        .eq("media_type", mediaType)
+        .in("tmdb_id", tmdbIds)
+    : { data: [] };
+  const stateMap = new Map(
+    ((stateRows ?? []) as Array<{
+      tmdb_id: number;
+      status: string | null;
+      favorite: boolean | null;
+      liked: boolean | null;
+    }>).map((row) => [row.tmdb_id, row]),
+  );
+
+  for (const tmdbId of tmdbIds) {
+    try {
+      const stateRow = stateMap.get(tmdbId);
+      processedTmdbIds.push(tmdbId);
+      await upsertTitleState({
+        userId: input.userId,
+        tmdbId,
+        mediaType,
+        libraryEntry: stateRow
+          ? {
+              status: stateRow.status,
+              favorite: Boolean(stateRow.favorite),
+              liked: stateRow.liked,
+            }
+          : undefined,
+      });
+
+      const state = await readTitleState(input.userId, tmdbId, mediaType);
+      if (typeof state?.duration_sort_minutes === "number" && state.duration_sort_minutes > 0) {
+        updatedTmdbIds.push(tmdbId);
+      } else {
+        unavailableTmdbIds.push(tmdbId);
+      }
+    } catch (err) {
+      failed.push({
+        tmdbId,
+        error: err instanceof Error ? err.message : "unknown",
+      });
+    }
+  }
+
+  return { processedTmdbIds, updatedTmdbIds, unavailableTmdbIds, failed };
 }
 
 /**
@@ -510,7 +697,12 @@ export async function getUserTitleStates(
   const { data, error } = await query;
 
   if (error) {
-    console.error("[user-title-state] getUserStates failed", error);
+    rateLimitedWarn(
+      "user-title-state:get-states-failed",
+      5 * 60 * 1000,
+      "[user-title-state] leitura de estados falhou\n- fallback aplicado: lista vazia",
+      formatError(error),
+    );
     return [];
   }
 

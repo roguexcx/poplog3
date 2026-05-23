@@ -125,8 +125,15 @@ function StartSeriesCard({
           </div>
 
           <h3 className="max-w-[14ch] text-4xl font-black leading-[0.95] tracking-[-0.03em] text-white sm:text-5xl md:max-w-[16ch] md:text-6xl">
-            {item.title}
+            {item.original_title && item.original_title !== item.title
+              ? item.original_title
+              : item.title}
           </h3>
+          {item.original_title && item.original_title !== item.title && (
+            <p className="mt-2 text-[13px] font-medium text-white/40 leading-tight">
+              {item.title}
+            </p>
+          )}
 
           <p className="mt-4 line-clamp-3 max-w-2xl text-sm leading-6 text-white/68 md:text-[15px]">
             {item.overview ?? item.editorial_reason}

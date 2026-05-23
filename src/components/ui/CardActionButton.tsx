@@ -1,6 +1,7 @@
 "use client";
 
 import type { ReactNode } from "react";
+import type { MouseEvent } from "react";
 
 type Props = {
   onClick: () => void;
@@ -21,10 +22,16 @@ export function CardActionButton({
   activeClass = "",
   children,
 }: Props) {
+  function handleClick(event: MouseEvent<HTMLButtonElement>) {
+    event.preventDefault();
+    event.stopPropagation();
+    onClick();
+  }
+
   return (
     <button
       type="button"
-      onClick={onClick}
+      onClick={handleClick}
       disabled={disabled || saving}
       title={title}
       aria-label={title}

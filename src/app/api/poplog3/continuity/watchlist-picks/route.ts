@@ -25,6 +25,7 @@ export type WatchlistPickItem = {
   tmdb_id: number;
   media_type: "movie" | "tv";
   title: string;
+  original_title: string | null;
   poster_path: string | null;
   backdrop_path: string | null;
   vote_average: number | null;
@@ -65,6 +66,7 @@ type TitleRow = {
   tmdb_id: number;
   media_type: string;
   title: string | null;
+  original_title: string | null;
   overview: string | null;
   poster_path: string | null;
   backdrop_path: string | null;
@@ -256,15 +258,19 @@ function buildContextualBadges(input: {
   const badges: string[] = [];
   const { state, title, runtime, totalRuntimeMinutes } = input;
   const episodes = title.number_of_episodes ?? null;
+  const isMovie = state.media_type === "movie";
 
+  // Fácil de começar: curto o suficiente
   if (
-    (episodes != null && episodes <= 8) ||
-    (totalRuntimeMinutes != null && totalRuntimeMinutes <= 420) ||
-    (runtime != null && runtime <= 35)
+    (isMovie && runtime != null && runtime <= 105) ||
+    (!isMovie && episodes != null && episodes <= 8) ||
+    (!isMovie && totalRuntimeMinutes != null && totalRuntimeMinutes <= 420) ||
+    (!isMovie && runtime != null && runtime <= 35)
   ) {
     badges.push("Fácil de começar");
   }
 
+  // Disponível no streaming preferido
   if (
     state.best_provider_name &&
     ["subscription", "free", "ads"].includes(state.best_provider_type ?? "")
@@ -272,22 +278,30 @@ function buildContextualBadges(input: {
     badges.push("No seu streaming");
   }
 
-  if (isFinishedSeriesStatus(readSeriesStatus(title)) || isMiniSeries(title)) {
-    badges.push(isMiniSeries(title) ? "Minissérie" : "Finalizada");
+  // Série finalizada / minissérie
+  if (!isMovie) {
+    if (isFinishedSeriesStatus(readSeriesStatus(title)) || isMiniSeries(title)) {
+      badges.push(isMiniSeries(title) ? "Minissérie" : "Finalizada");
+    }
   }
 
-  if ((title.vote_average ?? 0) >= 8 || (title.vote_count ?? 0) >= 2500) {
-    badges.push("Alta continuidade");
+  // Bem avaliado
+  const voteAvg = title.vote_average ?? 0;
+  const voteCount = title.vote_count ?? 0;
+  if (voteAvg >= 8.5 || (voteAvg >= 8.0 && voteCount >= 3000)) {
+    badges.push("Muito bem avaliado");
+  } else if (voteAvg >= 7.5 || (voteAvg >= 7.0 && voteCount >= 2000)) {
+    badges.push("Bem avaliado");
   }
 
-  const firstAirDate = title.first_air_date
-    ? new Date(title.first_air_date).getTime()
-    : null;
-  const recent =
-    firstAirDate != null &&
-    Number.isFinite(firstAirDate) &&
-    (Date.now() - firstAirDate) / 86_400_000 <= 180;
-  if (recent || (title.popularity ?? 0) >= 80) {
+  // Em alta (lançamento recente ou popularidade alta)
+  const airDate = title.first_air_date ?? title.release_date;
+  const refDate = airDate ? new Date(airDate).getTime() : null;
+  const recentRelease =
+    refDate != null &&
+    Number.isFinite(refDate) &&
+    (Date.now() - refDate) / 86_400_000 <= 180;
+  if (recentRelease || (title.popularity ?? 0) >= 80) {
     badges.push("Em alta");
   }
 
@@ -336,19 +350,37 @@ function buildAwardBadges(rating?: RatingRow | null): string[] {
   const emmyNoms = awards.match(/Nominated\s+for\s+(\d+)\s+Primetime Emmy/i);
   const globeWins = awards.match(/Won\s+(\d+)\s+Golden Globe/i);
   const globeNoms = awards.match(/Nominated\s+for\s+(\d+)\s+Golden Globe/i);
+  const oscarWins = awards.match(/Won\s+(\d+)\s+Oscar/i);
+  const oscarNoms = awards.match(/Nominated\s+for\s+(\d+)\s+Oscar/i);
 
-  if (emmyWins) badges.push(Number(emmyWins[1]) > 1 ? `${emmyWins[1]} Emmys` : "Vencedora do Emmy");
-  else if (emmyNoms) badges.push(`${emmyNoms[1]} indicações ao Emmy`);
+  if (oscarWins) badges.push(Number(oscarWins[1]) > 1 ? `${oscarWins[1]} Oscars` : "Vencedor do Oscar");
+  else if (oscarNoms) badges.push(`${oscarNoms[1]} indicações ao Oscar`);
 
-  if (globeWins) badges.push("Vencedora do Globo de Ouro");
-  else if (globeNoms) badges.push("Indicada ao Globo de Ouro");
+  if (emmyWins) badges.push(Number(emmyWins[1]) > 1 ? `${emmyWins[1]} Emmys` : "Vencedor do Emmy");
+  else if (emmyNoms && badges.length < 2) badges.push(`${emmyNoms[1]} indicações ao Emmy`);
+
+  if (globeWins && badges.length < 2) badges.push("Vencedor do Globo de Ouro");
+  else if (globeNoms && badges.length < 2) badges.push("Indicado ao Globo de Ouro");
 
   if (
     badges.length === 0 &&
-    ((rating?.metacritic_score ?? 0) >= 80 ||
-      (rating?.rotten_tomatoes_score ?? 0) >= 90 ||
-      normalized.includes("critical"))
+    (rating?.metacritic_score ?? 0) >= 85
   ) {
+    badges.push("Aclamado pela crítica");
+  } else if (
+    badges.length === 0 &&
+    (rating?.rotten_tomatoes_score ?? 0) >= 92
+  ) {
+    badges.push("Aprovação quase unânime");
+  } else if (
+    badges.length === 0 &&
+    ((rating?.imdb_rating ?? 0) >= 8.0 && (rating?.imdb_votes ?? 0) >= 100_000)
+  ) {
+    badges.push("Top IMDB");
+  }
+
+  // Badge de nota alta com volume de votos
+  if (badges.length === 0 && normalized.includes("critical")) {
     badges.push("Alta aclamação da crítica");
   }
 
@@ -447,7 +479,7 @@ export async function GET(request: NextRequest) {
     const { data: titlesRaw } = await supabaseAdmin
       .from("poplog3_titles")
       .select(
-        "tmdb_id, media_type, title, overview, poster_path, backdrop_path, vote_average, vote_count, popularity, release_date, first_air_date, last_air_date, runtime, episode_run_time, number_of_episodes, number_of_seasons, genres, tmdb_payload",
+        "tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, vote_average, vote_count, popularity, release_date, first_air_date, last_air_date, runtime, episode_run_time, number_of_episodes, number_of_seasons, genres, tmdb_payload",
       )
       .in("tmdb_id", tmdbIds);
 
@@ -536,18 +568,15 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    const selectedTvIds = selected
-      .filter((entry) => entry.state.media_type === "tv")
-      .map((entry) => entry.state.tmdb_id);
+    const selectedIds = selected.map((entry) => entry.state.tmdb_id);
     const { data: ratingsRaw } =
-      selectedTvIds.length > 0
+      selectedIds.length > 0
         ? await supabaseAdmin
             .from("title_ratings")
             .select(
               "tmdb_id, media_type, imdb_rating, imdb_votes, rotten_tomatoes_score, metacritic_score, poplog_score, source_payload",
             )
-            .eq("media_type", "tv")
-            .in("tmdb_id", selectedTvIds)
+            .in("tmdb_id", selectedIds)
         : { data: [] };
 
     const ratingMap = new Map<number, RatingRow>(
@@ -591,26 +620,21 @@ export async function GET(request: NextRequest) {
               estimated: runtimeResolution.estimated,
             });
       const genres = normalizeGenres(title);
-      const contextualBadges =
-        state.media_type === "tv"
-          ? buildContextualBadges({
+      const contextualBadges = buildContextualBadges({
               state,
               title,
               runtime: runtimeResolution.minutes,
               totalRuntimeMinutes,
               daysOnWatchlist,
-            })
-          : [];
-      const awardBadges =
-        state.media_type === "tv"
-          ? buildAwardBadges(ratingMap.get(state.tmdb_id))
-          : [];
+            });
+      const awardBadges = buildAwardBadges(ratingMap.get(state.tmdb_id));
 
       return {
         content_id: `${state.media_type}-${state.tmdb_id}`,
         tmdb_id: state.tmdb_id,
         media_type: state.media_type,
         title: title.title ?? `Título ${state.tmdb_id}`,
+        original_title: title.original_title ?? null,
         poster_path: title.poster_path ?? null,
         backdrop_path: title.backdrop_path ?? null,
         vote_average: title.vote_average ?? null,

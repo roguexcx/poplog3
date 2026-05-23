@@ -1,4 +1,5 @@
 import type { EpisodeRuntimeInput } from "@/lib/runtime";
+import { formatError, rateLimitedWarn } from "@/server/logging/log-control";
 import { supabaseAdmin } from "@/server/supabase/admin";
 
 type EpisodeRuntimeRow = {
@@ -10,15 +11,17 @@ type EpisodeRuntimeRow = {
 };
 
 export async function getSeriesEpisodeRuntimes(
-  seriesTmdbId: number
+  seriesTmdbId: number,
+  options?: { includeUnaired?: boolean },
 ): Promise<EpisodeRuntimeInput[]> {
-  const map = await getSeriesEpisodeRuntimesMap([seriesTmdbId]);
+  const map = await getSeriesEpisodeRuntimesMap([seriesTmdbId], options);
 
   return map.get(seriesTmdbId) ?? [];
 }
 
 export async function getSeriesEpisodeRuntimesMap(
-  seriesTmdbIds: number[]
+  seriesTmdbIds: number[],
+  options?: { includeUnaired?: boolean },
 ): Promise<Map<number, EpisodeRuntimeInput[]>> {
   const ids = Array.from(
     new Set(
@@ -37,7 +40,12 @@ export async function getSeriesEpisodeRuntimesMap(
     .not("runtime", "is", null);
 
   if (error) {
-    console.warn("[runtime] episode runtime lookup failed", error);
+    rateLimitedWarn(
+      "runtime:episode-runtime-lookup-failed",
+      5 * 60 * 1000,
+      "[runtime] leitura de runtime dos episódios falhou\n- fallback aplicado: TMDB/cache do título",
+      formatError(error),
+    );
     return map;
   }
 
@@ -48,6 +56,7 @@ export async function getSeriesEpisodeRuntimesMap(
       seasonNumber: row.season_number,
       episodeNumber: row.episode_number,
       runtimeMinutes: row.runtime,
+      aired: options?.includeUnaired ? true : undefined,
       airDate: row.air_date,
     });
 

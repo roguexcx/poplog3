@@ -2,6 +2,8 @@ export type ApiName = "tmdb" | "omdb" | "watchmode" | "motn";
 
 export type Origin =
   | "home"
+  | "radar"
+  /** Legacy alias accepted during the Agenda -> Radar transition. */
   | "agenda"
   | "hero"
   | "title"

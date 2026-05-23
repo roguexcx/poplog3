@@ -182,12 +182,28 @@ function getPosterSubtitle(item: Poplog3UserLibraryItem) {
 
 function getRuntimeLabels(item: Poplog3UserLibraryItem) {
   if (item.media_type === "tv") {
-    return [item.average_episode_runtime_label ?? null, item.runtime_label ?? null].filter(
+    const labels = [item.average_episode_runtime_label ?? null, item.runtime_label ?? null].filter(
       (label): label is string => Boolean(label),
     );
+    if (labels.length > 0) return labels;
+    const fallback = formatDurationBadge(item.duration_sort_minutes);
+    return fallback ? [fallback] : ["Duração indisponível"];
   }
 
-  return item.runtime_label ? [item.runtime_label] : [];
+  if (item.runtime_label) return [item.runtime_label];
+  const fallback = formatDurationBadge(item.duration_sort_minutes ?? item.title?.runtime);
+  return fallback ? [fallback] : ["Duração indisponível"];
+}
+
+function formatDurationBadge(minutes: number | null | undefined) {
+  if (typeof minutes !== "number" || !Number.isFinite(minutes) || minutes <= 0) {
+    return null;
+  }
+
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  if (hours <= 0) return `${mins}min total`;
+  return mins > 0 ? `${hours}h${mins}min total` : `${hours}h total`;
 }
 
 function getReleaseTime(item: Poplog3UserLibraryItem) {

@@ -7,12 +7,15 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "check:feedback-engine": "npx tsx scripts/check-feedback-engine.ts",
     "backfill:state": "npx tsx scripts/backfill-user-title-state.ts",
-    "backfill:state:dry": "npx tsx scripts/backfill-user-title-state.ts --dry-run"
+    "backfill:state:dry": "npx tsx scripts/backfill-user-title-state.ts --dry-run",
+    "backfill:movie-duration": "npx tsx scripts/backfill-movie-duration.ts"
   },
   "dependencies": {
     "@supabase/ssr": "^0.10.3",
     "@supabase/supabase-js": "^2.105.4",
+    "dotenv": "^17.4.2",
     "framer-motion": "^12.38.0",
     "google-translate-api-x": "^10.7.2",
     "lucide-react": "^1.14.0",

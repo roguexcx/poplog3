@@ -65,8 +65,14 @@ function shuffle<T>(arr: T[]): T[] {
 }
 
 function selectFive(all: WatchlistTitle[]): Array<WatchlistTitle & { _slot: WatchlistSlot }> {
-  const main   = all.filter((t) => !t.fridge);
-  const fridge = all.filter((t) => t.fridge);
+  // Excluir títulos ainda não disponíveis (não lançados / apenas em cartaz)
+  // do pool principal de seleção — eles não devem aparecer como recomendações de watchlist
+  const available = all.filter(
+    (t) => t.stream_status !== "cinemas" && t.stream_status !== "chegando"
+  );
+  const allPool  = available.length >= 3 ? available : all; // fallback se poucos disponíveis
+  const main   = allPool.filter((t) => !t.fridge);
+  const fridge = allPool.filter((t) => t.fridge);
   const recent = main.filter((t) => daysSince(t.created_at) <= 45);
   const old    = main.filter((t) => daysSince(t.created_at) > 90);
   const middle = main.filter((t) => !recent.includes(t) && !old.includes(t));
@@ -412,7 +418,7 @@ export default function WatchlistVivaSection() {
       fetch("/api/library/title", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ tmdbId, mediaType, status: "watched", favorite: false, liked: null }),
+        body: JSON.stringify({ tmdbId, mediaType, status: "watched" }),
       }).then(notifyUpdate);
     } else {
       fetch("/api/library/title", {

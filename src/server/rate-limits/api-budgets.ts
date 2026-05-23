@@ -1,17 +1,15 @@
 export const API_BUDGETS = {
-  tmdb: {
-    daily: 1000,
-  },
-
   omdb: {
-    daily: 100,
+    daily: 500,
   },
 
   watchmode: {
-    monthly: 1000,
+    daily: 40,
+    monthly: 1250,
   },
 
   movieofthenight: {
-    monthly: 500,
+    daily: 8,
+    monthly: 250,
   },
 } as const;

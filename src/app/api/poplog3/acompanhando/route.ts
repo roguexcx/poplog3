@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { supabaseAdmin } from "@/server/supabase/admin";
-import { upsertTitleState } from "@/server/state/user-title-state";
-import { isValidSeason, mapSeriesStatus, type SeriesStatus } from "@/lib/series";
+import { upsertUserTitleStatus } from "@/server/library/library-service";
+import { isValidSeason, mapSeriesStatus } from "@/lib/series";
 import type {
   ContentType,
   SignalType,
@@ -227,13 +227,11 @@ function getValidSeasonNumbers(meta: DbTitleMeta): Set<number> {
 }
 
 function getEpisodeContext({
-  tmdbId,
   meta,
   watchedEpisodes,
   episodeRows,
   overlay,
 }: {
-  tmdbId: number;
   meta: DbTitleMeta;
   watchedEpisodes: DbUserEpisode[];
   episodeRows: DbEpisode[];
@@ -638,7 +636,6 @@ export async function GET() {
     const episodeContext =
       ut.media_type === "tv"
         ? getEpisodeContext({
-            tmdbId: ut.tmdb_id,
             meta,
             watchedEpisodes,
             episodeRows,
@@ -826,36 +823,27 @@ export async function POST(request: NextRequest) {
 
     if (body.action === "mark_watched") {
       const now = new Date().toISOString();
-
-      // Remove linhas antigas e insere nova com status watched
-      await supabaseAdmin
+      const { data: existingTitle } = await supabaseAdmin
         .from("user_titles")
-        .delete()
+        .select("favorite, liked")
         .eq("user_id", user.id)
         .eq("tmdb_id", parsed.tmdbId)
-        .eq("media_type", parsed.mediaType);
+        .eq("media_type", parsed.mediaType)
+        .maybeSingle();
+      const existingFavorite = Boolean(
+        (existingTitle as { favorite?: boolean } | null)?.favorite,
+      );
+      const existingLiked =
+        ((existingTitle as { liked?: boolean | null } | null)?.liked ?? null);
 
-      const { error } = await supabaseAdmin
-        .from("user_titles")
-        .insert({
-          user_id: user.id,
-          tmdb_id: parsed.tmdbId,
-          media_type: parsed.mediaType,
-          status: "watched",
-          favorite: false,
-          watched_at: now,
-        });
-
-      if (error) throw new Error(error.message);
-
-      // Sincroniza engine global de estado
-      upsertTitleState({
+      await upsertUserTitleStatus({
         userId: user.id,
         tmdbId: parsed.tmdbId,
         mediaType: parsed.mediaType,
-        libraryEntry: { status: "watched", favorite: false, liked: null },
-        event: { type: parsed.mediaType === "movie" ? "movie_watched" : "series_completed" },
-      }).catch((err) => console.error("[acompanhando] upsertTitleState failed", err));
+        status: "watched",
+        favorite: existingFavorite,
+        liked: existingLiked,
+      });
 
       await logCuradoriaSignal(user.id, parsed.contentId, "finished", {
         finishedAt: now,

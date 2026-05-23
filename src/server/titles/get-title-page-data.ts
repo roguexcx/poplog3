@@ -18,11 +18,10 @@ import { getExternalIds } from "@/server/cache/external-ids-cache";
 import { computeUserSeriesProgress } from "@/server/episodes/episode-progress-service";
 import {
   readTitleState,
-  refreshTitleStateAvailability,
 } from "@/server/state/user-title-state";
 import { getUserTitleStatus } from "@/server/library/library-service";
 import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
-import { getTitleAvailability } from "@/server/streaming/title-availability";
+import { getAvailabilityForDisplay } from "@/server/streaming/title-availability";
 import { withOrigin } from "@/server/engine-logger";
 import type { TmdbPayloadWithWatch } from "@/server/sync/sync-availability";
 import { syncOmdbRatings } from "@/server/sync/sync-omdb-ratings";
@@ -215,6 +214,13 @@ export async function getTitlePageData(
           imdbId,
           tmdbRating: title.vote_average ?? null,
           force,
+          allowExternalRefresh: false,
+          origin: {
+            endpoint: "title_page",
+            userId: currentUser?.id ?? null,
+            action: "display_render",
+            reason: "title_page_cache_first_no_omdb",
+          },
         });
 
         ratingsCache = {
@@ -254,7 +260,7 @@ export async function getTitlePageData(
 
       let providers: AvailabilityProvider[] = [];
       let availability:
-        | Awaited<ReturnType<typeof getTitleAvailability>>["availability"]
+        | Awaited<ReturnType<typeof getAvailabilityForDisplay>>["availability"]
         | undefined = undefined;
 
       let userStreamingPreferences:
@@ -269,7 +275,7 @@ export async function getTitlePageData(
       }
 
       try {
-        const result = await getTitleAvailability({
+        const result = await getAvailabilityForDisplay({
           tmdbId: id,
           mediaType,
           tmdbPayload: (synced.rawPayload ??
@@ -281,34 +287,13 @@ export async function getTitlePageData(
           firstAirDate: details?.first_air_date ?? null,
           popularity: title.popularity ?? null,
           contexts: ["title_page"],
+          endpoint: "title_page",
         });
 
         availabilityCache = result.cacheInfo;
         availability = result.availability;
         providers = result.providers;
 
-        if (currentUser) {
-          const best = availability.primaryProvider;
-          const providerType: string | null =
-            best && "normalizedType" in best
-              ? best.normalizedType ?? null
-              : best?.type === "streaming"
-                ? "subscription"
-                : best?.type ?? null;
-
-          refreshTitleStateAvailability(
-            currentUser.id,
-            id,
-            mediaType,
-            best
-              ? {
-                  providerName: best.name,
-                  providerType,
-                  providerLogo: best.logoUrl ?? null,
-                }
-              : null,
-          ).catch(console.error);
-        }
       } catch (error) {
         console.warn("[getTitlePageData] availability sync falhou:", error);
       }

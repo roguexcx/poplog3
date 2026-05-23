@@ -8,7 +8,7 @@ import {
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
-import { getTitleAvailability } from "@/server/streaming/title-availability";
+import { getAvailabilityForDisplay } from "@/server/streaming/title-availability";
 import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -86,10 +86,16 @@ function inferStreamStatus(
   if (availabilityStatus === "cinema") return "cinemas";
   if (row.stream_status === "streaming" || row.stream_status === "confirmado") return "streaming";
   if (row.stream_status === "chegando") return "chegando";
-  if (row.stream_status === "cinemas") return "cinemas";
+  // Bug fix: não classificar séries como "cinemas" — séries vão direto para streaming
+  // "cinemas" só se aplica a filmes com lançamento em sala confirmado
+  if (row.stream_status === "cinemas" && row.media_type === "movie") return "cinemas";
   if (!releaseDate) return "unavailable";
   const released = new Date(releaseDate) <= new Date();
-  return released ? "streaming" : "cinemas";
+  if (!released) {
+    // Título ainda não lançado: filmes podem estar em cartaz, séries vão para streaming
+    return row.media_type === "movie" ? "cinemas" : "chegando";
+  }
+  return "streaming";
 }
 
 function buildContextPool(title: string, mediaType: MediaType): string[] {
@@ -134,13 +140,14 @@ export async function POST(request: Request) {
           const releaseDate =
             details.release_date ?? details.first_air_date ??
             (row.release_year ? `${row.release_year}-01-01` : null);
-          const availabilityResult = await getTitleAvailability({
+          const availabilityResult = await getAvailabilityForDisplay({
             tmdbId: row.tmdb_id,
             mediaType: row.media_type,
             releaseDate: details.release_date ?? null,
             firstAirDate: details.first_air_date ?? null,
             preferences,
             contexts: ["watchlist", "home"],
+            endpoint: "/api/watchlist/live",
           }).catch(() => null);
 
           const genre = translateGenreName(details.genres?.[0]?.name) ?? null;

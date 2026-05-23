@@ -13,12 +13,21 @@ type Props = {
 function normalizeTitle(value?: string | null): string {
   return (value ?? "")
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .toLowerCase()
     .trim();
 }
 
+/**
+ * Retorna o título a ser exibido como principal (original/inglês prioritário)
+ * e o título secundário (localizado, quando diferente do original).
+ *
+ * Lógica:
+ * - Se originalTitle existe e é diferente do title localizado → exibe originalTitle
+ *   como principal e title (localizado) como subtítulo discreto.
+ * - Se são iguais ou não há originalTitle → exibe apenas title.
+ */
 export function getDisplayOriginalTitle(
   title: string,
   originalTitle?: string | null,
@@ -35,13 +44,19 @@ export default function LocalizedTitle({
   as: Tag = "div",
   className = "",
 }: Props) {
-  const original = getDisplayOriginalTitle(title, originalTitle);
-  const fullTitle = original ? `${title} (${original})` : title;
+  const diffOriginal = getDisplayOriginalTitle(title, originalTitle);
+
+  // Título principal: original/inglês se disponível e diferente; caso contrário, localizado
+  const mainTitle = diffOriginal ?? title;
+  // Subtítulo: título localizado (PT-BR) quando diferente do original
+  const subTitle = diffOriginal ? title : null;
+
+  const fullTitle = diffOriginal ? `${diffOriginal} (${title})` : title;
 
   if (variant === "poster") {
     return (
       <Tag title={fullTitle} className={className}>
-        {title}
+        {mainTitle}
       </Tag>
     );
   }
@@ -53,7 +68,7 @@ export default function LocalizedTitle({
     compact: "block line-clamp-1 text-[12px] font-semibold leading-tight text-white/85",
   }[variant];
 
-  const originalClass = {
+  const subClass = {
     hero: "mt-1.5 block line-clamp-1 text-sm font-light text-zinc-500 sm:text-base",
     large: "mt-1 block line-clamp-1 text-xs font-light text-zinc-400/75",
     medium: "mt-0.5 block line-clamp-1 text-[10px] font-light text-zinc-500/80",
@@ -62,8 +77,8 @@ export default function LocalizedTitle({
 
   return (
     <Tag title={fullTitle} className={className}>
-      <span className={mainClass}>{title}</span>
-      {original && <span className={originalClass}>{original}</span>}
+      <span className={mainClass}>{mainTitle}</span>
+      {subTitle && <span className={subClass}>{subTitle}</span>}
     </Tag>
   );
 }

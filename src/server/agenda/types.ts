@@ -118,6 +118,7 @@ export type LegacyAgendaMovie = {
   id: number;
   media_type: "movie";
   title: string;
+  original_language?: string;
   poster_path: string | null;
   backdrop_path: string | null;
   release_date: string;
@@ -127,6 +128,10 @@ export type LegacyAgendaMovie = {
   overview: string;
   genre_ids: number[];
   user_status?: string | null;
+  /** Score editorial: popularidade normalizada + bônus BR (quando aplicável). */
+  editorial_score?: number;
+  /** Bônus BR concedido — 0 se não for produção brasileira elegível. */
+  br_bonus?: number;
 };
 
 export type LegacyAgendaTv = {
@@ -143,6 +148,9 @@ export type LegacyAgendaTv = {
   overview: string;
   genre_ids: number[];
   user_status?: string | null;
+  /** Score editorial: popularidade normalizada + bônus BR (quando aplicável). */
+  editorial_score?: number;
+  /** Bônus BR concedido — 0 se não for produção brasileira elegível. */  br_bonus?: number;
 };
 
 export type AgendaV2CompatResponse = AgendaV2Response & {

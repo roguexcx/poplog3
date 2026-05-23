@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server";
 import { tmdbFetch } from "@/lib/tmdb";
 import { createSupabaseServerClient } from "@/lib/supabase/server";
-import { getUserFeedbackMap } from "@/lib/personalization/feedback";
+import { getUserFeedbackMap, feedbackKey } from "@/lib/personalization/feedback";
+import { resolveEditorialPolicy } from "@/lib/personalization/editorial-policy";
 import { scoreTitleForUser } from "@/lib/personalization/scoring";
 import {
   BACKDROP_RANDOMIZATION_LANGUAGES,
@@ -112,6 +113,13 @@ function isGoodCandidate(item: TMDBItem): boolean {
   if ((item.vote_count ?? 0) < 80) return false;
   if ((item.popularity ?? 0) < 8) return false;
   if (item.original_language && !ALLOWED_LANGUAGES.has(item.original_language)) return false;
+
+  // Excluir títulos não lançados: sem data de lançamento conhecida OU data futura
+  const releaseDate = item.release_date ?? item.first_air_date ?? null;
+  if (!releaseDate) return false;
+  const releaseTime = new Date(releaseDate).getTime();
+  if (Number.isFinite(releaseTime) && releaseTime > Date.now()) return false;
+
   return true;
 }
 
@@ -281,7 +289,23 @@ export async function POST(request: Request) {
           score: scoredItem.personalScore ?? candidate.score,
         };
       })
-      .sort((a, b) => b.score - a.score);
+      .sort((a, b) => b.score - a.score)
+      // Exclude hidden titles from for_you -- editorial policy: hidden is restrictive.
+      // search and title_page are the only surfaces that keep hidden titles visible.
+      .filter((candidate) => {
+        if (!feedbackMap || feedbackMap.size === 0) return true;
+        const key = feedbackKey(candidate.item.id, candidate.mediaType);
+        const rows = feedbackMap.get(key) ?? [];
+        if (rows.length === 0) return true;
+        const feedbackInput = rows.map((r) => ({
+          feedback_type: r.feedback_type,
+          weight: r.weight,
+          updated_at: r.updated_at,
+          active: r.active,
+        }));
+        const policy = resolveEditorialPolicy({ feedback: feedbackInput, surface: "for_you" });
+        return !policy.shouldExclude;
+      });
 
     const movieCandidates = allCandidates.filter((c) => c.mediaType === "movie");
     const tvCandidates = allCandidates.filter((c) => c.mediaType === "tv");

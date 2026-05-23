@@ -3,6 +3,9 @@ import { filterValidTitles } from "@/server/utils/filter-valid-titles";
 import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import { normalizeTmdbTitle } from "@/server/normalizers/tmdb-title";
 import type { TmdbTitleSummary } from "@/server/api-clients/tmdb/types";
+import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { getUserFeedbackMap } from "@/lib/personalization/feedback";
+import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
 
 type MediaType = "movie" | "tv";
 
@@ -23,6 +26,20 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Resolve authenticated user for editorial feedback scoring (best-effort).
+    let userId: string | undefined;
+    let feedbackMap: Awaited<ReturnType<typeof getUserFeedbackMap>> | undefined;
+    try {
+      const supabase = await createSupabaseServerClient();
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        userId = user.id;
+        feedbackMap = await getUserFeedbackMap(user.id, supabase);
+      }
+    } catch {
+      // Unauthenticated -- proceed without personalization.
+    }
+
     const data = await tmdbFetch<{
       results: TmdbTitleSummary[];
     }>(`/discover/${mediaType}`, {
@@ -36,11 +53,23 @@ export async function GET(request: NextRequest) {
       data.results.map((item) => normalizeTmdbTitle(item))
     );
 
+    // Apply editorial scoring: not_interested penalizes score with reranking.
+    // Uses "discovery" context -- hidden titles are kept (not excluded here).
+    const scoredTitles = applyUserFeedbackScoring(
+      titles.map((t) => ({ ...t, id: t.tmdb_id, media_type: mediaType })),
+      {
+        userId,
+        feedbackMap,
+        context: "discovery",
+        mediaType,
+      },
+    );
+
     return NextResponse.json({
       ok: true,
       mediaType,
-      count: titles.length,
-      results: titles,
+      count: scoredTitles.length,
+      results: scoredTitles,
     });
   } catch (error) {
     console.error("[discover route]", error);

@@ -27,6 +27,8 @@ export type AvailabilityPriorityContext =
   | "title_page"
   | "hero"
   | "home"
+  | "radar"
+  /** Legacy alias accepted during the Agenda -> Radar transition. */
   | "agenda"
   | "search"
   | "background";
@@ -50,6 +52,9 @@ export type GetTitleAvailabilityInput = {
   firstAirDate?: string | null;
   popularity?: number | null;
   contexts?: AvailabilityPriorityContext[];
+  userId?: string | null;
+  action?: string | null;
+  endpoint?: string;
 };
 
 export type TitleAvailabilityResult = {
@@ -62,6 +67,8 @@ export type TitleAvailabilityResult = {
     motn: string;
   };
 };
+
+type AvailabilityMode = "display" | "user_title_refresh" | "admin_refresh";
 
 function tmdbImage(path: string | null | undefined, size: string): string | null {
   if (!path) return null;
@@ -254,14 +261,38 @@ function sourceFromRegions(br: TitleAvailabilityRegion, us: TitleAvailabilityReg
   return sources[0] ?? "none";
 }
 
-export async function getTitleAvailability(
+function getPremiumAvailabilityTtlDays(input: {
+  window: ReleaseWindow;
+  contexts?: AvailabilityPriorityContext[];
+}) {
+  const contexts = new Set(input.contexts ?? []);
+  const priority =
+    contexts.has("hero") ||
+    contexts.has("radar") ||
+    contexts.has("agenda") ||
+    input.window === "cinema_0_30" ||
+    input.window === "vod_light_30_45" ||
+    input.window === "vod_critical_45_90" ||
+    input.window === "streaming_transition_90_180";
+
+  if (!priority) return 15;
+  if (input.window === "vod_critical_45_90") return 1;
+  return 3;
+}
+
+async function resolveTitleAvailability(
   input: GetTitleAvailabilityInput,
+  mode: AvailabilityMode,
 ): Promise<TitleAvailabilityResult> {
   const window = getReleaseWindow(input);
   const maxAgeDays = getAvailabilityMaxAgeDays({
     window,
     contexts: input.contexts,
     popularity: input.popularity,
+  });
+  const premiumTtlDays = getPremiumAvailabilityTtlDays({
+    window,
+    contexts: input.contexts,
   });
 
   const [brSync, usSync] = await Promise.all([
@@ -273,6 +304,25 @@ export async function getTitleAvailability(
       imdbId: input.imdbId,
       force: input.force,
       maxAgeDays,
+      premiumTtlDays,
+      allowExternalFallback: mode !== "display",
+      origin: {
+        endpoint:
+          input.endpoint ??
+          (mode === "admin_refresh"
+            ? "admin/backfill/refresh"
+            : mode === "user_title_refresh"
+              ? "library:user-title-refresh"
+              : "display"),
+        userId: input.userId ?? null,
+        action: input.action ?? mode,
+        reason:
+          mode === "admin_refresh"
+            ? "admin_controlled_refresh_tmdb_empty_or_cache_expired"
+            : mode === "user_title_refresh"
+            ? "explicit_user_library_state_tmdb_empty_or_cache_expired"
+            : "display_render_tmdb_only",
+      },
     }),
     syncAvailability({
       tmdbId: input.tmdbId,
@@ -282,6 +332,25 @@ export async function getTitleAvailability(
       imdbId: input.imdbId,
       force: input.force,
       maxAgeDays,
+      premiumTtlDays,
+      allowExternalFallback: mode !== "display",
+      origin: {
+        endpoint:
+          input.endpoint ??
+          (mode === "admin_refresh"
+            ? "admin/backfill/refresh"
+            : mode === "user_title_refresh"
+              ? "library:user-title-refresh"
+              : "display"),
+        userId: input.userId ?? null,
+        action: input.action ?? mode,
+        reason:
+          mode === "admin_refresh"
+            ? "admin_controlled_refresh_tmdb_empty_or_cache_expired"
+            : mode === "user_title_refresh"
+            ? "explicit_user_library_state_tmdb_empty_or_cache_expired"
+            : "display_render_tmdb_only",
+      },
     }),
   ]);
 
@@ -335,4 +404,42 @@ export async function getTitleAvailability(
           : brSync.diagnostics.motn,
     },
   };
+}
+
+export async function getAvailabilityForDisplay(
+  input: GetTitleAvailabilityInput,
+): Promise<TitleAvailabilityResult> {
+  return resolveTitleAvailability(input, "display");
+}
+
+export async function refreshAvailabilityForUserTitle(
+  input: GetTitleAvailabilityInput & {
+    userId: string;
+    action: string;
+    endpoint: string;
+  },
+): Promise<TitleAvailabilityResult> {
+  return resolveTitleAvailability(input, "user_title_refresh");
+}
+
+export async function refreshAvailabilityForAdmin(
+  input: GetTitleAvailabilityInput & {
+    endpoint?: string;
+    action?: string;
+  },
+): Promise<TitleAvailabilityResult> {
+  return resolveTitleAvailability(
+    {
+      ...input,
+      endpoint: input.endpoint ?? "admin/backfill/refresh",
+      action: input.action ?? "admin_refresh",
+    },
+    "admin_refresh",
+  );
+}
+
+export async function getTitleAvailability(
+  input: GetTitleAvailabilityInput,
+): Promise<TitleAvailabilityResult> {
+  return getAvailabilityForDisplay(input);
 }

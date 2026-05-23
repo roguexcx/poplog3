@@ -402,6 +402,36 @@ export default function AcompanhandoPage() {
           </section>
         )}
 
+        {/* Boa hora pra começar */}
+        {(isStartSeriesLoading || startSeriesPicks.length > 0) && (
+          <section>
+            <SectionHeader
+              eyebrow="Da sua watchlist"
+              accent="amber"
+              title="Boa hora pra começar"
+              subtitle="Séries premiadas, bem avaliadas e fáceis de entrar — priorizadas por disponibilidade e relevância editorial."
+              size="sm"
+              action={
+                <button
+                  type="button"
+                  onClick={refreshStartSeriesPicks}
+                  disabled={isStartSeriesLoading}
+                  className="rounded-full border border-white/[0.10] bg-white/[0.04] px-3 py-1 text-[11px] font-bold text-white/45 transition-all hover:text-white/70 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Trocar
+                </button>
+              }
+              className="mb-4"
+            />
+
+            <StartSeriesBanner
+              items={startSeriesPicks}
+              loading={isStartSeriesLoading}
+              onPick={handleStartSeriesNavigate}
+            />
+          </section>
+        )}
+
         {/* Continue de onde parou */}
         {(isContinueLoading || continueItems.length > 0) && (
           <section>
@@ -476,36 +506,6 @@ export default function AcompanhandoPage() {
                 />
               </div>
             )}
-          </section>
-        )}
-
-        {/* Boa hora pra começar */}
-        {(isStartSeriesLoading || startSeriesPicks.length > 0) && (
-          <section>
-            <SectionHeader
-              eyebrow="Da sua watchlist"
-              accent="amber"
-              title="Boa hora pra começar"
-              subtitle="Séries salvas que ainda estão intactas, priorizadas por duração, disponibilidade e sinais de relevância."
-              size="sm"
-              action={
-                <button
-                  type="button"
-                  onClick={refreshStartSeriesPicks}
-                  disabled={isStartSeriesLoading}
-                  className="rounded-full border border-white/[0.10] bg-white/[0.04] px-3 py-1 text-[11px] font-bold text-white/45 transition-all hover:text-white/70 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Trocar
-                </button>
-              }
-              className="mb-4"
-            />
-
-            <StartSeriesBanner
-              items={startSeriesPicks}
-              loading={isStartSeriesLoading}
-              onPick={handleStartSeriesNavigate}
-            />
           </section>
         )}
 

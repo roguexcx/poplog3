@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { supabaseAdmin } from "@/server/supabase/admin";
 import { tmdbFetch } from "@/server/api-clients/tmdb/client";
+import { applyLegacyBrazilianBonus } from "@/server/agenda/editorial-regional-bonus";
+import { normalizeTmdbPopularity } from "@/lib/score/tmdb-popularity";
 
 // ── TMDB response shapes ──────────────────────────────────────────────────────
 
@@ -56,6 +58,10 @@ export type AgendaMovie = {
   overview: string;
   genre_ids: number[];
   user_status?: string | null;
+  /** Score editorial: popularidade normalizada + bônus BR (quando aplicável). */
+  editorial_score?: number;
+  /** Bônus BR concedido — 0 se não for produção brasileira elegível. */
+  br_bonus?: number;
 };
 
 export type AgendaTv = {
@@ -72,6 +78,10 @@ export type AgendaTv = {
   overview: string;
   genre_ids: number[];
   user_status?: string | null;
+  /** Score editorial: popularidade normalizada + bônus BR (quando aplicável). */
+  editorial_score?: number;
+  /** Bônus BR concedido — 0 se não for produção brasileira elegível. */
+  br_bonus?: number;
 };
 
 export type AgendaResponse = {
@@ -255,22 +265,40 @@ export async function GET() {
     const onTheAirRaw    = mergeDedup(onTheAirRes1, onTheAirRes2).filter((t) => !isTalkOrNews(t));
     const soonToReturnRaw = mergeDedup(soonToReturnRes1, soonToReturnRes2);
 
-    const airingToday = airingTodayRaw.map(normalizeTv);
-    const onTheAir    = onTheAirRaw.map(normalizeTv);
+    // Bônus BR: aplicado nos arrays de TV/filmes legados antes da entrega ao cliente.
+    // applyLegacyBrazilianBonus() adiciona editorial_score e br_bonus e reordena
+    // por editorial_score, garantindo que produções brasileiras elegíveis ganhem
+    // visibilidade consistente com o pipeline principal do AgendaEngine.
+    const airingToday = applyLegacyBrazilianBonus(
+      airingTodayRaw.map(normalizeTv),
+      normalizeTmdbPopularity,
+    );
+    const onTheAir = applyLegacyBrazilianBonus(
+      onTheAirRaw.map(normalizeTv),
+      normalizeTmdbPopularity,
+    );
 
     const nowPlaying = nowPlayingRes.status === "fulfilled"
       ? nowPlayingRes.value.results.map(normalizeMovie) : [];
     const upcoming = upcomingRes.status === "fulfilled"
       ? upcomingRes.value.results.map(normalizeMovie) : [];
-    const newSeries = newSeriesRes.status === "fulfilled"
-      ? newSeriesRes.value.results.filter((t) => !isTalkOrNews(t)).map(normalizeTv) : [];
-    const soonToReturn = soonToReturnRaw.map(normalizeTv);
+    const newSeries = applyLegacyBrazilianBonus(
+      newSeriesRes.status === "fulfilled"
+        ? newSeriesRes.value.results.filter((t) => !isTalkOrNews(t)).map(normalizeTv)
+        : [],
+      normalizeTmdbPopularity,
+    );
+    const soonToReturn = applyLegacyBrazilianBonus(
+      soonToReturnRaw.map(normalizeTv),
+      normalizeTmdbPopularity,
+    );
     const trendingMovies = trendingMoviesRes.status === "fulfilled"
       ? trendingMoviesRes.value.results.map(normalizeMovie) : [];
     const trendingTv = trendingTvRes.status === "fulfilled"
       ? trendingTvRes.value.results.filter((t) => !isTalkOrNews(t)).map(normalizeTv) : [];
 
-    // ── user library (optional) ───────────────────────────────────────────────
+
+    // user library (optional)
     const userLibraryIds: Record<string, string> = {};
     try {
       const user = await getCurrentUser();
@@ -286,7 +314,7 @@ export async function GET() {
         }
       }
     } catch {
-      // auth failure é não-fatal
+      // auth failure e nao-fatal
     }
 
     const response: AgendaResponse = {

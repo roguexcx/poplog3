@@ -4,7 +4,6 @@ import LoginDrawer from "@/components/auth/LoginDrawer";
 import { createClient } from "@/server/supabase/client";
 import type { User } from "@supabase/supabase-js";
 import {
-  CalendarDays,
   Dice5,
   Home,
   Library,
@@ -12,6 +11,7 @@ import {
   LogOut,
   Menu,
   PlayCircle,
+  Radar,
   Search,
   Settings,
   UserCircle,
@@ -45,7 +45,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Acompanhar",
     links: [
       { href: "/acompanhando", label: "Acompanhando", icon: PlayCircle, authRequired: true },
-      { href: "/agenda", label: "Agenda", icon: CalendarDays },
+      { href: "/radar", label: "Radar", icon: Radar },
     ],
   },
   {
@@ -77,7 +77,7 @@ const MOBILE_LINKS: NavLink[] = [
 ];
 
 const MOBILE_MORE_LINKS: NavLink[] = [
-  { href: "/agenda", label: "Agenda", icon: CalendarDays },
+  { href: "/radar", label: "Radar", icon: Radar },
   { href: "/sorteio", label: "Sorteio", icon: Dice5, authRequired: true },
   { href: "/profile", label: "Perfil", icon: UserCircle, authRequired: true },
   { href: "/settings", label: "Ajustes", icon: Settings, authRequired: true },
