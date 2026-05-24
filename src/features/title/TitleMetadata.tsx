@@ -209,9 +209,12 @@ export default function TitleMetadata({
       />
 
       <div className="relative">
-        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-white/45">
-          Bastidores
-        </p>
+        <div className="mb-3 flex items-center gap-2 text-white/55">
+          <span aria-hidden className="text-[13px]">{"✦"}</span>
+          <span className="text-xs font-black uppercase tracking-[0.18em]">
+            Ficha técnica
+          </span>
+        </div>
 
         {details.length > 0 && (
           <dl className="mt-3 flex flex-col divide-y divide-white/[0.05]">

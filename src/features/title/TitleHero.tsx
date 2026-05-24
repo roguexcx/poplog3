@@ -13,6 +13,7 @@ import {
 import StatusBadge from "@/components/ui/StatusBadge";
 
 import TitleActions from "./TitleActions";
+import SeriesProgressChip from "./SeriesProgressChip";
 import type { TitlePageData } from "./types";
 
 type TitleHeroProps = {
@@ -79,6 +80,21 @@ export default function TitleHero({
 
   const hasProgress =
     title.mediaType === "tv" && watchedCount > 0;
+
+  const isWatching =
+    title.mediaType === "tv" &&
+    (title.userState?.watching === true ||
+      title.userState?.computedState === "in_progress" ||
+      title.userState?.computedState === "up_to_date" ||
+      title.userState?.computedState === "completed");
+
+  const showProgressBlock = hasProgress || isWatching;
+
+  const hasSeasons =
+    typeof title.seasons !== "undefined" &&
+    title.seasons.filter((s) => s.seasonNumber > 0 && (s.episodeCount ?? 0) > 0).length > 0;
+
+  const isAuthenticated = title.userState?.isAuthenticated === true;
 
   const computedState =
     title.userState?.computedState ?? null;
@@ -263,42 +279,52 @@ export default function TitleHero({
               </p>
             )}
 
-            {hasProgress && (
-              <div className="mt-6 inline-flex max-w-full items-center gap-3 rounded-2xl border border-cyan-300/22 bg-cyan-500/[0.08] px-3 py-2.5 backdrop-blur-md sm:gap-4 sm:px-4 sm:py-3">
-                <span className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200/80">
-                  {isComplete ? "Concluída" : "Continuar"}
-                </span>
-
-                {nextEpUser && !isComplete && (
-                  <span className="text-[13px] font-bold tracking-[-0.01em] text-white/92">
-                    Próximo: S{pad2(nextEpUser.seasonNumber)}E
-                    {pad2(nextEpUser.episodeNumber)}
+            {showProgressBlock && (
+              <div className="mt-6 flex flex-wrap items-center gap-2.5">
+                <div className="inline-flex max-w-full items-center gap-3 rounded-2xl border border-cyan-300/22 bg-cyan-500/[0.08] px-3 py-2.5 backdrop-blur-md sm:gap-4 sm:px-4 sm:py-3">
+                  <span className="text-[10px] font-black uppercase tracking-[0.18em] text-cyan-200/80">
+                    {isComplete ? "Concluída" : hasProgress ? "Continuar" : "Assistindo"}
                   </span>
-                )}
 
-                {!isComplete &&
-                currentSeasonNumber != null &&
-                currentSeasonWatched != null &&
-                currentSeasonTotal != null ? (
-                  <span className="text-[11px] font-semibold text-white/55">
-                    T{currentSeasonNumber} · {currentSeasonWatched}/{currentSeasonTotal} eps
-                  </span>
-                ) : typeof totalEpisodes === "number" ? (
-                  <span className="text-[11px] font-semibold text-white/55">
-                    {watchedCount}/{totalEpisodes} eps
-                  </span>
-                ) : null}
+                  {nextEpUser && !isComplete && (
+                    <span className="text-[13px] font-bold tracking-[-0.01em] text-white/92">
+                      Próximo: S{pad2(nextEpUser.seasonNumber)}E
+                      {pad2(nextEpUser.episodeNumber)}
+                    </span>
+                  )}
 
-                {progressPct !== null && (
-                  <span
-                    className="relative h-1 w-24 overflow-hidden rounded-full bg-white/[0.08] sm:w-32"
-                    aria-hidden
-                  >
+                  {hasProgress && !isComplete &&
+                  currentSeasonNumber != null &&
+                  currentSeasonWatched != null &&
+                  currentSeasonTotal != null ? (
+                    <span className="text-[11px] font-semibold text-white/55">
+                      T{currentSeasonNumber} · {currentSeasonWatched}/{currentSeasonTotal} eps
+                    </span>
+                  ) : hasProgress && typeof totalEpisodes === "number" ? (
+                    <span className="text-[11px] font-semibold text-white/55">
+                      {watchedCount}/{totalEpisodes} eps
+                    </span>
+                  ) : null}
+
+                  {progressPct !== null && (
                     <span
-                      className="absolute inset-y-0 left-0 bg-gradient-to-r from-cyan-300/90 via-indigo-300/90 to-fuchsia-300/90"
-                      style={{ width: `${progressPct}%` }}
-                    />
-                  </span>
+                      className="relative h-1 w-24 overflow-hidden rounded-full bg-white/[0.08] sm:w-32"
+                      aria-hidden
+                    >
+                      <span
+                        className="absolute inset-y-0 left-0 bg-gradient-to-r from-cyan-300/90 via-indigo-300/90 to-fuchsia-300/90"
+                        style={{ width: `${progressPct}%` }}
+                      />
+                    </span>
+                  )}
+                </div>
+
+                {isAuthenticated && (
+                  <SeriesProgressChip
+                    tmdbId={title.id}
+                    progress={progress}
+                    hasSeasons={hasSeasons}
+                  />
                 )}
               </div>
             )}
@@ -308,6 +334,7 @@ export default function TitleHero({
                 tmdbId={title.id}
                 mediaType={title.mediaType}
                 initialState={title.userState}
+                initialProgress={title.userSeriesProgress ?? null}
                 seasons={
                   title.seasons?.map((season) => ({
                     seasonNumber: season.seasonNumber,

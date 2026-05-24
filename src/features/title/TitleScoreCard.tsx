@@ -127,19 +127,23 @@ export default function TitleScoreCard({ ratings }: TitleScoreCardProps) {
       />
 
       <div className="relative">
-        <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-200/70">
-          POPLOG Score
-        </p>
-        <ContextualAttribution
-          context="ratings"
-          sourcesUsed={sourcesUsed}
-          className="mt-1"
-        />
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-indigo-300/80">
+            <span aria-hidden className="text-[13px]">{"★"}</span>
+            <span className="text-xs font-black uppercase tracking-[0.18em]">
+              Notas
+            </span>
+          </div>
+          <ContextualAttribution
+            context="ratings"
+            sourcesUsed={sourcesUsed}
+          />
+        </div>
 
-        <div className="mt-4 flex items-end gap-4">
+        <div className="flex items-center gap-4">
           {score !== null && tone ? (
             <div
-              className={`relative grid h-20 w-20 place-items-center rounded-2xl border border-white/[0.10] bg-black/40 ${tone.glow}`}
+              className={`relative grid h-16 w-16 shrink-0 place-items-center rounded-2xl border border-white/[0.10] bg-black/40 ${tone.glow}`}
             >
               <div
                 className={`pointer-events-none absolute inset-0 rounded-2xl bg-gradient-to-br ${tone.ring} opacity-20`}
@@ -148,34 +152,34 @@ export default function TitleScoreCard({ ratings }: TitleScoreCardProps) {
 
               <div className="relative text-center">
                 <p
-                  className={`text-3xl font-black leading-none tracking-[-0.04em] ${tone.text}`}
+                  className={`text-2xl font-black leading-none tracking-[-0.04em] ${tone.text}`}
                 >
                   {score.toFixed(1)}
                 </p>
 
-                <p className="mt-0.5 text-[8px] font-bold uppercase tracking-[0.18em] text-white/45">
+                <p className="mt-0.5 text-[8px] font-bold uppercase tracking-[0.14em] text-white/45">
                   / 10
                 </p>
               </div>
             </div>
           ) : (
-            <div className="grid h-20 w-20 place-items-center rounded-2xl border border-white/[0.08] bg-black/30 text-[10px] font-bold uppercase tracking-[0.18em] text-white/40">
+            <div className="grid h-16 w-16 shrink-0 place-items-center rounded-2xl border border-white/[0.08] bg-black/30 text-[10px] font-bold uppercase tracking-[0.18em] text-white/40">
               s/d
             </div>
           )}
 
-          <div className="min-w-0 flex-1 pb-1">
+          <div className="min-w-0 flex-1">
             {score !== null ? (
-              <p className="text-[13px] leading-5 text-white/65">
-                Nota proprietária baseada em{" "}
-                <span className="font-semibold text-white/85">
+              <p className="text-[12px] leading-[1.5] text-white/60">
+                Score POPLOG baseado em{" "}
+                <span className="font-semibold text-white/80">
                   {componentsUsed}
                 </span>{" "}
-                {componentsUsed === 1 ? "fonte disponível" : "fontes disponíveis"}.
+                {componentsUsed === 1 ? "fonte" : "fontes"}.
               </p>
             ) : (
-              <p className="text-[13px] leading-5 text-white/55">
-                Ratings ainda não foram sincronizados para este título.
+              <p className="text-[12px] leading-[1.5] text-white/45">
+                Ratings não sincronizados.
               </p>
             )}
           </div>

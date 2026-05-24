@@ -180,11 +180,13 @@ export default function TitleProviders({ providers }: TitleProvidersProps) {
       />
 
       <div className="relative">
-        <div className="flex items-baseline justify-between gap-3">
-          <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-200/70">
-            Onde assistir
-          </p>
-
+        <div className="mb-4 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2 text-cyan-300/80">
+            <span aria-hidden className="text-[13px]">{"▶"}</span>
+            <span className="text-xs font-black uppercase tracking-[0.18em]">
+              Onde assistir
+            </span>
+          </div>
           <ContextualAttribution
             context="availability"
             sourcesUsed={sourcesUsed}
@@ -192,7 +194,7 @@ export default function TitleProviders({ providers }: TitleProvidersProps) {
         </div>
 
         {hasProviders ? (
-          <div className="mt-4 flex flex-col gap-4">
+          <div className="flex flex-col gap-4">
             {groups.map((group) => (
               <div key={group.type} className="flex flex-col gap-2">
                 <div className="flex items-center gap-2">
@@ -221,9 +223,8 @@ export default function TitleProviders({ providers }: TitleProvidersProps) {
             ))}
           </div>
         ) : (
-          <p className="mt-3 text-[13px] leading-6 text-white/45">
-            Nenhuma disponibilidade encontrada no Brasil. Vai voltar nesta lista
-            quando o título entrar em algum streaming, aluguel ou compra digital.
+          <p className="text-[12px] leading-[1.55] text-white/45">
+            Sem disponibilidade no Brasil no momento.
           </p>
         )}
       </div>

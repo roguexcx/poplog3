@@ -15,7 +15,7 @@ import {
   postEpisodeProgress,
   toPositiveTmdbId,
 } from "./episodeProgressClient";
-import type { TitleMediaType, TitleUserState } from "./types";
+import type { TitleMediaType, TitleSeriesProgress, TitleUserState } from "./types";
 
 type LibraryStatus =
   | "watchlist"
@@ -34,6 +34,7 @@ type TitleActionsProps = {
   tmdbId: number | string;
   mediaType: TitleMediaType;
   initialState?: TitleUserState;
+  initialProgress?: TitleSeriesProgress | null;
   seasons?: TitleSeasonSummary[];
 };
 
@@ -116,6 +117,7 @@ export default function TitleActions({
   tmdbId,
   mediaType,
   initialState,
+  initialProgress,
   seasons = [],
 }: TitleActionsProps) {
   const [status, setStatus] = useState<LibraryStatus | null>(
@@ -133,6 +135,14 @@ export default function TitleActions({
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [progressModalOpen, setProgressModalOpen] = useState(false);
+
+  // Controla confirmacao leve antes de mover para Abandonado
+  const [abandonConfirmOpen, setAbandonConfirmOpen] = useState(false);
+
+  // Rastreia watchedCount local (atualizado apos acoes de progresso)
+  const [localWatchedCount, setLocalWatchedCount] = useState<number>(
+    initialProgress?.watchedCount ?? 0
+  );
 
   const [, startTransition] = useTransition();
 
@@ -172,15 +182,31 @@ export default function TitleActions({
       }
     }
 
+    function handleProgressRefresh(event: Event) {
+      const e = event as CustomEvent<{ seriesTmdbId: number; watchedCount?: number }>;
+      if (e.detail?.seriesTmdbId !== id) return;
+      if (typeof e.detail.watchedCount === "number") {
+        setLocalWatchedCount(e.detail.watchedCount);
+      }
+    }
+
     window.addEventListener(
       "poplog3:library-status-changed",
       handleLibraryStatusChanged
+    );
+    window.addEventListener(
+      "poplog3:series-progress-refresh",
+      handleProgressRefresh
     );
 
     return () => {
       window.removeEventListener(
         "poplog3:library-status-changed",
         handleLibraryStatusChanged
+      );
+      window.removeEventListener(
+        "poplog3:series-progress-refresh",
+        handleProgressRefresh
       );
     };
   }, [id, isTv]);
@@ -290,12 +316,35 @@ export default function TitleActions({
   }
 
   function startWatching() {
+    const isCurrentlyWatching =
+      status === "watching" || status === "watched" || status === "fridge";
+
+    if (isCurrentlyWatching) {
+      if (localWatchedCount > 0) {
+        setAbandonConfirmOpen(true);
+        return;
+      }
+      setStatus(null);
+      commit("watching-off", { status: null });
+      return;
+    }
+
     setStatus("watching");
     setProgressModalOpen(true);
 
     commit("watching", {
       status: "watching",
     });
+  }
+
+  function confirmAbandon() {
+    setAbandonConfirmOpen(false);
+    setStatus("abandoned");
+    commit("abandoned", { status: "abandoned" });
+  }
+
+  function cancelAbandon() {
+    setAbandonConfirmOpen(false);
   }
 
   function markAiredEpisodesWatched() {
@@ -412,6 +461,7 @@ export default function TitleActions({
         episodeNumber: Math.floor(episodeNumber),
       });
 
+      setLocalWatchedCount((prev) => Math.max(prev, 1));
       dispatchSeriesProgressRefresh(id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro inesperado");
@@ -442,6 +492,7 @@ export default function TitleActions({
         seasonNumber: Math.floor(seasonNumber),
       });
 
+      setLocalWatchedCount((prev) => Math.max(prev, 1));
       dispatchSeriesProgressRefresh(id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro inesperado");
@@ -453,7 +504,6 @@ export default function TitleActions({
   async function clearEpisodeProgress() {
     setError(null);
     setPendingAction("clear-progress");
-    setStatus("watching");
     setProgressModalOpen(false);
 
     try {
@@ -465,12 +515,21 @@ export default function TitleActions({
         seriesTmdbId: id,
       });
 
+      setLocalWatchedCount(0);
+      setStatus(null);
+      commit("watching-off", { status: null });
       dispatchSeriesProgressRefresh(id);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Erro inesperado");
     } finally {
       setPendingAction(null);
     }
+  }
+
+  async function markAbandoned() {
+    setProgressModalOpen(false);
+    setStatus("abandoned");
+    commit("abandoned", { status: "abandoned" });
   }
 
   if (!isAuthenticated) {
@@ -604,6 +663,38 @@ export default function TitleActions({
         </div>
       )}
 
+      {abandonConfirmOpen && (
+        <div className="flex items-start gap-3 rounded-2xl border border-amber-300/20 bg-amber-950/25 px-4 py-3 backdrop-blur-md">
+          <span aria-hidden className="mt-0.5 shrink-0 text-amber-300">
+            {"◈"}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-[13px] font-bold text-amber-50">
+              Voce tem progresso nesta serie
+            </p>
+            <p className="mt-0.5 text-[11px] font-medium leading-snug text-amber-200/65">
+              Mover para Abandonado preserva os episodios assistidos.
+            </p>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={confirmAbandon}
+                className="rounded-full border border-amber-200/30 bg-amber-300/[0.15] px-3.5 py-1.5 text-xs font-black text-amber-50 transition hover:bg-amber-300/[0.25]"
+              >
+                Mover para Abandonado
+              </button>
+              <button
+                type="button"
+                onClick={cancelAbandon}
+                className="rounded-full border border-white/[0.10] bg-white/[0.04] px-3.5 py-1.5 text-xs font-bold text-white/60 transition hover:bg-white/[0.08] hover:text-white"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {isTv && (
         <ProgressUpdateModal
           open={progressModalOpen}
@@ -626,10 +717,11 @@ export default function TitleActions({
           onConfirm={confirmProgress}
           onMarkSeason={markSeasonProgress}
           onClearProgress={clearEpisodeProgress}
+          onAbandon={markAbandoned}
         />
       )}
 
-      {error && !progressModalOpen && (
+      {error && !progressModalOpen && !abandonConfirmOpen && (
         <p className="text-xs font-semibold text-rose-200/90">
           Falha ao sincronizar: {error}
         </p>

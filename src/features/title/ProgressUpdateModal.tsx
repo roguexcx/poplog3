@@ -20,6 +20,8 @@ type ProgressUpdateModalProps = {
   }) => void;
   onMarkSeason: (payload: { seasonNumber: number }) => void;
   onClearProgress: () => void;
+  /** Opcional: move a serie para Abandonado preservando o progresso */
+  onAbandon?: () => void;
 };
 
 const DEFAULT_SEASONS = [
@@ -40,6 +42,7 @@ export default function ProgressUpdateModal({
   onConfirm,
   onMarkSeason,
   onClearProgress,
+  onAbandon,
 }: ProgressUpdateModalProps) {
   const [mounted, setMounted] = useState(false);
 
@@ -128,7 +131,7 @@ export default function ProgressUpdateModal({
           <div className="mb-5 flex items-start justify-between gap-4">
             <div>
               <p className="text-[11px] font-black uppercase tracking-[0.22em] text-cyan-100/55">
-                Progresso da série
+                Progresso da serie
               </p>
 
               <h2 className="mt-1 text-xl font-black tracking-[-0.04em] text-white">
@@ -136,8 +139,8 @@ export default function ProgressUpdateModal({
               </h2>
 
               <p className="mt-1.5 text-sm font-medium leading-relaxed text-white/54">
-                Escolha até qual episódio você assistiu. O POPLOG marca tudo
-                até ali e atualiza sua continuidade.
+                Escolha ate qual episodio voce assistiu. O POPLOG marca tudo
+                ate ali e atualiza sua continuidade.
               </p>
             </div>
 
@@ -147,7 +150,7 @@ export default function ProgressUpdateModal({
               className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/[0.10] bg-white/[0.04] text-white/60 transition hover:bg-white/[0.08] hover:text-white"
               aria-label="Fechar"
             >
-              ×
+              {"×"}
             </button>
           </div>
 
@@ -204,7 +207,7 @@ export default function ProgressUpdateModal({
           </div>
 
           <div className="mt-4 rounded-2xl border border-cyan-200/[0.12] bg-cyan-950/[0.14] px-4 py-3 text-sm font-semibold text-cyan-50/78">
-            Marcar até:{" "}
+            Marcar ate:{" "}
             <span className="text-cyan-50">
               T{currentSeason?.seasonNumber}E{selectedEpisode}
             </span>
@@ -216,14 +219,27 @@ export default function ProgressUpdateModal({
             </div>
           )}
 
-          <button
-            type="button"
-            disabled={loading}
-            onClick={onClearProgress}
-            className="mt-4 w-full rounded-2xl border border-white/[0.09] bg-white/[0.035] px-4 py-3 text-left text-sm font-bold text-white/60 transition hover:border-white/[0.16] hover:bg-white/[0.065] hover:text-white disabled:cursor-wait disabled:opacity-60"
-          >
-            Ainda não assisti
-          </button>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              disabled={loading}
+              onClick={onClearProgress}
+              className="flex-1 rounded-2xl border border-white/[0.09] bg-white/[0.035] px-4 py-3 text-left text-sm font-bold text-white/60 transition hover:border-white/[0.16] hover:bg-white/[0.065] hover:text-white disabled:cursor-wait disabled:opacity-60"
+            >
+              Ainda nao assisti
+            </button>
+
+            {onAbandon && (
+              <button
+                type="button"
+                disabled={loading}
+                onClick={onAbandon}
+                className="flex-1 rounded-2xl border border-amber-300/[0.14] bg-amber-500/[0.06] px-4 py-3 text-left text-sm font-bold text-amber-200/70 transition hover:border-amber-300/[0.25] hover:bg-amber-500/[0.12] hover:text-amber-100 disabled:cursor-wait disabled:opacity-60"
+              >
+                Abandonar serie
+              </button>
+            )}
+          </div>
 
           <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
             <button
@@ -253,7 +269,7 @@ export default function ProgressUpdateModal({
             >
               {loading
                 ? "Salvando..."
-                : `Marcar até T${currentSeason?.seasonNumber ?? ""}E${selectedEpisode}`}
+                : `Marcar ate T${currentSeason?.seasonNumber ?? ""}E${selectedEpisode}`}
             </button>
           </div>
         </div>
