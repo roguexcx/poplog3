@@ -1,16 +1,8 @@
-// ── /api/radar ─────────────────────────────────────────────────────────────────
-// Endpoint unificado do Radar com suporte a dois modos:
+// -- /api/radar ─────────────────────────────────────────────────────────────────
+// Endpoint unificado do Radar:
 //
-//   GET /api/radar?mode=general    → Radar Geral: feed ICS + TMDB, sem personalização.
-//   GET /api/radar?mode=personal   → Radar Personalizado: AgendaEngine com dados do usuário.
-//
-// O cliente usa este endpoint para alternar entre os dois modos com um clique.
-// A escolha do modo muda a origem e montagem dos dados, não apenas rótulos visuais.
-//
-// MODO BRUTO (ativo agora):
-//   - Sem filtros editoriais de idioma, popularidade, gênero ou plataforma.
-//   - Apenas deduplicação técnica e validação mínima.
-//   - Pronto para receber filtros graduais no futuro.
+//   GET /api/radar?mode=general    -> Radar Geral: feed ICS + TMDB, sem personalização.
+//   GET /api/radar?mode=personal   -> Radar Personalizado: AgendaEngine com dados do usuario.
 // ──────────────────────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from "next/server";
@@ -36,7 +28,7 @@ export interface RadarResponse {
   cacheVersion?: number;
   /** Espelha general.fromCache para inspeção rápida */
   fromCache?: boolean;
-  /** Espelha general.rawBdsMode — true quando RAW_BDS_MODE está ativo */
+  /** Sempre false — RAW_BDS_MODE removido, pipeline e unico */
   rawBdsMode?: boolean;
   /** Espelha general.sections para acesso direto sem navegar por general.sections */
   sections?: RadarSections;
@@ -44,7 +36,7 @@ export interface RadarResponse {
 
 const CACHE_ID   = "main";
 const CACHE_TTL_H = 24;
-const CACHE_SCHEMA_VERSION = 5; // deve ser igual ao de agenda/route.ts
+const CACHE_SCHEMA_VERSION = 10; // deve ser igual ao de agenda/route.ts
 
 // ── Lê cache Supabase do pipeline ICS (modo geral) ────────────────────────────
 
@@ -74,14 +66,8 @@ async function readIcsCache(): Promise<IcsAgendaResponse | null> {
 // ── Modo Geral: busca do cache ICS ou dispara rebuild ────────────────────────
 
 async function buildGeneralPayload(): Promise<IcsAgendaResponse> {
-  const rawBdsMode = process.env.RADAR_RAW_BDS_MODE === "true";
-
-  // Em RAW_BDS_MODE, sempre força rebuild para diagnóstico.
-  // Não usar o cache manual do Supabase, senão o /api/radar pode devolver payload antigo.
-  if (!rawBdsMode) {
-    const cached = await readIcsCache();
-    if (cached) return { ...cached, fromCache: true };
-  }
+  const cached = await readIcsCache();
+  if (cached) return { ...cached, fromCache: true };
 
   const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
   const res = await fetch(`${origin}/api/ics/agenda`, {
@@ -140,7 +126,7 @@ export async function GET(req: NextRequest) {
       mode:          "general" as const,
       cacheVersion:  general.cacheVersion  ?? null,
       fromCache:     general.fromCache     ?? false,
-      rawBdsMode:    general.rawBdsMode    ?? false,
+      rawBdsMode:    false,
       sections:      general.sections      ?? null,
       generatedAt:   new Date().toISOString(),
       general,

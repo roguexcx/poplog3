@@ -20,9 +20,7 @@ import { refineCategoryFromTmdb } from "./ics-engine";
 // portanto CONCURRENCY_LIMIT=5 → até 15 req em voo simultâneo — dentro do
 // limite de 40 req/s da API read da TMDB e bem abaixo do risco de rate-limit.
 const CONCURRENCY_LIMIT     = 5;
-// Mantidas para retrocompatibilidade com enrichTopGroups (não usado no pipeline principal)
-const DEFAULT_BATCH_SIZE    = 10;
-const BATCH_PAUSE_MS        = 700;
+// enrichTopGroups removido — pipeline unificado usa enrichSeriesGroups diretamente
 const MAX_RPS               = 15;
 const MIN_REQUEST_INTERVAL  = Math.ceil(1000 / MAX_RPS); // ~67ms
 const RETRY_PAUSE_MS        = 5000;
@@ -96,13 +94,58 @@ const GENRE_NAMES: Record<number, string> = {
   10766: "Soap", 10767: "Talk", 10768: "Guerra & Política", 37: "Faroeste",
 };
 
-async function searchTmdbTv(
-  title: string,
+// ── Detecção de sufixos regionais ────────────────────────────────────────────
+// Lista de sufixos de país/região que podem aparecer no rawTitle vindo do
+// Banco de Séries (ex: "The Assembly UK", "Big Brother US", "Survivor AU").
+// Usado para evitar fallback ambíguo ao TMDB quando o sufixo não existe no
+// catálogo TMDB mas o título-base existe.
+
+const REGIONAL_SUFFIXES = new Set([
+  "UK", "US", "AU", "NZ", "CA", "BR", "IE", "ZA", "IN", "MX",
+  "DE", "FR", "ES", "IT", "NL", "SE", "NO", "DK", "FI", "BE",
+  "PT", "PL", "CH", "AT", "CZ", "HU", "RO", "GR", "TR", "IL",
+  "JP", "KR", "CN", "TH", "PH", "SG", "HK", "TW",
+]);
+
+/**
+ * Mapeia sufixo regional (BDS) → código(s) ISO 3166-1 alpha-2 usados em
+ * origin_country no TMDB. "UK" no BDS corresponde a "GB" no TMDB.
+ * Usado para disambiguar séries homônimas de países diferentes.
+ */
+const SUFFIX_TO_COUNTRY_CODES: Record<string, string[]> = {
+  UK: ["GB"], US: ["US"], AU: ["AU"], NZ: ["NZ"], CA: ["CA"],
+  BR: ["BR"], IE: ["IE"], ZA: ["ZA"], IN: ["IN"], MX: ["MX"],
+  DE: ["DE"], FR: ["FR"], ES: ["ES"], IT: ["IT"], NL: ["NL"],
+  SE: ["SE"], NO: ["NO"], DK: ["DK"], FI: ["FI"], BE: ["BE"],
+  PT: ["PT"], PL: ["PL"], CH: ["CH"], AT: ["AT"], CZ: ["CZ"],
+  HU: ["HU"], RO: ["RO"], GR: ["GR"], TR: ["TR"], IL: ["IL"],
+  JP: ["JP"], KR: ["KR"], CN: ["CN"], TH: ["TH"], PH: ["PH"],
+  SG: ["SG"], HK: ["HK"], TW: ["TW"],
+};
+
+/**
+ * Extrai sufixo regional do título (ex: "The Assembly UK" → { base: "The Assembly", suffix: "UK" }).
+ * Retorna null se não houver sufixo reconhecido.
+ */
+function extractRegionalSuffix(title: string): { base: string; suffix: string } | null {
+  const parts = title.trim().split(/\s+/);
+  if (parts.length < 2) return null;
+  const last = parts[parts.length - 1].toUpperCase();
+  if (REGIONAL_SUFFIXES.has(last)) {
+    return {
+      base: parts.slice(0, -1).join(" "),
+      suffix: last,
+    };
+  }
+  return null;
+}
+
+async function searchTmdbTvByQuery(
+  query: string,
   accessToken: string,
-  preferAnimation = false,
-): Promise<TmdbSearchTvResult | null> {
+): Promise<TmdbSearchTvResponse | null> {
   const url = new URL("https://api.themoviedb.org/3/search/tv");
-  url.searchParams.set("query", title);
+  url.searchParams.set("query", query);
   url.searchParams.set("language", "pt-BR");
   url.searchParams.set("page", "1");
 
@@ -117,44 +160,166 @@ async function searchTmdbTv(
 
     if (res.status === 429 || res.status >= 500) {
       if (attempts >= MAX_RETRIES) return null;
-      console.warn(`[ics-enricher] TMDB ${res.status} for "${title}" — retrying in ${RETRY_PAUSE_MS}ms`);
+      console.warn(`[ics-enricher] TMDB ${res.status} for "${query}" — retrying in ${RETRY_PAUSE_MS}ms`);
       await sleep(RETRY_PAUSE_MS);
       attempts++;
       continue;
     }
 
     if (!res.ok) return null;
+    return (await res.json()) as TmdbSearchTvResponse;
+  }
+  return null;
+}
 
-    const data = (await res.json()) as TmdbSearchTvResponse;
-    if (!data.results?.length) return null;
+/**
+ * Seleciona o melhor resultado TMDB para um título.
+ *
+ * Ordem de prioridade:
+ *  1. Animação exata (quando preferAnimation=true)
+ *  2. Nome exato + origin_country corresponde ao sufixo regional (ex: UK → GB)
+ *  3. Nome exato sem restrição de país
+ *  4. Qualquer resultado com origin_country correspondente (para variantes regionais)
+ *  5. null — sem match confiável
+ *
+ * Quando `regionalSuffix` é fornecido, evitamos devolver o primeiro resultado
+ * arbitrário: preferimos um resultado cujo origin_country bate com o sufixo.
+ * Isso distingue "The Assembly UK" (GB, tmdb 290057) de "The Assembly" (US/CA).
+ */
+function pickBestResult(
+  results: TmdbSearchTvResult[],
+  cleaned: string,
+  preferAnimation: boolean,
+  regionalSuffix?: string | null,
+): TmdbSearchTvResult | null {
+  if (!results.length) return null;
 
-    const cleaned = title.toLowerCase().trim();
+  const countryCodes = regionalSuffix ? (SUFFIX_TO_COUNTRY_CODES[regionalSuffix] ?? []) : [];
 
-    // Se o título foi classificado localmente como ANIMATION (ex: One Piece),
-    // preferimos um resultado animado (genre_id=16 ou original_language="ja")
-    // antes de cair no exact-match por nome.
-    if (preferAnimation) {
-      const animExact = data.results.find(
-        (r) =>
-          (r.name?.toLowerCase() === cleaned || r.original_name?.toLowerCase() === cleaned) &&
-          (r.genre_ids?.includes(16) || r.original_language === "ja"),
-      );
-      if (animExact) return animExact;
+  function matchesCountry(r: TmdbSearchTvResult): boolean {
+    if (!countryCodes.length) return false;
+    return (r.origin_country ?? []).some((c) => countryCodes.includes(c));
+  }
 
-      // Sem exact-match animado: tenta qualquer resultado animado com o nome
-      const animAny = data.results.find(
-        (r) => r.genre_ids?.includes(16) || r.original_language === "ja",
-      );
-      if (animAny) return animAny;
-    }
-
-    // Fallback padrão: exact match por nome, depois primeiro resultado
-    const exact = data.results.find(
+  if (preferAnimation) {
+    const animExact = results.find(
       (r) =>
-        r.name?.toLowerCase() === cleaned ||
-        r.original_name?.toLowerCase() === cleaned,
+        (r.name?.toLowerCase() === cleaned || r.original_name?.toLowerCase() === cleaned) &&
+        (r.genre_ids?.includes(16) || r.original_language === "ja"),
     );
-    return exact ?? data.results[0];
+    if (animExact) return animExact;
+    const animAny = results.find(
+      (r) => r.genre_ids?.includes(16) || r.original_language === "ja",
+    );
+    if (animAny) return animAny;
+  }
+
+  // Exact name match + country match (melhor caso para variantes regionais)
+  if (countryCodes.length) {
+    const exactCountry = results.find(
+      (r) =>
+        (r.name?.toLowerCase() === cleaned || r.original_name?.toLowerCase() === cleaned) &&
+        matchesCountry(r),
+    );
+    if (exactCountry) return exactCountry;
+  }
+
+  // Exact name match (sem restrição de país)
+  // Preferimos resultados recentes (últimos 20 anos) sobre séries antigas homônimas.
+  // Ex: "Raw" busca → encontra "Raw" de 1993 (WWE) antes de um show atual com mesmo nome.
+  const RECENT_CUTOFF_YEAR = new Date().getFullYear() - 20;
+
+  function isRecentEnough(r: TmdbSearchTvResult): boolean {
+    if (!r.first_air_date) return true; // sem data → não penalizar
+    const year = parseInt(r.first_air_date.slice(0, 4), 10);
+    return isNaN(year) || year >= RECENT_CUTOFF_YEAR;
+  }
+
+  const exactMatches = results.filter(
+    (r) =>
+      r.name?.toLowerCase() === cleaned ||
+      r.original_name?.toLowerCase() === cleaned,
+  );
+
+  if (exactMatches.length) {
+    // Prefere exact match recente; se nenhum for recente, pega o primeiro exact match
+    const recentExact = exactMatches.find(isRecentEnough);
+    return recentExact ?? exactMatches[0];
+  }
+
+  // Apenas country match (sem exact name) — útil quando o título TMDB tem variação ortográfica
+  if (countryCodes.length) {
+    const countryOnly = results.find(matchesCountry);
+    if (countryOnly) return countryOnly;
+  }
+
+  // Sem match confiável
+  return null;
+}
+
+interface TmdbSearchResult {
+  result: TmdbSearchTvResult;
+  /** Sufixo regional detectado no rawTitle (ex: "UK"). Null se não houver. */
+  variantSuffix: string | null;
+  /** True quando o match foi obtido apenas removendo o sufixo regional do título */
+  matchedWithoutSuffix: boolean;
+}
+
+async function searchTmdbTv(
+  title: string,
+  accessToken: string,
+  preferAnimation = false,
+): Promise<TmdbSearchResult | null> {
+  const cleaned = title.toLowerCase().trim();
+  const regional = extractRegionalSuffix(title);
+
+  // 1ª tentativa: busca com o título completo (incluindo sufixo, se houver)
+  const fullData = await searchTmdbTvByQuery(title, accessToken);
+  if (fullData?.results?.length) {
+    // Passa o sufixo regional para que pickBestResult prefira o país certo
+    // (ex: "The Assembly UK" → prefere result com origin_country GB)
+    const exact = pickBestResult(fullData.results, cleaned, preferAnimation, regional?.suffix);
+    if (exact) {
+      return { result: exact, variantSuffix: regional?.suffix ?? null, matchedWithoutSuffix: false };
+    }
+  }
+
+  // 2ª tentativa (só quando há sufixo regional): buscar pelo título-base sem o sufixo.
+  // Nesse caso, marcamos como variante regional — o match é provavelmente do show-mãe,
+  // não de uma versão regional específica.
+  if (regional) {
+    const baseData = await searchTmdbTvByQuery(regional.base, accessToken);
+    if (baseData?.results?.length) {
+      const baseCleaned = regional.base.toLowerCase().trim();
+      // Passa o sufixo regional: mesmo buscando pelo título-base, queremos
+      // o resultado cujo origin_country bate com o sufixo (ex: base="The Assembly"
+      // com suffix="UK" → prefere o resultado com origin_country GB, tmdb 290057).
+      const exact = pickBestResult(baseData.results, baseCleaned, preferAnimation, regional.suffix);
+      // Sem fallback para results[0] quando há sufixo regional e sem match de país:
+      // é melhor não enriquecer do que associar ao show errado.
+      const picked = exact;
+      if (picked) {
+        console.log(
+          `[ics-enricher] variant-match: "${title}" → base="${regional.base}" suffix="${regional.suffix}"` +
+          ` tmdb_id=${picked.id} tmdb_name="${picked.name}" country=${(picked.origin_country ?? []).join(",")}`,
+        );
+        return { result: picked, variantSuffix: regional.suffix, matchedWithoutSuffix: true };
+      }
+      // Sem match de país encontrado: loga e deixa cair para o fallback geral
+      console.log(
+        `[ics-enricher] variant-no-country-match: "${title}" suffix="${regional.suffix}"` +
+        ` — ${baseData.results.length} results, nenhum com country match`,
+      );
+    }
+  }
+
+  // Último recurso: primeiro resultado da busca com título completo (comportamento anterior)
+  if (fullData?.results?.[0]) {
+    console.log(
+      `[ics-enricher] fallback-first-result: "${title}" → tmdb_id=${fullData.results[0].id}` +
+      ` tmdb_name="${fullData.results[0].name}"`,
+    );
+    return { result: fullData.results[0], variantSuffix: regional?.suffix ?? null, matchedWithoutSuffix: false };
   }
 
   return null;
@@ -189,8 +354,16 @@ async function enrichGroup(
   accessToken: string,
 ): Promise<TmdbEnrichment | null> {
   const preferAnimation = group.category === "ANIMATION";
-  const result = await searchTmdbTv(group.rawTitle, accessToken, preferAnimation);
-  if (!result) return null;
+  const searchResult = await searchTmdbTv(group.rawTitle, accessToken, preferAnimation);
+  if (!searchResult) return null;
+
+  const { result, variantSuffix, matchedWithoutSuffix } = searchResult;
+
+  // Marcar variantCountry no grupo quando o match foi obtido removendo sufixo regional.
+  // Isso preserva a informação para deduplicação segura no pipeline e para a UI.
+  if (matchedWithoutSuffix && variantSuffix) {
+    group.variantCountry = variantSuffix;
+  }
 
   // Busca detalhes completos: type, vote_count, number_of_seasons, networks
   const details = await fetchTvDetails(result.id, accessToken);
@@ -306,50 +479,4 @@ export async function enrichSeriesGroups(
   return groups;
 }
 
-export async function enrichTopGroups(
-  groups: IcsSeriesGroup[],
-  topN: number,
-  accessToken: string,
-): Promise<void> {
-  const toEnrich = groups.slice(0, topN);
-  let currentBatchSize = DEFAULT_BATCH_SIZE;
-
-  let i = 0;
-  while (i < toEnrich.length) {
-    const batch = toEnrich.slice(i, i + currentBatchSize);
-    let retries = 0;
-    let success = false;
-
-    while (!success && retries <= MAX_RETRIES) {
-      try {
-        await Promise.all(
-          batch.map(async (group) => {
-            const enrichment = await enrichGroup(group, accessToken);
-            if (enrichment) {
-              group.tmdb = enrichment;
-              if (enrichment.refined_category) {
-                group.category = enrichment.refined_category;
-              }
-            }
-          }),
-        );
-        success = true;
-      } catch (err: unknown) {
-        const isRateLimit =
-          err instanceof Error && err.message.includes("429");
-        if (isRateLimit && retries < MAX_RETRIES) {
-          console.warn(`[ics-enricher] rate limit batch ${i} — pausa ${RETRY_PAUSE_MS}ms`);
-          await sleep(RETRY_PAUSE_MS);
-          currentBatchSize = Math.max(1, Math.floor(currentBatchSize / 2));
-          retries++;
-        } else {
-          console.error(`[ics-enricher] batch ${i} falhou:`, err);
-          success = true; // Pula este batch
-        }
-      }
-    }
-
-    i += batch.length;
-    if (i < toEnrich.length) await sleep(BATCH_PAUSE_MS);
-  }
-}
+// enrichTopGroups removido — use enrichSeriesGroups diretamente

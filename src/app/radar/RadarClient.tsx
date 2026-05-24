@@ -20,6 +20,7 @@ import PageShell from "@/components/layout/PageShell";
 import type {
   IcsSeriesGroup,
   MovieGroup,
+  CinemaReleaseGroup,
   ContentCategory,
 } from "@/lib/ics-engine";
 import type {
@@ -643,6 +644,11 @@ function editorialClusterKey(group: IcsSeriesGroup, dateStr: string): string {
   return `${tmdbId || title}|${dateStr}|s${season}`;
 }
 
+function itemPopularity(item: EditorialGroup): number {
+  if (item.movie) return item.movie.movie.popularity ?? 0;
+  return item.group.tmdb?.popularity ?? 0;
+}
+
 function buildEditorialGroups(
   sourceGroups: IcsSeriesGroup[],
   sourceMovies: MovieGroup[],
@@ -656,6 +662,8 @@ function buildEditorialGroups(
     trendingWeek: Set<number>;
     /** Quando fornecido, ignora filtragem por data — backend já particionou */
     sectionGroups?: IcsSeriesGroup[];
+    /** Filmes de cinema para o modo atual (cinemaToday / cinemaThisWeek / cinemaNext) */
+    cinemaGroups?: CinemaReleaseGroup[];
   },
 ): EditorialGroup[] {
   const today = todayStr();
@@ -690,6 +698,11 @@ function buildEditorialGroups(
     );
 
     const fallbackDate = group.sectionMeta?.episodeDate ?? today;
+
+    // Filtro obrigatório: TMDB indexado + backdrop disponível
+    if (!group.tmdb) continue;
+    const hasBackdrop = !!(group.tmdb.backdrop_path || group.tmdb.clean_backdrop_path);
+    if (!hasBackdrop) continue;
 
     if (useSectionGroups) {
       const dateStr =
@@ -745,36 +758,196 @@ function buildEditorialGroups(
     }
   }
 
-  // Filmes só entram no fallback legado; nas abas RAW, o foco é o que veio do BDS/sections.
-  if (!useSectionGroups) {
-    for (const movie of sourceMovies) {
-      const releaseDate = movie.movie.release_date ?? today;
-      const key = `movie-${movie.movie.tmdb_id}-${releaseDate}`;
-      if (seen.has(key)) continue;
-      seen.add(key);
-      const score = movieEditorialScore(
-        movie,
-        options.trendingDay,
-        options.trendingWeek,
-      );
-      items.push({
-        group: {} as IcsSeriesGroup,
-        movie,
-        dateStr: releaseDate,
-        score,
-        visualWeight: "poster",
-      });
-    }
-  }
-
-  items.sort((a, b) => {
-    const dateCompare = a.dateStr.localeCompare(b.dateStr);
-    if (dateCompare !== 0) return dateCompare;
-    return b.score - a.score;
+  // Cinema: usa cinemaGroups (pré-selecionados por aba) ou sourceMovies como fallback.
+  const cinemaReleaseToMovieGroup = (cr: CinemaReleaseGroup): MovieGroup => ({
+    key: cr.key,
+    source: "tmdb",
+    movie: {
+      tmdb_id: cr.movie.tmdb_id,
+      release_date: cr.releaseDate,
+      backdrop_path: cr.movie.backdrop_path ?? null,
+      poster_path: cr.movie.poster_path ?? null,
+      clean_backdrop_path: cr.movie.clean_backdrop_path ?? null,
+      popularity: cr.movie.popularity,
+      vote_average: cr.movie.vote_average,
+      vote_count: cr.movie.vote_count,
+      original_language: cr.movie.original_language,
+      overview: cr.movie.overview ?? null,
+      name: cr.movie.name,
+      original_name: cr.movie.original_name,
+      genre_ids: cr.movie.genre_ids,
+      genres: cr.movie.genres,
+      origin_country: cr.movie.origin_country,
+    },
   });
 
-  return items;
+  const cinemaSource: MovieGroup[] = options.cinemaGroups
+    ? options.cinemaGroups
+        .filter((cr) => !!(cr.movie.backdrop_path || cr.movie.clean_backdrop_path))
+        .map(cinemaReleaseToMovieGroup)
+    : !useSectionGroups
+      ? sourceMovies
+      : [];
+
+  const cinemaItems: EditorialGroup[] = [];
+  for (const movie of cinemaSource) {
+    const releaseDate = movie.movie.release_date ?? today;
+    const key = `movie-${movie.movie.tmdb_id}-${releaseDate}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const score = movieEditorialScore(movie, options.trendingDay, options.trendingWeek);
+    cinemaItems.push({ group: {} as IcsSeriesGroup, movie, dateStr: releaseDate, score, visualWeight: "poster" });
+  }
+
+  // Sort: tier editorial (empresa) → popularidade TMDB → data
+  const sortByTierThenPop = (a: EditorialGroup, b: EditorialGroup): number => {
+    const td = editorialTier(b) - editorialTier(a);
+    if (td !== 0) return td;
+    return itemPopularity(b) - itemPopularity(a);
+  };
+  items.sort(sortByTierThenPop);
+  cinemaItems.sort(sortByTierThenPop);
+
+  // Intercalar filmes de cinema a cada 5 posições.
+  const merged: EditorialGroup[] = [];
+  let ciIdx = 0;
+  for (let i = 0; i < items.length; i++) {
+    if (ciIdx < cinemaItems.length && i > 0 && i % 5 === 0) merged.push(cinemaItems[ciIdx++]);
+    merged.push(items[i]);
+  }
+  while (ciIdx < cinemaItems.length) merged.push(cinemaItems[ciIdx++]);
+
+  return applyLanguageCap(merged);
 }
+
+// ── TMDB ID → editorial tier (sem risco de falso positivo) ──────────────────
+const TIER_BY_TMDB_ID: Record<number, number> = {
+  // Tier 4 — Apple TV+, HBO, Max, Warner
+  2552: 4, 49: 4, 3268: 4, 3081: 4, 174: 4, 22213: 4,
+  // Tier 3 — Disney, Marvel, Lucasfilm, Pixar, FX, Hulu, Universal, Netflix
+  2739: 3, 6125: 3, 53: 3, 2: 3, 1024: 3, 3: 3, 1081: 3, 6394: 3, 7505: 3, 2301: 3, 33: 3,
+  // Tier 2 — Paramount, Prime, Sony, MGM, A24, Neon, BBC, AMC, Lionsgate
+  4: 2, 9: 2, 332: 2, 67: 2, 1709: 2, 21: 2, 318: 2,
+  // Tier 1 — Peacock, Sky, Canal+, Blumhouse etc.
+  3353: 1, 1375: 1,
+};
+
+// Regex estritos com word boundary ou anchors para evitar falsos positivos.
+const EDITORIAL_TIERS: Array<{ tier: number; patterns: RegExp[] }> = [
+  {
+    tier: 4,
+    patterns: [
+      /apple\s+tv\+/i, /apple\s+original/i, /apple\s+studios/i,
+      /hbo/i, /hbo\s+max/i, /^max$/i,
+      /warner\s+bros\.?\s+discovery/i, /dc\s+studios/i,
+    ],
+  },
+  {
+    tier: 3,
+    patterns: [
+      /disney\+/i, /walt\s+disney\s+(pictures|television|animation|studios)/i, /^disney$/i,
+      /marvel\s+studios/i, /lucasfilm/i, /pixar/i,
+      /searchlight\s+pictures/i,
+      /^fx$/i, /fx\s+productions/i, /^hulu$/i,
+      /universal\s+pictures/i, /nbcuniversal/i, /^focus\s+features$/i,
+      /^netflix$/i,
+    ],
+  },
+  {
+    tier: 2,
+    patterns: [
+      /^paramount\+?$/i, /paramount\s+(network|pictures|television)/i,
+      /^showtime$/i,
+      /^prime\s+video$/i, /amazon\s+(studios|mgm|prime)/i,
+      /^mgm$/i, /mgm\+/i,
+      /sony\s+pictures/i, /columbia\s+pictures/i, /tristar\s+pictures/i,
+      /new\s+line\s+cinema/i,
+      /^a24$/i, /^neon$/i, /^lionsgate$/i, /^starz$/i,
+      /^amc$/i,
+      /^bbc\s+(one|two|three|four|studios|america)$/i, /^bbc$/i,
+    ],
+  },
+  {
+    tier: 1,
+    patterns: [
+      /^peacock$/i,
+      /^sky\s+(atlantic|studios|one|uk|italia|witness)$/i,
+      /^itv/i, /^canal\+$/i, /^studiocanal$/i, /^film4$/i,
+      /path[eé]/i, /^mubi$/i, /criterion/i,
+      /blumhouse/i, /legendary\s+(pictures|entertainment|television)/i,
+      /dreamworks/i, /illumination/i, /toho/i,
+      /cj\s+enm/i, /gaumont/i, /participant/i,
+      /annapurna/i, /plan\s+b\s+entertainment/i, /bad\s+robot/i,
+    ],
+  },
+];
+
+// ── editorialTier ──────────────────────────────────────────────────────────────
+// Retorna 0–4. Lookup por TMDB ID primeiro (preciso), regex como fallback.
+// Usado apenas como desempate de ordem dentro da seção — nunca filtra entrada.
+function editorialTier(item: EditorialGroup): number {
+  type E = { id?: number | null; name?: string | null };
+  const entities: E[] = [];
+
+  if (item.movie) {
+    const m = item.movie.movie as { networks?: E[] | null; production_companies?: E[] | null };
+    for (const n of m.networks ?? []) entities.push(n);
+    for (const c of m.production_companies ?? []) entities.push(c);
+  } else {
+    const tmdb = item.group.tmdb as { networks?: E[] | null; production_companies?: E[] | null } | null | undefined;
+    for (const n of tmdb?.networks ?? []) entities.push(n);
+    for (const c of tmdb?.production_companies ?? []) entities.push(c);
+    if (item.group.streamingProvider?.name) entities.push({ name: item.group.streamingProvider.name });
+  }
+
+  if (entities.length === 0) return 0;
+
+  let best = 0;
+  for (const { id, name } of entities) {
+    if (id != null) {
+      const t = TIER_BY_TMDB_ID[id];
+      if (t != null && t > best) { best = t; if (best === 4) return 4; }
+    }
+    if (name && best < 4) {
+      for (const { tier, patterns } of EDITORIAL_TIERS) {
+        if (tier <= best) continue;
+        if (patterns.some((rx) => rx.test(name))) { best = tier; if (best === 4) return 4; break; }
+      }
+    }
+  }
+  return best;
+}
+
+// ── applyLanguageCap ──────────────────────────────────────────────────────────
+// • en, pt → sem limite
+// • anime (genre_ids ∋ 16) → máx 3 por aba; excedente → compact
+// • outros idiomas → máx 1 por idioma por aba; excedente → compact
+function applyLanguageCap(items: EditorialGroup[]): EditorialGroup[] {
+  const FREE = new Set(["en", "pt", "pt-BR", ""]);
+  const cnt = new Map<string, number>();
+  let animeCnt = 0;
+  const ANIME_LIMIT = 3;
+
+  return items.map((item) => {
+    if (item.movie) return item;
+    const lang = itemOriginalLanguage(item);
+    const isAnime = itemIsAnime(item);
+
+    if (isAnime) {
+      animeCnt++;
+      return animeCnt > ANIME_LIMIT ? { ...item, visualWeight: "compact" as const } : item;
+    }
+
+    if (FREE.has(lang)) return item;
+
+    const n = cnt.get(lang) ?? 0;
+    cnt.set(lang, n + 1);
+    return n >= 1 ? { ...item, visualWeight: "compact" as const } : item;
+  });
+}
+
+// ── Cinema badge helpers ───────────────────────────────────────────────────────
+// (usados nos cards para distinguir filmes de séries)
 
 // ── buildDayMap ────────────────────────────────────────────────────────────────
 
@@ -1022,19 +1195,22 @@ function buildRawGroupsForViewMode(
   if (!sections && groups.length === 0 && featuredGroups.length === 0)
     return undefined;
 
+  // Quando o backend já particionou os dados por aba (sections disponível),
+  // retorna diretamente a fatia correta — sem misturar rawPool, que contém
+  // todos os episódios e reintroduziria duplicatas entre abas.
+  if (sections) {
+    if (viewMode === "day")   return sections.today;
+    if (viewMode === "week")  return sections.thisWeek;
+    return sections.next30Days;
+  }
+
+  // Fallback: sem sections, usa o pool bruto filtrado por janela de datas.
   const today = todayStr();
   const recentStart = addDaysStr(-3);
   const tomorrow = addDaysStr(1);
   const next7 = addDaysStr(7);
   const next8 = addDaysStr(8);
   const next30 = addDaysStr(30);
-
-  const sectionBase =
-    viewMode === "day"
-      ? (sections?.today ?? [])
-      : viewMode === "week"
-        ? (sections?.thisWeek ?? [])
-        : (sections?.next30Days ?? []);
 
   const rawPool = [...groups, ...featuredGroups];
 
@@ -1046,7 +1222,6 @@ function buildRawGroupsForViewMode(
         : [next8, next30, "raw-month"];
 
   return mergeExpandedClusters([
-    ...expandGroupsByEpisodeWindow(sectionBase, startDay, endDay, `section-${viewMode}`),
     ...expandGroupsByEpisodeWindow(rawPool, startDay, endDay, suffix),
   ]);
 }
@@ -1342,12 +1517,7 @@ function AgendaEditorialHeroCard({
     item.movie,
   );
   const { label: catLabel, color: catColor } = d.isMovie
-    ? {
-        label: CAT_LABEL[d.category] ?? d.category,
-        color:
-          CAT_COLOR[d.category] ??
-          "bg-white/[0.05] text-white/30 border-white/[0.08]",
-      }
+    ? { label: "Cinema", color: "bg-amber-500/20 text-amber-300/90 border-amber-500/25" }
     : resolveCatLabel(item.group);
   const firstEp = !item.movie
     ? (episodesOnDay(item.group, item.dateStr)[0] ?? null)
@@ -1454,14 +1624,17 @@ function AgendaEditorialWideCard({
       <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/60 via-transparent to-transparent" />
       <div className="relative flex h-full flex-col justify-between p-5">
         <div className="flex items-center justify-between gap-3">
-          <SignalBadge label={signal.label} color={signal.color} />
-          <span className="text-[10px] font-bold uppercase text-white/38">
-            {d.dateLabel}
-          </span>
+          <div className="flex items-center gap-2">
+            <SignalBadge label={signal.label} color={signal.color} />
+            {d.isMovie && (
+              <span className="rounded-lg border border-amber-500/25 bg-amber-500/20 px-2 py-1 text-[9px] font-black uppercase text-amber-300/90">Cinema</span>
+            )}
+          </div>
+          <span className="text-[10px] font-bold uppercase text-white/38">{d.dateLabel}</span>
         </div>
         <div className="max-w-[560px]">
           <p className="mb-2 text-[10px] font-black uppercase tracking-[0.08em] text-emerald-300/80">
-            {d.subLabel || (d.isMovie ? "Cinema" : "Novo evento")}
+            {d.subLabel || ""}
           </p>
           <h3 className="line-clamp-2 text-2xl font-black leading-tight tracking-[-0.035em] text-white">
             {d.name}
@@ -1510,7 +1683,12 @@ function AgendaEditorialPosterCard({
       <div className="absolute inset-0 bg-gradient-to-t from-zinc-950/72 via-zinc-950/20 to-transparent" />
       <div className="relative flex h-full flex-col justify-between p-4">
         <div className="flex items-start justify-between gap-2">
-          <SignalBadge label={signal.label} color={signal.color} />
+          <div className="flex flex-wrap items-center gap-1.5">
+            <SignalBadge label={signal.label} color={signal.color} />
+            {d.isMovie && (
+              <span className="rounded-lg border border-amber-500/25 bg-amber-500/20 px-2 py-1 text-[9px] font-black uppercase text-amber-300/90">Cinema</span>
+            )}
+          </div>
           {d.voteAvg > 0 && (
             <span className="rounded-lg border border-amber-400/15 bg-black/20 px-1.5 py-1 text-[10px] font-black text-amber-200/90">
               ★ {d.voteAvg.toFixed(1)}
@@ -1973,7 +2151,7 @@ function RadarHero({
                 {v === "day"
                   ? "Destaques"
                   : v === "week"
-                    ? "Novos Episódios"
+                    ? "NOVIDADES"
                     : "Vem Aí"}
               </button>
             ))}
@@ -2536,6 +2714,9 @@ export default function RadarClient({
         ...g,
         episodes: g.episodes.map((ep) => ({ ...ep })),
       })),
+      cinemaToday:    s.cinemaToday    ?? [],
+      cinemaThisWeek: s.cinemaThisWeek ?? [],
+      cinemaNext:     s.cinemaNext     ?? [],
     };
   };
 
@@ -2575,7 +2756,7 @@ export default function RadarClient({
 
   // ── Estado de navegação ────────────────────────────────────────────────────
   const now = new Date();
-  const [viewMode, setViewMode] = useState<ViewMode>("week");
+  const [viewMode, setViewMode] = useState<ViewMode>("day");
   const [navYear, setNavYear] = useState(now.getFullYear());
   const [navMonth, setNavMonth] = useState(now.getMonth());
   const [navWeekStart, setNavWeekStart] = useState(() => startOfWeek(now));
@@ -2709,12 +2890,18 @@ export default function RadarClient({
 
   // Seleciona a seção pré-particionada pelo backend conforme o viewMode.
   // Quando sections está disponível, o backend decide a janela temporal.
-  // Quando não está (cache legado ou fallback), buildEditorialGroups filtra por data.
   const sectionGroupsForMode = useMemo(
     (): IcsSeriesGroup[] | undefined =>
       buildRawGroupsForViewMode(viewMode, sections, groups, featuredGroups),
     [sections, groups, featuredGroups, viewMode],
   );
+
+  const cinemaGroupsForMode = useMemo(() => {
+    if (!sections) return undefined;
+    if (viewMode === "day") return sections.cinemaToday ?? [];
+    if (viewMode === "week") return sections.cinemaThisWeek ?? [];
+    return sections.cinemaNext ?? [];
+  }, [sections, viewMode]);
 
   const editorialItems = useMemo(
     () =>
@@ -2727,6 +2914,7 @@ export default function RadarClient({
         trendingDay: trendingDayRef.current,
         trendingWeek: trendingWeekRef.current,
         sectionGroups: sectionGroupsForMode,
+        cinemaGroups: cinemaGroupsForMode,
       }),
     [
       viewMode,
@@ -2737,6 +2925,7 @@ export default function RadarClient({
       visibleFeatured,
       movies,
       sectionGroupsForMode,
+      cinemaGroupsForMode,
     ],
   );
 
@@ -2754,6 +2943,20 @@ export default function RadarClient({
         onChangeRadarMode={handleChangeRadarMode}
         isLoadingMode={isLoadingMode}
       />
+
+      {/* Contador discreto de títulos na aba atual */}
+      {editorialItems.length > 0 && (
+        <div className="flex items-center gap-2 mb-3 -mt-6">
+          <span className="text-[11px] font-bold tabular-nums text-white/40">
+            {editorialItems.length}
+          </span>
+          <span className="text-[11px] text-white/22">
+            {editorialItems.length === 1 ? "título" : "títulos"}
+            {" · "}
+            {viewMode === "day" ? "Destaques" : viewMode === "week" ? "NOVIDADES" : "Vem Aí"}
+          </span>
+        </div>
+      )}
 
       {error && (
         <div className="mb-6 rounded-2xl border border-red-500/20 bg-red-950/20 px-5 py-4 text-[12px] text-red-300/80">

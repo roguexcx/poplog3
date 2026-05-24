@@ -5,9 +5,6 @@
 //
 // Suporta dois modos via searchParam ?mode=general|personal.
 // O modo padrão é "general". O cliente pode alternar sem navegar para outra página.
-//
-// Em RAW_BDS_MODE, a página NÃO usa cache SSR antigo do Supabase.
-// Nesse modo, initialData fica null e o RadarClient faz fetch fresco.
 // ──────────────────────────────────────────────────────────────────────────────
 
 import type { IcsAgendaResponse } from "@/app/api/ics/agenda/route";
@@ -18,9 +15,7 @@ import { supabaseAdmin } from "@/server/supabase/admin";
 const CACHE_ID = "main";
 const CACHE_TTL_H = 24;
 // Deve ser igual a CACHE_SCHEMA_VERSION em agenda/route.ts e radar/route.ts
-const CACHE_SCHEMA_VERSION = 5;
-
-const RAW_BDS_MODE = process.env.RADAR_RAW_BDS_MODE === "true";
+const CACHE_SCHEMA_VERSION = 10;
 
 async function getIcsCache(): Promise<IcsAgendaResponse | null> {
   try {
@@ -56,11 +51,10 @@ export default async function RadarPage({ searchParams }: RadarPageProps) {
   const rawMode = params?.mode ?? "general";
   const initialMode: RadarMode = rawMode === "personal" ? "personal" : "general";
 
-  // Modo geral normal: pode pré-carregar cache ICS no servidor.
-  // RAW_BDS_MODE: não injeta cache antigo; força fetch fresco no RadarClient.
+  // Modo geral: pré-carrega cache ICS no servidor para SSR sem loading state.
   // Modo pessoal: o cliente faz o fetch após montar, pois depende de auth.
   const initialData =
-    initialMode === "general" && !RAW_BDS_MODE ? await getIcsCache() : null;
+    initialMode === "general" ? await getIcsCache() : null;
 
   return <RadarClient initialData={initialData} initialMode={initialMode} />;
 }
