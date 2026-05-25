@@ -26,6 +26,16 @@ import { supabaseAdmin } from "@/server/supabase/admin";
 import { refineCategoryFromTmdb } from "@/lib/radar/categories";
 import { classifyRealityBySignals } from "@/lib/radar/reality-classifier";
 import { applyRetrofill } from "@/lib/radar/tmdb-retrofill";
+import {
+  classifyRadarEligibility,
+  createEligibilityDiagnostics,
+  accumulateDiagnostics,
+  logEligibilityDiagnostics,
+} from "@/lib/radar/eligibility";
+import {
+  fetchTmdbTrendingFeed,
+  isTmdbFeedEnabled,
+} from "@/lib/radar/tmdb-trending-feed";
 
 // Nao usar cache do Next.js — gerenciamos o cache manualmente no Supabase
 export const revalidate = 0;
@@ -36,7 +46,7 @@ const CACHE_ID   = "main";
 const CACHE_TTL_H = 24; // horas
 const CACHE_SCHEMA_VERSION = 10; // bumped: collapse por serie+temporada ativo
 const DEBUG_RADAR = process.env.DEBUG_RADAR === "true";
-const DEBUG_TITLES = [/rupaul/i, /drag race/i, /tonight show/i, /jimmy fallon/i];
+const DEBUG_TITLES = [/rupaul/i, /drag race/i, /tonight show/i, /jimmy fallon/i, /euphoria/i, /pela metade/i];
 
 // TmdbTvListItem removido — era usado por fetchTmdbTvList/fetchActiveTmdbSeries (desativados).
 
@@ -616,13 +626,40 @@ async function buildAgendaPayload(): Promise<IcsAgendaResponse> {
     ? groups.filter((g) => !dedupedIcsGroups.has(g.key))
     : groups;
 
-  // tmdbSeries = 0 permanentemente. TMDB nao injeta series no Radar.
-  const unifiedGroups = groupsAfterIcsDedup;
+  // ── TMDB Trending Feed (feature flag: ENABLE_TMDB_TRENDING_FEED=true) ────────
+  // Quando ativo: busca trending/tv/day + week + airing_today e mescla com BDS.
+  // BDS sempre prevalece: se o tmdb_id já existe no pool ICS, o grupo sintético é descartado.
+  // Quando inativo: unifiedGroups = groupsAfterIcsDedup (comportamento histórico).
+  let trendingDayIds:  number[] = [];
+  let trendingWeekIds: number[] = [];
+  let unifiedGroups = groupsAfterIcsDedup;
+  let tmdbTrendingAdded = 0; // grupos sintéticos novos (não duplicados com BDS)
 
-  // Verificacao de leak: nenhum grupo deve ter source:"tmdb" ou key "tmdb-tv-*"
-  for (const g of unifiedGroups) {
-    if (g.source === "tmdb" || g.key?.startsWith("tmdb-tv-")) {
-      console.error(`[radar-error] tmdb_series_leak title="${g.tmdb?.name ?? g.rawTitle}" key="${g.key}" source="${g.source}" sourceTag="${g.sourceTag ?? "_"}"`);
+  if (isTmdbFeedEnabled()) {
+    const trendingFeed = await fetchTmdbTrendingFeed();
+    trendingDayIds  = trendingFeed.trendingDayIds;
+    trendingWeekIds = trendingFeed.trendingWeekIds;
+
+    if (trendingFeed.groups.length > 0) {
+      // Conjunto de tmdb_ids já presentes no BDS — BDS prevalece
+      const bdsIds = new Set(
+        groupsAfterIcsDedup.map((g) => g.tmdb?.tmdb_id).filter((id): id is number => id != null),
+      );
+      const newFromTmdb = trendingFeed.groups.filter(
+        (g) => g.tmdb?.tmdb_id != null && !bdsIds.has(g.tmdb.tmdb_id),
+      );
+      tmdbTrendingAdded = newFromTmdb.length;
+      unifiedGroups = [...groupsAfterIcsDedup, ...newFromTmdb];
+      console.log(
+        `[tmdb-trending-merge] bds=${groupsAfterIcsDedup.length}` +
+        ` tmdb_elegíveis=${trendingFeed.groups.length}` +
+        ` tmdb_novos=${newFromTmdb.length}` +
+        ` (stats: day=${trendingFeed.stats.fetchedDay} week=${trendingFeed.stats.fetchedWeek}` +
+        ` airing=${trendingFeed.stats.fetchedAiring}` +
+        ` bloq_estrutural=${trendingFeed.stats.blockedStructural}` +
+        ` bloq_editorial=${trendingFeed.stats.blockedEligibility})` +
+        ` total=${unifiedGroups.length}`,
+      );
     }
   }
 
@@ -635,8 +672,13 @@ async function buildAgendaPayload(): Promise<IcsAgendaResponse> {
 
   const visibleGroups: IcsSeriesGroup[] = [];
   let blockedStructural = 0;
+  const eligibilityDiag = createEligibilityDiagnostics();
+  let blockedEditorial = 0;
+
   for (const group of unifiedGroups) {
     const refinedCat = group.tmdb?.refined_category ?? group.category;
+
+    // 7a. Filtro estrutural por categoria (tecnico — nao editorial)
     if (isHiddenGroup(group)) {
       blockedStructural++;
       radarFilterLog(
@@ -654,8 +696,58 @@ async function buildAgendaPayload(): Promise<IcsAgendaResponse> {
       });
       continue;
     }
+
+    // 7b. Filtro editorial de elegibilidade — classifyRadarEligibility()
+    //    Avalia metadados, gêneros, keywords, networks, país, popularidade e sinais
+    //    editoriais para filtrar conteúdo estruturalmente inadequado para o Radar:
+    //    soap/dorama, infantil, religioso de nicho, factual local, reality de nicho,
+    //    lifestyle regional, baixa relevância para o Brasil, baixo sinal editorial.
+    const eligibilityTitle = group.tmdb?.name ?? group.rawTitle;
+    const eligResult = classifyRadarEligibility({
+      title: eligibilityTitle,
+      category: refinedCat,
+      tmdbType: group.tmdb?.tmdb_type ?? null,
+      genreIds: group.tmdb?.genre_ids ?? null,
+      originalLanguage: group.tmdb?.original_language ?? null,
+      originCountry: group.tmdb?.origin_country ?? null,
+      overview: group.tmdb?.overview ?? null,
+      keywords: null,  // TMDB keywords não são buscadas no pipeline atual
+      popularity: group.tmdb?.popularity ?? null,
+      voteCount: group.tmdb?.vote_count ?? null,
+      voteAverage: group.tmdb?.vote_average ?? null,
+      networks: group.tmdb?.networks?.map((n) => ({ id: n.id, name: n.name, origin_country: n.origin_country })) ?? null,
+      productionCompanies: group.tmdb?.production_companies?.map((c) => ({ id: c.id, name: c.name, origin_country: c.origin_country })) ?? null,
+      brazilProviders: null,  // providers BR não disponíveis neste ponto do pipeline
+      hasTmdb: !!group.tmdb,
+      relevanceScore: group.relevanceScore ?? null,
+    });
+
+    accumulateDiagnostics(eligibilityDiag, eligResult, eligibilityTitle);
+
+    if (!eligResult.eligible) {
+      blockedEditorial++;
+      radarFilterLog(eligibilityTitle, eligResult.reason);
+      radarDebugTitle({
+        title: eligibilityTitle,
+        source: group.source ?? "ics",
+        tmdbId: group.tmdb?.tmdb_id ?? null,
+        date: group.nextAirDate,
+        category: refinedCat,
+        blocked: true,
+        reason: eligResult.reason,
+      });
+      if (DEBUG_RADAR) {
+        console.log(
+          `[eligibility] blocked title="${eligibilityTitle}"` +
+          ` reason=${eligResult.reason}` +
+          ` signals=[${eligResult.signals.join(",")}]`,
+        );
+      }
+      continue;
+    }
+
     radarDebugTitle({
-      title: group.tmdb?.name ?? group.rawTitle,
+      title: eligibilityTitle,
       source: group.source ?? "ics",
       tmdbId: group.tmdb?.tmdb_id ?? null,
       date: group.nextAirDate,
@@ -664,6 +756,9 @@ async function buildAgendaPayload(): Promise<IcsAgendaResponse> {
     });
     visibleGroups.push(group);
   }
+
+  // Log de diagnóstico de elegibilidade (sempre — para calibração)
+  logEligibilityDiagnostics(eligibilityDiag);
 
   // Todos os grupos visiveis sao "featured" — sem split editorial por categoria.
   // A divisao featured/secondary e preservada na interface por compatibilidade.
@@ -683,6 +778,7 @@ async function buildAgendaPayload(): Promise<IcsAgendaResponse> {
   const totalFromIcs  = groups.length;
   const withTmdb      = unifiedGroups.filter((g) => !!g.tmdb).length;
   const hiddenBlocked = blockedStructural;
+  const editorialBlocked = blockedEditorial;
   const noTmdbPending = featuredGroups.filter((g) => !g.tmdb).length;
 
   const catCount: Record<string, number> = {};
@@ -705,10 +801,11 @@ async function buildAgendaPayload(): Promise<IcsAgendaResponse> {
   console.log(
     "\n+- [ICS Agenda] PIPELINE RESUMO -----------------------------------\n" +
     "|  ICS -> grupos brutos     : " + totalFromIcs + "\n" +
-    "|  TMDB -> series ativas    : 0  <- BDS e unica fonte de series\n" +
+    "|  TMDB -> trending feed    : " + (isTmdbFeedEnabled() ? tmdbTrendingAdded + " novos" : "desligado (flag off)") + "\n" +
     "|  TMDB -> cinema estreias  : " + cinemaReleases.length + "\n" +
     "|  Com TMDB enriquecido    : " + withTmdb + " / " + unifiedGroups.length + "\n" +
     "|  Bloqueados estruturais  : " + hiddenBlocked + "\n" +
+    "|  Bloqueados editoriais   : " + editorialBlocked + "\n" +
     "|  Featured finais         : " + featuredGroups.length + "\n" +
     "|    sem TMDB (pendente)   : " + noTmdbPending + "\n" +
     "|  Secondary (outras cat)  : " + secondaryGroups.length + "\n" +
@@ -1356,8 +1453,8 @@ async function buildAgendaPayload(): Promise<IcsAgendaResponse> {
     fetchedAt: new Date().toISOString(),
     source: ICS_URL,
     pendingEnrichment,
-    trendingDay:  [],
-    trendingWeek: [],
+    trendingDay:  trendingDayIds,
+    trendingWeek: trendingWeekIds,
     fromCache: false,
     cacheVersion: CACHE_SCHEMA_VERSION,
   };

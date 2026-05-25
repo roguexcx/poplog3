@@ -1948,29 +1948,32 @@ function AgendaEditorialFeed({
   isLoading,
   trendingDay,
   trendingWeek,
+  radarMode: feedRadarMode,
 }: {
   items: EditorialGroup[];
   mode: ViewMode;
   isLoading: boolean;
   trendingDay: Set<number>;
   trendingWeek: Set<number>;
+  radarMode?: RadarMode;
 }) {
   const rows = getRows(mode);
+  const isPersonal = feedRadarMode === "personal";
 
-  // Split 50/50 sobre itens não-compact (esses vão para o grid de cards).
-  // Compacts sempre vão para o bloco compacto — não participam do split.
-  // Ordena por score desc (trending day > trending week > popularidade > premieres).
-  const allCompact = items.filter((i) => i.visualWeight === "compact")
-    .sort((a, b) => b.score - a.score);
-  const allNonCmp   = items.filter((i) => i.visualWeight !== "compact")
-    .sort((a, b) => b.score - a.score);
+  // Modo personal: tudo no grid, sem split e sem bloco compacto.
+  // Modo geral: split 50/50 por score (comportamento original).
+  const allCompact = isPersonal
+    ? []  // no personal, não há compacts — tudo vai pro grid
+    : items.filter((i) => i.visualWeight === "compact").sort((a, b) => b.score - a.score);
+  const allNonCmp = isPersonal
+    ? items.map(i => ({ ...i, visualWeight: "poster" as const }))  // promove todos a poster
+    : items.filter((i) => i.visualWeight !== "compact").sort((a, b) => b.score - a.score);
 
-  // top 50% dos não-compact → grid de cards (Destaques)
-  // bottom 50% → compacto. Sem cap de idioma: o score já determina quem vai pra cima.
-  const splitAt    = Math.ceil(allNonCmp.length / 2);
-  const nonCmp     = allNonCmp.slice(0, splitAt);   // top 50% → grid
-  const bottomHalf = allNonCmp.slice(splitAt);       // bottom 50% → compacto
-  const capSpill: EditorialGroup[] = [];             // sem cap — array vazio
+  // Personal: splitAt = total (tudo no grid). Geral: top 50%.
+  const splitAt    = isPersonal ? allNonCmp.length : Math.ceil(allNonCmp.length / 2);
+  const nonCmp     = allNonCmp.slice(0, splitAt);
+  const bottomHalf = isPersonal ? [] : allNonCmp.slice(splitAt);
+  const capSpill: EditorialGroup[] = [];
 
 
 
@@ -2239,6 +2242,7 @@ function RadarHero({
   radarMode: RadarMode;
   onChangeRadarMode: (m: RadarMode) => void;
   isLoadingMode: boolean;
+  personalLibrarySize?: number | null;
 }) {
   const router = useRouter();
   const today = new Date().toLocaleDateString("pt-BR", {
@@ -3039,8 +3043,8 @@ export default function RadarClient({
   );
 
   // ── Estado do Radar Personalizado ────────────────────────────────────────
-  const [personalData, setPersonalData] =
-    useState<AgendaV2CompatResponse | null>(null);
+  const [personalEmpty, setPersonalEmpty] = useState(false);
+  const [personalLibrarySize, setPersonalLibrarySize] = useState<number | null>(null);
 
   // ── Estado do modo ────────────────────────────────────────────────────────
   const [radarMode, setRadarMode] = useState<RadarMode>(initialMode);
@@ -3158,22 +3162,79 @@ export default function RadarClient({
 
       if (newMode === "personal") {
         try {
-          const res = await fetch("/api/radar?mode=personal");
+          // Busca só os tmdb_ids da biblioteca do usuário
+          const res = await fetch(`/api/radar?mode=personal&t=${Date.now()}`, { cache: "no-store" });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = (await res.json()) as {
-            personal?: AgendaV2CompatResponse;
+            general?: IcsAgendaResponse;
+            libraryFiltered?: boolean;
+            librarySize?: number;
+            libraryMovieIds?: number[];
           };
-          setPersonalData(data.personal ?? null);
+
+          // tmdb_ids de séries da biblioteca (vindos do payload filtrado)
+          const libraryIds = new Set(
+            (data.general?.groups ?? [])
+              .map(g => g.tmdb?.tmdb_id)
+              .filter((id): id is number => id != null)
+          );
+          // tmdb_ids de filmes da biblioteca (vindos do servidor)
+          const libraryMovieIds = new Set<number>(data.libraryMovieIds ?? []);
+
+          if (libraryIds.size === 0) {
+            setPersonalEmpty(true);
+            setPersonalLibrarySize(0);
+            setIsLoadingMode(false);
+            return;
+          }
+
+          // Filtra os grupos do Geral (já carregados) pelos tmdb_ids da biblioteca.
+          // featured = mesmo pool de groups filtrado — sem grupos extras do featured geral
+          // que poderiam introduzir "intrusos" não pertencentes à biblioteca.
+          const filterByLibrary = (gs: IcsSeriesGroup[]) =>
+            gs.filter(g => g.tmdb?.tmdb_id != null && libraryIds.has(g.tmdb.tmdb_id));
+
+          const filteredGroups   = filterByLibrary(groups);
+          // Filmes de cinema: filtra pelos tmdb_ids de filmes da biblioteca do usuário
+          const filterCinema = (cs: CinemaReleaseGroup[]) =>
+            cs.filter(c => libraryMovieIds.has(c.movie.tmdb_id));
+
+          const filteredSections = sections ? {
+            ...sections,
+            today:          filterByLibrary(sections.today ?? []),
+            thisWeek:       filterByLibrary(sections.thisWeek ?? []),
+            next30Days:     filterByLibrary(sections.next30Days ?? []),
+            cinemaToday:    filterCinema(sections.cinemaToday ?? []),
+            cinemaThisWeek: filterCinema(sections.cinemaThisWeek ?? []),
+            cinemaNext:     filterCinema(sections.cinemaNext ?? []),
+          } : null;
+
+          setGroups(filteredGroups);
+          setFeatured(filteredGroups);
+          setSections(filteredSections);
+          setMovies([]); // movies legado — não usado no pipeline unificado
+          setPersonalEmpty(filteredGroups.length === 0);
+          setPersonalLibrarySize(data.librarySize ?? libraryIds.size);
         } catch (err) {
           console.warn("[radar] erro ao carregar modo personalizado:", err);
-          setPersonalData(null);
+          setPersonalEmpty(true);
+          setPersonalLibrarySize(0);
         }
+      } else {
+        // Voltando para Geral — restaura dados originais
+        if (initialData) {
+          setGroups(hydrate(initialData.groups ?? []));
+          setFeatured(hydrate(initialData.featuredGroups ?? []));
+          setSections(hydrateSections(initialData.sections));
+          setMovies(initialData.movies ?? []);
+        }
+        setPersonalEmpty(false);
+        setPersonalLibrarySize(null);
       }
-      // Para o modo geral os dados já estão carregados
 
       setIsLoadingMode(false);
     },
-    [radarMode, isLoadingMode],
+    [radarMode, isLoadingMode, groups, featuredGroups, sections, initialData],
   );
 
   // ── Dados visíveis ────────────────────────────────────────────────────────
@@ -3295,6 +3356,7 @@ export default function RadarClient({
         radarMode={radarMode}
         onChangeRadarMode={handleChangeRadarMode}
         isLoadingMode={isLoadingMode}
+        personalLibrarySize={personalLibrarySize}
       />
 
       {error && (
@@ -3305,38 +3367,34 @@ export default function RadarClient({
 
       <SectionDivider />
 
-      {/* Conteúdo varia conforme o modo */}
-      {radarMode === "general" ? (
-        <section>
-          <ContentFilterBar
-            activeFilter={contentFilter}
-            counts={filterCounts}
-            onSelect={handleContentFilter}
-          />
+      {/* Feed unificado — mesmo componente para Geral e Personalizado */}
+      <section>
+        <ContentFilterBar
+          activeFilter={contentFilter}
+          counts={filterCounts}
+          onSelect={handleContentFilter}
+        />
+        {radarMode === "personal" && !isLoadingMode && personalEmpty && (
+          <div className="rounded-[24px] border border-violet-500/10 bg-violet-950/10 px-6 py-14 text-center">
+            <p className="text-[14px] font-black text-white/35">
+              Nenhum título da sua biblioteca está no radar agora.
+            </p>
+            <p className="mt-2 text-[12px] text-white/20">
+              Adicione séries à sua watchlist para vê-las aqui quando tiverem novidades.
+            </p>
+          </div>
+        )}
+        {!(radarMode === "personal" && !isLoadingMode && personalEmpty) && (
           <AgendaEditorialFeed
             items={filteredEditorialItems}
             mode={viewMode}
             isLoading={isLoading || isLoadingMode}
             trendingDay={trendingDayRef.current}
             trendingWeek={trendingWeekRef.current}
+            radarMode={radarMode}
           />
-        </section>
-      ) : (
-        <section>
-          {isLoadingMode ? (
-            <div className="flex flex-col gap-3">
-              {[0, 1, 2].map((i) => (
-                <div
-                  key={i}
-                  className="h-[60px] rounded-2xl bg-white/[0.035] animate-pulse"
-                />
-              ))}
-            </div>
-          ) : (
-            <PersonalRadarPanel data={personalData} />
-          )}
-        </section>
-      )}
+        )}
+      </section>
 
       <div className="mt-10 flex items-center gap-2 border-t border-white/[0.05] pt-6">
         <span

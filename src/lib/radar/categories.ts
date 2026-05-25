@@ -2,20 +2,27 @@
 // Camada global de categorias de conteúdo.
 // Usada por ambas as fontes de dados: BancoSéries (ICS) e TMDB direto.
 //
-// HIERARQUIA EDITORIAL:
-//   FEATURED_CATEGORIES  → exibição principal no Radar/Agenda
-//   HIDDEN_CATEGORIES    → exclusão estrutural (esportes, notícias etc.)
-//   SECONDARY_CATEGORIES → seção "Também relevantes" (menor destaque)
-//   DISCARD_CATEGORIES   → descartados no início do pipeline, log-only
+// NOVA ARQUITETURA (modelo de score/curadoria):
+//   HIDDEN_CATEGORIES    → exclusão estrutural definitiva (esportes, notícias,
+//                          podcast, live event, variety) — fora do escopo do Radar
+//   HARD_BLOCKED         → bloqueio rígido incondicional, sem override por score:
+//                          DAILY_SOAP — episódios diários, sem curadoria possível
+//   FEATURED_CATEGORIES  → categorias exibidas nas seções principais do Radar
+//   SECONDARY_CATEGORIES → categorias exibidas em "Também Relevantes" com score médio
 //
-// REALITY_PREMIUM vs REALITY:
-//   REALITY_PREMIUM → definido por src/lib/radar/reality-classifier.ts, usando
-//                     sinais de formato, cadência, evento, rede/produtora/plataforma
-//   REALITY          → reality genérico — descartado cedo (DISCARD_CATEGORIES)
-//   VARIETY           → talk shows, programas de auditório — HIDDEN estrutural
-//   DAILY_SOAP        → novela diária — DISCARD (volume diário distorce pipeline)
-//   KIDS              → conteúdo infantil — DISCARD (fora do público-alvo)
-//   UNKNOWN           → sem classificação — SECONDARY (pode aparecer com dados mínimos)
+// MUDANÇA PRINCIPAL:
+//   REALITY, KIDS e outras categorias de nicho NÃO são mais descartadas
+//   automaticamente. Em vez disso, recebem penalidades de score em eligibility.ts
+//   e podem aparecer em seções secundárias se tiverem sinais positivos suficientes.
+//
+//   DAILY_SOAP continua bloqueado rigidamente — sem override por score, plataforma,
+//   popularidade, provider, votos ou qualquer outro sinal editorial.
+//
+// HIERARQUIA DE EXIBIÇÃO:
+//   Destaques         → score muito alto (≥ 85)
+//   Novidades/Vem Aí  → score alto (≥ 55)
+//   Também Relevantes → score médio (≥ 30)
+//   Ocultos           → score baixo (< 30) — não exibidos
 // ──────────────────────────────────────────────────────────────────────────────
 
 export type ContentCategory =
@@ -57,50 +64,77 @@ export const CATEGORY_PRIORITY: Record<ContentCategory, number> = {
 
 // ── Classificações de exibição ────────────────────────────────────────────────
 
-/** Categorias que aparecem no Radar e Agenda (secção principal) */
+/**
+ * Categorias exibidas nas seções principais do Radar (score alto/muito alto).
+ * Inclui REALITY — realities populares, em tendência ou com rede forte sobem
+ * naturalmente pelo score; realities de nicho ficam em SECONDARY ou ocultos.
+ */
 export const FEATURED_CATEGORIES = new Set<ContentCategory>([
-  "MOVIE", "CINEMATIC", "SERIES", "ANIMATION", "DOCUMENTARY", "REALITY_PREMIUM",
+  "MOVIE", "CINEMATIC", "SERIES", "ANIMATION", "DOCUMENTARY",
+  "REALITY_PREMIUM", "REALITY", "KIDS", "UNKNOWN",
 ]);
 
 /**
- * Categorias estruturalmente ocultas — exclusão definitiva, não editorial.
- * Nunca aparecem em nenhuma secção, independente de score ou popularidade.
+ * Categorias que aparecem na seção "Também Relevantes" (score médio).
+ * Qualquer categoria de FEATURED_CATEGORIES com score médio também pode
+ * aparecer aqui — a distinção é feita pelo score, não pela categoria.
+ */
+export const SECONDARY_CATEGORIES = new Set<ContentCategory>([
+  "REALITY", "KIDS", "DOCUMENTARY", "ANIMATION", "UNKNOWN",
+]);
+
+/**
+ * Categorias estruturalmente ocultas — exclusão definitiva, sem override.
+ * Nunca aparecem em nenhuma seção, independente de score ou popularidade.
+ * Fora do escopo editorial do Radar por definição de formato/conteúdo.
  */
 export const HIDDEN_CATEGORIES = new Set<ContentCategory>([
   "SPORTS", "NEWS", "PODCAST", "LIVE_EVENT", "VARIETY",
 ]);
 
 /**
- * Categorias descartadas cedo no pipeline (log-only).
- * Têm volume alto ou audience fora do escopo — não aparecem em nenhuma secção.
- * REALITY genérico: volume alto, qualidade baixa → descartado.
- * DAILY_SOAP: episódios diários distorcem a agenda → descartado.
- * KIDS: fora do público-alvo → descartado.
+ * Bloqueios rígidos incondicionais — sem override por score, plataforma,
+ * popularidade, provider, votos ou qualquer outro sinal editorial.
+ *
+ * DAILY_SOAP: episódios diários distorcem o pipeline. Bloqueio total,
+ * permanente e incondicional. Não há exceção.
  */
-export const DISCARD_CATEGORIES = new Set<ContentCategory>([
-  "REALITY", "DAILY_SOAP", "KIDS",
+export const HARD_BLOCKED_CATEGORIES = new Set<ContentCategory>([
+  "DAILY_SOAP",
 ]);
 
 /**
- * VARIETY (talk shows, auditório) -> HIDDEN estrutural.
- * Nao e "esporte/noticia" mas tambem nao deve aparecer no Radar.
+ * @deprecated Use HARD_BLOCKED_CATEGORIES + HIDDEN_CATEGORIES separadamente.
+ * Mantido para compatibilidade com código legado que usa ALL_BLOCKED_CATEGORIES.
+ * Todas as categorias que nunca passam para exibição.
  */
+export const DISCARD_CATEGORIES = new Set<ContentCategory>([
+  "DAILY_SOAP",
+]);
 
 /** Todas as categorias que nunca passam para exibição */
 export const ALL_BLOCKED_CATEGORIES = new Set<ContentCategory>([
   ...HIDDEN_CATEGORIES,
-  ...DISCARD_CATEGORIES,
+  ...HARD_BLOCKED_CATEGORIES,
 ]);
 
 // ── Padrões de classificação local por título ─────────────────────────────────
 
 const SOAP_PATTERNS = [
-  /novela/i, /\bsoap\b/i, /in aller freundschaft/i, /lindenstrasse/i,
-  /\bEastEnders\b/i, /\bHollyoaks\b/i, /\bCoronation\b/i, /\bEmmerdale\b/i,
-  /\bNeighbours\b/i, /Sturm der Liebe/i, /Rote Rosen/i, /Verbotene Liebe/i,
-  /\bThe Bold\b/i, /\bDays of Our\b/i, /\bGeneral Hospital\b/i,
-  /\bThe Young\b/i, /Guiding Light/i, /\bHome and Away\b/i,
-];
+  // Novela / soap genérico
+  /novela/i, /soap/i, /telenovela/i,
+  // Soaps anglófonos / europeus conhecidos
+  /in aller freundschaft/i, /lindenstrasse/i,
+  /EastEnders/i, /Hollyoaks/i, /Coronation/i, /Emmerdale/i,
+  /Neighbours/i, /Sturm der Liebe/i, /Rote Rosen/i, /Verbotene Liebe/i,
+  /The Bold/i, /Days of Our/i, /General Hospital/i,
+  /The Young/i, /Guiding Light/i, /Home and Away/i,
+  /gute zeiten schlechte zeiten/i,
+  // Dorama / drama asiático serializado no título
+  /dorama/i, /k-?drama/i, /j-?drama/i, /c-?drama/i,
+  /lakorn/i, /dizi/i, /daily drama/i, /daily soap/i,
+  /serial[\s-]drama/i, /drama[\s-]serial/i,
+]
 
 const SPORTS_PATTERNS = [
   /\bfootball\b/i, /\bsoccer\b/i, /\bnfl\b/i, /\bnba\b/i, /\bnhl\b/i,
@@ -151,9 +185,8 @@ const KIDS_PATTERNS = [
   // Palavras-chave genericas de conteudo infantil
   /\bkids\b/i, /\bjunior\b/i, /\bnickjr\b/i,
   /\bcartoon\b/i,
-  // Princesas / contos de fada infantis
-  /\bprincesinha\b/i, /\bsofia.*first\b/i, /\bsofia the first\b/i,
-  /\bprincesa.*sofia\b/i, /\bprincess.*sofia\b/i,
+  // Princesas / contos de fada infantis (apenas padrões genéricos, não títulos específicos)
+  /\bprincesinha\b/i,
   /\bprince.*frog\b/i, /\blittle mermaid.*series\b/i,
   // Disney/Nick franchises infantis
   /\bdisney.*junior\b/i, /\bdisney junior\b/i,
@@ -284,9 +317,47 @@ export function isAnime(title: string, genreIds?: number[]): boolean {
 }
 
 /**
- * Retorna true se a categoria é exibível em alguma secção (featured ou secondary).
+ * Retorna true se a categoria é exibível em alguma seção (featured ou secondary).
  * Usado para descarte antecipado no pipeline antes de enriquecimento TMDB.
  */
 export function isCategoryVisible(cat: ContentCategory): boolean {
   return !ALL_BLOCKED_CATEGORIES.has(cat);
+}
+
+/**
+ * Retorna true se a categoria está rigidamente bloqueada (sem override possível).
+ * Use esta função — não ALL_BLOCKED_CATEGORIES diretamente — para garantir que
+ * DAILY_SOAP nunca seja exibido, independente de qualquer sinal positivo.
+ */
+export function isCategoryHardBlocked(cat: ContentCategory): boolean {
+  return HARD_BLOCKED_CATEGORIES.has(cat);
+}
+
+// ── Faixas de score para distribuição visual ──────────────────────────────────
+
+// ── Faixas de score para distribuição visual ──────────────────────────────────
+
+/**
+ * Thresholds de score para distribuição nas faixas visuais do Radar.
+ * O score usado é o radarScore final (após penalidades de eligibility).
+ */
+export const SCORE_THRESHOLDS = {
+  /** Score mínimo para entrar em Destaques */
+  SPOTLIGHT:  85,
+  /** Score mínimo para entrar nas seções principais (Novidades / Vem Aí) */
+  MAIN:       55,
+  /** Score mínimo para entrar em Também Relevantes */
+  SECONDARY:  30,
+  /** Abaixo deste valor: oculto por baixa relevância */
+  HIDDEN:     30,
+} as const;
+
+export type ScoreTier = "spotlight" | "main" | "secondary" | "hidden";
+
+/** Classifica um score numérico na faixa de exibição correspondente. */
+export function getScoreTier(score: number): ScoreTier {
+  if (score >= SCORE_THRESHOLDS.SPOTLIGHT) return "spotlight";
+  if (score >= SCORE_THRESHOLDS.MAIN)      return "main";
+  if (score >= SCORE_THRESHOLDS.SECONDARY) return "secondary";
+  return "hidden";
 }

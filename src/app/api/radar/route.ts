@@ -1,44 +1,63 @@
 // -- /api/radar ─────────────────────────────────────────────────────────────────
 // Endpoint unificado do Radar:
 //
-//   GET /api/radar?mode=general    -> Radar Geral: feed ICS + TMDB, sem personalização.
-//   GET /api/radar?mode=personal   -> Radar Personalizado: AgendaEngine com dados do usuario.
+//   GET /api/radar?mode=general  -> Radar Geral: feed ICS + TMDB completo.
+//   GET /api/radar?mode=personal -> Radar Personalizado: mesmo feed, filtrado
+//                                   pelos tmdb_ids que o usuario tem na biblioteca
+//                                   (watching, watchlist, watched).
+//
+// Modo personal sem usuario autenticado retorna o feed geral sem filtro.
 // ──────────────────────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/server/supabase/admin";
 import type { IcsAgendaResponse, RadarSections } from "@/app/api/ics/agenda/route";
-import type { AgendaV2CompatResponse } from "@/server/agenda/types";
-import { agendaEngine } from "@/server/agenda/agenda-engine";
+import type { IcsSeriesGroup } from "@/lib/ics-engine";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 
-// Não usar cache do Next.js — gerenciamos o cache manualmente no Supabase
+// Nao usar cache do Next.js -- gerenciamos o cache manualmente no Supabase
 export const revalidate = 0;
 
 export type RadarMode = "general" | "personal";
 
 export interface RadarResponse {
   mode: RadarMode;
-  /** Presente no modo general */
+  /** Presente em ambos os modos -- payload ICS (completo ou filtrado) */
   general?: IcsAgendaResponse;
-  /** Presente no modo personal */
-  personal?: AgendaV2CompatResponse;
   generatedAt: string;
-  /** Espelha general.cacheVersion para inspeção rápida */
+  /** Espelha general.cacheVersion para inspecao rapida */
   cacheVersion?: number;
-  /** Espelha general.fromCache para inspeção rápida */
+  /** Espelha general.fromCache para inspecao rapida */
   fromCache?: boolean;
-  /** Sempre false — RAW_BDS_MODE removido, pipeline e unico */
+  /** Sempre false -- RAW_BDS_MODE removido, pipeline e unico */
   rawBdsMode?: boolean;
-  /** Espelha general.sections para acesso direto sem navegar por general.sections */
+  /** Espelha general.sections para acesso direto */
   sections?: RadarSections;
+  /** true quando o filtro de biblioteca foi aplicado */
+  libraryFiltered?: boolean;
+  /** Quantidade de titulos na biblioteca do usuario */
+  librarySize?: number;
+  /** Debug info para diagnosticar filtro personalizado */
+  _debug?: {
+    userId: string | null;
+    libraryIdsCount: number;
+    sampleLibraryIds: number[];
+    feedTotal: number;
+    feedWithTmdb: number;
+    sampleFeedIds: (number | string)[];
+    matchCount: number;
+  };
 }
 
-const CACHE_ID   = "main";
+const CACHE_ID = "main";
 const CACHE_TTL_H = 24;
 const CACHE_SCHEMA_VERSION = 10; // deve ser igual ao de agenda/route.ts
 
-// ── Lê cache Supabase do pipeline ICS (modo geral) ────────────────────────────
+// Statuses que definem "esta na minha biblioteca"
+// "fridge" excluido — itens pausados nao aparecem no Personalizado
+const LIBRARY_STATUSES = ["watching", "watchlist", "watched"] as const;
+
+// ── Le cache Supabase do pipeline ICS ────────────────────────────────────────
 
 async function readIcsCache(): Promise<IcsAgendaResponse | null> {
   try {
@@ -63,7 +82,7 @@ async function readIcsCache(): Promise<IcsAgendaResponse | null> {
   }
 }
 
-// ── Modo Geral: busca do cache ICS ou dispara rebuild ────────────────────────
+// ── Modo Geral: cache ICS ou rebuild ─────────────────────────────────────────
 
 async function buildGeneralPayload(): Promise<IcsAgendaResponse> {
   const cached = await readIcsCache();
@@ -75,18 +94,204 @@ async function buildGeneralPayload(): Promise<IcsAgendaResponse> {
     headers: { "x-internal-request": "1" },
   });
 
-  if (!res.ok) {
-    throw new Error(`ICS agenda pipeline returned ${res.status}`);
-  }
+  if (!res.ok) throw new Error(`ICS agenda pipeline returned ${res.status}`);
 
   const fresh = await res.json() as IcsAgendaResponse;
   return { ...fresh, fromCache: false };
 }
 
-// ── Modo Personalizado: AgendaEngine com dados do usuário ────────────────────
+// ── Busca os tmdb_ids da biblioteca do usuario ────────────────────────────────
 
-async function buildPersonalPayload(userId: string | null): Promise<AgendaV2CompatResponse> {
-  return agendaEngine.compose(userId, { region: "BR" });
+interface LibraryIds {
+  tvIds: Set<number>;
+  movieIds: Set<number>;
+}
+
+async function fetchUserLibraryTmdbIds(userId: string): Promise<LibraryIds> {
+  // user_title_state é a fonte primária (materializada, sempre atualizada)
+  const { data: stateData, error: stateError } = await supabaseAdmin
+    .from("user_title_state")
+    .select("tmdb_id, media_type")
+    .eq("user_id", userId)
+    .in("status", LIBRARY_STATUSES);
+
+  if (stateError) {
+    console.error(`[radar/personal] user_title_state error for userId=${userId}:`, stateError);
+  }
+
+  const tvIds = new Set<number>();
+  const movieIds = new Set<number>();
+
+  if (stateData && stateData.length > 0) {
+    for (const row of stateData as Array<{ tmdb_id: number; media_type: string }>) {
+      if (row.media_type === "tv") tvIds.add(row.tmdb_id);
+      else if (row.media_type === "movie") movieIds.add(row.tmdb_id);
+    }
+    console.log(`[radar/personal] library via user_title_state: ${tvIds.size} series, ${movieIds.size} movies (userId=${userId})`);
+    return { tvIds, movieIds };
+  }
+
+  console.log(`[radar/personal] user_title_state vazia/erro para userId=${userId}, tentando user_titles`);
+
+  // Fallback: user_titles
+  const { data: legacyData, error: legacyError } = await supabaseAdmin
+    .from("user_titles")
+    .select("tmdb_id, media_type")
+    .eq("user_id", userId)
+    .in("status", LIBRARY_STATUSES);
+
+  if (legacyError) {
+    console.error(`[radar/personal] user_titles error for userId=${userId}:`, legacyError);
+  }
+
+  for (const row of (legacyData ?? []) as Array<{ tmdb_id: number; media_type: string }>) {
+    if (row.media_type === "tv") tvIds.add(row.tmdb_id);
+    else if (row.media_type === "movie") movieIds.add(row.tmdb_id);
+  }
+  console.log(`[radar/personal] library via user_titles (fallback): ${tvIds.size} series, ${movieIds.size} movies (userId=${userId})`);
+  return { tvIds, movieIds };
+}
+
+// ── Filtra um payload ICS pelos tmdb_ids da biblioteca ───────────────────────
+
+interface FilterDebug {
+  feedTotal: number;
+  feedWithTmdb: number;
+  sampleFeedIds: (number | string)[];
+  matchCount: number;
+}
+
+function filterPayloadByLibrary(
+  payload: IcsAgendaResponse,
+  libraryIds: Set<number>,
+): { filtered: IcsAgendaResponse; debug: FilterDebug } {
+  const allGroups = payload.groups ?? [];
+  const withTmdb    = allGroups.filter((g) => g.tmdb?.tmdb_id != null).length;
+  const withoutTmdb = allGroups.length - withTmdb;
+
+  // Sample dos primeiros IDs do feed para debug
+  const sampleFeedIds = allGroups
+    .slice(0, 10)
+    .map((g) => g.tmdb?.tmdb_id ?? `no-tmdb(${g.rawTitle?.slice(0, 20)})`);
+
+  // Interseção entre feed e biblioteca
+  const intersection = allGroups.filter((g) => {
+    const id = g.tmdb?.tmdb_id;
+    return id != null && libraryIds.has(id);
+  });
+
+  // Log especifico para series que sabemos que deveriam bater (debug)
+  const WATCH_IDS = [85552, 4588, 271053, 224372]; // Euphoria, Drag Race, Half Man
+  for (const watchId of WATCH_IDS) {
+    const inFeed = allGroups.some((g) => g.tmdb?.tmdb_id === watchId);
+    const inLib  = libraryIds.has(watchId);
+    if (inFeed || inLib) {
+      console.log(`[radar/personal/watch] tmdb_id=${watchId} inFeed=${inFeed} inLib=${inLib} typeof_lib_id=${typeof watchId}`);
+    }
+  }
+
+  console.log(
+    `[radar/personal/filter]` +
+    ` feed_total=${allGroups.length}` +
+    ` feed_com_tmdb=${withTmdb}` +
+    ` feed_sem_tmdb=${withoutTmdb}` +
+    ` library_ids=${libraryIds.size}` +
+    ` match=${intersection.length}` +
+    ` sample_feed_ids=${JSON.stringify(sampleFeedIds)}` +
+    ` sample_lib_ids=${JSON.stringify([...libraryIds].slice(0, 10))}`,
+  );
+
+  function filterGroups(groups: IcsSeriesGroup[]): IcsSeriesGroup[] {
+    return groups.filter((g) => {
+      const tmdbId = g.tmdb?.tmdb_id;
+      return tmdbId != null && libraryIds.has(tmdbId);
+    });
+  }
+
+  const filteredGroups   = filterGroups(payload.groups ?? []);
+  const filteredFeatured = filterGroups(payload.featuredGroups ?? []);
+
+  // Filtra tambem as secoes (destaques/novosEpisodios/vemAi)
+  const filteredSections = payload.sections
+    ? {
+        destaques:      filterGroups(payload.sections.destaques ?? []),
+        novosEpisodios: filterGroups(payload.sections.novosEpisodios ?? []),
+        vemAi:          filterGroups(payload.sections.vemAi ?? []),
+      }
+    : payload.sections;
+
+  return {
+    filtered: {
+      ...payload,
+      groups:         filteredGroups,
+      featuredGroups: filteredFeatured,
+      sections:       filteredSections,
+    },
+    debug: {
+      feedTotal:    allGroups.length,
+      feedWithTmdb: withTmdb,
+      sampleFeedIds,
+      matchCount:   intersection.length,
+    },
+  };
+}
+
+// ── Modo Personalizado: payload ICS filtrado pela biblioteca do usuario ───────
+
+async function buildPersonalFilteredPayload(userId: string | null): Promise<{
+  payload: IcsAgendaResponse;
+  libraryFiltered: boolean;
+  librarySize: number;
+  libraryMovieIds: number[];
+  debug: {
+    userId: string | null;
+    libraryIdsCount: number;
+    sampleLibraryIds: number[];
+    feedTotal: number;
+    feedWithTmdb: number;
+    sampleFeedIds: (number | string)[];
+    matchCount: number;
+  };
+}> {
+  const [general, library] = await Promise.all([
+    buildGeneralPayload(),
+    userId ? fetchUserLibraryTmdbIds(userId) : Promise.resolve({ tvIds: new Set<number>(), movieIds: new Set<number>() }),
+  ]);
+
+  const { tvIds, movieIds } = library;
+  const sampleLibraryIds = [...tvIds].slice(0, 20);
+
+  if (tvIds.size === 0 && movieIds.size === 0) {
+    return {
+      payload: general,
+      libraryFiltered: false,
+      librarySize: 0,
+      libraryMovieIds: [],
+      debug: {
+        userId,
+        libraryIdsCount: 0,
+        sampleLibraryIds: [],
+        feedTotal: general.groups?.length ?? 0,
+        feedWithTmdb: (general.groups ?? []).filter((g) => g.tmdb?.tmdb_id != null).length,
+        sampleFeedIds: (general.groups ?? []).slice(0, 5).map((g) => g.tmdb?.tmdb_id ?? `no-tmdb`),
+        matchCount: 0,
+      },
+    };
+  }
+
+  const { filtered, debug: filterDebug } = filterPayloadByLibrary(general, tvIds);
+  return {
+    payload: filtered,
+    libraryFiltered: true,
+    librarySize: tvIds.size + movieIds.size,
+    libraryMovieIds: [...movieIds],
+    debug: {
+      userId,
+      libraryIdsCount: tvIds.size,
+      sampleLibraryIds,
+      ...filterDebug,
+    },
+  };
 }
 
 // ── Handler GET ───────────────────────────────────────────────────────────────
@@ -98,30 +303,42 @@ export async function GET(req: NextRequest) {
     const mode: RadarMode = rawMode === "personal" ? "personal" : "general";
 
     if (mode === "personal") {
-      // Modo personalizado — requer usuário autenticado (ou funciona anonimamente com dados limitados)
       const user = await getCurrentUser().catch(() => null);
-      const personal = await buildPersonalPayload(user?.id ?? null);
+      const { payload, libraryFiltered, librarySize, libraryMovieIds, debug } =
+        await buildPersonalFilteredPayload(user?.id ?? null);
 
-      const response: RadarResponse = {
-        mode: "personal",
-        personal,
-        generatedAt: new Date().toISOString(),
-      };
+      console.log(
+        `[radar/personal] user=${user?.id ?? "anon"}` +
+        ` libraryFiltered=${libraryFiltered}` +
+        ` librarySize=${librarySize}` +
+        ` groups=${payload.groups?.length ?? 0}` +
+        ` featured=${payload.featuredGroups?.length ?? 0}`,
+      );
 
-      return NextResponse.json(response, {
+      return NextResponse.json({
+        mode:            "personal" as const,
+        libraryFiltered,
+        librarySize,
+        libraryMovieIds,
+        cacheVersion:    payload.cacheVersion ?? null,
+        fromCache:       payload.fromCache ?? false,
+        rawBdsMode:      false,
+        sections:        payload.sections ?? null,
+        generatedAt:     new Date().toISOString(),
+        general:         payload,
+        _debug:          debug,
+      } satisfies RadarResponse, {
         headers: {
           "Cache-Control": user
-            ? "private, max-age=120, stale-while-revalidate=60"
-            : "public, max-age=300, stale-while-revalidate=120",
+            ? "no-store"  // was: private, max-age=300 — desabilitado para debug
+            : "public, max-age=60",
         },
       });
     }
 
-    // Modo geral (padrão)
+    // Modo geral (padrao)
     const general = await buildGeneralPayload();
 
-    // Campos de topo espelham o payload interno para inspeção rápida sem navegar por general.*
-    // Objeto literal explícito — garante serialização correta independente de cache do Next.js.
     return NextResponse.json({
       mode:          "general" as const,
       cacheVersion:  general.cacheVersion  ?? null,
@@ -130,9 +347,8 @@ export async function GET(req: NextRequest) {
       sections:      general.sections      ?? null,
       generatedAt:   new Date().toISOString(),
       general,
-    }, {
+    } satisfies RadarResponse, {
       headers: {
-        // no-store: garante resposta fresca — sem cache na CDN ou no Next.js
         "Cache-Control": "no-store",
       },
     });

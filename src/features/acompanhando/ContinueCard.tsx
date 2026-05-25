@@ -191,9 +191,12 @@ export default function ContinueCard({ item, onClick }: Props) {
                   {item.season_watched} de {item.season_total} eps na T{item.next_season}
                 </span>
                 {activeRuntimeLabel && (
-                  <button
-                    type="button"
-                    onClick={handleTimeScopeToggle}
+                  // span em vez de button — ContinueCard já é um <button>, não pode aninhar
+                  <span
+                    role={hasSeriesTime ? "button" : undefined}
+                    tabIndex={hasSeriesTime ? 0 : undefined}
+                    onClick={hasSeriesTime ? handleTimeScopeToggle : undefined}
+                    onKeyDown={hasSeriesTime ? (e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); setTimeScope((p) => p === "season" ? "series" : "season"); } } : undefined}
                     title={hasSeriesTime ? (timeScope === "season" ? "Ver tempo total da série" : "Ver tempo da temporada") : undefined}
                     className={[
                       "inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-px transition-all",
@@ -208,7 +211,7 @@ export default function ContinueCard({ item, onClick }: Props) {
                         {activeScopeLabel}
                       </span>
                     )}
-                  </button>
+                  </span>
                 )}
               </p>
             )}
