@@ -52,27 +52,18 @@ export type ContentFilterKey =
   | "all"
   | "series"
   | "movies"
-  | "anime"
-  | "animation"
-  | "dorama"
-  | "nonfiction";
+  | "anime";
 
 export const CONTENT_FILTER_LABELS: Record<ContentFilterKey, string> = {
-  all:        "Todos",
-  series:     "Series",
-  movies:     "Filmes",
-  anime:      "Anime",
-  animation:  "Animacao",
-  dorama:     "Dorama",
-  nonfiction: "Docs & Reality",
+  all:    "Todos",
+  series: "Séries",
+  movies: "Filmes",
+  anime:  "Animação",
 };
 
 // Subtitulo exibido abaixo do label no filtro (opcional na UI)
 export const CONTENT_FILTER_SUBLABELS: Partial<Record<ContentFilterKey, string>> = {
-  dorama:     "K-drama, novela turca, J-drama",
-  anime:      "Animacao japonesa e asiatica",
-  animation:  "Cartoons e animacao ocidental",
-  nonfiction: "Documentarios e reality",
+  anime: "Anime e animação",
 };
 
 export interface ContentTypeInput {
@@ -324,35 +315,26 @@ export function classifyContentType(input: ContentTypeInput): ContentTypeResult 
  * Retorna true se o item deve aparecer no filtro dado.
  *
  * REGRA DE NAO-DUPLICACAO:
- *   "Series"    -> apenas tv:scripted e tv:unknown
- *   "Dorama"    -> editorialType === "dorama"
- *   "Anime"     -> editorialType === "anime"
- *   "Animacao"  -> editorialType === "animation"
- *   "Nonfiction"-> editorialType === "documentary" ou "reality"
+ *   "Animacao"  -> anime | animation  (tem aba propria)
  *   "Filmes"    -> mediaType === "movie"
+ *   "Series"    -> qualquer tv que NAO tenha aba propria
+ *                  (scripted, unknown, dorama, documentary, reality, soap, special)
  *   "Todos"     -> tudo sem restricao
  */
 export function itemMatchesFilter(
   result: ContentTypeResult,
   filter: ContentFilterKey,
 ): boolean {
-  if (filter === "all") return true;
+  if (filter === "all")    return true;
+  if (filter === "movies") return result.mediaType === "movie";
+  if (filter === "anime")  return result.editorialType === "anime" || result.editorialType === "animation";
 
   if (filter === "series") {
+    // Cobre tudo que e TV mas nao tem aba propria (anime/animation ja tem "Animacao")
     return (
       result.mediaType === "tv" &&
-      (result.editorialType === "scripted" || result.editorialType === "unknown")
-    );
-  }
-
-  if (filter === "movies")    return result.mediaType === "movie";
-  if (filter === "anime")     return result.editorialType === "anime";
-  if (filter === "animation") return result.editorialType === "animation";
-  if (filter === "dorama")    return result.editorialType === "dorama";
-  if (filter === "nonfiction") {
-    return (
-      result.editorialType === "documentary" ||
-      result.editorialType === "reality"
+      result.editorialType !== "anime" &&
+      result.editorialType !== "animation"
     );
   }
 

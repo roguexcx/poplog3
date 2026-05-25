@@ -112,7 +112,17 @@ const PHASE_LABELS: Record<Phase, string> = {
   done: "Radar ativo",
 };
 
-type ViewMode = "day" | "week" | "month";
+// Progresso base por fase (0-100) — o enrich complementa de 65% a 95%
+const PHASE_PROGRESS: Record<Phase, number> = {
+  idle: 0,
+  fetching_ics: 15,
+  grouping: 40,
+  cache_check: 55,
+  enriching: 65,
+  done: 100,
+};
+
+type ViewMode = "all" | "day" | "week" | "month";
 
 // ── Helpers de data ────────────────────────────────────────────────────────────
 
@@ -221,9 +231,8 @@ function episodesOnDay(group: IcsSeriesGroup, dateStr: string) {
 function isPremiereEpisode(group: IcsSeriesGroup, dateStr: string): boolean {
   const ep = firstEpisodeOnDay(group, dateStr);
   if (!ep || ep.season !== 1 || ep.episode !== 1) return false;
-  const numSeasons = group.tmdb?.number_of_seasons;
-  if (numSeasons && numSeasons > 1) return false;
-  if (group.key.startsWith("tmdb-") && group.tmdb?.first_air_date) {
+  // Conta como estreia se S01E01 foi ao ar nos últimos 180 dias (independente de nº de temporadas)
+  if (group.tmdb?.first_air_date) {
     const airMs = new Date(group.tmdb.first_air_date).getTime();
     if (Date.now() - airMs > 180 * 24 * 3600 * 1000) return false;
   }
@@ -246,7 +255,16 @@ function isSeasonFinaleGuess(group: IcsSeriesGroup, dateStr: string): boolean {
 
 function normalizePopularity(raw: number): number {
   if (!raw || raw <= 0) return 0;
-  return Math.log10(Math.min(raw, 500) + 1) * 10;
+  // Teto 2000: séries mainstream (Euphoria ~1500, Stranger Things ~2000) ficam separadas
+  return Math.log10(Math.min(raw, 2000) + 1) * 12;
+}
+
+// Fix 1: score de qualidade via vote_average — threshold mínimo de votos para evitar
+// inflar séries de nicho com poucos votos altos (ex: 2 votos de 10.0)
+function voteQualityScore(voteAvg: number, voteCount: number): number {
+  if (voteCount < 50) return 0;          // sem votos suficientes, neutro
+  const deviation = voteAvg - 5.5;       // centro em 5.5 (média real do TMDB)
+  return Math.max(-10, deviation * 5);   // 5.5→0, 8.0→+12.5, 9.0→+17.5, 4.0→-7.5
 }
 
 function groupEditorialScore(
@@ -257,6 +275,8 @@ function groupEditorialScore(
 ): number {
   const tmdbId = group.tmdb?.tmdb_id;
   const days = daysUntilDate(dateStr);
+
+  // Boost temporal: episódio recente tem prioridade sobre "vem aí" distante
   const timeBoost =
     days <= 0
       ? 18
@@ -265,23 +285,51 @@ function groupEditorialScore(
         : days <= 7
           ? 7
           : Math.max(0, 6 - Math.floor(days / 5));
+
   const hasBackdrop = !!(
     group.tmdb?.clean_backdrop_path ?? group.tmdb?.backdrop_path
   );
   const hasPoster = !!group.tmdb?.poster_path;
   const imgPenalty = hasBackdrop ? 0 : hasPoster ? -25 : -60;
+
+  // Fix 3: trending com boosts diferenciados (day >> week)
   const trendBoost = (() => {
-    if (trendingDay.has(tmdbId ?? -1)) return 38;
-    if (trendingWeek.has(tmdbId ?? -1)) return 20;
+    if (trendingDay.has(tmdbId ?? -1)) return 45;   // era 38 — dia tem mais peso
+    if (trendingWeek.has(tmdbId ?? -1)) return 22;  // era 20
     return 0;
   })();
+
+  // Fix 5: tier da plataforma entra no score (Netflix/HBO/Apple > canais locais)
+  // Cria um EditorialGroup temporário apenas com os dados necessários para editorialTier
+  const fakeItem = { group, movie: undefined } as unknown as EditorialGroup;
+  const tierBoost = editorialTier(fakeItem) * 6;  // tier4→+24, tier3→+18, tier2→+12, tier1→+6
+
+  // Fix 1: qualidade via vote_average (mínimo 50 votos para contar)
+  const quality = voteQualityScore(
+    group.tmdb?.vote_average ?? 0,
+    group.tmdb?.vote_count ?? 0,
+  );
+
+  const isPremiere   = isPremiereEpisode(group, dateStr);
+  const isFinale     = isSeasonFinaleGuess(group, dateStr);
+  const isStart      = isSeasonStart(group, dateStr);
+
+  // Fix 6: "evento do dia" — estreia/finale + trending ou alta relevância = boost extra
+  const isEventDay =
+    (isPremiere || isFinale) &&
+    (trendingDay.has(tmdbId ?? -1) || (group.relevanceScore ?? 0) >= 70);
+  const eventDayBoost = isEventDay ? 20 : 0;
+
   return (
     (group.relevanceScore ?? 0) +
     normalizePopularity(group.tmdb?.popularity ?? 0) +
     trendBoost +
-    (isPremiereEpisode(group, dateStr) ? 34 : 0) +
-    (isSeasonFinaleGuess(group, dateStr) ? 30 : 0) +
-    (isSeasonStart(group, dateStr) ? 12 : 0) +
+    tierBoost +
+    quality +
+    (isPremiere ? 34 : 0) +
+    (isFinale   ? 30 : 0) +
+    (isStart    ? 12 : 0) +
+    eventDayBoost +
     (group.episodeCount > 1 ? Math.min(12, group.episodeCount * 2) : 0) +
     timeBoost +
     imgPenalty
@@ -307,11 +355,20 @@ function movieEditorialScore(
   const hasPoster = !!m.poster_path;
   const imgPenalty = hasBackdrop ? 0 : hasPoster ? -20 : -50;
   const isPremiereToday = days >= -3 && days <= 1;
+
+  // Fix 3: trending day mais pesado
+  const trendBoost =
+    trendingDay.has(m.tmdb_id) ? 45 :
+    trendingWeek.has(m.tmdb_id) ? 22 : 0;
+
+  // Fix 1: qualidade via vote_average
+  const quality = voteQualityScore(m.vote_average ?? 0, m.vote_count ?? 0);
+
   const rawScore =
     (movie.relevanceScore ?? 0) +
     normalizePopularity(m.popularity ?? 0) +
-    (trendingDay.has(m.tmdb_id) ? 35 : 0) +
-    (trendingWeek.has(m.tmdb_id) ? 18 : 0) +
+    trendBoost +
+    quality +
     (isPremiereToday ? 28 : 0) +
     timeBoost +
     imgPenalty;
@@ -559,6 +616,7 @@ const ROWS_MONTH: RowDef[] = [
   ],
 ];
 function getRows(mode: ViewMode): RowDef[] {
+  if (mode === "all") return ROWS_WEEK;
   if (mode === "day") return ROWS_DAY;
   if (mode === "week") return ROWS_WEEK;
   return ROWS_MONTH;
@@ -867,7 +925,7 @@ function buildEditorialGroups(
   }
   while (ciIdx < cinemaItems.length) merged.push(cinemaItems[ciIdx++]);
 
-  return applyLanguageCap(merged);
+  return merged;
 }
 
 // ── TMDB ID → editorial tier (sem risco de falso positivo) ──────────────────
@@ -969,14 +1027,17 @@ function editorialTier(item: EditorialGroup): number {
 }
 
 // ── applyLanguageCap ──────────────────────────────────────────────────────────
-// • en, pt → sem limite
-// • anime (genre_ids ∋ 16) → máx 3 por aba; excedente → compact
-// • outros idiomas → máx 1 por idioma por aba; excedente → compact
+// • en, pt → sem limite (idiomas nativos do público)
+// • anime (genre_ids ∋ 16) → máx ~20% do total, mínimo 5; excedente → compact
+// • outros idiomas → máx 2 por idioma por aba; excedente → compact
 function applyLanguageCap(items: EditorialGroup[]): EditorialGroup[] {
   const FREE = new Set(["en", "pt", "pt-BR", ""]);
   const cnt = new Map<string, number>();
   let animeCnt = 0;
-  const ANIME_LIMIT = 3;
+  // Escala com o total: ~20% dos itens podem ser anime no grid, mínimo 5
+  const ANIME_LIMIT = Math.max(5, Math.ceil(items.length * 0.20));
+  // Máx 2 itens por idioma não-livre para diversidade sem exclusão total
+  const LANG_LIMIT = 2;
 
   return items.map((item) => {
     if (item.movie) return item;
@@ -992,7 +1053,7 @@ function applyLanguageCap(items: EditorialGroup[]): EditorialGroup[] {
 
     const n = cnt.get(lang) ?? 0;
     cnt.set(lang, n + 1);
-    return n >= 1 ? { ...item, visualWeight: "compact" as const } : item;
+    return n >= LANG_LIMIT ? { ...item, visualWeight: "compact" as const } : item;
   });
 }
 
@@ -1249,6 +1310,20 @@ function buildRawGroupsForViewMode(
   // retorna diretamente a fatia correta — sem misturar rawPool, que contém
   // todos os episódios e reintroduziria duplicatas entre abas.
   if (sections) {
+    if (viewMode === "all") {
+      // Merge todas as janelas, deduplicando por tmdb_id
+      const seen = new Set<number>();
+      const merged: IcsSeriesGroup[] = [];
+      for (const g of [...sections.today, ...sections.thisWeek, ...sections.next30Days]) {
+        const id = g.tmdb?.tmdb_id;
+        if (id != null) {
+          if (seen.has(id)) continue;
+          seen.add(id);
+        }
+        merged.push(g);
+      }
+      return merged;
+    }
     if (viewMode === "day")   return sections.today;
     if (viewMode === "week")  return sections.thisWeek;
     return sections.next30Days;
@@ -1823,19 +1898,6 @@ function AgendaCompactCluster({ items }: { items: EditorialGroup[] }) {
   if (items.length === 0) return null;
   return (
     <div className="col-span-1 rounded-[24px] border border-white/[0.08] bg-zinc-900/80 shadow-[0_18px_50px_rgba(0,0,0,0.40)] backdrop-blur-xl p-4 sm:col-span-2 lg:col-span-4">
-      <div className="mb-4 flex items-center justify-between gap-4">
-        <div>
-          <p className="text-[9px] font-black uppercase text-white/30">
-            Agenda compactada
-          </p>
-          <h3 className="text-[18px] font-black text-white">
-            Também relevantes
-          </h3>
-        </div>
-        <span className="rounded-full border border-white/[0.08] px-2.5 py-1 text-[11px] font-black text-white/30">
-          {items.length}
-        </span>
-      </div>
       <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {items.map((editorialItem) => {
           const d = resolveItemData(editorialItem);
@@ -1894,8 +1956,23 @@ function AgendaEditorialFeed({
   trendingWeek: Set<number>;
 }) {
   const rows = getRows(mode);
-  const nonCmp = items.filter((i) => i.visualWeight !== "compact");
-  const compact = items.filter((i) => i.visualWeight === "compact");
+
+  // Split 50/50 sobre itens não-compact (esses vão para o grid de cards).
+  // Compacts sempre vão para o bloco compacto — não participam do split.
+  // Ordena por score desc (trending day > trending week > popularidade > premieres).
+  const allCompact = items.filter((i) => i.visualWeight === "compact")
+    .sort((a, b) => b.score - a.score);
+  const allNonCmp   = items.filter((i) => i.visualWeight !== "compact")
+    .sort((a, b) => b.score - a.score);
+
+  // top 50% dos não-compact → grid de cards (Destaques)
+  // bottom 50% → compacto. Sem cap de idioma: o score já determina quem vai pra cima.
+  const splitAt    = Math.ceil(allNonCmp.length / 2);
+  const nonCmp     = allNonCmp.slice(0, splitAt);   // top 50% → grid
+  const bottomHalf = allNonCmp.slice(splitAt);       // bottom 50% → compacto
+  const capSpill: EditorialGroup[] = [];             // sem cap — array vazio
+
+
 
   if (isLoading && items.length === 0) {
     return (
@@ -1919,7 +1996,7 @@ function AgendaEditorialFeed({
     );
   }
 
-  if (nonCmp.length === 0 && compact.length === 0) {
+  if (items.length === 0) {
     return (
       <div className="rounded-[24px] border border-white/[0.08] bg-zinc-900/80 px-6 py-14 text-center">
         <p className="text-[14px] font-black text-white/35">
@@ -1932,101 +2009,208 @@ function AgendaEditorialFeed({
     );
   }
 
-  const renderedRows: Array<{ rowDef: RowDef; items: EditorialGroup[] }> = [];
-  const spillover: EditorialGroup[] = [];
-  let cursor = 0;
-  let rIdx = 0;
-  while (cursor < nonCmp.length) {
-    const rowDef = rows[rIdx % rows.length];
-    const remaining = nonCmp.length - cursor;
-    if (remaining === 0) break;
-    if (remaining >= rowDef.length) {
-      renderedRows.push({
-        rowDef,
-        items: nonCmp.slice(cursor, cursor + rowDef.length),
-      });
-      cursor += rowDef.length;
-    } else {
-      const smaller = rows.find((r) => r.length === remaining);
-      if (smaller)
-        renderedRows.push({
-          rowDef: smaller,
-          items: nonCmp.slice(cursor, cursor + remaining),
-        });
-      else spillover.push(...nonCmp.slice(cursor, cursor + remaining));
-      cursor += remaining;
+  // ── Helper: monta renderedRows + spillover para um conjunto de itens ──────
+  function buildRows(pool: EditorialGroup[]) {
+    const rendered: Array<{ rowDef: RowDef; items: EditorialGroup[] }> = [];
+    const spill: EditorialGroup[] = [];
+    let cursor = 0;
+    let ri = 0;
+    while (cursor < pool.length) {
+      const rowDef = rows[ri % rows.length];
+      const remaining = pool.length - cursor;
+      if (remaining === 0) break;
+      if (remaining >= rowDef.length) {
+        rendered.push({ rowDef, items: pool.slice(cursor, cursor + rowDef.length) });
+        cursor += rowDef.length;
+      } else {
+        const smaller = rows.find((r) => r.length === remaining);
+        if (smaller) rendered.push({ rowDef: smaller, items: pool.slice(cursor, cursor + remaining) });
+        else spill.push(...pool.slice(cursor, cursor + remaining));
+        cursor += remaining;
+      }
+      ri++;
     }
-    rIdx++;
+    return { rendered, spill };
   }
-  const allCompact = [...spillover, ...compact].sort(
-    (a, b) => b.score - a.score,
-  );
+
+  // ── Helper: renderiza uma lista de rows como grid ──────────────────────────
+  function renderRows(
+    rendered: Array<{ rowDef: RowDef; items: EditorialGroup[] }>,
+    keyPrefix: string,
+  ) {
+    return rendered.map((row, rIdx) => {
+      const dominantType = row.rowDef.reduce<CardType>((best, slot) => {
+        const order: CardType[] = ["hero", "wide", "poster", "square", "tall"];
+        return order.indexOf(slot.cardType) < order.indexOf(best) ? slot.cardType : best;
+      }, "square");
+      return (
+        <div
+          key={`${keyPrefix}-${rIdx}`}
+          className={`grid gap-3 ${ROW_H[dominantType]}`}
+          style={{ gridTemplateColumns: "repeat(12, 1fr)" }}
+        >
+          {row.items.map((item, cIdx) => {
+            const slot = row.rowDef[cIdx];
+            const key = `${item.movie ? item.movie.key : item.group.key}-${item.dateStr}-${keyPrefix}-${rIdx}-${cIdx}`;
+            return (
+              <div key={key} className="h-full min-w-0" style={{ gridColumn: `span ${slot.colSm}` }}>
+                {slot.cardType === "hero" && (
+                  <AgendaEditorialHeroCard item={item} trendingDay={trendingDay} trendingWeek={trendingWeek} />
+                )}
+                {slot.cardType === "wide" && (
+                  <AgendaEditorialWideCard item={item} trendingDay={trendingDay} trendingWeek={trendingWeek} />
+                )}
+                {slot.cardType === "square" && (
+                  <AgendaEditorialSquareCard item={item} trendingDay={trendingDay} trendingWeek={trendingWeek} />
+                )}
+                {slot.cardType === "poster" && (
+                  <AgendaEditorialPosterCard item={item} trendingDay={trendingDay} trendingWeek={trendingWeek} />
+                )}
+              </div>
+            );
+          })}
+        </div>
+      );
+    });
+  }
+
+  // Seção principal: top 50% non-compact no grid
+  const { rendered: topRows, spill: topSpill } = buildRows(nonCmp);
+
+  // Seção "Também relevantes": bottom 50% não-compact + todos os compacts + spillover do grid.
+  // Tudo reordenado por score desc — direto para AgendaCompactCluster (sem grid intermediário).
+  const compactPool = [...bottomHalf, ...capSpill, ...allCompact, ...topSpill]
+    .sort((a, b) => b.score - a.score);
+
+  const hasSecondSection = compactPool.length > 0;
 
   return (
     <div className="flex flex-col gap-3">
-      {renderedRows.map((row, rIdx) => {
-        const dominantType = row.rowDef.reduce<CardType>((best, slot) => {
-          const order: CardType[] = [
-            "hero",
-            "wide",
-            "poster",
-            "square",
-            "tall",
-          ];
-          return order.indexOf(slot.cardType) < order.indexOf(best)
-            ? slot.cardType
-            : best;
-        }, "square");
-        return (
-          <div
-            key={rIdx}
-            className={`grid gap-3 ${ROW_H[dominantType]}`}
-            style={{ gridTemplateColumns: "repeat(12, 1fr)" }}
-          >
-            {row.items.map((item, cIdx) => {
-              const slot = row.rowDef[cIdx];
-              const key = `${item.movie ? item.movie.key : item.group.key}-${item.dateStr}-${rIdx}-${cIdx}`;
-              return (
-                <div
-                  key={key}
-                  className="h-full min-w-0"
-                  style={{ gridColumn: `span ${slot.colSm}` }}
-                >
-                  {slot.cardType === "hero" && (
-                    <AgendaEditorialHeroCard
-                      item={item}
-                      trendingDay={trendingDay}
-                      trendingWeek={trendingWeek}
-                    />
-                  )}
-                  {slot.cardType === "wide" && (
-                    <AgendaEditorialWideCard
-                      item={item}
-                      trendingDay={trendingDay}
-                      trendingWeek={trendingWeek}
-                    />
-                  )}
-                  {slot.cardType === "square" && (
-                    <AgendaEditorialSquareCard
-                      item={item}
-                      trendingDay={trendingDay}
-                      trendingWeek={trendingWeek}
-                    />
-                  )}
-                  {slot.cardType === "poster" && (
-                    <AgendaEditorialPosterCard
-                      item={item}
-                      trendingDay={trendingDay}
-                      trendingWeek={trendingWeek}
-                    />
-                  )}
-                </div>
-              );
-            })}
+      {/* Bloco 1: Destaques — top 50% por score */}
+      {renderRows(topRows, "top")}
+
+      {/* Bloco 2: Também relevantes — bottom 50% completo em lista compacta */}
+      {hasSecondSection && (
+        <>
+          <div className="flex items-center gap-3 my-2">
+            <div className="h-px flex-1 bg-white/[0.06]" />
+            <span className="text-[10px] font-bold uppercase tracking-[0.15em] text-white/25">
+              Também relevantes
+            </span>
+            <div className="h-px flex-1 bg-white/[0.06]" />
           </div>
-        );
-      })}
-      {allCompact.length > 0 && <AgendaCompactCluster items={allCompact} />}
+          <AgendaCompactCluster items={compactPool} />
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── Estado de carregamento com barra de progresso ─────────────────────────────
+
+function RadarLoadingState({
+  phase,
+  enrichProgress,
+}: {
+  phase: Phase;
+  enrichProgress: number;
+}) {
+  // Calcula progresso total (0-100):
+  // Fases até "enriching" têm progresso fixo; durante o enrich interpola 65→95.
+  const baseProgress = PHASE_PROGRESS[phase] ?? 0;
+  const totalProgress =
+    phase === "enriching"
+      ? 65 + (enrichProgress / 100) * 30
+      : baseProgress;
+
+  const steps: { key: Phase; label: string }[] = [
+    { key: "fetching_ics", label: "Sinais" },
+    { key: "grouping",     label: "Séries" },
+    { key: "cache_check",  label: "Cache" },
+    { key: "enriching",    label: "Dados" },
+  ];
+
+  const phaseOrder: Phase[] = ["idle", "fetching_ics", "grouping", "cache_check", "enriching", "done"];
+  const currentIdx = phaseOrder.indexOf(phase);
+
+  return (
+    <div className="min-h-[220px] flex flex-col justify-center px-6 sm:px-9 py-8 gap-6">
+      {/* Skeletons do hero */}
+      <div className="flex items-end gap-5">
+        <div className="hidden sm:block w-[80px] h-[120px] rounded-xl bg-white/[0.04] animate-pulse shrink-0" />
+        <div className="flex-1 min-w-0 flex flex-col gap-3">
+          <div className="flex gap-2">
+            <div className="h-4 w-16 rounded-lg bg-white/[0.06] animate-pulse" />
+            <div className="h-4 w-20 rounded-lg bg-white/[0.04] animate-pulse" />
+          </div>
+          <div className="h-7 w-2/3 rounded-lg bg-white/[0.06] animate-pulse" />
+          <div className="h-3.5 w-full rounded-lg bg-white/[0.03] animate-pulse" />
+          <div className="h-3.5 w-4/5 rounded-lg bg-white/[0.03] animate-pulse" />
+        </div>
+      </div>
+
+      {/* Barra de progresso */}
+      <div className="flex flex-col gap-2.5">
+        {/* Trilha de fases */}
+        <div className="flex items-center gap-1.5">
+          {steps.map(({ key, label }, i) => {
+            const stepIdx = phaseOrder.indexOf(key);
+            const isDone = currentIdx > stepIdx;
+            const isActive = currentIdx === stepIdx;
+            return (
+              <div key={key} className="flex items-center gap-1.5 flex-1">
+                <div className="flex flex-col items-center gap-1 flex-1">
+                  <div
+                    className={`h-0.5 w-full rounded-full transition-all duration-500 ${
+                      isDone
+                        ? "bg-sky-400/70"
+                        : isActive
+                          ? "bg-sky-400/40"
+                          : "bg-white/[0.06]"
+                    }`}
+                  />
+                  <span
+                    className={`text-[9px] font-bold uppercase tracking-wide transition-colors duration-300 ${
+                      isDone
+                        ? "text-sky-400/60"
+                        : isActive
+                          ? "text-sky-300/80"
+                          : "text-white/15"
+                    }`}
+                  >
+                    {label}
+                  </span>
+                </div>
+                {i < steps.length - 1 && (
+                  <div
+                    className={`w-1 h-1 rounded-full shrink-0 mb-3 transition-colors duration-300 ${
+                      isDone ? "bg-sky-400/50" : "bg-white/[0.08]"
+                    }`}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Barra contínua de progresso */}
+        <div className="h-[3px] w-full rounded-full bg-white/[0.06] overflow-hidden">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-sky-500 to-sky-300 transition-all duration-700 ease-out"
+            style={{ width: `${Math.max(4, totalProgress)}%` }}
+          />
+        </div>
+
+        {/* Label da fase atual */}
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] text-sky-400/70 font-medium">
+            {PHASE_LABELS[phase]}
+          </span>
+          <span className="text-[10px] text-white/25 tabular-nums">
+            {Math.round(totalProgress)}%
+          </span>
+        </div>
+      </div>
     </div>
   );
 }
@@ -2191,18 +2375,20 @@ function RadarHero({
 
           {/* Tabs de período */}
           <div className="flex items-center gap-1 rounded-2xl border border-white/[0.09] bg-black/30 p-1 backdrop-blur-md shrink-0">
-            {(["day", "week", "month"] as ViewMode[]).map((v) => (
+            {(["all", "day", "week", "month"] as ViewMode[]).map((v) => (
               <button
                 key={v}
                 type="button"
                 onClick={() => onChangeViewMode(v)}
                 className={`text-[11px] font-bold px-3.5 py-1.5 rounded-lg transition-all duration-200 ${viewMode === v ? "border border-sky-300/25 bg-sky-300/[0.14] text-sky-100 shadow-[0_0_18px_rgba(56,189,248,0.12)]" : "text-white/30 hover:text-white/55"}`}
               >
-                {v === "day"
-                  ? "Destaques"
-                  : v === "week"
-                    ? "NOVIDADES"
-                    : "Vem Aí"}
+                {v === "all"
+                  ? "Todos"
+                  : v === "day"
+                    ? "Destaques"
+                    : v === "week"
+                      ? "Novidades"
+                      : "Vem Aí"}
               </button>
             ))}
           </div>
@@ -2543,7 +2729,7 @@ function RadarHero({
       )}
 
       {spotlightItems.length === 0 && phase !== "done" && (
-        <div className="min-h-[180px] animate-pulse" />
+        <RadarLoadingState phase={phase} enrichProgress={enrichProgress} />
       )}
 
       <style>{`@keyframes spotlight-progress { from { transform: scaleX(0); } to { transform: scaleX(1); } }`}</style>
@@ -2862,7 +3048,7 @@ export default function RadarClient({
 
   // ── Estado de navegação ────────────────────────────────────────────────────
   const now = new Date();
-  const [viewMode, setViewMode] = useState<ViewMode>("day");
+  const [viewMode, setViewMode] = useState<ViewMode>("all");
   const [navYear, setNavYear] = useState(now.getFullYear());
   const [navMonth, setNavMonth] = useState(now.getMonth());
   const [navWeekStart, setNavWeekStart] = useState(() => startOfWeek(now));
@@ -2871,6 +3057,7 @@ export default function RadarClient({
   // ── Filtro por tipo de conteúdo ────────────────────────────────────────────
   // Estado por aba de período — cada aba preserva seu filtro independentemente.
   const [filterByMode, setFilterByMode] = useState<Record<ViewMode, ContentFilterKey>>({
+    all: "all",
     day: "all",
     week: "all",
     month: "all",
@@ -3029,6 +3216,11 @@ export default function RadarClient({
 
   const cinemaGroupsForMode = useMemo(() => {
     if (!sections) return undefined;
+    if (viewMode === "all") return [
+      ...(sections.cinemaToday ?? []),
+      ...(sections.cinemaThisWeek ?? []),
+      ...(sections.cinemaNext ?? []),
+    ];
     if (viewMode === "day") return sections.cinemaToday ?? [];
     if (viewMode === "week") return sections.cinemaThisWeek ?? [];
     return sections.cinemaNext ?? [];
@@ -3062,7 +3254,7 @@ export default function RadarClient({
 
   // ── Contagens por filtro e lista filtrada ─────────────────────────────────
   const filterCounts = useMemo((): FilterCount[] => {
-    const keys: ContentFilterKey[] = ["all", "series", "movies", "anime", "animation", "dorama", "nonfiction"];
+    const keys: ContentFilterKey[] = ["all", "series", "movies", "anime"];
     return keys.map((key) => ({
       key,
       count: key === "all"
@@ -3096,7 +3288,7 @@ export default function RadarClient({
         phase={phase}
         viewMode={viewMode}
         onChangeViewMode={setViewMode}
-        filteredCount={filteredCount}
+        filteredCount={filteredEditorialItems.length}
         filteredEps={filteredEps}
         enrichProgress={enrichProgress}
         spotlightItems={spotlightItems}
@@ -3104,20 +3296,6 @@ export default function RadarClient({
         onChangeRadarMode={handleChangeRadarMode}
         isLoadingMode={isLoadingMode}
       />
-
-      {/* Contador discreto de títulos na aba atual */}
-      {editorialItems.length > 0 && (
-        <div className="flex items-center gap-2 mb-3 -mt-6">
-          <span className="text-[11px] font-bold tabular-nums text-white/40">
-            {filteredEditorialItems.length}
-          </span>
-          <span className="text-[11px] text-white/22">
-            {filteredEditorialItems.length === 1 ? "título" : "títulos"}
-            {" · "}
-            {viewMode === "day" ? "Destaques" : viewMode === "week" ? "NOVIDADES" : "Vem Aí"}
-          </span>
-        </div>
-      )}
 
       {error && (
         <div className="mb-6 rounded-2xl border border-red-500/20 bg-red-950/20 px-5 py-4 text-[12px] text-red-300/80">
