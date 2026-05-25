@@ -94,10 +94,12 @@ export async function GET() {
     }
 
     if (!statesRaw || statesRaw.length === 0) {
+      console.log("[continuity-new-episodes] states=0 → returning empty");
       return NextResponse.json({ items: [] });
     }
 
     const states = statesRaw as StateRow[];
+    console.log("[continuity-new-episodes] statesRaw=", states.length);
     const tmdbIds = states.map((s) => s.tmdb_id);
 
     // 2. Busca metadados de título em batch
@@ -142,10 +144,14 @@ export async function GET() {
       };
 
     const eligible: Eligible[] = [];
+    let skipNoTitle = 0;
+    let skipBehindLimit = 0;
+    let skipNoDateTrigger = 0;
+    const skipOther = 0;
 
     for (const state of states) {
       const title = titleMap.get(state.tmdb_id);
-      if (!title) continue;
+      if (!title) { skipNoTitle++; continue; }
 
       // Resolve last_air_date: coluna direta nunca foi populada — usa tmdb_payload como fallback
       const seriesLastAirDate: string | null =
@@ -170,7 +176,11 @@ export async function GET() {
         // Trigger: o próximo episódio DO USUÁRIO foi ao ar recentemente (fonte: user_title_state)
         // Fallback: last_air_date da série (quando disponível no tmdb_payload)
         const dateTrigger = state.next_episode_air_date ?? seriesLastAirDate;
-        if (!dateTrigger || dateTrigger < cutoffStr) continue;
+        if (!dateTrigger || dateTrigger < cutoffStr) {
+          skipNoDateTrigger++;
+          console.log(`[continuity-new-episodes] skip tmdb_id=${state.tmdb_id} reason=date_trigger_stale cs=${cs} behind=${episodesBehind} dateTrigger=${dateTrigger} cutoff=${cutoffStr}`);
+          continue;
+        }
 
         eligible.push({
           ...state,
@@ -185,6 +195,12 @@ export async function GET() {
 
       // Watchlist ainda não iniciada com poucos episódios aired — começa por S1E1
       // Trigger: série tem episódios recentes (verifica tmdb_payload)
+      // Se chegou aqui com in_progress mas episodesBehind > MAX_EPISODES_BEHIND, loga
+      if (cs === "in_progress" && episodesBehind > MAX_EPISODES_BEHIND) {
+        skipBehindLimit++;
+        console.log(`[continuity-new-episodes] skip tmdb_id=${state.tmdb_id} reason=behind_limit cs=${cs} behind=${episodesBehind} max=${MAX_EPISODES_BEHIND}`);
+      }
+
       if (
         (cs === "watchlist" || state.status === "watchlist") &&
         watched === 0 &&
@@ -234,6 +250,8 @@ export async function GET() {
         }
       }
     }
+
+    console.log(`[continuity-new-episodes] eligible=${eligible.length} skip_no_title=${skipNoTitle} skip_behind_limit=${skipBehindLimit} skip_no_date=${skipNoDateTrigger} skip_other=${skipOther}`);
 
     // Ordena: menos episódios por assistir primeiro, depois mais recente
     eligible.sort(
@@ -311,6 +329,7 @@ export async function GET() {
       };
     });
 
+    console.log(`[continuity-new-episodes] returned=${items.length}`);
     return NextResponse.json({ items });
   } catch (err) {
     console.error("[new-episodes] unhandled error", err);

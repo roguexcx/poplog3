@@ -16,6 +16,9 @@ import WatchlistPickCard, {
   type WatchlistPickItem,
 } from "@/features/acompanhando/WatchlistPickCard";
 import StartSeriesBanner from "@/features/acompanhando/StartSeriesBanner";
+import RecentlyWatchedCard, {
+  type RecentlyWatchedItem,
+} from "@/features/acompanhando/RecentlyWatchedCard";
 
 import type { ScoredItem, SignalType } from "@/components/HeroSpotlight/types";
 
@@ -44,6 +47,60 @@ async function postCuradoriaAction(body: unknown) {
     headers: { "content-type": "application/json" },
     body: JSON.stringify(body),
   }).catch(() => null);
+}
+
+type FetchResult<T> =
+  | { ok: true; data: T }
+  | { ok: false; status: number | null; reason: string };
+
+async function fetchJsonSafe<T>(url: string): Promise<FetchResult<T>> {
+  let res: Response;
+  try {
+    res = await fetch(url);
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : String(err);
+    console.warn("[AcompanhandoPage] fetch network error:", { url, reason });
+    return { ok: false, status: null, reason };
+  }
+
+  const contentType = res.headers.get("content-type") ?? "";
+
+  if (!res.ok) {
+    console.warn("[AcompanhandoPage] resposta não-ok:", {
+      url,
+      status: res.status,
+      contentType,
+    });
+    // Tenta extrair mensagem de erro do JSON, se disponível
+    const reason = contentType.includes("application/json")
+      ? await res.json().then((d: unknown) => (d && typeof d === "object" && "error" in d ? String((d as Record<string, unknown>).error) : `HTTP ${res.status}`)).catch(() => `HTTP ${res.status}`)
+      : `HTTP ${res.status}`;
+    return { ok: false, status: res.status, reason };
+  }
+
+  if (!contentType.includes("application/json")) {
+    console.warn("[AcompanhandoPage] content-type inesperado:", {
+      url,
+      status: res.status,
+      contentType,
+    });
+    return { ok: false, status: res.status, reason: "Resposta não é JSON" };
+  }
+
+  try {
+    const data = await res.json() as T;
+    return { ok: true, data };
+  } catch (err) {
+    const reason = err instanceof Error ? err.message : "JSON inválido";
+    console.warn("[AcompanhandoPage] erro ao parsear JSON:", { url, reason });
+    return { ok: false, status: res.status, reason };
+  }
+}
+
+/** Mantido para chamadas internas que não precisam do estado de erro. */
+async function fetchJsonOrNull<T>(url: string): Promise<T | null> {
+  const result = await fetchJsonSafe<T>(url);
+  return result.ok ? result.data : null;
 }
 
 // ── Hook responsivo para itens por página da seção Continue ──────────────────
@@ -138,15 +195,21 @@ export default function AcompanhandoPage() {
 
   const [heroItems, setHeroItems] = useState<ScoredItem[]>([]);
   const [isHeroLoading, setIsHeroLoading] = useState(true);
+  const [heroError, setHeroError] = useState<string | null>(null);
 
   const [newEpisodeItems, setNewEpisodeItems] = useState<NewEpisodeItem[]>([]);
   const [isNewEpisodesLoading, setIsNewEpisodesLoading] = useState(true);
+  const [newEpisodesError, setNewEpisodesError] = useState<string | null>(null);
 
   const [continueItems, setContinueItems] = useState<ContinueItem[]>([]);
   const [isContinueLoading, setIsContinueLoading] = useState(true);
+  const [continueError, setContinueError] = useState<string | null>(null);
   const [continueSortMode, setContinueSortMode] = useState<ContinueSortMode>("easy");
   const [continuePage, setContinuePage] = useState(1);
   const continueItemsPerPage = useContinueItemsPerPage();
+
+  const [recentlyWatched, setRecentlyWatched] = useState<RecentlyWatchedItem[]>([]);
+  const [isRecentlyWatchedLoading, setIsRecentlyWatchedLoading] = useState(true);
 
   const [watchlistPicks, setWatchlistPicks] = useState<WatchlistPickItem[]>([]);
   const [isWatchlistPicksLoading, setIsWatchlistPicksLoading] = useState(true);
@@ -157,14 +220,19 @@ export default function AcompanhandoPage() {
   const shownStartSeriesIds = useRef<Set<string>>(new Set());
 
   useEffect(() => {
-    fetch("/api/poplog3/continuity/hero")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data && Array.isArray(data.candidates)) {
-          setHeroItems(data.candidates);
+    fetchJsonSafe<{ candidates?: ScoredItem[] }>("/api/poplog3/continuity/hero")
+      .then((result) => {
+        if (result.ok) {
+          if (Array.isArray(result.data.candidates)) {
+            setHeroItems(result.data.candidates);
+          }
+        } else {
+          setHeroError(result.reason);
+          console.error("[AcompanhandoPage] Hero falhou:", result.reason);
         }
       })
       .catch((err) => {
+        setHeroError(err instanceof Error ? err.message : String(err));
         console.error("[AcompanhandoPage] Falha ao carregar Hero:", err);
       })
       .finally(() => {
@@ -173,14 +241,19 @@ export default function AcompanhandoPage() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/poplog3/continuity/new-episodes")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data && Array.isArray(data.items)) {
-          setNewEpisodeItems(data.items);
+    fetchJsonSafe<{ items?: NewEpisodeItem[] }>("/api/poplog3/continuity/new-episodes")
+      .then((result) => {
+        if (result.ok) {
+          if (Array.isArray(result.data.items)) {
+            setNewEpisodeItems(result.data.items);
+          }
+        } else {
+          setNewEpisodesError(result.reason);
+          console.error("[AcompanhandoPage] Novos episódios falhou:", result.reason);
         }
       })
       .catch((err) => {
+        setNewEpisodesError(err instanceof Error ? err.message : String(err));
         console.error("[AcompanhandoPage] Falha ao carregar novos episódios:", err);
       })
       .finally(() => {
@@ -189,18 +262,38 @@ export default function AcompanhandoPage() {
   }, []);
 
   useEffect(() => {
-    fetch("/api/poplog3/continuity/continue")
-      .then((res) => res.json())
-      .then((data) => {
-        if (data && Array.isArray(data.items)) {
-          setContinueItems(data.items);
+    fetchJsonSafe<{ items?: ContinueItem[] }>("/api/poplog3/continuity/continue")
+      .then((result) => {
+        if (result.ok) {
+          if (Array.isArray(result.data.items)) {
+            setContinueItems(result.data.items);
+          }
+        } else {
+          setContinueError(result.reason);
+          console.error("[AcompanhandoPage] Continue falhou:", result.reason);
         }
       })
       .catch((err) => {
+        setContinueError(err instanceof Error ? err.message : String(err));
         console.error("[AcompanhandoPage] Falha ao carregar continuidade:", err);
       })
       .finally(() => {
         setIsContinueLoading(false);
+      });
+  }, []);
+
+  useEffect(() => {
+    fetchJsonSafe<{ items?: RecentlyWatchedItem[] }>("/api/poplog3/continuity/recently-watched")
+      .then((result) => {
+        if (result.ok && Array.isArray(result.data.items)) {
+          setRecentlyWatched(result.data.items);
+        }
+      })
+      .catch((err) => {
+        console.error("[AcompanhandoPage] Falha ao carregar últimos assistidos:", err);
+      })
+      .finally(() => {
+        setIsRecentlyWatchedLoading(false);
       });
   }, []);
 
@@ -212,8 +305,7 @@ export default function AcompanhandoPage() {
     const params = allExcludeIds.length
       ? `?exclude=${allExcludeIds.join(",")}`
       : "";
-    fetch(`/api/poplog3/continuity/watchlist-picks${params}`)
-      .then((res) => res.json())
+    fetchJsonOrNull<{ items?: WatchlistPickItem[] }>(`/api/poplog3/continuity/watchlist-picks${params}`)
       .then((data) => {
         if (data && Array.isArray(data.items)) {
           setWatchlistPicks(data.items);
@@ -242,8 +334,7 @@ export default function AcompanhandoPage() {
     const params = new URLSearchParams({ seriesStart: "1" });
     if (excludeIds.length) params.set("exclude", excludeIds.join(","));
 
-    fetch(`/api/poplog3/continuity/watchlist-picks?${params.toString()}`)
-      .then((res) => res.json())
+    fetchJsonOrNull<{ items?: WatchlistPickItem[] }>(`/api/poplog3/continuity/watchlist-picks?${params.toString()}`)
       .then((data) => {
         if (data && Array.isArray(data.items)) {
           setStartSeriesPicks(data.items);
@@ -321,6 +412,10 @@ export default function AcompanhandoPage() {
     router.push(`/title/tv/${item.tmdb_id}`);
   }
 
+  function handleRecentlyWatchedNavigate(item: RecentlyWatchedItem) {
+    router.push(`/title/${item.media_type}/${item.tmdb_id}`);
+  }
+
   const sortedContinueItems = useMemo(() => {
     if (continueSortMode === "easy") {
       return [...continueItems].sort(
@@ -361,7 +456,7 @@ export default function AcompanhandoPage() {
         )}
 
         {/* Novos episódios esperando */}
-        {(isNewEpisodesLoading || newEpisodeItems.length > 0) && (
+        {(isNewEpisodesLoading || newEpisodeItems.length > 0 || newEpisodesError !== null) && (
           <section>
             <SectionHeader
               eyebrow="Disponível agora"
@@ -388,6 +483,10 @@ export default function AcompanhandoPage() {
                   />
                 ))}
               </div>
+            ) : newEpisodesError !== null ? (
+              <p className="py-3 text-xs text-white/30">
+                Não foi possível carregar os episódios agora.
+              </p>
             ) : (
               <div className="grid gap-2.5 md:grid-cols-2">
                 {newEpisodeItems.map((item) => (
@@ -433,7 +532,7 @@ export default function AcompanhandoPage() {
         )}
 
         {/* Continue de onde parou */}
-        {(isContinueLoading || continueItems.length > 0) && (
+        {(isContinueLoading || continueItems.length > 0 || continueError !== null) && (
           <section>
             <SectionHeader
               eyebrow="Em andamento"
@@ -488,6 +587,10 @@ export default function AcompanhandoPage() {
                   />
                 ))}
               </div>
+            ) : continueError !== null ? (
+              <p className="py-3 text-xs text-white/30">
+                Não foi possível carregar os títulos em andamento agora.
+              </p>
             ) : (
               <div className="flex flex-col gap-4">
                 <div className="grid gap-2.5 md:grid-cols-2 xl:grid-cols-3">
@@ -546,6 +649,40 @@ export default function AcompanhandoPage() {
                     key={item.content_id}
                     item={item}
                     onClick={() => handleWatchlistPickNavigate(item)}
+                  />
+                ))}
+              </div>
+            )}
+          </section>
+        )}
+
+        {/* Últimos vistos */}
+        {(isRecentlyWatchedLoading || recentlyWatched.length > 0) && (
+          <section>
+            <SectionHeader
+              eyebrow="Histórico"
+              accent="neutral"
+              title="Últimos vistos"
+              size="sm"
+              className="mb-4"
+            />
+
+            {isRecentlyWatchedLoading ? (
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {[...Array(4)].map((_, i) => (
+                  <div
+                    key={i}
+                    className="h-[54px] animate-pulse rounded-xl bg-white/[0.04]"
+                  />
+                ))}
+              </div>
+            ) : (
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {recentlyWatched.map((item) => (
+                  <RecentlyWatchedCard
+                    key={item.content_id}
+                    item={item}
+                    onClick={() => handleRecentlyWatchedNavigate(item)}
                   />
                 ))}
               </div>

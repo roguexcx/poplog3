@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+
 export type ContinueStatusSignal =
   | "new_episode"
   | "last_episode"
@@ -25,6 +27,9 @@ export type ContinueItem = {
   last_watched_at: string | null;
   remaining_minutes: number | null;
   remaining_runtime_label: string | null;
+  /** Tempo restante de toda a série (todos eps aired) */
+  series_remaining_minutes: number | null;
+  series_remaining_runtime_label: string | null;
   status_signal: ContinueStatusSignal;
   runtime: number | null;
   runtime_label: string | null;
@@ -33,6 +38,8 @@ export type ContinueItem = {
   /** Total de episódios na temporada atual — null se não sincronizado */
   season_total: number | null;
 };
+
+type TimeScope = "season" | "series";
 
 type Props = {
   item: ContinueItem;
@@ -66,6 +73,8 @@ const SIGNAL_CONFIG: Record<
 };
 
 export default function ContinueCard({ item, onClick }: Props) {
+  const [timeScope, setTimeScope] = useState<TimeScope>("season");
+
   const posterUrl = item.poster_path
     ? `https://image.tmdb.org/t/p/w185${item.poster_path}`
     : null;
@@ -90,6 +99,23 @@ export default function ContinueCard({ item, onClick }: Props) {
       : cfg.label;
 
   const isNewEp = item.status_signal === "new_episode";
+
+  // Tempo restante para exibição conforme scope selecionado
+  const hasSeriesTime =
+    item.series_remaining_minutes != null &&
+    item.series_remaining_minutes !== item.remaining_minutes;
+  const activeRuntimeLabel =
+    timeScope === "series" && hasSeriesTime
+      ? item.series_remaining_runtime_label
+      : item.remaining_runtime_label;
+  const activeScopeLabel =
+    timeScope === "series" && hasSeriesTime ? "total" : `T${item.next_season}`;
+
+  function handleTimeScopeToggle(e: React.MouseEvent) {
+    if (!hasSeriesTime) return;
+    e.stopPropagation();
+    setTimeScope((prev) => (prev === "season" ? "series" : "season"));
+  }
 
   return (
     <button
@@ -160,9 +186,30 @@ export default function ContinueCard({ item, onClick }: Props) {
               </p>
             )}
             {item.season_total != null && (
-              <p className="mt-0.5 truncate text-[10px] text-white/35">
-                {item.season_watched} de {item.season_total} eps na T{item.next_season}
-                {item.remaining_runtime_label ? ` · ${item.remaining_runtime_label}` : ""}
+              <p className="mt-0.5 flex items-center gap-1 truncate text-[10px] text-white/35">
+                <span className="shrink-0">
+                  {item.season_watched} de {item.season_total} eps na T{item.next_season}
+                </span>
+                {activeRuntimeLabel && (
+                  <button
+                    type="button"
+                    onClick={handleTimeScopeToggle}
+                    title={hasSeriesTime ? (timeScope === "season" ? "Ver tempo total da série" : "Ver tempo da temporada") : undefined}
+                    className={[
+                      "inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-px transition-all",
+                      hasSeriesTime
+                        ? "cursor-pointer border border-white/[0.12] bg-white/[0.06] hover:border-white/[0.22] hover:bg-white/[0.12] hover:text-white/70"
+                        : "cursor-default",
+                    ].join(" ")}
+                  >
+                    <span className="font-medium">{activeRuntimeLabel}</span>
+                    {hasSeriesTime && (
+                      <span className="text-[8px] font-bold uppercase tracking-wide opacity-60">
+                        {activeScopeLabel}
+                      </span>
+                    )}
+                  </button>
+                )}
               </p>
             )}
           </div>

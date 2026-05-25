@@ -38,6 +38,9 @@ export type ContinueItem = {
   last_watched_at: string | null;
   remaining_minutes: number | null;
   remaining_runtime_label: string | null;
+  /** Minutos restantes considerando TODOS os episódios aired da série */
+  series_remaining_minutes: number | null;
+  series_remaining_runtime_label: string | null;
   status_signal: ContinueStatusSignal;
   runtime: number | null;
   runtime_label: string | null;
@@ -112,10 +115,12 @@ export async function GET() {
     }
 
     if (!statesRaw || statesRaw.length === 0) {
+      console.log("[continuity-continue] states=0 → returning empty");
       return NextResponse.json({ items: [] });
     }
 
     const states = statesRaw as StateRow[];
+    console.log("[continuity-continue] statesRaw=", states.length);
     const tmdbIds = states.map((s) => s.tmdb_id);
 
     const { data: titlesRaw } = await supabaseAdmin
@@ -149,6 +154,11 @@ export async function GET() {
 
     // Filtra novamente para garantir que o título exista no catálogo
     const valid = states.filter((s) => titleMap.has(s.tmdb_id));
+    const skipped = states.length - valid.length;
+    if (skipped > 0) {
+      console.log(`[continuity-continue] skip=${skipped} (not in poplog3_titles catalog)`);
+    }
+    console.log(`[continuity-continue] valid=${valid.length} titles=${titleMap.size}`);
     const top = valid.slice(0, MAX_ITEMS);
 
     // Enriquece com nome/still do próximo episódio em paralelo
@@ -165,18 +175,32 @@ export async function GET() {
         episodes: episodeRuntimesBySeries.get(state.tmdb_id) ?? null,
       });
       const episodesBehind = Math.max(0, state.aired_episodes - state.watched_episodes);
+      // Eps restantes APENAS na temporada atual
+      const seasonTotal = seasonMap.get(`${state.tmdb_id}:${state.next_season}`) ?? null;
+      const seasonEpsBehind =
+        seasonTotal != null
+          ? Math.max(0, seasonTotal - (state.next_episode - 1))
+          : null;
+      // Tempo restante da temporada atual
       const remainingMinutes =
-        runtimeResolution.minutes === null
+        runtimeResolution.minutes === null || seasonEpsBehind === null
           ? null
-          : episodesBehind * runtimeResolution.minutes;
+          : seasonEpsBehind * runtimeResolution.minutes;
       const runtimeLabel = formatEpisodeRuntimeLabel(runtimeResolution.minutes, {
         estimated: runtimeResolution.estimated,
       });
       const remainingRuntimeLabel = formatRemainingRuntimeLabel(
         remainingMinutes,
-        {
-          estimated: runtimeResolution.estimated,
-        },
+        { estimated: runtimeResolution.estimated },
+      );
+      // Tempo restante de TODA a série (todos eps aired menos assistidos)
+      const seriesRemainingMinutes =
+        runtimeResolution.minutes === null
+          ? null
+          : episodesBehind * runtimeResolution.minutes;
+      const seriesRemainingRuntimeLabel = formatRemainingRuntimeLabel(
+        seriesRemainingMinutes,
+        { estimated: runtimeResolution.estimated },
       );
 
       return {
@@ -198,14 +222,17 @@ export async function GET() {
         last_watched_at: state.last_watched_at ?? null,
         remaining_minutes: remainingMinutes,
         remaining_runtime_label: remainingRuntimeLabel,
+        series_remaining_minutes: seriesRemainingMinutes,
+        series_remaining_runtime_label: seriesRemainingRuntimeLabel,
         status_signal: resolveSignal(episodesBehind, state.next_episode_air_date, cutoffStr),
         runtime: runtimeResolution.minutes,
         runtime_label: runtimeLabel,
         season_watched: state.next_episode - 1,
-        season_total: seasonMap.get(`${state.tmdb_id}:${state.next_season}`) ?? null,
+        season_total: seasonTotal,
       };
     });
 
+    console.log(`[continuity-continue] returned=${items.length}`);
     return NextResponse.json({ items });
   } catch (err) {
     console.error("[continuity/continue] unhandled error", err);

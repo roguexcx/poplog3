@@ -58,7 +58,7 @@ export default function LibraryHero({
             <TmdbImage
               path={heroItem.title.backdrop_path ?? heroItem.title.poster_path}
               fallbackPath={heroItem.title.poster_path ?? null}
-              size="original"
+              size="w1280"
               alt={heroTitle}
               fallbackLabel={heroTitle}
               className="h-full w-full object-cover opacity-48 blur-[1px] scale-105 saturate-[1.08]"

@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import ContextualAttribution from "@/components/attribution/ContextualAttribution";
 import PageShell from "@/components/layout/PageShell";
 import type { IcsSeriesGroup, MovieGroup, ContentCategory } from "@/lib/ics-engine";
-import { filterEnrichedGroup, CATEGORY_PRIORITY } from "@/lib/ics-engine";
+import { CATEGORY_PRIORITY, ALL_BLOCKED_CATEGORIES } from "@/lib/ics-engine";
 import type { IcsAgendaResponse } from "@/app/api/ics/agenda/route";
 
 // ── Constantes ─────────────────────────────────────────────────────────────────
@@ -39,10 +39,10 @@ function bestVerticalImg(
   const cleanBd     = tmdb.clean_backdrop_path ?? tmdb.backdrop_path;
   if (POSTER_TEXT_LANGS.has(lang)) {
     // Idioma não-latino: usar backdrop limpo (sem caracteres)
-    return TMDB_IMG(cleanBd, "w780") || TMDB_IMG(tmdb.poster_path, "w342");
+    return TMDB_IMG(cleanBd, "w1280") || TMDB_IMG(tmdb.poster_path, "w500");
   }
   // Para idiomas latinos: poster ok; fallback pro backdrop limpo
-  return TMDB_IMG(tmdb.poster_path, "w342") || TMDB_IMG(cleanBd, "w780");
+  return TMDB_IMG(tmdb.poster_path, "w500") || TMDB_IMG(cleanBd, "w1280");
 }
 
 
@@ -239,8 +239,15 @@ function groupEditorialScore(
   return (
     (group.relevanceScore ?? 0) +
     normalizePopularity(group.tmdb?.popularity ?? 0) +   // log-normalizado (era /10 linear)
-    // K-dramas (ko/zh/th) sem boost trending — TMDB trending global é distorcido
-    ((() => { const l = group.tmdb?.original_language ?? ""; const asian = new Set(["ko","zh","th","hi","tl"]); if (asian.has(l)) return 0; if (l === "ja") return (trendingDay.has(tmdbId ?? -1) || trendingWeek.has(tmdbId ?? -1)) ? 5 : 0; return trendingDay.has(tmdbId ?? -1) ? 38 : trendingWeek.has(tmdbId ?? -1) ? 20 : 0; })()) +
+    ((() => {
+      const lang = group.tmdb?.original_language ?? "";
+      const reduced = new Set(["ko", "zh", "th", "hi", "tl"]);
+      const dayBoost = trendingDay.has(tmdbId ?? -1);
+      const weekBoost = trendingWeek.has(tmdbId ?? -1);
+      if (reduced.has(lang)) return dayBoost ? 19 : weekBoost ? 10 : 0;
+      if (lang === "ja" && group.category !== "ANIMATION") return dayBoost ? 10 : weekBoost ? 5 : 0;
+      return dayBoost ? 38 : weekBoost ? 20 : 0;
+    })()) +
     (isPremiereEpisode(group, dateStr) ? 34 : 0) +
     (isSeasonFinaleGuess(group, dateStr) ? 30 : 0) +
     (isSeasonStart(group, dateStr) ? 12 : 0) +
@@ -368,15 +375,6 @@ function buildEditorialGroups(
   const seen = new Set<string>();
   const items: EditorialGroup[] = [];
 
-  // ── Contadores de diversidade (decay editorial) ───────────────────────────
-  // Usados para penalizar repetição de provider, idioma e gênero no feed final.
-  const providerCount = new Map<string, number>();   // e.g. "Netflix" → 3
-  const langCount     = new Map<string, number>();   // e.g. "ko" → 2
-  const genreCount    = new Map<number, number>();   // e.g. 18 (drama) → 5
-  // Hard cap: idiomas asiáticos (ko/ja/zh/th) — máx 2 itens no feed completo
-  const ASIAN_LANGS   = new Set(["ko", "ja", "zh", "th", "hi", "tl"]);
-  const asianLangCount = new Map<string, number>();
-
   // ── Séries ──────────────────────────────────────────────────────────────────
   for (const group of sourceGroups) {
     if (!hasValidTmdb(group)) continue;
@@ -392,26 +390,8 @@ function buildEditorialGroups(
     seen.add(key);
     const dateStr = ep.startAt.slice(0, 10);
     const score = groupEditorialScore(group, dateStr, options.trendingDay, options.trendingWeek);
-    // ── Decay editorial por diversidade ──────────────────────────────────────
-    const provider   = group.streamingProvider?.name ?? "_";
-    const lang       = group.tmdb?.original_language ?? "_";
-    const genres     = ((group.tmdb as unknown as Record<string,unknown>)?.genre_ids as number[]) ?? [];
-    const pCount     = providerCount.get(provider) ?? 0;
-    const lCount     = langCount.get(lang) ?? 0;
-    const maxGCount  = genres.reduce((mx, g) => Math.max(mx, genreCount.get(g) ?? 0), 0);
-    // Idiomas asiáticos: hard cap de 2 itens — excedente bloqueado completamente
-    if (ASIAN_LANGS.has(lang)) {
-      const aCount = asianLangCount.get(lang) ?? 0;
-      if (aCount >= 2) continue;
-      asianLangCount.set(lang, aCount + 1);
-    }
-    // Penalty de diversidade: provider (8pt×n, cap 32), idioma (10pt×n, cap 30), gênero (4pt×n, cap 16)
-    const diversityPenalty = Math.min(pCount * 8, 32) + Math.min(lCount * 10, 30) + Math.min(maxGCount * 4, 16);
-    providerCount.set(provider, pCount + 1);
-    langCount.set(lang, lCount + 1);
-    genres.forEach(g => genreCount.set(g, (genreCount.get(g) ?? 0) + 1));
 
-    items.push({ group, dateStr, score: score - diversityPenalty, visualWeight: "compact" });
+    items.push({ group, dateStr, score, visualWeight: "compact" });
   }
 
   // ── Filmes — incluídos SOMENTE se a data de lançamento cair dentro do range ──
@@ -433,30 +413,26 @@ function buildEditorialGroups(
 
   items.sort((a, b) => b.score - a.score);
 
-  // Cap de filmes: no máximo 1 filme a cada 3 itens (33%) para distribuição equilibrada.
-  // Reordena para intercalar filmes entre séries em vez de empilhá-los.
-  const series = items.filter(i => !i.movie);
-  const movies  = items.filter(i =>  i.movie);
-  const movieCap = Math.ceil(series.length / 2.5); // máx ~40% do total
-  const cappedMovies = movies.slice(0, movieCap);
+  const len = items.length;
+  const compactCount = Math.max(3, Math.floor(len * 0.25));
+  const prominentTarget = Math.max(0, len - compactCount);
+  const promotedLangs = new Set<string>();
+  let promoted = 0;
 
-  // Intercala: a cada 3 séries, insere 1 filme (pelo score mais alto disponível)
-  const merged: EditorialGroup[] = [];
-  let mi = 0;
-  for (let si = 0; si < series.length; si++) {
-    merged.push(series[si]);
-    // Insere filme após a 3ª, 6ª, 9ª... série SE o filme tiver score razoável
-    if ((si + 1) % 3 === 0 && mi < cappedMovies.length) {
-      merged.push(cappedMovies[mi++]);
-    }
-  }
-  // Filmes restantes vão ao final (mas limitados)
-  while (mi < cappedMovies.length) merged.push(cappedMovies[mi++]);
+  return items.map((item) => {
+    const lang = item.movie
+      ? item.movie.movie.original_language ?? ""
+      : item.group.tmdb?.original_language ?? "";
+    const isAnime = item.movie
+      ? item.movie.movie.genre_ids?.includes(16) ?? false
+      : item.group.category === "ANIMATION" || item.group.tmdb?.genre_ids?.includes(16) === true;
+    const needsLanguageCap = !!lang && lang !== "pt" && lang !== "en" && !isAnime;
+    const canPromoteByLang = !needsLanguageCap || !promotedLangs.has(lang);
+    const shouldPromote = promoted < prominentTarget && canPromoteByLang;
 
-  // Distribui pesos visuais: últimos 25% viram compact
-  const len = merged.length;
-  return merged.map((item, index) => {
-    if (index >= len - Math.max(3, Math.floor(len * 0.25))) return { ...item, visualWeight: "compact" as const };
+    if (!shouldPromote) return { ...item, visualWeight: "compact" as const };
+    if (needsLanguageCap) promotedLangs.add(lang);
+    promoted++;
     return { ...item, visualWeight: "poster" as const };
   });
 }
@@ -870,25 +846,22 @@ function buildSpotlightItems(
     return (b.group.tmdb?.popularity ?? 0) - (a.group.tmdb?.popularity ?? 0);
   });
 
-  // ── Filtro de diversidade no spotlight ──────────────────────────────────────
-  // Idiomas asiáticos: máx 1 item por idioma no hero (ko, ja, zh, th, hi, tl)
-  // Garante que o carrossel seja dominantemente ocidental/BR.
-  const ASIAN_SPOTLIGHT = new Set(["ko", "ja", "zh", "th", "hi", "tl"]);
-  const asianSpotCount  = new Map<string, number>();
-  const filtered: SpotlightItem[] = [];
+  const promotedLangs = new Set<string>();
+  const balanced: SpotlightItem[] = [];
+  const overflow: SpotlightItem[] = [];
+
   for (const item of items) {
     const lang = item.group.tmdb?.original_language ?? "";
-    if (ASIAN_SPOTLIGHT.has(lang)) {
-      const c = asianSpotCount.get(lang) ?? 0;
-      if (c >= 1) continue;                     // bloqueia 2º+ item do mesmo idioma asiático
-      asianSpotCount.set(lang, c + 1);
+    const needsLanguageCap = !!lang && lang !== "pt" && lang !== "en" && item.group.category !== "ANIMATION";
+    if (needsLanguageCap && promotedLangs.has(lang)) {
+      overflow.push(item);
+      continue;
     }
-    filtered.push(item);
-    if (filtered.length >= 20) break;
+    if (needsLanguageCap) promotedLangs.add(lang);
+    balanced.push(item);
   }
 
-  // Máx 20 itens no spotlight
-  return filtered;
+  return [...balanced, ...overflow].slice(0, 20);
 }
 
 
@@ -959,7 +932,7 @@ function resolveItemData(item: EditorialGroup): NormalizedItem {
       name:      m.name ?? "",
       overview:  m.overview ?? null,
       backdrop,
-      poster:    TMDB_IMG(m.poster_path ?? null, "w342"),
+      poster:    TMDB_IMG(m.poster_path ?? null, "w500"),
       voteAvg:   m.vote_average ?? 0,
       category:  "MOVIE",
       href:      `/title/movie/${m.tmdb_id}`,
@@ -2271,14 +2244,18 @@ export default function AgendaClient({ initialData }: { initialData: IcsAgendaRe
             });
             if (enrichRes.ok) {
               const { results } = await enrichRes.json() as { results: Record<string, import("@/lib/ics-engine").TmdbEnrichment | null> };
-              const td = trendingDayRef.current;
-              const tw = trendingWeekRef.current;
               const apply = (prev: IcsSeriesGroup[]) =>
                 prev
                   .map((g) => results[g.rawTitle] !== undefined && !g.tmdb
                     ? { ...g, tmdb: results[g.rawTitle] }
                     : g)
-                  .filter((g) => filterEnrichedGroup(g, td, tw));
+                  .filter((g) => {
+                    // Filtro estrutural: remove categorias bloqueadas (SPORTS, NEWS, PODCAST etc.)
+                    const cat = g.tmdb?.refined_category ?? g.category;
+                    if (ALL_BLOCKED_CATEGORIES.has(cat)) return false;
+                    g.isRelevant = true;
+                    return true;
+                  });
               setFeatured(apply);
               setGroups(apply);
             }

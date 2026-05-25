@@ -604,10 +604,8 @@ function resolveContentType(group: IcsSeriesGroup, movie?: MovieGroup): ContentT
       title: movie.movie.name ?? movie.movie.original_name ?? "",
     });
   }
-  // Usa refined_category quando disponível — pode reclassificar SERIES→KIDS etc.
-  const effectiveCategory = group.tmdb?.refined_category ?? group.category;
   return classifyContentType({
-    category: effectiveCategory,
+    category: group.category,
     isMovie: false,
     originalLanguage: group.tmdb?.original_language ?? null,
     originCountry: group.tmdb?.origin_country ?? null,
@@ -2991,13 +2989,9 @@ export default function RadarClient({
 
   // ── Dados visíveis ────────────────────────────────────────────────────────
   // Descarta categorias estruturalmente bloqueadas (KIDS, SPORTS, NEWS, etc.)
-  // Usa refined_category quando disponível — o enricher TMDB pode reclassificar
-  // um grupo (ex: SERIES → KIDS via genre 10751/10762) após enriquecimento.
+  // antes de qualquer processamento editorial — estas nunca devem aparecer.
   const visibleFeatured = useMemo(
-    () => featuredGroups.filter((g) => {
-      const cat = g.tmdb?.refined_category ?? g.category;
-      return !ALL_BLOCKED_CATEGORIES.has(cat);
-    }),
+    () => featuredGroups.filter((g) => !ALL_BLOCKED_CATEGORIES.has(g.category)),
     [featuredGroups],
   );
 
@@ -3062,7 +3056,7 @@ export default function RadarClient({
 
   // ── Contagens por filtro e lista filtrada ─────────────────────────────────
   const filterCounts = useMemo((): FilterCount[] => {
-    const keys: ContentFilterKey[] = ["all", "series", "movies", "anime", "animation", "dorama", "nonfiction"];
+    const keys: ContentFilterKey[] = ["all", "series", "movies", "anime", "dorama", "nonfiction"];
     return keys.map((key) => ({
       key,
       count: key === "all"
@@ -3172,3 +3166,7 @@ export default function RadarClient({
     </PageShell>
   );
 }
+    },
+    [radarMode, isLoadingMode],
+  );
+

@@ -136,9 +136,34 @@ const NEWS_PATTERNS = [
 const PODCAST_PATTERNS = [/\bpodcast\b/i, /\bq&a\b/i];
 
 const KIDS_PATTERNS = [
-  /\bcartoon\b/i, /\bpaw patrol\b/i, /\bsesame street\b/i,
-  /\bdora\b.*explor/i, /\bpeppa pig\b/i, /\bbluey\b/i,
+  // Marcas infantis conhecidas
+  /\bpaw patrol\b/i, /\bsesame street\b/i, /\bpeppa pig\b/i,
+  /\bbluey\b/i, /\bdora\b.*explor/i, /\bnick.*jr\b/i,
+  /\bpokemon\b/i, /\bdigimon\b/i,
+  /\bmy little pony\b/i, /\blittle pony\b/i,
+  /\bben 10\b/i,
+  /\btransformers.*rescue\b/i,
+  /\bwinx\b/i, /\bbratz\b/i,
+  /\bbarbie\b/i,
+  /\bmasha.*bear\b/i, /\bmasha e o urso\b/i,
+  /\bbackyardigans\b/i, /\bdora.*aventureira\b/i,
+  /\bspongebob\b/i, /\bbob esponja\b/i,
+  // Palavras-chave genericas de conteudo infantil
   /\bkids\b/i, /\bjunior\b/i, /\bnickjr\b/i,
+  /\bcartoon\b/i,
+  // Princesas / contos de fada infantis
+  /\bprincesinha\b/i, /\bsofia.*first\b/i, /\bsofia the first\b/i,
+  /\bprincesa.*sofia\b/i, /\bprincess.*sofia\b/i,
+  /\bprince.*frog\b/i, /\blittle mermaid.*series\b/i,
+  // Disney/Nick franchises infantis
+  /\bdisney.*junior\b/i, /\bdisney junior\b/i,
+  /\bhandy manny\b/i, /\bspecial agent oso\b/i,
+  /\bmickey.*clubhouse\b/i, /\bminnie\b.*bow\b/i,
+  /\bdoc mcstuffins\b/i, /\bfireman sam\b/i,
+  /\bpostman pat\b/i, /\bthomas.*tank engine\b/i, /\bthomas.*friends\b/i,
+  /\bblippi\b/i, /\bchuggington\b/i, /\bteletubbies\b/i,
+  /\bin the night garden\b/i, /\bmr rogers\b/i,
+  /\bteen titans go\b/i,
 ];
 
 /**

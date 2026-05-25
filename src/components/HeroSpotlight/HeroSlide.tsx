@@ -129,7 +129,7 @@ export default function HeroSlide({
   const eyebrow = (item as any).serverEyebrow ?? { text: "CURADORIA", color: "#a07ee0" };
   const cta = (item as any).serverCta ?? { primary: "Assistir agora", icon: "play" };
 
-  const backdropUrl = item.backdrop_path ? `https://image.tmdb.org/t/p/original${item.backdrop_path}` : null;
+  const backdropUrl = item.backdrop_path ? `https://image.tmdb.org/t/p/w1280${item.backdrop_path}` : null;
   const stillUrl = item.next_episode_still_path ? `https://image.tmdb.org/t/p/w1280${item.next_episode_still_path}` : null;
   const dominantColor = item.dominant_color ?? "#1a1a2e";
   const glowRgb = hexToRgb(dominantColor);

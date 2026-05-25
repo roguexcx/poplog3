@@ -638,8 +638,8 @@ export async function getTitlePageData(
             : details?.number_of_seasons ?? null,
         numberOfEpisodes,
         overview: title.overview ?? null,
-        posterUrl: tmdbImage(title.poster_path, "w780"),
-        backdropUrl: tmdbImage(title.backdrop_path, "original"),
+        posterUrl: tmdbImage(title.poster_path, "w500"),
+        backdropUrl: tmdbImage(title.backdrop_path, "w1280"),
         runtime: mediaType === "movie" ? runtimeResolution.minutes : null,
         episodeRunTimeMinutes:
           mediaType === "tv" ? runtimeResolution.minutes : null,

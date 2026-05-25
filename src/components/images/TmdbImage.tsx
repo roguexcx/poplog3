@@ -46,7 +46,7 @@ const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
 type TmdbImageV3Props = {
   path: string | null;
   fallbackPath?: string | null;
-  size?: "w300" | "w500" | "w780" | "original";
+  size?: "w185" | "w300" | "w342" | "w500" | "w780" | "w1280" | "original";
   alt?: string;
   className?: string;
   priority?: boolean;
