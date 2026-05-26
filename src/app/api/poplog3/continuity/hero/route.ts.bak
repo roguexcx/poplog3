@@ -335,17 +335,10 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    // Qualquer falha interna (Supabase, TMDB, etc.) não deve retornar 404 ou 500
-    // para o cliente — isso quebraria o carregamento da página. Retornamos lista
-    // vazia com status 200 para que a UI exiba o fallback de onboarding normalmente.
-    const errorMsg = error instanceof Error ? error.message : String(error);
-    console.warn("[api/poplog3/continuity/hero] falha ao gerar candidatos — retornando lista vazia", {
-      error: errorMsg,
-    });
-    return NextResponse.json({
-      candidates: [],
-      generatedAt: new Date().toISOString(),
-      cache: { status: "error_fallback", poolSize: 0, returned: 0, responseTimeMs: 0 },
-    });
+    console.error("[api/poplog3/continuity/hero] failed", error);
+    return NextResponse.json(
+      { error: "Erro ao gerar candidatos do Hero." },
+      { status: 500 },
+    );
   }
 }

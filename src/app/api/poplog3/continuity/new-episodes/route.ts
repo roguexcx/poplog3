@@ -171,7 +171,9 @@ export async function GET() {
         episodesBehind > 0 &&
         episodesBehind <= MAX_EPISODES_BEHIND &&
         state.next_season != null &&
-        state.next_episode != null
+        state.next_season > 0 &&   // exclui temporada especial/fantasma (season 0 → TMDB 404)
+        state.next_episode != null &&
+        state.next_episode > 0
       ) {
         // Trigger: o próximo episódio DO USUÁRIO foi ao ar recentemente (fonte: user_title_state)
         // Fallback: last_air_date da série (quando disponível no tmdb_payload)
@@ -213,7 +215,7 @@ export async function GET() {
           ...state,
           ...title,
           tmdb_id: state.tmdb_id,
-          effectiveNextSeason: 1,
+          effectiveNextSeason: 1,  // watchlist sempre começa em S01E01 — nunca 0
           effectiveNextEpisode: 1,
           episodesBehind: aired,
         });
@@ -238,6 +240,13 @@ export async function GET() {
             const userIsAhead =
               state.next_season !== seasonNum || state.next_episode !== episodeNum;
             if (userIsAhead) continue;
+            // Paranoia: nunca enfileirar temporada 0 ou episódio 0
+            if (seasonNum <= 0 || episodeNum <= 0) {
+              console.warn("[continuity-new-episodes] up_to_date skip: season/episode inválido", {
+                tmdb_id: state.tmdb_id, seasonNum, episodeNum,
+              });
+              continue;
+            }
             eligible.push({
               ...state,
               ...title,

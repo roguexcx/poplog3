@@ -14,7 +14,6 @@ import {
   PlayCircle,
   Radar,
   Search,
-  Settings,
   Tv,
   UserCircle,
   X,
@@ -66,7 +65,6 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Conta",
     links: [
       { href: "/profile", label: "Perfil", icon: UserCircle, authRequired: true },
-      { href: "/settings", label: "Ajustes", icon: Settings, authRequired: true },
     ],
   },
 ];
@@ -84,7 +82,6 @@ const MOBILE_MORE_LINKS: NavLink[] = [
   { href: "/buscar?type=tv", label: "Séries", icon: Tv },
   { href: "/sorteio", label: "Sorteio", icon: Dice5, authRequired: true },
   { href: "/profile", label: "Perfil", icon: UserCircle, authRequired: true },
-  { href: "/settings", label: "Ajustes", icon: Settings, authRequired: true },
 ];
 
 export default function Sidebar() {

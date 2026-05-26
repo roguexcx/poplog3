@@ -1,11 +1,21 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
+import { Reorder, useDragControls } from "framer-motion";
 import { createClient } from "@/server/supabase/client";
 import type { User } from "@supabase/supabase-js";
+import {
+  GripVertical, X, Search, ChevronRight,
+  LogOut, Trash2, Mail, Lock, Check,
+  Film, Tv, BarChart2, ChevronDown,
+} from "lucide-react";
 
-// ── types ─────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// TYPES
+// ─────────────────────────────────────────────────────────────────────────────
+
+type Tab = "visao-geral" | "preferencias" | "conta";
 
 type LibraryStats = {
   watched:   number;
@@ -18,37 +28,161 @@ type LibraryStats = {
   total:     number;
 };
 
-// ── mock visual data (genres + streamings — phase 2 will derive from library) ─
+type GenreStat = { name: string; count: number; pct: number };
 
-const GENRE_DIST = [
-  { name: "Drama",            pct: 34, color: "bg-indigo-500" },
-  { name: "Ação",             pct: 23, color: "bg-rose-500" },
-  { name: "Ficção Científica",pct: 18, color: "bg-cyan-500" },
-  { name: "Crime",            pct: 14, color: "bg-amber-500" },
-  { name: "Comédia",          pct: 11, color: "bg-teal-500" },
-];
+type StreamingProvider = {
+  id:               string;
+  provider_name:    string;
+  provider_slug:    string;
+  logo_url:         string | null;
+  tmdb_provider_id: number | null;
+  country:          string;
+  is_active:        boolean;
+};
 
-const STREAMINGS = [
-  { name: "Netflix",     bg: "bg-[#E50914]", short: "N",   active: true  },
-  { name: "Prime Video", bg: "bg-[#00A8E1]", short: "P",   active: true  },
-  { name: "Disney+",     bg: "bg-[#113CCF]", short: "D+",  active: false },
-  { name: "Max",         bg: "bg-[#6D28D9]", short: "M",   active: true  },
-  { name: "Apple TV+",   bg: "bg-zinc-800",  short: "▶",   active: false },
-  { name: "Globoplay",   bg: "bg-[#D50032]", short: "G",   active: false },
-];
+type SaveStatus = "idle" | "saving" | "saved" | "error";
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// PROVIDER BRAND MAP
+// ─────────────────────────────────────────────────────────────────────────────
+
+type ProviderCategory = "principais" | "gratuitos" | "canais" | "aluguel" | "outros";
+type ProviderType     = "subscription" | "ads" | "channel" | "free" | "rental";
+
+type ProviderMeta = {
+  brand:         string;
+  variantLabel?: string;
+  type:          ProviderType;
+  category:      ProviderCategory;
+  bg:            string;
+  textColor?:    string;
+  short:         string;
+};
+
+const PROVIDER_BRAND_MAP: Record<string, ProviderMeta> = {
+  "netflix":                         { brand: "Netflix",         type: "subscription", category: "principais", bg: "#E50914", short: "N" },
+  "netflix standard with ads":       { brand: "Netflix",         variantLabel: "Com anúncios",       type: "ads",     category: "principais", bg: "#E50914", short: "N"  },
+  "netflix basic with ads":          { brand: "Netflix",         variantLabel: "Com anúncios",       type: "ads",     category: "principais", bg: "#E50914", short: "N"  },
+  "max":                             { brand: "Max",             type: "subscription", category: "principais", bg: "#002BE7", short: "M"  },
+  "hbo max":                         { brand: "Max",             type: "subscription", category: "principais", bg: "#002BE7", short: "M"  },
+  "max amazon channel":              { brand: "Max",             variantLabel: "Canal Prime Video",  type: "channel", category: "canais",    bg: "#002BE7", short: "M"  },
+  "max apple tv channel":            { brand: "Max",             variantLabel: "Canal Apple TV",     type: "channel", category: "canais",    bg: "#002BE7", short: "M"  },
+  "amazon prime video":              { brand: "Prime Video",     type: "subscription", category: "principais", bg: "#00A8E1", short: "P"  },
+  "prime video":                     { brand: "Prime Video",     type: "subscription", category: "principais", bg: "#00A8E1", short: "P"  },
+  "amazon prime video with ads":     { brand: "Prime Video",     variantLabel: "Com anúncios",       type: "ads",     category: "principais", bg: "#00A8E1", short: "P"  },
+  "amazon video":                    { brand: "Prime Video",     variantLabel: "Aluguel/compra",     type: "rental",  category: "aluguel",   bg: "#00A8E1", short: "P"  },
+  "disney plus":                     { brand: "Disney+",         type: "subscription", category: "principais", bg: "#113CCF", short: "D+" },
+  "disney+":                         { brand: "Disney+",         type: "subscription", category: "principais", bg: "#113CCF", short: "D+" },
+  "star plus":                       { brand: "Star+",           type: "subscription", category: "principais", bg: "#0A2A6E", short: "S+" },
+  "apple tv plus":                   { brand: "Apple TV+",       type: "subscription", category: "principais", bg: "#1C1C1E", short: "▶" },
+  "apple tv+":                       { brand: "Apple TV+",       type: "subscription", category: "principais", bg: "#1C1C1E", short: "▶" },
+  "apple tv":                        { brand: "Apple TV+",       type: "subscription", category: "principais", bg: "#1C1C1E", short: "▶" },
+  "apple tv store":                  { brand: "Apple TV+",       variantLabel: "Aluguel/compra",     type: "rental",  category: "aluguel",   bg: "#1C1C1E", short: "▶" },
+  "apple tv channels":               { brand: "Apple TV+",       variantLabel: "Canais",             type: "channel", category: "canais",    bg: "#1C1C1E", short: "▶" },
+  "globoplay":                       { brand: "Globoplay",       type: "subscription", category: "principais", bg: "#D50032", short: "G"  },
+  "globoplay amazon channel":        { brand: "Globoplay",       variantLabel: "Canal Prime Video",  type: "channel", category: "canais",    bg: "#D50032", short: "G"  },
+  "paramount plus":                  { brand: "Paramount+",      type: "subscription", category: "principais", bg: "#0064FF", short: "P+" },
+  "paramount+":                      { brand: "Paramount+",      type: "subscription", category: "principais", bg: "#0064FF", short: "P+" },
+  "paramount plus apple tv channel": { brand: "Paramount+",      variantLabel: "Canal Apple TV",     type: "channel", category: "canais",    bg: "#0064FF", short: "P+" },
+  "paramount+ amazon channel":       { brand: "Paramount+",      variantLabel: "Canal Prime Video",  type: "channel", category: "canais",    bg: "#0064FF", short: "P+" },
+  "mubi":                            { brand: "MUBI",            type: "subscription", category: "principais", bg: "#2C2C2C", short: "MB" },
+  "mubi amazon channel":             { brand: "MUBI",            variantLabel: "Canal Prime Video",  type: "channel", category: "canais",    bg: "#2C2C2C", short: "MB" },
+  "pluto tv":                        { brand: "Pluto TV",        type: "free",         category: "gratuitos",  bg: "#1F1D36", short: "PT" },
+  "mercado play":                    { brand: "Mercado Play",    type: "free",         category: "gratuitos",  bg: "#FFE600", textColor: "#000", short: "MP" },
+  "plex":                            { brand: "Plex",            type: "free",         category: "gratuitos",  bg: "#E5A00D", textColor: "#000", short: "PX" },
+  "netmovies":                       { brand: "NetMovies",       type: "free",         category: "gratuitos",  bg: "#2D2D2D", short: "NM" },
+  "claro video":                     { brand: "Claro Video",     type: "subscription", category: "outros",     bg: "#CC0000", short: "CV" },
+  "telecine play":                   { brand: "Telecine",        type: "channel",      category: "canais",     bg: "#003087", short: "TC" },
+  "mgm plus":                        { brand: "MGM+",            type: "channel",      category: "canais",     bg: "#C4A020", textColor: "#000", short: "MG" },
+  "universal plus":                  { brand: "Universal+",      type: "channel",      category: "canais",     bg: "#2A2A2A", short: "U+" },
+  "google play movies":              { brand: "Google Play",     variantLabel: "Aluguel/compra",     type: "rental",  category: "aluguel",   bg: "#34A853", short: "GP" },
+  "youtube premium":                 { brand: "YouTube Premium", type: "subscription", category: "outros",     bg: "#FF0000", short: "YT" },
+  "crunchyroll":                      { brand: "Crunchyroll",     type: "subscription", category: "principais", bg: "#F47521", short: "CR" },
+  "wow":                              { brand: "WOW",             type: "subscription", category: "principais", bg: "#00C2FF", short: "W"  },
+  "wow presents plus":               { brand: "WOW",             variantLabel: "Presents Plus",          type: "subscription", category: "principais", bg: "#00C2FF", short: "W"  },
+};
+
+function getProviderMeta(name: string | null | undefined): ProviderMeta {
+  const key = (name ?? "").trim().toLowerCase();
+  if (PROVIDER_BRAND_MAP[key]) return PROVIDER_BRAND_MAP[key];
+
+  // Auto-detect Amazon Channel variants not explicitly mapped
+  if (key.includes(" amazon channel")) {
+    const rawBrand = key.replace(" amazon channel", "").trim();
+    const base = PROVIDER_BRAND_MAP[rawBrand];
+    return {
+      brand:        base?.brand ?? toTitleCase(rawBrand),
+      variantLabel: "Canal Prime Video",
+      type:         "channel",
+      category:     "canais",
+      bg:           base?.bg ?? "#2A2A2A",
+      textColor:    base?.textColor,
+      short:        base?.short ?? rawBrand.slice(0, 2).toUpperCase(),
+    };
+  }
+
+  // Auto-detect Apple TV Channel variants
+  if (key.includes(" apple tv channel")) {
+    const rawBrand = key.replace(" apple tv channel", "").trim();
+    const base = PROVIDER_BRAND_MAP[rawBrand];
+    return {
+      brand:        base?.brand ?? toTitleCase(rawBrand),
+      variantLabel: "Canal Apple TV",
+      type:         "channel",
+      category:     "canais",
+      bg:           base?.bg ?? "#1C1C1E",
+      textColor:    base?.textColor,
+      short:        base?.short ?? rawBrand.slice(0, 2).toUpperCase(),
+    };
+  }
+
+  // Generic "channel" keyword
+  if (key.includes(" channel")) {
+    return {
+      brand:    toTitleCase(key.replace(/ channel.*/, "").trim()) ?? name ?? "Canal",
+      type:     "channel",
+      category: "canais",
+      bg:       "#2A2A2A",
+      short:    (name ?? "?").slice(0, 2).toUpperCase(),
+    };
+  }
+
+  return {
+    brand:    name ?? "Desconhecido",
+    type:     "subscription",
+    category: "outros",
+    bg:       "#444444",
+    short:    (name ?? "?").slice(0, 2).toUpperCase(),
+  };
+}
+
+function toTitleCase(str: string): string {
+  return str.replace(/\b\w/g, c => c.toUpperCase());
+}
+
+function getLogoUrl(logoUrl: string | null | undefined): string | null {
+  if (!logoUrl) return null;
+  if (logoUrl.startsWith("http")) return logoUrl;
+  return `https://image.tmdb.org/t/p/w200${logoUrl}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// UTILITIES
+// ─────────────────────────────────────────────────────────────────────────────
 
 function getInitials(user: User): string {
   const name = user.user_metadata?.full_name ?? user.user_metadata?.name;
-  if (name) {
-    return name.split(" ").slice(0, 2).map((w: string) => w[0]).join("").toUpperCase();
-  }
+  if (name) return name.split(" ").slice(0, 2).map((w: string) => w[0]).join("").toUpperCase();
   return (user.email?.[0] ?? "U").toUpperCase();
 }
 
 function getDisplayName(user: User): string {
-  return user.user_metadata?.full_name ?? user.user_metadata?.name ?? user.email?.split("@")[0] ?? "Usuário";
+  return (
+    user.user_metadata?.full_name ??
+    user.user_metadata?.name ??
+    user.email?.split("@")[0] ??
+    "Usuário"
+  );
 }
 
 function formatJoinDate(dateStr: string): string {
@@ -59,25 +193,33 @@ function estimateHours(stats: LibraryStats): number {
   return Math.round((stats.movies * 105 + stats.series * 45 * 8) / 60);
 }
 
-function avatarBg(email: string): string {
-  const hues = ["from-violet-600 to-indigo-600", "from-rose-600 to-pink-600",
-    "from-cyan-600 to-teal-600", "from-amber-600 to-orange-600",
-    "from-emerald-600 to-teal-600"];
-  const idx = email.charCodeAt(0) % hues.length;
-  return hues[idx];
+function avatarGradient(email: string): string {
+  const opts = [
+    "from-violet-600 to-indigo-600",
+    "from-rose-600 to-pink-600",
+    "from-cyan-600 to-teal-600",
+    "from-amber-600 to-orange-600",
+    "from-emerald-600 to-teal-600",
+  ];
+  return opts[email.charCodeAt(0) % opts.length];
 }
 
-// ── primitives ────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// PRIMITIVES
+// ─────────────────────────────────────────────────────────────────────────────
 
-function SectionEyebrow({ children, color = "indigo" }: { children: React.ReactNode; color?: string }) {
-  const map: Record<string, [string, string]> = {
-    indigo: ["bg-indigo-400/60", "text-indigo-400/80"],
-    violet: ["bg-violet-400/60", "text-violet-400/80"],
-    teal:   ["bg-teal-400/60",   "text-teal-400/80"],
-    amber:  ["bg-amber-400/60",  "text-amber-400/80"],
-    muted:  ["bg-white/20",      "text-white/30"],
+type EyebrowColor = "indigo" | "violet" | "teal" | "amber" | "muted" | "rose";
+
+function Eyebrow({ children, color = "indigo" }: { children: React.ReactNode; color?: EyebrowColor }) {
+  const map: Record<EyebrowColor, [string, string]> = {
+    indigo: ["bg-indigo-400/60",  "text-indigo-400/80"],
+    violet: ["bg-violet-400/60",  "text-violet-400/80"],
+    teal:   ["bg-teal-400/60",    "text-teal-400/80"],
+    amber:  ["bg-amber-400/60",   "text-amber-400/80"],
+    muted:  ["bg-white/20",       "text-white/30"],
+    rose:   ["bg-rose-400/60",    "text-rose-400/80"],
   };
-  const [line, text] = map[color] ?? map.indigo;
+  const [line, text] = map[color];
   return (
     <div className="flex items-center gap-2 mb-1.5">
       <span className={`block h-px w-5 rounded-full ${line}`} />
@@ -86,484 +228,1085 @@ function SectionEyebrow({ children, color = "indigo" }: { children: React.ReactN
   );
 }
 
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return <h2 className="text-xl font-black tracking-[-0.03em] text-white/90 leading-tight mb-5">{children}</h2>;
+function BlockTitle({ children }: { children: React.ReactNode }) {
+  return <h2 className="text-[18px] font-black tracking-[-0.03em] text-white/90 leading-tight mb-5">{children}</h2>;
 }
 
-function SectionDivider() {
-  return <div className="h-px w-full bg-gradient-to-r from-transparent via-white/[0.06] to-transparent my-10" />;
-}
-
-// ── StatCard ──────────────────────────────────────────────────────────────────
-
-function StatCard({
-  value, label, sub, accent = false,
-}: {
-  value: string | number;
-  label: string;
-  sub?: string;
-  accent?: boolean;
-}) {
+function Block({ children, className = "" }: { children: React.ReactNode; className?: string }) {
   return (
-    <div className={`rounded-2xl border px-4 py-4 ${accent
-      ? "bg-violet-950/35 border-violet-500/20"
-      : "bg-white/[0.025] border-white/[0.06]"
-    }`}>
-      <p className={`text-2xl font-black tracking-tight leading-none mb-1 ${accent ? "text-violet-200" : "text-white/80"}`}>
-        {value}
-      </p>
+    <div className={`rounded-[22px] border border-white/[0.06] bg-white/[0.025] p-5 sm:p-6 ${className}`}>
+      {children}
+    </div>
+  );
+}
+
+function StatPill({ value, label, accent = false }: { value: string | number; label: string; accent?: boolean }) {
+  return (
+    <div className={`rounded-2xl border px-4 py-3.5 ${accent ? "bg-violet-950/35 border-violet-500/20" : "bg-white/[0.025] border-white/[0.06]"}`}>
+      <p className={`text-[22px] font-black tracking-tight leading-none mb-1 ${accent ? "text-violet-200" : "text-white/80"}`}>{value}</p>
       <p className="text-[11px] text-white/35 leading-snug">{label}</p>
-      {sub && <p className={`text-[10px] mt-1 ${accent ? "text-violet-400/60" : "text-white/20"}`}>{sub}</p>}
     </div>
   );
 }
 
-// ── ProgressRing ──────────────────────────────────────────────────────────────
-
-function ProgressRing({
-  pct, value, label,
-}: {
-  pct: number;
-  value: string;
-  label: string;
-}) {
-  const r = 34;
-  const circ = 2 * Math.PI * r;
-  const offset = circ * (1 - Math.min(pct, 100) / 100);
-  return (
-    <div className="flex flex-col items-center gap-2">
-      <svg viewBox="0 0 84 84" className="w-20 h-20">
-        <circle cx="42" cy="42" r={r} fill="none" stroke="white" strokeOpacity="0.06" strokeWidth="6" />
-        <circle cx="42" cy="42" r={r} fill="none" stroke="url(#ring-grad)" strokeWidth="6"
-          strokeDasharray={circ} strokeDashoffset={offset}
-          strokeLinecap="round" transform="rotate(-90 42 42)" />
-        <defs>
-          <linearGradient id="ring-grad" x1="0" y1="0" x2="1" y2="0">
-            <stop offset="0%" stopColor="#8B5CF6" />
-            <stop offset="100%" stopColor="#06B6D4" />
-          </linearGradient>
-        </defs>
-        <text x="42" y="39" textAnchor="middle" dominantBaseline="middle"
-          style={{ fontSize: 14, fontWeight: 900, fill: "rgba(255,255,255,0.88)", fontFamily: "inherit" }}>
-          {value}
-        </text>
-        <text x="42" y="53" textAnchor="middle" dominantBaseline="middle"
-          style={{ fontSize: 8, fill: "rgba(255,255,255,0.35)", fontFamily: "inherit", letterSpacing: 1 }}>
-          %
-        </text>
-      </svg>
-      <p className="text-[11px] text-white/40 text-center leading-snug">{label}</p>
-    </div>
-  );
-}
-
-// ── AvatarEditDropdown ────────────────────────────────────────────────────────
-
-function AvatarEditDropdown({ onClose }: { onClose: () => void }) {
-  const options = [
-    { icon: "↑", label: "Enviar foto",    sub: "JPG, PNG ou WebP · max 2MB" },
-    { icon: "🔗", label: "URL de imagem", sub: "Cole um link público" },
-    { icon: "✕", label: "Remover foto",  sub: "Volta ao avatar padrão" },
-  ];
-  return (
-    <div className="absolute top-full left-1/2 -translate-x-1/2 mt-3 z-50 w-56 rounded-2xl border border-white/[0.10] bg-zinc-900/95 backdrop-blur-xl shadow-2xl p-1.5">
-      <p className="text-[9px] font-bold uppercase tracking-[0.2em] text-white/25 px-3 pt-2 pb-1.5">Editar avatar</p>
-      {options.map(o => (
-        <button
-          key={o.label}
-          type="button"
-          onClick={onClose}
-          className="w-full flex items-start gap-3 rounded-xl px-3 py-2.5 hover:bg-white/[0.05] transition-colors text-left group"
-        >
-          <span className="text-base mt-0.5 group-hover:scale-110 transition-transform">{o.icon}</span>
-          <div>
-            <p className="text-[12.5px] font-bold text-white/75">{o.label}</p>
-            <p className="text-[10px] text-white/30">{o.sub}</p>
-          </div>
-        </button>
-      ))}
-      <div className="h-px bg-white/[0.06] mx-3 my-1" />
-      <button
-        type="button"
-        onClick={onClose}
-        className="w-full text-[11px] text-white/25 hover:text-white/45 py-1.5 transition-colors"
-      >
-        Cancelar
-      </button>
-    </div>
-  );
-}
-
-// ── ProfileHeader ─────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// PROFILE HEADER
+// ─────────────────────────────────────────────────────────────────────────────
 
 function ProfileHeader({
-  user, stats,
+  user, stats, onSignOut,
 }: {
-  user: User;
-  stats: LibraryStats;
+  user: User; stats: LibraryStats; onSignOut: () => void;
 }) {
   const initials = getInitials(user);
   const name     = getDisplayName(user);
-  const gradBg   = avatarBg(user.email ?? "u");
+  const gradBg   = avatarGradient(user.email ?? "u");
   const joinDate = formatJoinDate(user.created_at);
   const hours    = estimateHours(stats);
-  const [editOpen, setEditOpen] = useState(false);
 
   return (
-    <div className="relative isolate rounded-[28px] overflow-hidden border border-white/[0.06] mb-10">
-      {/* atmospheric bg */}
-      <div className="absolute inset-0 -z-10 bg-gradient-to-br from-indigo-950/70 via-zinc-950 to-black" />
-      <div className="absolute inset-0 -z-10"
-        style={{ background: "radial-gradient(ellipse at 20% 0%, rgba(139,92,246,0.18) 0%, transparent 55%), radial-gradient(ellipse at 80% 100%, rgba(6,182,212,0.10) 0%, transparent 45%)" }} />
-      <div className="absolute inset-0 -z-10 opacity-[0.025]"
-        style={{ backgroundImage: "linear-gradient(0deg,white 1px,transparent 1px),linear-gradient(90deg,white 1px,transparent 1px)", backgroundSize: "44px 44px" }} />
+    <div className="relative isolate rounded-[24px] overflow-hidden border border-white/[0.07] mb-6">
+      <div className="absolute inset-0 -z-10 bg-gradient-to-br from-indigo-950/60 via-zinc-950 to-black" />
+      <div
+        className="absolute inset-0 -z-10"
+        style={{ background: "radial-gradient(ellipse at 20% 0%,rgba(139,92,246,.15) 0%,transparent 55%),radial-gradient(ellipse at 80% 100%,rgba(6,182,212,.09) 0%,transparent 45%)" }}
+      />
 
-      <div className="px-6 sm:px-8 pt-8 pb-8">
-        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-6">
+      <div className="px-5 sm:px-7 pt-6 pb-5">
+        <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
 
-          {/* avatar */}
-          <div className="relative">
-            <div className={`w-[88px] h-[88px] rounded-[24px] bg-gradient-to-br ${gradBg} flex items-center justify-center border-2 border-white/[0.12] shadow-2xl flex-shrink-0`}>
-              {user.user_metadata?.avatar_url ? (
-                <img
-                  src={user.user_metadata.avatar_url}
-                  alt={name}
-                  className="w-full h-full rounded-[22px] object-cover"
-                />
-              ) : (
-                <span className="text-2xl font-black text-white/90 tracking-tight">{initials}</span>
-              )}
-            </div>
-
-            {/* edit button */}
-            <button
-              type="button"
-              onClick={() => setEditOpen(v => !v)}
-              className="absolute -bottom-2 -right-2 w-7 h-7 rounded-full bg-white/[0.09] hover:bg-white/[0.16] border border-white/[0.14] flex items-center justify-center transition-all text-white/60 hover:text-white/90"
-            >
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
-                <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
-              </svg>
-            </button>
-
-            {editOpen && <AvatarEditDropdown onClose={() => setEditOpen(false)} />}
+          {/* Avatar */}
+          <div
+            className={`w-[72px] h-[72px] sm:w-20 sm:h-20 rounded-[20px] bg-gradient-to-br ${gradBg} flex items-center justify-center border-2 border-white/[0.12] shadow-xl flex-shrink-0`}
+          >
+            {user.user_metadata?.avatar_url ? (
+              <img src={user.user_metadata.avatar_url} alt={name} className="w-full h-full rounded-[18px] object-cover" />
+            ) : (
+              <span className="text-xl sm:text-2xl font-black text-white/90 tracking-tight">{initials}</span>
+            )}
           </div>
 
-          {/* user info */}
+          {/* Info */}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-0.5">
-              <h1 className="text-2xl font-black tracking-[-0.04em] text-white/93 leading-none">{name}</h1>
-              <span className="text-[9px] font-bold uppercase tracking-[0.2em] px-2 py-0.5 rounded-full border border-violet-500/25 bg-violet-950/40 text-violet-300/70">
-                Membro
-              </span>
+            <h1 className="text-[22px] sm:text-[26px] font-black tracking-[-0.04em] text-white/93 leading-tight">{name}</h1>
+            <p className="text-[11px] text-white/30 mt-0.5">Membro desde {joinDate}</p>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2.5 text-[12px] text-white/45">
+              <span><span className="font-bold text-white/70">{stats.total}</span> títulos</span>
+              <span className="text-white/15">·</span>
+              <span><span className="font-bold text-white/70">{hours > 0 ? `${hours.toLocaleString("pt-BR")}h` : "—"}</span> estimadas</span>
+              <span className="text-white/15">·</span>
+              <span><span className="font-bold text-violet-300/80">{stats.favorites}</span> favoritos</span>
             </div>
-            <p className="text-[12px] text-white/35 mb-3">{user.email}</p>
-            <p className="text-[11px] text-white/22">Membro desde {joinDate}</p>
           </div>
 
-          {/* right quick stats */}
-          <div className="flex items-center gap-4 sm:gap-6 flex-shrink-0">
-            <div className="text-center">
-              <p className="text-xl font-black text-white/80 leading-none">{stats.total}</p>
-              <p className="text-[10px] text-white/30 mt-0.5">títulos</p>
+          {/* Desktop stat pills */}
+          <div className="hidden lg:flex items-center gap-3 flex-shrink-0">
+            <div className="rounded-2xl bg-white/[0.04] border border-white/[0.06] px-4 py-3 text-center min-w-[72px]">
+              <p className="text-[20px] font-black text-white/80 tracking-tight leading-none">{stats.watched}</p>
+              <p className="text-[10px] text-white/30 mt-1">assistidos</p>
             </div>
-            <div className="h-8 w-px bg-white/[0.08]" />
-            <div className="text-center">
-              <p className="text-xl font-black text-white/80 leading-none">{hours}</p>
-              <p className="text-[10px] text-white/30 mt-0.5">horas est.</p>
+            <div className="rounded-2xl bg-white/[0.04] border border-white/[0.06] px-4 py-3 text-center min-w-[72px]">
+              <p className="text-[20px] font-black text-cyan-300/80 tracking-tight leading-none">{stats.watching}</p>
+              <p className="text-[10px] text-white/30 mt-1">assistindo</p>
             </div>
-            <div className="h-8 w-px bg-white/[0.08]" />
-            <div className="text-center">
-              <p className="text-xl font-black text-violet-300/80 leading-none">{stats.favorites}</p>
-              <p className="text-[10px] text-white/30 mt-0.5">favoritos</p>
+            <div className="rounded-2xl bg-white/[0.04] border border-white/[0.06] px-4 py-3 text-center min-w-[72px]">
+              <p className="text-[20px] font-black text-violet-300/80 tracking-tight leading-none">{stats.watchlist}</p>
+              <p className="text-[10px] text-white/30 mt-1">watchlist</p>
             </div>
           </div>
+
+          {/* Sign out — low visual weight */}
+          <button
+            type="button"
+            onClick={onSignOut}
+            className="flex items-center gap-1.5 text-[11px] text-white/22 hover:text-white/45 transition-colors px-2 py-1.5 flex-shrink-0 self-start sm:self-center"
+          >
+            <LogOut size={13} />
+            Sair
+          </button>
         </div>
       </div>
     </div>
   );
 }
 
-// ── LoadingSkeleton ───────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// TAB BAR
+// ─────────────────────────────────────────────────────────────────────────────
 
-function LoadingSkeleton() {
+const TABS: { id: Tab; label: string }[] = [
+  { id: "visao-geral",  label: "Visão geral" },
+  { id: "preferencias", label: "Preferências" },
+  { id: "conta",        label: "Conta" },
+];
+
+function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
   return (
-    <div className="space-y-6">
-      <div className="h-[190px] rounded-[28px] bg-white/[0.03] animate-pulse" />
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        {Array.from({ length: 4 }).map((_, i) => <div key={i} className="h-20 rounded-2xl bg-white/[0.03] animate-pulse" />)}
-      </div>
+    <div className="flex border-b border-white/[0.07] mb-7 overflow-x-auto no-scrollbar">
+      {TABS.map(tab => (
+        <button
+          key={tab.id}
+          type="button"
+          onClick={() => onChange(tab.id)}
+          className={[
+            "relative flex-shrink-0 px-5 py-3.5 text-[12px] font-bold uppercase tracking-[0.12em] transition-colors duration-200 border-b-2 -mb-px",
+            active === tab.id
+              ? "border-indigo-500 text-white"
+              : "border-transparent text-white/35 hover:text-white/60",
+          ].join(" ")}
+        >
+          {tab.label}
+        </button>
+      ))}
     </div>
   );
 }
 
-function NotLoggedIn() {
-  const router = useRouter();
+// ─────────────────────────────────────────────────────────────────────────────
+// TAB: VISÃO GERAL
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ProgressBar({ pct, colorClass }: { pct: number; colorClass: string }) {
   return (
-    <div className="flex flex-col items-center justify-center py-24 text-center rounded-[28px] border border-white/[0.06] bg-white/[0.02]">
-      <div className="w-14 h-14 rounded-2xl border border-white/10 bg-white/[0.04] flex items-center justify-center mx-auto mb-5">
-        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="text-white/25">
-          <path d="M20 21v-2a4 4 0 00-4-4H8a4 4 0 00-4 4v2" />
-          <circle cx="12" cy="7" r="4" />
-        </svg>
+    <div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
+      <div className={`h-full rounded-full ${colorClass}`} style={{ width: `${pct}%`, transition: "width 1.1s ease" }} />
+    </div>
+  );
+}
+
+function TabOverview({ stats, genres }: { stats: LibraryStats; genres: GenreStat[] }) {
+  const hours      = estimateHours(stats);
+  const watchedPct = stats.total > 0 ? Math.round((stats.watched / stats.total) * 100) : 0;
+  const moviesPct  = stats.total > 0 ? Math.round((stats.movies  / stats.total) * 100) : 50;
+  const seriesPct  = 100 - moviesPct;
+
+  return (
+    <div className="space-y-4">
+
+      {/* Topo: resumo + biblioteca lado a lado no desktop */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+
+        {/* Resumo geral */}
+        <Block>
+          <Eyebrow color="violet">Sua jornada · POPLOG</Eyebrow>
+          <BlockTitle>Resumo geral</BlockTitle>
+
+          <div className="grid grid-cols-3 gap-3 mb-5">
+            <div className="text-center">
+              <p className="text-3xl font-black text-white/85 tracking-tight leading-none">{stats.total}</p>
+              <p className="text-[11px] text-white/30 mt-1">títulos</p>
+            </div>
+            <div className="text-center">
+              <p className="text-3xl font-black text-white/85 tracking-tight leading-none">
+                {hours > 0 ? hours.toLocaleString("pt-BR") : "—"}
+              </p>
+              <p className="text-[11px] text-white/30 mt-1">horas est.</p>
+            </div>
+            <div className="text-center">
+              <p className="text-3xl font-black text-cyan-300/80 tracking-tight leading-none">{watchedPct}%</p>
+              <p className="text-[11px] text-white/30 mt-1">concluídos</p>
+            </div>
+          </div>
+
+          <div className="h-px bg-white/[0.05] mb-5" />
+          <div className="mb-1.5 flex justify-between">
+            <span className="text-[11px] text-white/40">Progresso geral</span>
+            <span className="text-[11px] text-white/25">{stats.watched}/{stats.total}</span>
+          </div>
+          <ProgressBar pct={watchedPct} colorClass="bg-gradient-to-r from-indigo-500 to-cyan-400" />
+        </Block>
+
+        {/* Biblioteca + Consumo empilhados na coluna direita */}
+        <div className="space-y-4">
+          {/* Biblioteca em números */}
+          <div className="grid grid-cols-2 gap-2.5">
+            <StatPill value={stats.watched}   label="Assistidos"  accent />
+            <StatPill value={stats.watching}  label="Assistindo"  />
+            <StatPill value={stats.watchlist} label="Watchlist"   />
+            <StatPill value={stats.favorites} label="Favoritos"   />
+          </div>
+
+          {/* Perfil de consumo */}
+          <Block>
+            <Eyebrow color="teal">Perfil de consumo</Eyebrow>
+            <BlockTitle>Filmes vs Séries</BlockTitle>
+
+            <div className="space-y-3.5">
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <Film size={13} className="text-cyan-400/70" />
+                    <span className="text-[11px] text-cyan-400/80 font-bold">Filmes</span>
+                  </div>
+                  <span className="text-[11px] text-white/30">{stats.movies} · {moviesPct}%</span>
+                </div>
+                <ProgressBar pct={moviesPct} colorClass="bg-gradient-to-r from-cyan-500 to-cyan-400" />
+              </div>
+              <div>
+                <div className="flex justify-between items-center mb-1.5">
+                  <div className="flex items-center gap-1.5">
+                    <Tv size={13} className="text-indigo-400/70" />
+                    <span className="text-[11px] text-indigo-400/80 font-bold">Séries</span>
+                  </div>
+                  <span className="text-[11px] text-white/30">{stats.series} · {seriesPct}%</span>
+                </div>
+                <ProgressBar pct={seriesPct} colorClass="bg-gradient-to-r from-indigo-500 to-violet-400" />
+              </div>
+            </div>
+          </Block>
+        </div>
       </div>
-      <h3 className="text-[17px] font-black tracking-tight text-white/50 mb-2">Você não está logado</h3>
-      <p className="text-[12px] text-white/25 max-w-xs mx-auto mb-6">Faça login para ver seu perfil, estatísticas e histórico da POPLOG.</p>
+
+      {/* Gêneros favoritos — largura total */}
+      <Block>
+        <Eyebrow color="indigo">Gêneros favoritos</Eyebrow>
+        <BlockTitle>O que você mais assiste</BlockTitle>
+
+        {genres.length > 0 ? (
+          <div className="space-y-3">
+            {genres.slice(0, 6).map((g, i) => {
+              const colorClasses = [
+                "bg-indigo-500 opacity-75",
+                "bg-violet-500 opacity-75",
+                "bg-cyan-500 opacity-75",
+                "bg-rose-500 opacity-75",
+                "bg-amber-500 opacity-75",
+                "bg-teal-500 opacity-75",
+              ];
+              return (
+                <div key={g.name}>
+                  <div className="flex justify-between items-center mb-1.5">
+                    <span className="text-[12px] font-bold text-white/60">{g.name}</span>
+                    <span className="text-[11px] text-white/25">{g.pct}%</span>
+                  </div>
+                  <ProgressBar pct={g.pct} colorClass={colorClasses[i % colorClasses.length]} />
+                </div>
+              );
+            })}
+            <p className="text-[10px] text-white/20 mt-3 italic">
+              * Calculado a partir dos títulos da sua biblioteca.
+            </p>
+          </div>
+        ) : (
+          <div className="text-center py-6">
+            <BarChart2 size={28} className="text-white/15 mx-auto mb-3" />
+            <p className="text-[12px] text-white/30">Nenhum dado de gênero disponível ainda.</p>
+            <p className="text-[11px] text-white/20 mt-1">
+              Adicione títulos à sua biblioteca para ver seus gêneros favoritos.
+            </p>
+          </div>
+        )}
+      </Block>
+
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ACTIVE STREAMING ITEM (draggable)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function ActiveStreamingItem({
+  provider, priority, onRemove, isSaving,
+}: {
+  provider: StreamingProvider;
+  priority: number;
+  onRemove: () => void;
+  isSaving: boolean;
+}) {
+  const controls = useDragControls();
+  const meta     = getProviderMeta(provider.provider_name);
+  const logo     = getLogoUrl(provider.logo_url);
+
+  const typeBadge = (() => {
+    if (meta.type === "free")    return { label: "Grátis",     cls: "border-teal-500/25 bg-teal-950/30 text-teal-400/70"     };
+    if (meta.type === "rental")  return { label: "Aluguel",    cls: "border-amber-500/25 bg-amber-950/30 text-amber-400/70"   };
+    if (meta.type === "ads")     return { label: "Anúncios",   cls: "border-orange-500/25 bg-orange-950/30 text-orange-400/70" };
+    if (meta.type === "channel") return { label: "Canal",      cls: "border-violet-500/25 bg-violet-950/30 text-violet-400/70" };
+    return                              { label: "Assinatura", cls: "border-white/[0.07] bg-white/[0.04] text-white/25"       };
+  })();
+
+  return (
+    <Reorder.Item
+      value={provider.id}
+      dragListener={false}
+      dragControls={controls}
+      className="flex items-center gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.03] px-3.5 py-3 touch-none select-none"
+      whileDrag={{ scale: 1.02, boxShadow: "0 12px 40px rgba(0,0,0,0.45)", zIndex: 50 }}
+    >
+      {/* Drag handle */}
       <button
         type="button"
-        onClick={() => router.push("/login")}
-        className="text-[12.5px] font-bold text-indigo-300/80 border border-indigo-500/25 bg-indigo-950/30 hover:bg-indigo-950/50 rounded-2xl px-5 py-2.5 transition-colors"
+        className="cursor-grab active:cursor-grabbing text-white/20 hover:text-white/50 transition-colors flex-shrink-0"
+        onPointerDown={e => controls.start(e)}
+        aria-label="Arrastar para reordenar"
       >
-        Fazer login
+        <GripVertical size={16} />
       </button>
+
+      {/* Priority */}
+      <span className="w-5 h-5 rounded-full bg-white/[0.06] border border-white/[0.08] text-[9px] font-black text-white/40 flex items-center justify-center flex-shrink-0 tabular-nums">
+        {priority}
+      </span>
+
+      {/* Logo */}
+      {logo ? (
+        <img src={logo} alt={meta.brand} className="w-8 h-8 rounded-lg object-cover flex-shrink-0" />
+      ) : (
+        <div
+          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-black"
+          style={{ background: meta.bg, color: meta.textColor ?? "#fff" }}
+        >
+          {meta.short}
+        </div>
+      )}
+
+      {/* Name + variant */}
+      <div className="flex-1 min-w-0">
+        <p className="text-[13px] font-bold text-white/80 leading-tight truncate">{meta.brand}</p>
+        {meta.variantLabel && (
+          <p className="text-[10px] text-white/30 mt-0.5">{meta.variantLabel}</p>
+        )}
+      </div>
+
+      {/* Type badge */}
+      <span
+        className={[
+          "text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full border flex-shrink-0",
+          typeBadge.cls,
+        ].join(" ")}
+      >
+        {typeBadge.label}
+      </span>
+
+      {/* Remove */}
+      <button
+        type="button"
+        onClick={onRemove}
+        disabled={isSaving}
+        className="w-7 h-7 rounded-full border border-white/[0.07] bg-white/[0.03] hover:bg-rose-500/15 hover:border-rose-500/25 flex items-center justify-center text-white/25 hover:text-rose-400 transition-all flex-shrink-0"
+        aria-label={`Remover ${meta.brand}`}
+      >
+        <X size={12} />
+      </button>
+    </Reorder.Item>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// BRAND GROUPS FOR ADD STREAMING
+// ─────────────────────────────────────────────────────────────────────────────
+
+type BrandGroup = {
+  brand:     string;
+  bg:        string;
+  textColor: string;
+  short:     string;
+  logoUrl:   string | null;
+  category:  ProviderCategory;
+  providers: StreamingProvider[];
+};
+
+function buildBrandGroups(providers: StreamingProvider[]): BrandGroup[] {
+  const map = new Map<string, BrandGroup>();
+  for (const p of providers) {
+    const meta = getProviderMeta(p.provider_name);
+    if (!map.has(meta.brand)) {
+      map.set(meta.brand, {
+        brand:     meta.brand,
+        bg:        meta.bg,
+        textColor: meta.textColor ?? "#fff",
+        short:     meta.short,
+        logoUrl:   getLogoUrl(p.logo_url),
+        category:  meta.category,
+        providers: [],
+      });
+    }
+    map.get(meta.brand)!.providers.push(p);
+  }
+  return Array.from(map.values());
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ADD STREAMING BLOCK
+// ─────────────────────────────────────────────────────────────────────────────
+
+const CATEGORY_LABELS: Record<ProviderCategory, string> = {
+  principais: "Principais",
+  gratuitos:  "Gratuitos",
+  canais:     "Canais",
+  aluguel:    "Aluguel",
+  outros:     "Outros",
+};
+
+function AddStreamingBlock({
+  allProviders,
+  activeIds,
+  onAdd,
+  desktopMode = false,
+}: {
+  allProviders:  StreamingProvider[];
+  activeIds:     string[];
+  onAdd:         (id: string) => void;
+  desktopMode?:  boolean;
+}) {
+  const [search,       setSearch]       = useState("");
+  const [activeFilter, setActiveFilter] = useState<ProviderCategory | "todos">("todos");
+  const [expandedBrand, setExpandedBrand] = useState<string | null>(null);
+
+  // Hide the entire brand once any variant of it is already active
+  const activeBrands = new Set(
+    activeIds
+      .map(id => allProviders.find(p => p.id === id))
+      .filter((p): p is StreamingProvider => !!p)
+      .map(p => getProviderMeta(p.provider_name).brand)
+  );
+  const available = allProviders.filter(p => {
+    if (activeIds.includes(p.id)) return false;
+    return !activeBrands.has(getProviderMeta(p.provider_name).brand);
+  });
+  const groups = buildBrandGroups(available);
+
+  const filtered = groups.filter(g => {
+    if (activeFilter !== "todos" && g.category !== activeFilter) return false;
+    if (search && !g.brand.toLowerCase().includes(search.toLowerCase())) return false;
+    return true;
+  });
+
+  const categories: Array<ProviderCategory | "todos"> = ["todos", "principais", "gratuitos", "canais", "aluguel", "outros"];
+
+  function handleBrandClick(group: BrandGroup) {
+    if (group.providers.length === 1) {
+      onAdd(group.providers[0].id);
+      setExpandedBrand(null);
+    } else {
+      setExpandedBrand(prev => prev === group.brand ? null : group.brand);
+    }
+  }
+
+  return (
+    <div className={desktopMode ? "flex flex-col h-full" : "mt-6 pt-6 border-t border-white/[0.06]"}>
+      {!desktopMode && <Eyebrow color="muted">Adicionar streaming</Eyebrow>}
+      <p className="text-[12px] text-white/30 mb-4 flex-shrink-0">Selecione os serviços que você assina.</p>
+
+      {/* Search */}
+      <div className="relative mb-3 flex-shrink-0">
+        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25 pointer-events-none" />
+        <input
+          type="text"
+          placeholder="Buscar streaming..."
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          className="w-full bg-white/[0.04] border border-white/[0.07] rounded-xl pl-8 pr-3 py-2.5 text-[12px] text-white/70 placeholder:text-white/20 outline-none focus:border-indigo-500/40 focus:bg-white/[0.06] transition-all"
+        />
+      </div>
+
+      {/* Category chips */}
+      <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1 mb-3 flex-shrink-0">
+        {categories.map(cat => (
+          <button
+            key={cat}
+            type="button"
+            onClick={() => setActiveFilter(cat)}
+            className={[
+              "flex-shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wide transition-all",
+              activeFilter === cat
+                ? "bg-indigo-600/30 border border-indigo-500/40 text-indigo-300"
+                : "bg-white/[0.04] border border-white/[0.06] text-white/30 hover:bg-white/[0.07] hover:text-white/50",
+            ].join(" ")}
+          >
+            {cat === "todos" ? "Todos" : CATEGORY_LABELS[cat]}
+          </button>
+        ))}
+      </div>
+
+      {/* Brand grid — scrollable area */}
+      <div className={desktopMode ? "relative flex-1 min-h-0" : ""}>
+        <div className={desktopMode ? "absolute inset-0 overflow-y-auto thin-scrollbar pr-1" : "overflow-y-auto no-scrollbar max-h-[420px] pr-0.5"}>
+        {filtered.length === 0 ? (
+          <p className="text-[12px] text-white/25 text-center py-6">
+            {search ? "Nenhum resultado para esta busca." : "Todos os streamings desta categoria ja foram adicionados."}
+          </p>
+        ) : (
+          <div className="grid grid-cols-1 gap-1.5">
+            {filtered.map(group => {
+              const isExpanded = expandedBrand === group.brand;
+              const brandLogo  = group.logoUrl;
+              return (
+                <div key={group.brand}>
+                  <button
+                    type="button"
+                    onClick={() => handleBrandClick(group)}
+                    className="w-full flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.025] hover:bg-white/[0.05] hover:border-indigo-500/25 transition-all px-3 py-2.5 text-left"
+                  >
+                    {brandLogo ? (
+                      <img
+                        src={brandLogo}
+                        alt={group.brand}
+                        className="w-9 h-9 rounded-xl object-cover flex-shrink-0"
+                        style={{ background: group.bg }}
+                      />
+                    ) : (
+                      <div
+                        className="w-9 h-9 rounded-xl flex items-center justify-center text-[11px] font-black flex-shrink-0"
+                        style={{ background: group.bg, color: group.textColor }}
+                      >
+                        {group.short}
+                      </div>
+                    )}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-[13px] font-bold text-white/80 truncate">{group.brand}</p>
+                      {group.providers.length > 1 && (
+                        <p className="text-[10px] text-white/30">{group.providers.length} opcoes</p>
+                      )}
+                    </div>
+                    {group.providers.length > 1 && (
+                      isExpanded
+                        ? <ChevronDown size={14} className="text-white/30 flex-shrink-0" />
+                        : <ChevronRight size={14} className="text-white/30 flex-shrink-0" />
+                    )}
+                  </button>
+
+                  {/* Variant picker */}
+                  {isExpanded && (
+                    <div className="mt-1 ml-3 space-y-1">
+                      {group.providers.map(p => {
+                        const pMeta   = getProviderMeta(p.provider_name);
+                        const pLogo   = getLogoUrl(p.logo_url);
+                        return (
+                          <button
+                            key={p.id}
+                            type="button"
+                            onClick={() => { onAdd(p.id); setExpandedBrand(null); }}
+                            className="w-full flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.06] hover:border-indigo-500/25 transition-all px-3 py-2 text-left"
+                          >
+                            {pLogo ? (
+                              <img
+                                src={pLogo}
+                                alt={pMeta.brand}
+                                className="w-6 h-6 rounded-lg object-cover flex-shrink-0"
+                                style={{ background: pMeta.bg }}
+                              />
+                            ) : (
+                              <div
+                                className="w-6 h-6 rounded-lg flex items-center justify-center text-[9px] font-black flex-shrink-0"
+                                style={{ background: pMeta.bg, color: pMeta.textColor ?? "#fff" }}
+                              >
+                                {pMeta.short}
+                              </div>
+                            )}
+                            <div className="flex-1 min-w-0">
+                              <p className="text-[11px] font-semibold text-white/70 truncate">
+                                {pMeta.variantLabel ?? pMeta.brand}
+                              </p>
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      </div>
     </div>
   );
 }
 
-// ── page ──────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// SAVE STATUS BADGE
+// ─────────────────────────────────────────────────────────────────────────────
+
+function SaveStatusBadge({ status }: { status: SaveStatus }) {
+  if (status === "idle") return null;
+  const map: Record<Exclude<SaveStatus, "idle">, { label: string; cls: string }> = {
+    saving: { label: "Salvando...",    cls: "bg-white/[0.05] border-white/[0.08] text-white/30"       },
+    saved:  { label: "✓ Salvo",        cls: "bg-teal-950/40 border-teal-500/25 text-teal-400/80"      },
+    error:  { label: "Erro ao salvar", cls: "bg-rose-950/40 border-rose-500/25 text-rose-400/80"      },
+  };
+  const { label, cls } = map[status as Exclude<SaveStatus, "idle">];
+  return (
+    <span
+      className={[
+        "text-[9px] font-bold uppercase tracking-wide px-2 py-1 rounded-full border",
+        cls,
+      ].join(" ")}
+    >
+      {label}
+    </span>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TAB: PREFERÊNCIAS
+// ─────────────────────────────────────────────────────────────────────────────
+
+type LangPref = "auto" | "pt" | "en" | "original";
+
+const LANG_OPTIONS: { id: LangPref; label: string; desc: string }[] = [
+  { id: "auto",     label: "Automático",  desc: "Usa o idioma do dispositivo" },
+  { id: "pt",       label: "Português",   desc: "Títulos em português"        },
+  { id: "en",       label: "Inglês",      desc: "Títulos em inglês"           },
+  { id: "original", label: "Original",    desc: "Título original da obra"     },
+];
+
+function TabPreferences({
+  allProviders,
+  initialActiveIds,
+  userId,
+}: {
+  allProviders:     StreamingProvider[];
+  initialActiveIds: string[];
+  userId:           string;
+}) {
+  const [activeIds,  setActiveIds]  = useState<string[]>(initialActiveIds);
+  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+  const [langPref,   setLangPref]   = useState<LangPref>("auto");
+  const saveTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const isSaving = saveStatus === "saving";
+
+  const doSave = useCallback(async (ids: string[]) => {
+    setSaveStatus("saving");
+    try {
+      const res = await fetch("/api/user/streaming-preferences", {
+        method:  "PUT",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ providerIds: ids, country: "BR" }),
+      });
+      if (!res.ok) throw new Error("save failed");
+      if (savedTimer.current) clearTimeout(savedTimer.current);
+      setSaveStatus("saved");
+      savedTimer.current = setTimeout(() => setSaveStatus("idle"), 2500);
+    } catch {
+      setSaveStatus("error");
+    }
+  }, []);
+
+  function scheduleProviderSave(ids: string[]) {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    setSaveStatus("saving");
+    saveTimer.current = setTimeout(() => { void doSave(ids); }, 700);
+  }
+
+  function handleReorder(newOrder: string[]) {
+    setActiveIds(newOrder);
+    scheduleProviderSave(newOrder);
+  }
+
+  function handleAdd(id: string) {
+    const next = [...activeIds, id];
+    setActiveIds(next);
+    scheduleProviderSave(next);
+  }
+
+  function handleRemove(id: string) {
+    const next = activeIds.filter(x => x !== id);
+    setActiveIds(next);
+    scheduleProviderSave(next);
+  }
+
+  const activeProviders = activeIds
+    .map(id => allProviders.find(p => p.id === id))
+    .filter((p): p is StreamingProvider => !!p);
+
+  return (
+    <div className="space-y-4">
+
+      {/* Idioma — compacto, no topo */}
+      <Block>
+        <Eyebrow color="violet">Preferências</Eyebrow>
+        <BlockTitle>Idioma dos títulos</BlockTitle>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {LANG_OPTIONS.map(opt => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => setLangPref(opt.id)}
+              className={[
+                "rounded-2xl border p-3.5 text-left transition-all",
+                langPref === opt.id
+                  ? "bg-indigo-600/15 border-indigo-500/35 text-white"
+                  : "bg-white/[0.025] border-white/[0.06] text-white/50 hover:bg-white/[0.05] hover:text-white/70",
+              ].join(" ")}
+            >
+              <div className="flex items-center justify-between mb-1">
+                <p className="text-[12px] font-bold">{opt.label}</p>
+                {langPref === opt.id && <Check size={12} className="text-indigo-400" />}
+              </div>
+              <p className="text-[10px] text-white/30 leading-snug">{opt.desc}</p>
+            </button>
+          ))}
+        </div>
+      </Block>
+
+      {/* Streaming: 2 cols desktop — direita fixa/sticky, esquerda com scroll */}
+      <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 lg:items-start">
+
+        {/* Esquerda — lista ativa, scroll interno no desktop */}
+        <Block className="flex flex-col">
+          <div className="flex items-center justify-between mb-1.5">
+            <Eyebrow color="indigo">Streaming</Eyebrow>
+            <SaveStatusBadge status={saveStatus} />
+          </div>
+          <BlockTitle>Seus streamings</BlockTitle>
+
+          {activeProviders.length === 0 ? (
+            <div className="text-center py-8">
+              <p className="text-[13px] text-white/30">Nenhum streaming adicionado ainda.</p>
+              <p className="text-[11px] text-white/20 mt-1">Adicione ao lado para personalizar sua experiência.</p>
+            </div>
+          ) : (
+            <Reorder.Group
+              axis="y"
+              values={activeIds}
+              onReorder={handleReorder}
+              className="space-y-2"
+            >
+              {activeProviders.map((p, idx) => (
+                <ActiveStreamingItem
+                  key={p.id}
+                  provider={p}
+                  priority={idx + 1}
+                  isSaving={isSaving}
+                  onRemove={() => handleRemove(p.id)}
+                />
+              ))}
+            </Reorder.Group>
+          )}
+
+          {/* Mobile: adicionar inline */}
+          <div className="lg:hidden">
+            <AddStreamingBlock
+              allProviders={allProviders}
+              activeIds={activeIds}
+              onAdd={handleAdd}
+            />
+          </div>
+        </Block>
+
+        {/* Direita — sticky, altura igual à viewport menos o header */}
+        <div className="hidden lg:flex lg:flex-col lg:sticky lg:top-6" style={{ height: "calc(100vh - 6rem)" }}>
+          <Block className="flex flex-col flex-1 min-h-0 overflow-hidden">
+            <div className="flex-shrink-0">
+              <Eyebrow color="muted">Adicionar streaming</Eyebrow>
+              <BlockTitle>Serviços disponíveis</BlockTitle>
+            </div>
+            <div className="flex-1 min-h-0">
+              <AddStreamingBlock
+                allProviders={allProviders}
+                activeIds={activeIds}
+                onAdd={handleAdd}
+                desktopMode
+              />
+            </div>
+          </Block>
+        </div>
+      </div>
+
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// TAB: CONTA
+// ─────────────────────────────────────────────────────────────────────────────
+
+function TabAccount({ user, onSignOut }: { user: User; onSignOut: () => void }) {
+  const [deleteConfirmText, setDeleteConfirmText] = useState("");
+  const [isDeleting,        setIsDeleting]        = useState(false);
+
+  async function handleDeleteAccount() {
+    if (deleteConfirmText !== "EXCLUIR") return;
+    setIsDeleting(true);
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
+  const hasProvider = (user.app_metadata?.providers as string[] | undefined)?.includes("email");
+
+  return (
+    <div className="space-y-4">
+
+      {/* Login + Sessão lado a lado no desktop */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+
+      {/* Login info */}
+      <Block>
+        <Eyebrow color="indigo">Informações da conta</Eyebrow>
+        <BlockTitle>Login &amp; segurança</BlockTitle>
+
+        <div className="space-y-3">
+          <div className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.025] px-4 py-3.5">
+            <div className="w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/25 flex items-center justify-center flex-shrink-0">
+              <Mail size={15} className="text-indigo-400" />
+            </div>
+            <div className="flex-1 min-w-0">
+              <p className="text-[10px] font-bold text-white/30 uppercase tracking-wide mb-0.5">E-mail</p>
+              <p className="text-[13px] font-semibold text-white/75 truncate">{user.email}</p>
+            </div>
+          </div>
+
+          {hasProvider && (
+            <div className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.025] px-4 py-3.5">
+              <div className="w-9 h-9 rounded-xl bg-violet-600/20 border border-violet-500/25 flex items-center justify-center flex-shrink-0">
+                <Lock size={15} className="text-violet-400" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-[10px] font-bold text-white/30 uppercase tracking-wide mb-0.5">Senha</p>
+                <p className="text-[13px] font-semibold text-white/75">••••••••</p>
+              </div>
+            </div>
+          )}
+        </div>
+      </Block>
+
+      {/* Sign out */}
+      <Block>
+        <Eyebrow color="muted">Sessão</Eyebrow>
+        <BlockTitle>Sair da conta</BlockTitle>
+
+        <p className="text-[12px] text-white/35 mb-5 leading-relaxed">
+          Encerre a sessão neste dispositivo. Seus dados permanecem salvos.
+        </p>
+
+        <button
+          type="button"
+          onClick={onSignOut}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.04] hover:bg-white/[0.07] text-[13px] font-semibold text-white/60 hover:text-white/80 transition-all"
+        >
+          <LogOut size={15} />
+          Sair da conta
+        </button>
+      </Block>
+
+      </div>{/* end desktop 2-col grid */}
+
+      {/* Danger zone — largura total */}
+      <Block className="border-rose-500/15">
+        <Eyebrow color="rose">Zona de risco</Eyebrow>
+        <BlockTitle>Excluir conta</BlockTitle>
+
+        <p className="text-[12px] text-white/35 mb-5 leading-relaxed">
+          Esta ação é irreversível. Todos os seus dados — biblioteca, histórico e preferências — serão permanentemente apagados.
+        </p>
+
+        <div className="space-y-3">
+          <div>
+            <label className="block text-[10px] font-bold text-white/30 uppercase tracking-wide mb-1.5">
+              Digite EXCLUIR para confirmar
+            </label>
+            <input
+              type="text"
+              value={deleteConfirmText}
+              onChange={e => setDeleteConfirmText(e.target.value)}
+              placeholder="EXCLUIR"
+              className="w-full bg-white/[0.03] border border-white/[0.07] focus:border-rose-500/35 rounded-xl px-3.5 py-2.5 text-[13px] text-white/70 placeholder:text-white/15 outline-none transition-all"
+            />
+          </div>
+
+          <button
+            type="button"
+            disabled={deleteConfirmText !== "EXCLUIR" || isDeleting}
+            onClick={handleDeleteAccount}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-semibold transition-all disabled:opacity-30 disabled:cursor-not-allowed bg-rose-500/15 border border-rose-500/25 text-rose-400 hover:bg-rose-500/25 hover:border-rose-500/40 disabled:hover:bg-rose-500/15"
+          >
+            <Trash2 size={15} />
+            {isDeleting ? "Excluindo..." : "Confirmar exclusão"}
+          </button>
+        </div>
+      </Block>
+
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MAIN PAGE
+// ─────────────────────────────────────────────────────────────────────────────
 
 export default function ProfilePage() {
-  const [user, setUser]   = useState<User | null>(null);
-  const [stats, setStats] = useState<LibraryStats>({
-    watched: 0, watching: 0, watchlist: 0, abandoned: 0,
-    favorites: 0, movies: 0, series: 0, total: 0,
-  });
-  const [isLoading, setIsLoading] = useState(true);
-  const router = useRouter();
+  const router       = useRouter();
+  const searchParams = useSearchParams();
+
+  const [user,         setUser]         = useState<User | null>(null);
+  const [authLoading,  setAuthLoading]  = useState(true);
+  const [stats,        setStats]        = useState<LibraryStats>({ watched: 0, watching: 0, watchlist: 0, abandoned: 0, favorites: 0, movies: 0, series: 0, total: 0 });
+  const [genres,       setGenres]       = useState<GenreStat[]>([]);
+  const [allProviders, setAllProviders] = useState<StreamingProvider[]>([]);
+  const [activeIds,    setActiveIds]    = useState<string[]>([]);
+  const [dataLoading,  setDataLoading]  = useState(true);
+
+  const rawTab    = searchParams.get("tab") as Tab | null;
+  const validTabs: Tab[] = ["visao-geral", "preferencias", "conta"];
+  const [tab, setTab] = useState<Tab>(validTabs.includes(rawTab as Tab) ? (rawTab as Tab) : "visao-geral");
+
+  function changeTab(t: Tab) {
+    setTab(t);
+    router.replace(`/profile?tab=${t}`, { scroll: false });
+  }
 
   useEffect(() => {
     const supabase = createClient();
-
-    async function load() {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) { setIsLoading(false); return; }
-      setUser(user);
-
-      // fetch library counts
-      const { data: titles } = await supabase
-        .from("user_titles")
-        .select("status, media_type, favorite")
-        .eq("user_id", user.id);
-
-      if (titles) {
-        const s: LibraryStats = {
-          watched:   titles.filter(t => t.status === "watched").length,
-          watching:  titles.filter(t => t.status === "watching").length,
-          watchlist: titles.filter(t => t.status === "watchlist").length,
-          abandoned: titles.filter(t => t.status === "abandoned").length,
-          favorites: titles.filter(t => t.favorite).length,
-          movies:    titles.filter(t => t.media_type === "movie").length,
-          series:    titles.filter(t => t.media_type === "tv").length,
-          total:     titles.length,
-        };
-        setStats(s);
-      }
-
-      setIsLoading(false);
-    }
-
-    load().catch(() => setIsLoading(false));
+    supabase.auth.getSession().then(({ data }) => {
+      setUser(data.session?.user ?? null);
+      setAuthLoading(false);
+    });
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
+      setUser(session?.user ?? null);
+      setAuthLoading(false);
+    });
+    return () => subscription.unsubscribe();
   }, []);
 
-  if (isLoading) {
+  useEffect(() => {
+    if (!user) { setDataLoading(false); return; }
+    void loadData(user);
+  }, [user]);
+
+  async function loadData(u: User) {
+    setDataLoading(true);
+    const supabase = createClient();
+
+    // Stats
+    try {
+      const { data: titles } = await supabase
+        .from("user_titles")
+        .select("status, media_type")
+        .eq("user_id", u.id);
+
+      if (titles) {
+        const s: LibraryStats = { watched: 0, watching: 0, watchlist: 0, abandoned: 0, favorites: 0, movies: 0, series: 0, total: titles.length };
+        for (const t of titles) {
+          if (t.status === "watched")   s.watched++;
+          if (t.status === "watching")  s.watching++;
+          if (t.status === "watchlist") s.watchlist++;
+          if (t.status === "abandoned") s.abandoned++;
+          if (t.media_type === "movie") s.movies++;
+          if (t.media_type === "tv")    s.series++;
+        }
+        const { count } = await supabase
+          .from("user_titles")
+          .select("*", { count: "exact", head: true })
+          .eq("user_id", u.id)
+          .eq("favorite", true);
+        s.favorites = count ?? 0;
+        setStats(s);
+      }
+    } catch { /* silent */ }
+
+    // Genres
+    try {
+      const { data: titleGenres } = await supabase
+        .from("user_titles")
+        .select("tmdb_id, media_type, poplog3_titles!inner(genres)")
+        .eq("user_id", u.id);
+
+      if (titleGenres) {
+        const genreCount: Record<string, number> = {};
+        for (const row of titleGenres) {
+          const g = (row as { poplog3_titles: { genres?: string[] } }).poplog3_titles;
+          if (Array.isArray(g?.genres)) {
+            for (const name of g.genres as string[]) {
+              genreCount[name] = (genreCount[name] ?? 0) + 1;
+            }
+          }
+        }
+        const sorted = Object.entries(genreCount)
+          .sort((a, b) => b[1] - a[1])
+          .slice(0, 8);
+        const maxCount = sorted[0]?.[1] ?? 1;
+        setGenres(sorted.map(([name, count]) => ({
+          name,
+          count,
+          pct: Math.round((count / maxCount) * 100),
+        })));
+      }
+    } catch { /* silent */ }
+
+    // Providers + active preferences via API
+    try {
+      const res = await fetch("/api/user/streaming-preferences");
+      if (res.ok) {
+        const json = await res.json() as {
+          ok:          boolean;
+          providers:   StreamingProvider[];
+          preferences: Array<{ provider_id: string; is_enabled: boolean; priority_order: number }>;
+        };
+        if (json.ok) {
+          setAllProviders(json.providers ?? []);
+          const active = (json.preferences ?? [])
+            .filter(p => p.is_enabled)
+            .sort((a, b) => a.priority_order - b.priority_order)
+            .map(p => p.provider_id);
+          setActiveIds(active);
+        }
+      }
+    } catch { /* silent */ }
+
+    setDataLoading(false);
+  }
+
+  async function handleSignOut() {
+    const supabase = createClient();
+    await supabase.auth.signOut();
+    router.push("/");
+    router.refresh();
+  }
+
+  if (authLoading) {
     return (
-      <section className="px-4 py-6 sm:px-6 md:px-8 lg:px-10">
-        <LoadingSkeleton />
-      </section>
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="w-8 h-8 rounded-full border-2 border-indigo-500/30 border-t-indigo-400 animate-spin" />
+      </div>
     );
   }
 
   if (!user) {
     return (
-      <section className="px-4 py-6 sm:px-6 md:px-8 lg:px-10">
-        <NotLoggedIn />
-      </section>
+      <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center">
+        <div className="w-14 h-14 rounded-[18px] bg-gradient-to-br from-indigo-600 to-purple-700 flex items-center justify-center mb-2">
+          <span className="text-2xl font-black text-white">P</span>
+        </div>
+        <h1 className="text-xl font-black text-white/90 tracking-tight">Central do Perfil</h1>
+        <p className="text-[13px] text-white/40 max-w-xs leading-relaxed">
+          Entre na sua conta para ver sua biblioteca, preferencias e historico na Poplog.
+        </p>
+      </div>
     );
   }
 
-  const hours        = estimateHours(stats);
-  const watchedPct   = stats.total > 0 ? Math.round((stats.watched / stats.total) * 100) : 0;
-  const moviesPct    = stats.total > 0 ? Math.round((stats.movies / stats.total) * 100) : 50;
-
   return (
-    <section className="px-4 py-6 sm:px-6 md:px-8 lg:px-10 pb-24 max-w-[1200px]">
+    <div className="max-w-5xl mx-auto">
 
-      {/* ── Header ─────────────────────────────────────────────── */}
-      <ProfileHeader user={user} stats={stats} />
+      <ProfileHeader user={user} stats={stats} onSignOut={handleSignOut} />
 
-      {/* ── Stats grid ─────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-6 mb-10">
-        <StatCard value={stats.watched}   label="Assistidos"  accent />
-        <StatCard value={stats.watching}  label="Assistindo"  />
-        <StatCard value={stats.watchlist} label="Watchlist"   />
-        <StatCard value={stats.movies}    label="Filmes"      />
-        <StatCard value={stats.series}    label="Séries"      />
-        <StatCard value={stats.favorites} label="Favoritos"   sub="★ marcados" />
-      </div>
+      <TabBar active={tab} onChange={changeTab} />
 
-      {/* ── Jornada ────────────────────────────────────────────── */}
-      <div className="rounded-[24px] border border-white/[0.06] bg-white/[0.02] p-6 sm:p-8 mb-10">
-        <SectionEyebrow color="violet">Sua jornada · POPLOG</SectionEyebrow>
-        <SectionTitle>Números da sua história</SectionTitle>
+      {tab === "visao-geral" && (
+        dataLoading
+          ? <div className="flex items-center justify-center py-16"><div className="w-6 h-6 rounded-full border-2 border-indigo-500/30 border-t-indigo-400 animate-spin" /></div>
+          : <TabOverview stats={stats} genres={genres} />
+      )}
 
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-8 items-center">
-          {/* Hours */}
-          <div className="flex flex-col items-center gap-2">
-            <p className="text-3xl font-black text-white/85 tracking-tight leading-none">
-              {hours > 0 ? hours.toLocaleString("pt-BR") : "—"}
-            </p>
-            <p className="text-[11px] text-white/30 text-center">horas estimadas</p>
-            <p className="text-[9.5px] text-white/20 text-center">filmes + séries</p>
-          </div>
+      {tab === "preferencias" && (
+        dataLoading
+          ? <div className="flex items-center justify-center py-16"><div className="w-6 h-6 rounded-full border-2 border-indigo-500/30 border-t-indigo-400 animate-spin" /></div>
+          : <TabPreferences allProviders={allProviders} initialActiveIds={activeIds} userId={user.id} />
+      )}
 
-          {/* Completion ring */}
-          <ProgressRing
-            pct={watchedPct}
-            value={String(watchedPct)}
-            label="concluídos"
-          />
+      {tab === "conta" && (
+        <TabAccount user={user} onSignOut={handleSignOut} />
+      )}
 
-          {/* Films vs Series bar */}
-          <div className="flex flex-col gap-3 col-span-2">
-            <div>
-              <div className="flex justify-between items-center mb-1.5">
-                <span className="text-[10px] text-cyan-400/70 font-bold">Filmes</span>
-                <span className="text-[10px] text-white/30">{moviesPct}%</span>
-              </div>
-              <div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
-                <div className="h-full rounded-full bg-gradient-to-r from-cyan-500 to-cyan-400"
-                  style={{ width: `${moviesPct}%`, transition: "width 1s ease" }} />
-              </div>
-            </div>
-            <div>
-              <div className="flex justify-between items-center mb-1.5">
-                <span className="text-[10px] text-indigo-400/70 font-bold">Séries</span>
-                <span className="text-[10px] text-white/30">{100 - moviesPct}%</span>
-              </div>
-              <div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
-                <div className="h-full rounded-full bg-gradient-to-r from-indigo-500 to-violet-400"
-                  style={{ width: `${100 - moviesPct}%`, transition: "width 1s ease" }} />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <SectionDivider />
-
-      {/* ── Gêneros favoritos ───────────────────────────────────── */}
-      <section className="mb-10">
-        <SectionEyebrow color="teal">Gêneros favoritos · Estimado</SectionEyebrow>
-        <SectionTitle>O que você mais assiste</SectionTitle>
-
-        <div className="space-y-3">
-          {GENRE_DIST.map(g => (
-            <div key={g.name}>
-              <div className="flex justify-between items-center mb-1.5">
-                <span className="text-[12px] font-bold text-white/60">{g.name}</span>
-                <span className="text-[11px] text-white/25">{g.pct}%</span>
-              </div>
-              <div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
-                <div className={`h-full rounded-full ${g.color} opacity-70`}
-                  style={{ width: `${g.pct}%`, transition: "width 1.2s ease" }} />
-              </div>
-            </div>
-          ))}
-        </div>
-
-        <p className="text-[10px] text-white/18 mt-4 italic">
-          * Distribuição estimada. Análise precisa dos gêneros chega em breve.
-        </p>
-      </section>
-
-      <SectionDivider />
-
-      {/* ── Streamings ativos ───────────────────────────────────── */}
-      <section className="mb-10">
-        <div className="flex items-end justify-between mb-5">
-          <div>
-            <SectionEyebrow color="indigo">Streamings · Configurados</SectionEyebrow>
-            <h2 className="text-xl font-black tracking-[-0.03em] text-white/90 leading-tight">Plataformas ativas</h2>
-          </div>
-          <button
-            type="button"
-            onClick={() => router.push("/settings")}
-            className="text-[11px] text-white/30 hover:text-white/60 transition-colors flex items-center gap-1 pb-0.5"
-          >
-            Gerenciar
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 18l6-6-6-6" />
-            </svg>
-          </button>
-        </div>
-
-        <div className="flex flex-wrap gap-3">
-          {STREAMINGS.map(s => (
-            <div key={s.name}
-              className={`flex items-center gap-2.5 rounded-2xl border px-4 py-3 transition-all ${
-                s.active
-                  ? "border-white/[0.10] bg-white/[0.04]"
-                  : "border-white/[0.04] bg-transparent opacity-35"
-              }`}
-            >
-              <div className={`w-7 h-7 rounded-lg ${s.bg} flex items-center justify-center flex-shrink-0`}>
-                <span className="text-[10px] font-black text-white">{s.short}</span>
-              </div>
-              <div>
-                <p className="text-[12px] font-bold text-white/75 leading-none">{s.name}</p>
-                <p className={`text-[9.5px] mt-0.5 ${s.active ? "text-teal-400/60" : "text-white/25"}`}>
-                  {s.active ? "Ativo" : "Inativo"}
-                </p>
-              </div>
-            </div>
-          ))}
-
-          <button
-            type="button"
-            onClick={() => router.push("/settings")}
-            className="flex items-center gap-2 rounded-2xl border border-dashed border-white/[0.10] px-4 py-3 text-white/25 hover:text-white/50 hover:border-white/[0.18] transition-all"
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <line x1="12" y1="5" x2="12" y2="19" /><line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
-            <span className="text-[12px] font-bold">Adicionar</span>
-          </button>
-        </div>
-      </section>
-
-      <SectionDivider />
-
-      {/* ── Ações rápidas ───────────────────────────────────────── */}
-      <section>
-        <SectionEyebrow color="muted">Acesso rápido</SectionEyebrow>
-        <SectionTitle>Central da conta</SectionTitle>
-
-        <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
-          {[
-            { label: "Configurações",     sub: "Streamings, idioma, notificações",  href: "/settings",     icon: "⚙️" },
-            { label: "Minha Biblioteca",  sub: `${stats.total} títulos registrados`, href: "/library",      icon: "📚" },
-            { label: "Acompanhando",      sub: `${stats.watching} em andamento`,     href: "/acompanhando", icon: "▶️" },
-          ].map(link => (
-            <button
-              key={link.label}
-              type="button"
-              onClick={() => router.push(link.href)}
-              className="group flex items-center gap-4 rounded-2xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.045] hover:border-white/[0.10] transition-all duration-200 px-5 py-4 text-left"
-            >
-              <span className="text-xl flex-shrink-0">{link.icon}</span>
-              <div className="flex-1 min-w-0">
-                <p className="text-[13px] font-black text-white/80 tracking-tight">{link.label}</p>
-                <p className="text-[11px] text-white/30 truncate">{link.sub}</p>
-              </div>
-              <svg className="text-white/20 group-hover:text-white/45 flex-shrink-0 transition-colors" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M9 18l6-6-6-6" />
-              </svg>
-            </button>
-          ))}
-        </div>
-      </section>
-
-    </section>
+    </div>
   );
 }

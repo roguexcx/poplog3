@@ -32,15 +32,17 @@ export async function GET(
       { status: 400 }
     );
   }
-  if (Number.isNaN(seasonNumber) || seasonNumber < 0) {
-    console.warn("[poplog3/tv/season] número de temporada inválido", {
+  if (Number.isNaN(seasonNumber) || seasonNumber <= 0) {
+    // season_number = 0 = "Especiais" / temporadas fantasmas. TMDB retorna 404
+    // para séries sem especiais, gerando erros desnecessários. Retornamos 400.
+    console.warn("[poplog3/tv/season] número de temporada inválido (≤0 ou NaN)", {
       rawSeason: resolved.season,
       parsedSeason: seasonNumber,
       isNaN: Number.isNaN(seasonNumber),
-      isNegative: seasonNumber < 0,
+      isZeroOrNegative: seasonNumber <= 0,
     });
     return NextResponse.json(
-      { ok: false, error: "Invalid season number" },
+      { ok: false, error: "Invalid season number — must be >= 1" },
       { status: 400 }
     );
   }
@@ -57,14 +59,18 @@ export async function GET(
     });
 
     if (!result.season) {
-      console.error("[poplog3/tv/season] season não encontrada", {
+      // season null = TMDB retornou 404 ou série não encontrada.
+      // Retornamos 404 para o cliente, mas com mensagem informativa
+      // para facilitar diagnóstico (sem tratar como erro grave no servidor).
+      console.warn("[poplog3/tv/season] season não encontrada — provavelmente TMDB 404", {
         seriesId,
         seasonNumber,
         source: result.source,
         cacheStatus: result.cache_status,
+        hint: "Verifique se o tmdb_id corresponde a uma série (não a um filme) e se a temporada existe no TMDB",
       });
       return NextResponse.json(
-        { ok: false, error: "Season not found" },
+        { ok: false, error: "Season not found", hint: `Série ${seriesId} temporada ${seasonNumber} não encontrada no TMDB. Verifique se o ID é de uma série válida.` },
         { status: 404 }
       );
     }

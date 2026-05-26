@@ -103,6 +103,8 @@ export async function GET() {
       .gt("watched_episodes", 0)
       .not("next_season", "is", null)
       .not("next_episode", "is", null)
+      .gt("next_season", 0)   // exclui temporada 0 (Especiais / fantasmas → TMDB 404)
+      .gt("next_episode", 0)  // exclui episódio 0 inválido
       .order("last_watched_at", { ascending: false, nullsFirst: false });
 
     if (statesError) {

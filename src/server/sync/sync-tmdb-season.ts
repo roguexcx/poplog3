@@ -45,6 +45,24 @@ export async function syncTmdbSeason(
   seasonNumber: number,
   options: { force?: boolean } = {}
 ): Promise<SyncTmdbSeasonResult> {
+  // ── Validações defensivas ─────────────────────────────────────────────────
+  // Impede chamadas inválidas ao TMDB antes de qualquer I/O.
+  if (!Number.isFinite(seriesTmdbId) || seriesTmdbId <= 0) {
+    console.warn("[syncTmdbSeason] seriesTmdbId inválido — abortando chamada TMDB", {
+      seriesTmdbId, seasonNumber,
+    });
+    return { season: null, source: "cache", cache_status: "fresh" };
+  }
+  if (!Number.isFinite(seasonNumber) || seasonNumber <= 0) {
+    // season_number = 0 = "Especiais" (Season 0); TMDB retorna 404 para a maioria
+    // das séries que não possuem especiais cadastrados. Temporadas com número ≤ 0
+    // são consideradas fantasmas e não devem disparar chamadas externas.
+    console.warn("[syncTmdbSeason] season_number inválido (≤0) — ignorando temporada especial/fantasma", {
+      seriesTmdbId, seasonNumber,
+    });
+    return { season: null, source: "cache", cache_status: "fresh" };
+  }
+  // ─────────────────────────────────────────────────────────────────────────
   const t0 = Date.now();
   const cached = await getCachedSeason(seriesTmdbId, seasonNumber);
 
@@ -97,11 +115,22 @@ export async function syncTmdbSeason(
     });
     // Re-throw com contexto adicional
     if (errorMsg.includes("404")) {
-      throw new Error(
-        `TMDB season endpoint ${tmdbEndpoint} retornou 404. ` +
-        `Verifique se series_id=${seriesTmdbId} existe em TMDB e ` +
-        `se season_number=${seasonNumber} é válido para essa série.`
-      );
+      // TMDB retornou 404. Causas esperadas:
+      //   - tmdb_id é de um FILME (media_type mismatch no banco)
+      //   - série foi removida do TMDB
+      //   - season_number não existe para esta série
+      // Não relança como erro fatal — deixa o caller tratar com fallback.
+      console.warn("[syncTmdbSeason] TMDB 404 — série ou temporada não encontrada no TMDB", {
+        seriesTmdbId,
+        seasonNumber,
+        endpoint: tmdbEndpoint,
+        possibleCauses: [
+          "ID pode ser de um filme registrado como série no banco",
+          "Série removida ou inativa no TMDB",
+          "Temporada não existe para esta série",
+        ],
+      });
+      return { season: null, source: "tmdb", cache_status: "fresh" };
     }
     throw error;
   }

@@ -86,7 +86,11 @@ export async function GET() {
       return NextResponse.json({ items: [] });
     }
 
-    const states = (statesRaw ?? []) as StateRow[];
+    // Filtra estados com next_season/next_episode inválidos para não tentar
+    // enriquecer episódios de temporada 0 (Specials) ou dados corrompidos.
+    const states = ((statesRaw ?? []) as StateRow[]).filter(
+      (s) => (s.next_season ?? 0) > 0 && (s.next_episode ?? 0) > 0,
+    );
 
     // Sintetiza StateRows para séries up_to_date usando tmdb_payload.next_episode_to_air
     if (upToDateRaw && upToDateRaw.length > 0) {

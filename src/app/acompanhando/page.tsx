@@ -227,8 +227,16 @@ export default function AcompanhandoPage() {
             setHeroItems(result.data.candidates);
           }
         } else {
-          setHeroError(result.reason);
-          console.error("[AcompanhandoPage] Hero falhou:", result.reason);
+          // 404 = sem dados (sem candidatos ou usuário novo) → não é um erro fatal.
+          // 5xx = falha real no servidor → loga como erro.
+          const isFatal = result.status !== null && result.status >= 500;
+          if (isFatal) {
+            setHeroError(result.reason);
+            console.error("[AcompanhandoPage] Hero falhou (erro servidor):", result.reason);
+          } else {
+            // Ausência de candidatos é esperada; exibe fallback silenciosamente.
+            console.warn("[AcompanhandoPage] Hero sem candidatos:", { status: result.status, reason: result.reason });
+          }
         }
       })
       .catch((err) => {
