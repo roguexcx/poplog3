@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ElementType } from "react";
+import { useMemo, type ElementType } from "react";
 
 type TitleVariant = "hero" | "large" | "medium" | "compact" | "poster";
 
@@ -12,11 +12,6 @@ type Props = {
   className?: string;
 };
 
-declare global {
-  interface Window {
-    __poplogTitleShuffleSeed?: number;
-  }
-}
 
 function normalizeTitle(value?: string | null): string {
   return (value ?? "")
@@ -27,15 +22,7 @@ function normalizeTitle(value?: string | null): string {
     .trim();
 }
 
-/**
- * Retorna o título a ser exibido como principal (original/inglês prioritário)
- * e o título secundário (localizado, quando diferente do original).
- *
- * Lógica:
- * - Se originalTitle existe e é diferente do title localizado → exibe originalTitle
- *   como principal e title (localizado) como subtítulo discreto.
- * - Se são iguais ou não há originalTitle → exibe apenas title.
- */
+/** Retorna o originalTitle somente se for diferente do title localizado. */
 export function getDisplayOriginalTitle(
   title: string,
   originalTitle?: string | null,
@@ -45,25 +32,11 @@ export function getDisplayOriginalTitle(
   return normalizeTitle(original) !== normalizeTitle(title) ? original : null;
 }
 
-function hashTitle(value: string): number {
-  let hash = 2166136261;
-  for (let i = 0; i < value.length; i++) {
-    hash ^= value.charCodeAt(i);
-    hash = Math.imul(hash, 16777619);
-  }
-  return hash >>> 0;
-}
-
-function titleShuffleSeed() {
-  if (typeof window === "undefined") return 0;
-  window.__poplogTitleShuffleSeed ??= Math.random();
-  return window.__poplogTitleShuffleSeed;
-}
 
 export function resolveRandomizedTitleDisplay(
   title: string,
   originalTitle?: string | null,
-  seed = 0,
+  _seed = 0,
 ) {
   const diffOriginal = getDisplayOriginalTitle(title, originalTitle);
   if (!diffOriginal) {
@@ -74,16 +47,10 @@ export function resolveRandomizedTitleDisplay(
     };
   }
 
-  const normalizedPair = `${normalizeTitle(title)}|${normalizeTitle(diffOriginal)}`;
-  const localizedFirst =
-    ((hashTitle(normalizedPair) + Math.floor(seed * 10_000)) % 2) === 0;
-  const mainTitle = localizedFirst ? title : diffOriginal;
-  const subTitle = localizedFirst ? diffOriginal : title;
-
   return {
-    mainTitle,
-    subTitle,
-    fullTitle: `${mainTitle} (${subTitle})`,
+    mainTitle: title,
+    subTitle: diffOriginal,
+    fullTitle: `${title} (${diffOriginal})`,
   };
 }
 
@@ -91,15 +58,9 @@ export function useRandomizedTitleDisplay(
   title: string,
   originalTitle?: string | null,
 ) {
-  const [seed, setSeed] = useState(0);
-
-  useEffect(() => {
-    setSeed(titleShuffleSeed());
-  }, []);
-
   return useMemo(
-    () => resolveRandomizedTitleDisplay(title, originalTitle, seed),
-    [title, originalTitle, seed],
+    () => resolveRandomizedTitleDisplay(title, originalTitle),
+    [title, originalTitle],
   );
 }
 

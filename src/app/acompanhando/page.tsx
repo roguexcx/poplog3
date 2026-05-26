@@ -501,36 +501,6 @@ export default function AcompanhandoPage() {
           </section>
         )}
 
-        {/* Boa hora pra começar */}
-        {(isStartSeriesLoading || startSeriesPicks.length > 0) && (
-          <section>
-            <SectionHeader
-              eyebrow="Da sua watchlist"
-              accent="amber"
-              title="Boa hora pra começar"
-              subtitle="Séries premiadas, bem avaliadas e fáceis de entrar — priorizadas por disponibilidade e relevância editorial."
-              size="sm"
-              action={
-                <button
-                  type="button"
-                  onClick={refreshStartSeriesPicks}
-                  disabled={isStartSeriesLoading}
-                  className="rounded-full border border-white/[0.10] bg-white/[0.04] px-3 py-1 text-[11px] font-bold text-white/45 transition-all hover:text-white/70 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  Trocar
-                </button>
-              }
-              className="mb-4"
-            />
-
-            <StartSeriesBanner
-              items={startSeriesPicks}
-              loading={isStartSeriesLoading}
-              onPick={handleStartSeriesNavigate}
-            />
-          </section>
-        )}
-
         {/* Continue de onde parou */}
         {(isContinueLoading || continueItems.length > 0 || continueError !== null) && (
           <section>
@@ -625,31 +595,38 @@ export default function AcompanhandoPage() {
                   type="button"
                   onClick={refreshWatchlistPicks}
                   disabled={isWatchlistPicksLoading}
-                  className="rounded-full border border-white/[0.10] bg-white/[0.04] px-3 py-1 text-[11px] font-bold text-white/45 transition-all hover:text-white/70 disabled:cursor-not-allowed disabled:opacity-40"
+                  className="h-8 rounded-full border border-white/[0.10] bg-white/[0.04] px-3 text-[11px] font-bold text-white/45 transition-all hover:border-white/[0.16] hover:text-white/70 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   Trocar sugestões
                 </button>
               }
-              className="mb-4"
+              className="mb-5 sm:items-center"
             />
 
             {isWatchlistPicksLoading ? (
-              <div className="grid grid-cols-3 gap-3 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-9">
+              <div className="grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-9">
                 {[...Array(9)].map((_, i) => (
                   <div
                     key={i}
-                    className="aspect-[2/3] animate-pulse rounded-xl bg-white/[0.04]"
+                    className={[
+                      "aspect-[2/3] animate-pulse rounded-xl bg-white/[0.04]",
+                      i >= 8 ? "hidden sm:block" : "",
+                    ].join(" ")}
                   />
                 ))}
               </div>
             ) : (
-              <div className="grid grid-cols-3 gap-3 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-9">
-                {watchlistPicks.map((item) => (
-                  <WatchlistPickCard
+              <div className="grid grid-cols-2 gap-x-4 gap-y-5 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-9">
+                {watchlistPicks.map((item, index) => (
+                  <div
                     key={item.content_id}
-                    item={item}
-                    onClick={() => handleWatchlistPickNavigate(item)}
-                  />
+                    className={index >= 8 ? "hidden sm:block" : ""}
+                  >
+                    <WatchlistPickCard
+                      item={item}
+                      onClick={() => handleWatchlistPickNavigate(item)}
+                    />
+                  </div>
                 ))}
               </div>
             )}
@@ -668,25 +645,62 @@ export default function AcompanhandoPage() {
             />
 
             {isRecentlyWatchedLoading ? (
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {[...Array(4)].map((_, i) => (
+              <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+                {[...Array(6)].map((_, i) => (
                   <div
                     key={i}
-                    className="h-[54px] animate-pulse rounded-xl bg-white/[0.04]"
+                    className={[
+                      "h-[72px] animate-pulse rounded-xl bg-white/[0.04] sm:h-[68px]",
+                      i >= 3 ? "hidden sm:block" : "",
+                    ].join(" ")}
                   />
                 ))}
               </div>
             ) : (
-              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                {recentlyWatched.map((item) => (
-                  <RecentlyWatchedCard
+              <div className="grid gap-2.5 sm:grid-cols-2 xl:grid-cols-3">
+                {recentlyWatched.map((item, index) => (
+                  <div
                     key={item.content_id}
-                    item={item}
-                    onClick={() => handleRecentlyWatchedNavigate(item)}
-                  />
+                    className={index >= 3 ? "hidden sm:block" : ""}
+                  >
+                    <RecentlyWatchedCard
+                      item={item}
+                      onClick={() => handleRecentlyWatchedNavigate(item)}
+                    />
+                  </div>
                 ))}
               </div>
             )}
+          </section>
+        )}
+
+        {/* Boa hora pra começar */}
+        {(isStartSeriesLoading || startSeriesPicks.length > 0) && (
+          <section>
+            <SectionHeader
+              eyebrow="Da sua watchlist"
+              accent="amber"
+              title="Boa hora pra começar"
+              subtitle="Séries premiadas, bem avaliadas e fáceis de entrar — priorizadas por disponibilidade e relevância editorial."
+              size="sm"
+              action={
+                <button
+                  type="button"
+                  onClick={refreshStartSeriesPicks}
+                  disabled={isStartSeriesLoading}
+                  className="h-8 rounded-full border border-white/[0.10] bg-white/[0.04] px-3 text-[11px] font-bold text-white/45 transition-all hover:border-white/[0.16] hover:text-white/70 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  Trocar
+                </button>
+              }
+              className="mb-4 sm:items-start"
+            />
+
+            <StartSeriesBanner
+              items={startSeriesPicks}
+              loading={isStartSeriesLoading}
+              onPick={handleStartSeriesNavigate}
+            />
           </section>
         )}
       </div>

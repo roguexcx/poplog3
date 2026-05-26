@@ -239,7 +239,7 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
   }
 
   return (
-    <div className="relative flex flex-col gap-10 md:gap-14">
+    <div className="relative flex flex-col gap-8 pb-20 md:gap-14 md:pb-0">
 
       {/* Atmospheric depth */}
       <div className="pointer-events-none absolute inset-0 overflow-hidden">
@@ -274,11 +274,11 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
                 subtitle="Tudo que você salvou para assistir"
                 onViewAll={() => scrollToGrid("watchlist", "popularity-desc")}
               />
-              <div className="relative flex-1 flex flex-col justify-center rounded-[1.75rem] border border-white/[0.08] bg-white/[0.025] p-4 shadow-[0_18px_56px_rgba(0,0,0,0.30)]">
+              <div className="relative flex-1 flex flex-col justify-center rounded-[1.5rem] border border-white/[0.08] bg-white/[0.025] p-3 shadow-[0_18px_56px_rgba(0,0,0,0.30)] sm:rounded-[1.75rem] sm:p-4">
                 <div className="pointer-events-none absolute -right-12 -top-10 h-40 w-40 rounded-full bg-indigo-500/[0.06] blur-[60px]" />
                 <ScrollRail>
                   {watchlistItems.map((item, i) => (
-                    <div key={item.id} className="w-[158px] shrink-0 sm:w-[175px]">
+                    <div key={item.id} className="w-[124px] shrink-0 sm:w-[175px]">
                       <LibraryPosterCard item={item} priority={i < 5} />
                     </div>
                   ))}
@@ -302,7 +302,7 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
               />
               <ScrollRail>
                 {recentItems.map((item, i) => (
-                  <div key={item.id} className="w-[130px] shrink-0 sm:w-[140px]">
+                  <div key={item.id} className="w-[118px] shrink-0 sm:w-[140px]">
                     <LibraryPosterCard item={item} priority={i < 4} />
                   </div>
                 ))}
@@ -319,7 +319,7 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
               />
               <ScrollRail>
                 {shortestItems.map((item, i) => (
-                  <div key={item.id} className="w-[130px] shrink-0 sm:w-[140px]">
+                  <div key={item.id} className="w-[118px] shrink-0 sm:w-[140px]">
                     <LibraryPosterCard item={item} priority={i < 4} />
                   </div>
                 ))}
@@ -344,7 +344,7 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
               />
               <ScrollRail>
                 {favoritesItems.map((item, i) => (
-                  <div key={item.id} className="w-[135px] shrink-0 sm:w-[148px]">
+                  <div key={item.id} className="w-[118px] shrink-0 sm:w-[148px]">
                     <LibraryPosterCard item={item} priority={i < 5} />
                   </div>
                 ))}
@@ -412,7 +412,7 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
 
         {/* Mobile filter row */}
         <div className="mb-5 flex items-center justify-between gap-3 md:hidden">
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
             {activeTab !== "all" && (
               <span className="rounded-full bg-indigo-500/20 px-2.5 py-0.5 text-[11px] font-medium text-indigo-200">
                 {TAB_OPTIONS.find((t) => t.id === activeTab)?.label}
@@ -435,10 +435,10 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
           <button
             type="button"
             onClick={() => setMobileFiltersOpen(true)}
-            className="flex shrink-0 items-center gap-2 rounded-full border border-white/[0.12] bg-white/[0.05] px-4 py-2 text-[12px] font-medium text-white/75 transition hover:bg-white/[0.10]"
+            className="flex h-9 shrink-0 items-center gap-2 rounded-full border border-white/[0.12] bg-white/[0.05] px-3 text-[11px] font-bold text-white/75 transition hover:bg-white/[0.10]"
           >
             <Filter className="h-3.5 w-3.5" />
-            Filtrar e ordenar
+            Filtrar
           </button>
         </div>
 
@@ -558,30 +558,92 @@ function LibraryStatsRow({
   stats:       ExtendedStats;
   onStatClick: (tab: LibraryTab, sort: SortBy) => void;
 }) {
+  const scrollerRef = useRef<HTMLDivElement>(null);
+  const [canScrollLeft, setCanScrollLeft] = useState(false);
+  const [canScrollRight, setCanScrollRight] = useState(false);
+
+  const updateScrollButtons = useCallback(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+    setCanScrollLeft(el.scrollLeft > 4);
+    setCanScrollRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  }, []);
+
+  useEffect(() => {
+    const el = scrollerRef.current;
+    if (!el) return;
+
+    updateScrollButtons();
+    el.addEventListener("scroll", updateScrollButtons, { passive: true });
+    const observer = new ResizeObserver(updateScrollButtons);
+    observer.observe(el);
+
+    return () => {
+      el.removeEventListener("scroll", updateScrollButtons);
+      observer.disconnect();
+    };
+  }, [updateScrollButtons]);
+
+  function scrollStats(direction: -1 | 1) {
+    scrollerRef.current?.scrollBy({
+      left: direction * 224,
+      behavior: "smooth",
+    });
+  }
+
   return (
-    <div className="-mx-1 overflow-x-auto no-scrollbar px-1 pb-1 sm:mx-0 sm:overflow-x-visible sm:pb-0">
-      <div className="grid min-w-[700px] grid-cols-7 gap-2 sm:min-w-0 sm:gap-3">
-      {STAT_CONFIGS.map((config) => (
+    <div className="relative">
+      <div
+        ref={scrollerRef}
+        className="-mx-4 overflow-x-auto no-scrollbar px-4 pb-1 scroll-smooth sm:mx-0 sm:overflow-x-visible sm:px-0 sm:pb-0"
+      >
+        <div className="flex w-max gap-2 sm:grid sm:w-auto sm:grid-cols-7 sm:gap-3">
+        {STAT_CONFIGS.map((config) => (
+          <button
+            key={config.key}
+            type="button"
+            onClick={() => onStatClick(config.tab, config.sort)}
+            className="group flex w-[92px] shrink-0 touch-pan-x flex-col gap-2 rounded-[1.1rem] border border-white/[0.08] bg-white/[0.04] px-2.5 py-3 text-left transition hover:border-white/[0.14] hover:bg-white/[0.07] min-[390px]:w-[94px] sm:w-auto sm:rounded-[1.25rem] sm:px-4 sm:py-3.5"
+          >
+            <div className="flex items-center gap-2">
+              {config.icon}
+              <span className="text-[22px] font-black tabular-nums leading-none text-white sm:text-2xl">
+                {stats[config.key]}
+              </span>
+            </div>
+            <p className="line-clamp-2 min-h-[22px] text-[9px] font-black uppercase tracking-[0.08em] text-white/65 sm:min-h-0 sm:text-[10px] sm:tracking-[0.14em]">
+              {config.label}
+            </p>
+            <p className="text-[10px] leading-tight text-white/30">
+              {config.description}
+            </p>
+          </button>
+        ))}
+        </div>
+      </div>
+
+      <div className="pointer-events-none absolute inset-y-0 left-0 flex items-center sm:hidden">
         <button
-          key={config.key}
           type="button"
-          onClick={() => onStatClick(config.tab, config.sort)}
-          className="group flex flex-col gap-2 rounded-[1.25rem] border border-white/[0.08] bg-white/[0.04] px-3 py-3.5 text-left transition hover:border-white/[0.14] hover:bg-white/[0.07] sm:px-4"
+          aria-label="Ver categorias anteriores"
+          disabled={!canScrollLeft}
+          onClick={() => scrollStats(-1)}
+          className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.12] bg-[#09090f]/85 text-white/70 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-md transition disabled:opacity-0"
         >
-          <div className="flex items-center gap-2">
-            {config.icon}
-            <span className="text-2xl font-black tabular-nums leading-none text-white">
-              {stats[config.key]}
-            </span>
-          </div>
-          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-white/65">
-            {config.label}
-          </p>
-          <p className="text-[10px] text-white/30">
-            {config.description}
-          </p>
+          <ChevronLeft className="h-4 w-4" />
         </button>
-      ))}
+      </div>
+
+      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center sm:hidden">
+        <button
+          type="button"
+          aria-label="Ver mais categorias"
+          disabled={!canScrollRight}
+          onClick={() => scrollStats(1)}
+          className="pointer-events-auto flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.12] bg-[#09090f]/85 text-white/70 shadow-[0_10px_28px_rgba(0,0,0,0.35)] backdrop-blur-md transition disabled:opacity-0"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
       </div>
     </div>
   );
@@ -619,7 +681,7 @@ function RailHeader({
 
   return (
     <div className="flex items-start justify-between gap-4">
-      <div>
+      <div className="min-w-0">
         <div className="flex items-center gap-2">
           {icon && <span>{icon}</span>}
           <h2 className="text-sm font-black uppercase tracking-wide text-white sm:text-[15px]">
@@ -627,14 +689,14 @@ function RailHeader({
           </h2>
         </div>
         {subtitle && (
-          <p className="mt-0.5 text-[11px] text-white/38">{subtitle}</p>
+          <p className="mt-0.5 line-clamp-1 text-[11px] text-white/38">{subtitle}</p>
         )}
       </div>
       {onViewAll && (
         <button
           type="button"
           onClick={onViewAll}
-          className={`flex shrink-0 items-center gap-1 text-[12px] font-medium ${accentText} hover:underline`}
+          className={`flex h-7 shrink-0 items-center gap-1 rounded-full px-1.5 text-[11px] font-bold sm:text-[12px] ${accentText} hover:underline`}
         >
           Ver tudo
           <ChevronRight className="h-3.5 w-3.5" />
@@ -685,7 +747,7 @@ function ScrollRail({
           type="button"
           onClick={() => scroll(-1)}
           aria-label="Anterior"
-          className="absolute -left-3 top-1/2 z-10 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.14] bg-black/75 text-white/80 shadow-lg backdrop-blur-sm transition hover:bg-black/95 hover:text-white"
+          className="absolute -left-3 top-1/2 z-10 hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-white/[0.14] bg-black/75 text-white/80 shadow-lg backdrop-blur-sm transition hover:bg-black/95 hover:text-white sm:flex"
         >
           <ChevronLeft className="h-4 w-4" />
         </button>
@@ -701,7 +763,7 @@ function ScrollRail({
           type="button"
           onClick={() => scroll(1)}
           aria-label="Próximo"
-          className="absolute -right-3 top-1/2 z-10 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.14] bg-black/75 text-white/80 shadow-lg backdrop-blur-sm transition hover:bg-black/95 hover:text-white"
+          className="absolute -right-3 top-1/2 z-10 hidden h-8 w-8 -translate-y-1/2 items-center justify-center rounded-full border border-white/[0.14] bg-black/75 text-white/80 shadow-lg backdrop-blur-sm transition hover:bg-black/95 hover:text-white sm:flex"
         >
           <ChevronRight className="h-4 w-4" />
         </button>
@@ -804,7 +866,7 @@ function SpotlightCard({ item }: { item: Poplog3UserLibraryItem }) {
 
   return (
     <Link href={`/title/${item.media_type}/${item.tmdb_id}`} className="group block h-full">
-      <div className="relative min-h-[340px] overflow-hidden rounded-[1.75rem] border border-white/[0.08] bg-black/40 shadow-[0_24px_80px_rgba(0,0,0,0.55)] transition duration-300 group-hover:border-white/[0.16] sm:min-h-[380px]">
+      <div className="relative min-h-[300px] overflow-hidden rounded-[1.5rem] border border-white/[0.08] bg-black/40 shadow-[0_24px_80px_rgba(0,0,0,0.55)] transition duration-300 group-hover:border-white/[0.16] sm:min-h-[380px] sm:rounded-[1.75rem]">
         {/* Backdrop */}
         {title?.backdrop_path && (
           <TmdbImage
@@ -822,7 +884,7 @@ function SpotlightCard({ item }: { item: Poplog3UserLibraryItem }) {
         <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(3,4,10,0.60)_0%,transparent_50%)]" />
 
         {/* Status badge — top left */}
-        <div className="absolute left-4 top-4">
+        <div className="absolute left-3 top-3 sm:left-4 sm:top-4">
           <span
             className={`rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.16em] shadow-[0_6px_18px_rgba(0,0,0,0.40)] backdrop-blur-md ${badgeClass}`}
           >
@@ -832,7 +894,7 @@ function SpotlightCard({ item }: { item: Poplog3UserLibraryItem }) {
 
         {/* Provider — top right */}
         {item.best_provider_logo && (
-          <div className="absolute right-4 top-4 overflow-hidden rounded-lg border border-white/[0.14] bg-black/55 shadow-[0_4px_14px_rgba(0,0,0,0.45)] backdrop-blur-md">
+          <div className="absolute right-3 top-3 overflow-hidden rounded-lg border border-white/[0.14] bg-black/55 shadow-[0_4px_14px_rgba(0,0,0,0.45)] backdrop-blur-md sm:right-4 sm:top-4">
             <Image
               src={`https://image.tmdb.org/t/p/original${item.best_provider_logo}`}
               alt={item.best_provider_name ?? ""}
@@ -844,13 +906,13 @@ function SpotlightCard({ item }: { item: Poplog3UserLibraryItem }) {
         )}
 
         {/* Content — bottom */}
-        <div className="absolute inset-x-0 bottom-0 p-5 sm:p-6">
+        <div className="absolute inset-x-0 bottom-0 p-4 sm:p-6">
           {metaParts.length > 0 && (
             <p className="mb-2 text-[11px] font-medium text-white/45">
               {metaParts.join(" · ")}
             </p>
           )}
-          <h2 className="text-2xl font-black leading-tight tracking-[-0.04em] text-white line-clamp-2 sm:text-3xl">
+          <h2 className="text-[22px] font-black leading-tight tracking-[-0.03em] text-white line-clamp-2 sm:text-3xl sm:tracking-[-0.04em]">
             {displayTitle}
           </h2>
 
@@ -989,7 +1051,6 @@ function FilterSelect({
   highlight?: boolean;
 }) {
   const isDefault = options[0]?.value === value;
-  const activeLabel = options.find((o) => o.value === value)?.label ?? label;
 
   return (
     <div className="relative flex items-center gap-1.5">

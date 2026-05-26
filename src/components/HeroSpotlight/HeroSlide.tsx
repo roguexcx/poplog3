@@ -205,12 +205,12 @@ export default function HeroSlide({
         />
       ) : null}
 
-      <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-black/78 via-black/22 to-transparent" />
+      <div className="pointer-events-none absolute inset-0 bg-gradient-to-r from-black/84 via-black/34 to-black/5 sm:from-black/78 sm:via-black/22 sm:to-transparent" />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#0a0b0f] via-transparent to-transparent" />
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-black/20 to-transparent" />
 
       <div className="relative flex h-full flex-col justify-end">
-        <div className="flex max-w-[720px] flex-col justify-end gap-4 p-5 pb-6 md:p-8 md:pb-10 lg:p-12 lg:pb-12 xl:max-w-[58%]">
+        <div className="flex max-w-[720px] flex-col justify-end gap-3 p-4 pb-12 sm:gap-4 sm:p-5 sm:pb-7 md:p-8 md:pb-10 lg:p-12 lg:pb-12 xl:max-w-[58%]">
           <div className="flex items-center gap-2">
             <span
               className="h-1 w-5 rounded-full"
@@ -224,11 +224,11 @@ export default function HeroSlide({
             </span>
           </div>
 
-          <h2 className="text-2xl font-black leading-none tracking-[-0.04em] text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.5)] sm:text-3xl md:text-4xl lg:text-[2.75rem]">
+          <h2 className="max-w-[15ch] text-[1.65rem] font-black leading-[0.95] tracking-[-0.04em] text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.5)] max-[360px]:text-[1.45rem] sm:max-w-none sm:text-3xl md:text-4xl lg:text-[2.75rem]">
             {item.title}
           </h2>
 
-          <div className="flex flex-wrap items-center gap-1.5 text-xs text-white/55">
+          <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-white/55 sm:text-xs">
             {yearStr ? <span>{yearStr}</span> : null}
 
             {genres ? (

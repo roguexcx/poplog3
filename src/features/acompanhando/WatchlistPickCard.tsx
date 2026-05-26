@@ -156,10 +156,10 @@ export default function WatchlistPickCard({ item, onClick }: Props) {
           as="div"
           title={item.title}
           originalTitle={item.original_title}
-          variant="compact"
-          className="mb-0.5 transition-colors group-hover:text-white"
+          variant="poster"
+          className="mb-0.5 line-clamp-2 min-h-[2.15rem] text-[12px] font-semibold leading-tight text-white/85 transition-colors group-hover:text-white"
         />
-        <p className="text-[11px] text-white/35">
+        <p className="line-clamp-2 min-h-[2rem] text-[11px] leading-4 text-white/35">
           {item.runtime_label ? `${subtitle} · ${item.runtime_label}` : subtitle}
         </p>
       </div>

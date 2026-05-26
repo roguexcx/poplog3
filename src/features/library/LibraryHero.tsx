@@ -16,7 +16,7 @@ export default function LibraryHero({ library, totalCount }: LibraryHeroProps) {
 
   return (
     <section className="relative w-full">
-      <div className="relative min-h-[260px] overflow-hidden rounded-[2rem] border border-white/[0.06] bg-[#03040a] shadow-[0_32px_120px_rgba(0,0,0,0.58)] sm:min-h-[300px] md:min-h-[340px] lg:rounded-[2.5rem]">
+      <div className="relative min-h-[230px] overflow-hidden rounded-[1.65rem] border border-white/[0.06] bg-[#03040a] shadow-[0_32px_120px_rgba(0,0,0,0.58)] sm:min-h-[300px] sm:rounded-[2rem] md:min-h-[340px] lg:rounded-[2.5rem]">
         <div className="absolute inset-0">
           {heroItem?.title && (
             <TmdbImage
@@ -34,19 +34,19 @@ export default function LibraryHero({ library, totalCount }: LibraryHeroProps) {
           <div className="absolute right-[-6%] bottom-[-14%] h-[22rem] w-[22rem] rounded-full bg-fuchsia-500/[0.10] blur-[110px]" />
         </div>
 
-        <div className="relative flex h-full min-h-[260px] flex-col justify-end p-6 sm:min-h-[300px] sm:p-8 md:min-h-[340px] md:p-10 lg:p-12">
-          <div className="mb-4 flex items-center gap-3">
+        <div className="relative flex h-full min-h-[230px] flex-col justify-end p-5 sm:min-h-[300px] sm:p-8 md:min-h-[340px] md:p-10 lg:p-12">
+          <div className="mb-3 flex items-center gap-3 sm:mb-4">
             <span className="h-px w-8 rounded-full bg-cyan-200/75" />
             <span className="text-[10px] font-black uppercase tracking-[0.28em] text-cyan-100/65">
               Sua coleção
             </span>
           </div>
 
-          <h1 className="text-5xl font-black leading-[0.88] tracking-[-0.07em] text-white sm:text-7xl md:text-8xl lg:text-[7rem]">
+          <h1 className="text-[42px] font-black leading-[0.9] tracking-[-0.04em] text-white sm:text-7xl sm:tracking-[-0.07em] md:text-8xl lg:text-[7rem]">
             Biblioteca
           </h1>
 
-          <p className="mt-4 max-w-xl text-sm leading-relaxed text-white/40 sm:text-[15px]">
+          <p className="mt-3 max-w-xl text-[13px] leading-relaxed text-white/42 sm:mt-4 sm:text-[15px]">
             {totalCount > 0
               ? `${totalCount} ${totalCount === 1 ? "título organizado" : "títulos organizados"} no seu acervo — watchlist, favoritos, obras em andamento, pausas e memória da sua jornada.`
               : "Seu acervo pessoal de filmes e séries — organizado, registrado e curado."}

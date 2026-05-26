@@ -95,6 +95,19 @@ export async function getTitlePageData(
       const synced = await syncTmdbTitle(mediaType, id, { force });
       const title = synced.title;
 
+      // Validação defensiva: garantir que o ID retornado é válido
+      if (!title?.tmdb_id || title.tmdb_id !== id) {
+        console.error(
+          "[getTitlePageData] Title ID mismatch or invalid",
+          {
+            requestedId: id,
+            returnedId: title?.tmdb_id,
+            mediaType,
+          }
+        );
+        return null;
+      }
+
       const details = hasDetailFields(title) ? title : null;
       const currentUser = await getCurrentUser();
 

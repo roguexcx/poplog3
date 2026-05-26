@@ -51,8 +51,14 @@ function QuickFacts({ item }: { item: WatchlistPickItem }) {
 
   return (
     <div className="flex flex-wrap items-center gap-2 text-[12px] font-semibold text-white/62">
-      {facts.map((fact) => (
-        <span key={fact} className="rounded-full bg-white/[0.07] px-2.5 py-1">
+      {facts.map((fact, index) => (
+        <span
+          key={fact}
+          className={[
+            "rounded-full bg-white/[0.07] px-2.5 py-1",
+            index > 1 ? "hidden sm:inline" : "",
+          ].join(" ")}
+        >
           {fact}
         </span>
       ))}
@@ -78,14 +84,14 @@ function StartSeriesCard({
     <button
       type="button"
       onClick={() => onPick(item)}
-      className="group relative min-h-[360px] w-[min(92vw,900px)] shrink-0 snap-start overflow-hidden rounded-[24px] border border-white/[0.10] bg-zinc-950 text-left shadow-[0_24px_80px_rgba(0,0,0,0.42)] transition-all hover:border-white/[0.18] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 md:min-h-[410px]"
+      className="group relative h-[340px] w-full shrink-0 snap-start overflow-hidden rounded-[22px] border border-white/[0.10] bg-zinc-950 text-left shadow-[0_24px_80px_rgba(0,0,0,0.42)] transition-all hover:border-white/[0.18] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/35 sm:h-[360px] sm:w-[min(88vw,760px)] lg:h-[390px]"
     >
       {backdropUrl ? (
         <Image
           src={backdropUrl}
           alt=""
           fill
-          sizes="(min-width: 1024px) 900px, 92vw"
+          sizes="(min-width: 1024px) 760px, 100vw"
           className="absolute inset-0 h-full w-full object-cover opacity-70 transition duration-700 group-hover:scale-[1.025] group-hover:opacity-82"
           loading="lazy"
         />
@@ -94,7 +100,7 @@ function StartSeriesCard({
           src={posterUrl}
           alt=""
           fill
-          sizes="(min-width: 1024px) 900px, 92vw"
+          sizes="(min-width: 1024px) 760px, 100vw"
           className="absolute inset-0 h-full w-full object-cover opacity-55 blur-[2px] transition duration-700 group-hover:scale-[1.025]"
           loading="lazy"
         />
@@ -104,21 +110,24 @@ function StartSeriesCard({
       <div className="absolute inset-0 bg-gradient-to-r from-black via-zinc-950/80 to-zinc-950/18" />
       <div className="absolute inset-0 bg-gradient-to-t from-black via-black/28 to-transparent" />
 
-      <div className="relative flex min-h-[360px] flex-col justify-between p-5 md:min-h-[410px] md:p-7 lg:max-w-[68%]">
+      <div className="relative flex h-full flex-col justify-between p-5 md:p-6 lg:max-w-[68%]">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200/20 bg-amber-300/12 px-3 py-1 text-[10px] font-black uppercase tracking-[0.18em] text-amber-100">
+          <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-200/20 bg-amber-300/12 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.16em] text-amber-100 sm:px-3 sm:text-[10px]">
             <Sparkles className="h-3.5 w-3.5" />
             Boa hora pra começar
           </span>
           <ProviderPill item={item} />
         </div>
 
-        <div className="mt-10 md:mt-14">
-          <div className="mb-3 flex flex-wrap gap-1.5">
-            {badges.map((badge) => (
+        <div className="mt-5 md:mt-10">
+          <div className="mb-2.5 flex flex-wrap gap-1.5">
+            {badges.map((badge, index) => (
               <span
                 key={badge}
-                className="rounded-full border border-white/[0.10] bg-white/[0.08] px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.12em] text-white/68 backdrop-blur-md"
+                className={[
+                  "rounded-full border border-white/[0.10] bg-white/[0.08] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.10em] text-white/68 backdrop-blur-md sm:text-[10px]",
+                  index > 1 ? "hidden sm:inline-flex" : "",
+                ].join(" ")}
               >
                 {badge}
               </span>
@@ -130,25 +139,25 @@ function StartSeriesCard({
             title={item.title}
             originalTitle={item.original_title}
             variant="poster"
-            className="max-w-[14ch] text-4xl font-black leading-[0.95] tracking-[-0.03em] text-white sm:text-5xl md:max-w-[16ch] md:text-6xl"
+            className="max-w-[15ch] text-[1.75rem] font-black leading-[0.95] tracking-[-0.03em] text-white sm:text-4xl md:max-w-[16ch] md:text-5xl"
           />
 
-          <p className="mt-4 line-clamp-3 max-w-2xl text-sm leading-6 text-white/68 md:text-[15px]">
+          <p className="mt-2.5 line-clamp-1 max-w-2xl text-[13px] leading-5 text-white/68 sm:line-clamp-2 md:line-clamp-3 md:text-sm md:leading-6">
             {item.overview ?? item.editorial_reason}
           </p>
 
           {item.editorial_reason && item.overview && (
-            <p className="mt-3 max-w-xl text-[13px] font-semibold leading-5 text-amber-100/78">
+            <p className="mt-2 line-clamp-1 max-w-xl text-[12px] font-semibold leading-5 text-amber-100/78 sm:line-clamp-2 md:text-[13px]">
               {item.editorial_reason}
             </p>
           )}
 
-          <div className="mt-5">
+          <div className="mt-3">
             <QuickFacts item={item} />
           </div>
         </div>
 
-        <div className="mt-7 flex flex-wrap items-center gap-3">
+        <div className="mt-4 flex flex-wrap items-center gap-3 md:mt-6">
           <span className="inline-flex items-center gap-2 rounded-full bg-white px-4 py-2 text-[12px] font-black text-zinc-950 shadow-[0_10px_30px_rgba(255,255,255,0.16)]">
             <Play className="h-4 w-4 fill-current" />
             Começar série
@@ -178,7 +187,7 @@ export default function StartSeriesBanner({ items, loading, onPick }: Props) {
 
   if (loading) {
     return (
-      <div className="h-[360px] animate-pulse rounded-[24px] border border-white/[0.08] bg-white/[0.04] md:h-[410px]" />
+      <div className="h-[340px] animate-pulse rounded-[22px] border border-white/[0.08] bg-white/[0.04] sm:h-[360px] lg:h-[390px]" />
     );
   }
 
@@ -188,7 +197,7 @@ export default function StartSeriesBanner({ items, loading, onPick }: Props) {
     <div className="relative">
       <div
         ref={rowRef}
-        className="no-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth pr-2"
+        className="no-scrollbar flex snap-x snap-mandatory gap-4 overflow-x-auto scroll-smooth"
       >
         {items.map((item) => (
           <StartSeriesCard key={item.content_id} item={item} onPick={onPick} />

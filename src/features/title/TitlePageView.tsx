@@ -79,11 +79,11 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
       />
 
       <section className="mx-auto w-full max-w-[1600px] px-5 pb-24 pt-8 sm:px-8 sm:pt-10 md:px-12 md:pt-12 lg:px-16">
-        <div className="grid min-w-0 gap-8 lg:grid-cols-[minmax(0,1fr)_360px] xl:grid-cols-[minmax(0,1fr)_420px] xl:gap-10">
+        <div className="grid min-w-0 gap-8 lg:grid-cols-[minmax(0,1fr)_380px] xl:grid-cols-[minmax(0,1fr)_460px] xl:gap-10">
           <div className="flex min-w-0 flex-col gap-8 sm:gap-10 lg:gap-12">
             {hasSeasonsBlock && <TitleSeasonsCard title={title} />}
 
-            {showEpisodeBrowser && typeof title.id === "number" && (
+            {showEpisodeBrowser && typeof title.id === "number" && title.id > 0 && (
               <TitleEpisodeBrowser
                 seriesTmdbId={title.id}
                 seriesName={title.title}
@@ -113,7 +113,7 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
             <TitleRecommendations recommendations={title.recommendations} />
           </div>
 
-          <aside className="flex min-w-0 flex-col gap-5 sm:gap-6 lg:sticky lg:top-6 lg:max-h-[calc(100vh-3rem)] lg:overflow-y-auto lg:self-start lg:pr-1">
+          <aside className="flex min-w-0 flex-col gap-5 sm:gap-6 lg:sticky lg:top-6 lg:self-start">
             {hasTrailer && title.trailer && (
               <TitleTrailer trailer={title.trailer} title={title.title} />
             )}

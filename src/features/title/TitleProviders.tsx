@@ -211,7 +211,7 @@ export default function TitleProviders({ providers }: TitleProvidersProps) {
                   </span>
                 </div>
 
-                <div className="flex flex-wrap gap-2">
+                <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-1 2xl:grid-cols-2">
                   {group.items.map((p, idx) => (
                     <ProviderPill
                       key={`${group.type}-${p.name}-${idx}`}
@@ -236,7 +236,7 @@ function ProviderPill({ provider }: { provider: MergedProvider }) {
   const inner = (
     <span
       className={[
-        "inline-flex max-w-full items-center gap-2 rounded-2xl border py-2 pl-2 pr-3 text-[12px] font-semibold backdrop-blur-md transition duration-200",
+        "inline-flex w-full max-w-full items-center gap-2 rounded-2xl border py-2 pl-2 pr-3 text-[12px] font-semibold backdrop-blur-md transition duration-200",
         provider.isPreferred
           ? "border-cyan-300/30 bg-cyan-300/[0.08] text-white shadow-[0_0_24px_rgba(34,211,238,0.10)] hover:border-cyan-200/45 hover:bg-cyan-300/[0.12]"
           : "border-white/[0.08] bg-white/[0.04] text-white/90 hover:border-white/[0.18] hover:bg-white/[0.08]",
@@ -258,7 +258,9 @@ function ProviderPill({ provider }: { provider: MergedProvider }) {
         />
       )}
 
-      <span className="min-w-0 truncate">{provider.name}</span>
+      <span className="min-w-0 flex-1 leading-tight line-clamp-2">
+        {provider.name}
+      </span>
 
       {provider.isPreferred && (
         <span className="shrink-0 rounded-full border border-cyan-200/20 bg-cyan-300/10 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.12em] text-cyan-100">
@@ -280,7 +282,7 @@ function ProviderPill({ provider }: { provider: MergedProvider }) {
         href={provider.deepLink}
         target="_blank"
         rel="noreferrer noopener"
-        className="max-w-full"
+        className="block max-w-full"
         title={`Abrir em ${provider.name}`}
       >
         {inner}

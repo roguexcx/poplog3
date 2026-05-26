@@ -229,6 +229,17 @@ export default function TitleEpisodeBrowser({
   useEffect(() => {
     if (selected === null) return;
 
+    // Validação defensiva: seriesTmdbId deve ser um número positivo válido
+    if (!Number.isFinite(seriesTmdbId) || seriesTmdbId <= 0) {
+      console.error("[TitleEpisodeBrowser] Invalid seriesTmdbId", {
+        seriesTmdbId,
+        type: typeof seriesTmdbId,
+      });
+      setError("ID de série inválido ou não disponível");
+      setSeason(null);
+      return;
+    }
+
     let cancelled = false;
 
     setLoading(true);

@@ -68,16 +68,51 @@ export async function syncTmdbSeason(
 
   // Tenta pt-BR; se overview vier vazia em algum episodio o fallback en-US
   // entra na proxima rodada de sync.
-  const data = await tmdbFetch<TmdbSeasonPayload>(
-    `/tv/${seriesTmdbId}/season/${seasonNumber}`,
-    {
-      params: {
-        language: "pt-BR",
-      },
+  const tmdbEndpoint = `/tv/${seriesTmdbId}/season/${seasonNumber}`;
+
+  console.log("[syncTmdbSeason] requisitando TMDB", {
+    seriesTmdbId,
+    seasonNumber,
+    endpoint: tmdbEndpoint,
+  });
+
+  let data: TmdbSeasonPayload | null = null;
+  try {
+    data = await tmdbFetch<TmdbSeasonPayload>(
+      tmdbEndpoint,
+      {
+        params: {
+          language: "pt-BR",
+        },
+      }
+    );
+  } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+    console.error("[syncTmdbSeason] erro na requisição TMDB", {
+      seriesTmdbId,
+      seasonNumber,
+      endpoint: tmdbEndpoint,
+      error: errorMsg,
+      note: "Se erro é '404', a série ou temporada pode não existir em TMDB",
+    });
+    // Re-throw com contexto adicional
+    if (errorMsg.includes("404")) {
+      throw new Error(
+        `TMDB season endpoint ${tmdbEndpoint} retornou 404. ` +
+        `Verifique se series_id=${seriesTmdbId} existe em TMDB e ` +
+        `se season_number=${seasonNumber} é válido para essa série.`
+      );
     }
-  );
+    throw error;
+  }
 
   if (!data || typeof data.id !== "number") {
+    console.error("[syncTmdbSeason] payload TMDB inválido", {
+      seriesTmdbId,
+      seasonNumber,
+      dataId: data?.id,
+      dataType: typeof data?.id,
+    });
     throw new Error(`TMDB season ${seriesTmdbId}/${seasonNumber} payload invalido.`);
   }
 

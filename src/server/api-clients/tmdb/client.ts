@@ -47,6 +47,23 @@ export async function tmdbFetch<T>(
   const durationMs = Date.now() - t0;
 
   if (!response.ok) {
+    let errorBody: string | null = null;
+    try {
+      const body = await response.json();
+      errorBody = JSON.stringify(body);
+    } catch {
+      errorBody = await response.text();
+    }
+
+    const errorMsg = `TMDB request failed: ${response.status}`;
+    console.error("[tmdbFetch] erro na requisição TMDB", {
+      path,
+      status: response.status,
+      statusText: response.statusText,
+      errorBody,
+      url: buildTmdbUrl(path, options.params),
+    });
+
     logApiCall({
       api: "tmdb",
       op: "fetch",
@@ -55,9 +72,9 @@ export async function tmdbFetch<T>(
       durationMs,
       success: false,
       httpStatus: response.status,
-      error: `TMDB request failed: ${response.status}`,
+      error: errorMsg,
     });
-    throw new Error(`TMDB request failed: ${response.status}`);
+    throw new Error(errorMsg);
   }
 
   logApiCall({

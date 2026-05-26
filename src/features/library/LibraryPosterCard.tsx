@@ -44,7 +44,7 @@ export default function LibraryPosterCard({
       <article className="relative">
         <div
           className={[
-            "absolute -inset-2.5 rounded-[2rem] opacity-0 blur-2xl transition duration-500 group-hover:opacity-100",
+            "absolute -inset-2 rounded-[1.5rem] opacity-0 blur-2xl transition duration-500 group-hover:opacity-100 sm:-inset-2.5 sm:rounded-[2rem]",
             isFavorite
               ? "bg-amber-400/[0.18]"
               : "bg-gradient-to-b from-indigo-400/[0.12] to-transparent",
@@ -53,7 +53,7 @@ export default function LibraryPosterCard({
 
         <div
           className={[
-            "relative overflow-hidden rounded-[1.45rem] border bg-white/[0.032] shadow-[0_18px_56px_rgba(0,0,0,0.40)]",
+            "relative overflow-hidden rounded-[1rem] border bg-white/[0.032] shadow-[0_18px_56px_rgba(0,0,0,0.40)] sm:rounded-[1.45rem]",
             "transition duration-300 group-hover:-translate-y-2 group-hover:shadow-[0_36px_100px_rgba(0,0,0,0.62)]",
             isFavorite
               ? "border-amber-300/[0.18] group-hover:border-amber-300/[0.34] group-hover:bg-amber-900/[0.07]"
@@ -83,42 +83,42 @@ export default function LibraryPosterCard({
             />
 
             <div
-              className={`absolute left-3 top-3 rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] shadow-[0_8px_22px_rgba(0,0,0,0.38)] backdrop-blur-md ${
+              className={`absolute left-2 top-2 rounded-full border px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.12em] shadow-[0_8px_22px_rgba(0,0,0,0.38)] backdrop-blur-md sm:left-3 sm:top-3 sm:px-2.5 sm:py-1 sm:text-[9px] sm:tracking-[0.14em] ${
                 STATUS_BADGE[item.status] ?? STATUS_BADGE.watched
               }`}
             >
               {formatStatus(item.status)}
             </div>
 
-            <div className="absolute right-3 top-3 flex flex-col items-end gap-1.5">
+            <div className="absolute right-2 top-2 flex flex-col items-end gap-1.5 sm:right-3 sm:top-3">
               {isFavorite ? (
-                <div className="rounded-full border border-amber-300/30 bg-amber-500/22 px-2 py-1 text-[9px] font-black text-amber-200 shadow-[0_0_16px_rgba(251,191,36,0.30)] backdrop-blur-md">
+                <div className="rounded-full border border-amber-300/30 bg-amber-500/22 px-2 py-0.5 text-[9px] font-black text-amber-200 shadow-[0_0_16px_rgba(251,191,36,0.30)] backdrop-blur-md sm:py-1">
                   ★
                 </div>
               ) : typeof title?.vote_average === "number" ? (
-                <div className="rounded-full border border-amber-200/18 bg-black/50 px-2.5 py-1 text-[10px] font-black text-amber-100 shadow-[0_8px_22px_rgba(0,0,0,0.35)] backdrop-blur-md">
+                <div className="rounded-full border border-amber-200/18 bg-black/50 px-2 py-0.5 text-[9px] font-black text-amber-100 shadow-[0_8px_22px_rgba(0,0,0,0.35)] backdrop-blur-md sm:px-2.5 sm:py-1 sm:text-[10px]">
                   ★ {title.vote_average.toFixed(1)}
                 </div>
               ) : null}
             </div>
 
             {hasProvider && (
-              <div className="absolute bottom-3 right-3 overflow-hidden rounded-lg border border-white/[0.14] bg-black/55 shadow-[0_4px_14px_rgba(0,0,0,0.45)] backdrop-blur-md">
+              <div className="absolute bottom-2 right-2 overflow-hidden rounded-md border border-white/[0.14] bg-black/55 shadow-[0_4px_14px_rgba(0,0,0,0.45)] backdrop-blur-md sm:bottom-3 sm:right-3 sm:rounded-lg">
                 <Image
                   src={`https://image.tmdb.org/t/p/original${item.best_provider_logo}`}
                   alt={item.best_provider_name ?? "Provider"}
                   width={28}
                   height={28}
-                  className="h-7 w-7 object-cover"
+                  className="h-6 w-6 object-cover sm:h-7 sm:w-7"
                 />
               </div>
             )}
 
-            <div className="absolute inset-x-0 bottom-0 p-3 sm:p-4">
+            <div className="absolute inset-x-0 bottom-0 p-2.5 sm:p-4">
               <div className="translate-y-2 opacity-0 transition duration-300 group-hover:translate-y-0 group-hover:opacity-100">
                 <div className="flex flex-wrap items-center gap-1.5">
                   {subtitle && (
-                    <span className="rounded-full border border-white/[0.12] bg-black/50 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-white/76 backdrop-blur-md">
+                    <span className="rounded-full border border-white/[0.12] bg-black/50 px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.12em] text-white/76 backdrop-blur-md sm:px-2.5 sm:py-1 sm:text-[9px] sm:tracking-[0.14em]">
                       {subtitle}
                     </span>
                   )}
@@ -126,7 +126,7 @@ export default function LibraryPosterCard({
                   {runtimeLabels.map((runtime) => (
                     <span
                       key={runtime}
-                      className="rounded-full border border-white/[0.12] bg-black/50 px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-white/55 backdrop-blur-md"
+                      className="rounded-full border border-white/[0.12] bg-black/50 px-2 py-0.5 text-[8px] font-black uppercase tracking-[0.12em] text-white/55 backdrop-blur-md sm:px-2.5 sm:py-1 sm:text-[9px] sm:tracking-[0.14em]"
                     >
                       {runtime}
                     </span>
@@ -145,7 +145,7 @@ export default function LibraryPosterCard({
             )}
           </div>
 
-          <div className="flex h-7 items-center px-[10px]">
+          <div className="flex h-7 items-center px-2 sm:px-[10px]">
             <div className="flex items-center gap-[5px] text-[11px] font-normal leading-none text-white/40">
               <span>{title?.year ?? "—"}</span>
               <span className="text-white/20">·</span>

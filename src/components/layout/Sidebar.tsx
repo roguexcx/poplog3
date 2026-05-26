@@ -304,8 +304,8 @@ export default function Sidebar() {
       </aside>
 
       {/* Mobile bottom nav */}
-      <nav className="fixed bottom-0 left-0 right-0 z-50 border-t border-white/5 bg-[#09090f]/90 px-2 pb-[env(safe-area-inset-bottom,8px)] pt-1.5 backdrop-blur-xl md:hidden">
-        <div className="flex items-center justify-around">
+      <nav className="fixed bottom-0 left-0 right-[calc(100vw-100%)] z-50 border-t border-white/5 bg-[#09090f]/90 px-1.5 pb-[calc(env(safe-area-inset-bottom,0px)+0.35rem)] pt-1.5 backdrop-blur-xl md:hidden">
+        <div className="grid grid-cols-5 items-center">
           {MOBILE_LINKS.filter(isVisible).map((link) => {
             const active = isActive(link.href);
 
@@ -313,7 +313,7 @@ export default function Sidebar() {
               <Link
                 key={link.href}
                 href={link.href}
-                className={`flex min-h-[44px] min-w-[44px] flex-col items-center justify-center gap-1 rounded-xl px-2 transition-colors ${
+                className={`flex min-h-[44px] min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 transition-colors ${
                   active ? "text-indigo-300" : "text-zinc-300"
                 }`}
               >
@@ -322,7 +322,7 @@ export default function Sidebar() {
                   className={active ? "stroke-[2.5px]" : "stroke-[1.9px]"}
                 />
 
-                <span className="text-[10px] font-bold uppercase tracking-normal">
+                <span className="max-w-full truncate text-[9px] font-bold uppercase tracking-normal min-[380px]:text-[10px]">
                   {link.label}
                 </span>
               </Link>
@@ -332,10 +332,10 @@ export default function Sidebar() {
           <button
             type="button"
             onClick={() => setMobileMenuOpen(true)}
-            className="flex min-h-[44px] min-w-[44px] flex-col items-center justify-center gap-1 rounded-xl px-2 text-zinc-300 transition-colors hover:text-white"
+            className="flex min-h-[44px] min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 text-zinc-300 transition-colors hover:text-white"
           >
             <Menu size={22} className="stroke-[1.9px]" />
-            <span className="text-[10px] font-bold uppercase tracking-normal">
+            <span className="max-w-full truncate text-[9px] font-bold uppercase tracking-normal min-[380px]:text-[10px]">
               Mais
             </span>
           </button>

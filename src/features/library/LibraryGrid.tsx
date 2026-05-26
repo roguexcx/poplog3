@@ -8,10 +8,7 @@ type LibraryGridProps = {
 
 export default function LibraryGrid({ items }: LibraryGridProps) {
   return (
-    <div
-      className="grid gap-3"
-      style={{ gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))" }}
-    >
+    <div className="grid grid-cols-2 gap-x-3 gap-y-5 sm:grid-cols-[repeat(auto-fill,minmax(160px,1fr))] sm:gap-3">
       {items.map((item, index) => (
         <LibraryPosterCard key={item.id} item={item} priority={index < 10} />
       ))}

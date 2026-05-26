@@ -92,7 +92,11 @@
       "mcp__Claude_in_Chrome__tabs_context_mcp",
       "mcp__Claude_in_Chrome__navigate",
       "mcp__Claude_in_Chrome__javascript_tool",
-      "mcp__Claude_in_Chrome__computer"
+      "mcp__Claude_in_Chrome__computer",
+      "Bash(Get-ChildItem -Path \"I:\\\\poplog-v3\" -Recurse -Depth 2 -Directory)",
+      "Bash(Sort-Object)",
+      "Bash(xargs grep -l \"subtitle\\\\|heading\\\\|title.*component\")",
+      "Bash(xargs grep -l \"title\\\\|heading\\\\|subtitle\")"
     ]
   }
 }

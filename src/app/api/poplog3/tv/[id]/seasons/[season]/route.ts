@@ -19,13 +19,26 @@ export async function GET(
     request.nextUrl.searchParams.get("refresh") === "1" ||
     request.nextUrl.searchParams.get("force") === "1";
 
-  if (!seriesId || Number.isNaN(seriesId)) {
+  // Validação: seriesId deve ser um número positivo válido
+  if (Number.isNaN(seriesId) || seriesId <= 0) {
+    console.warn("[poplog3/tv/season] ID de série inválido", {
+      rawId: resolved.id,
+      parsedId: seriesId,
+      isNaN: Number.isNaN(seriesId),
+      isZeroOrNegative: seriesId <= 0,
+    });
     return NextResponse.json(
       { ok: false, error: "Invalid TMDB series id" },
       { status: 400 }
     );
   }
   if (Number.isNaN(seasonNumber) || seasonNumber < 0) {
+    console.warn("[poplog3/tv/season] número de temporada inválido", {
+      rawSeason: resolved.season,
+      parsedSeason: seasonNumber,
+      isNaN: Number.isNaN(seasonNumber),
+      isNegative: seasonNumber < 0,
+    });
     return NextResponse.json(
       { ok: false, error: "Invalid season number" },
       { status: 400 }
@@ -33,16 +46,36 @@ export async function GET(
   }
 
   return withOrigin("title", async () => { try {
+    console.log("[poplog3/tv/season] iniciando sincronização", {
+      seriesId,
+      seasonNumber,
+      refresh,
+    });
+
     const result = await syncTmdbSeason(seriesId, seasonNumber, {
       force: refresh,
     });
 
     if (!result.season) {
+      console.error("[poplog3/tv/season] season não encontrada", {
+        seriesId,
+        seasonNumber,
+        source: result.source,
+        cacheStatus: result.cache_status,
+      });
       return NextResponse.json(
         { ok: false, error: "Season not found" },
         { status: 404 }
       );
     }
+
+    console.log("[poplog3/tv/season] season sincronizada com sucesso", {
+      seriesId,
+      seasonNumber,
+      episodeCount: result.season.episodes?.length ?? 0,
+      source: result.source,
+      cacheStatus: result.cache_status,
+    });
 
     const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
     const tmdbImage = (path: string | null, size: string) => {
@@ -81,6 +114,26 @@ export async function GET(
       },
     });
   } catch (error) {
+    const errorMsg = error instanceof Error ? error.message : String(error);
+
+    // Se é um erro 404 do TMDB, provavelmente o ID não existe em TMDB
+    if (errorMsg.includes("404") || errorMsg.includes("not found")) {
+      console.error("[poplog3/tv/season] TMDB retornou 404 - série pode não existir em TMDB", {
+        seriesId,
+        seasonNumber,
+        error: errorMsg,
+      });
+      return NextResponse.json(
+        {
+          ok: false,
+          error: "Season not found in TMDB",
+          details: `TMDB não encontrou a série ${seriesId} ou a temporada ${seasonNumber}. ` +
+                   `O ID pode ser inválido ou a série foi removida de TMDB.`,
+        },
+        { status: 404 }
+      );
+    }
+
     console.error("[poplog3/tv/season] erro:", error);
     return NextResponse.json(
       {

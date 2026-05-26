@@ -132,6 +132,13 @@ const PHASE_PROGRESS: Record<Phase, number> = {
 
 type ViewMode = "all" | "day" | "week" | "month";
 
+const VIEW_MODE_OPTIONS: { value: ViewMode; label: string }[] = [
+  { value: "all", label: "Visão Geral" },
+  { value: "day", label: "Destaques" },
+  { value: "week", label: "Semana" },
+  { value: "month", label: "Próximos" },
+];
+
 // ── Helpers de data ────────────────────────────────────────────────────────────
 
 function toLocalDateStr(date: Date): string {
@@ -2536,21 +2543,15 @@ function RadarHero({
           </div>
 
           {/* Tabs de período */}
-          <div className="flex w-full items-center gap-1 rounded-2xl border border-white/[0.09] bg-black/30 p-1 backdrop-blur-md shrink-0 sm:w-auto">
-            {(["all", "day", "week", "month"] as ViewMode[]).map((v) => (
+          <div className="hidden w-full items-center gap-1 rounded-2xl border border-white/[0.09] bg-black/30 p-1 backdrop-blur-md shrink-0 sm:w-auto">
+            {VIEW_MODE_OPTIONS.map(({ value: v, label }) => (
               <button
                 key={v}
                 type="button"
                 onClick={() => onChangeViewMode(v)}
                 className={`flex-1 rounded-lg px-2 py-1.5 text-[10px] font-bold transition-all duration-200 sm:flex-none sm:px-3.5 sm:text-[11px] ${viewMode === v ? "border border-sky-300/25 bg-sky-300/[0.14] text-sky-100 shadow-[0_0_18px_rgba(56,189,248,0.12)]" : "text-white/30 hover:text-white/55"}`}
               >
-                {v === "all"
-                  ? "Todos"
-                  : v === "day"
-                    ? "Destaques"
-                    : v === "week"
-                      ? "Novidades"
-                      : "Vem Aí"}
+                {label}
               </button>
             ))}
           </div>
@@ -2610,7 +2611,7 @@ function RadarHero({
         </div>
 
         {/* ── Seletor de modo Geral / Personalizado ── */}
-        <div className="flex flex-col items-start gap-2 pb-4 sm:flex-row sm:items-center sm:pb-5">
+        <div className="hidden flex-col items-start gap-2 pb-4 sm:flex-row sm:items-center sm:pb-5">
           <div className="flex w-full items-center gap-1 rounded-2xl border border-white/[0.09] bg-black/40 p-1 backdrop-blur-md sm:w-auto">
             <button
               type="button"
@@ -2636,7 +2637,7 @@ function RadarHero({
                   strokeLinecap="round"
                 />
               </svg>
-              Geral
+              Descobrir
               {radarMode === "general" && (
                 <span className="hidden text-[8px] font-black uppercase tracking-wide text-sky-400/60 sm:inline">
                   Ativo
@@ -2668,7 +2669,7 @@ function RadarHero({
                   strokeLinecap="round"
                 />
               </svg>
-              Personalizado
+              Meu Radar
               {radarMode === "personal" && (
                 <span className="hidden text-[8px] font-black uppercase tracking-wide text-violet-400/60 sm:inline">
                   Ativo
@@ -2931,6 +2932,124 @@ function RadarHero({
   );
 }
 
+function RadarStickyNav({
+  radarMode,
+  viewMode,
+  isLoadingMode,
+  filteredCount,
+  contentFilter,
+  filterCounts,
+  onChangeRadarMode,
+  onChangeViewMode,
+  onChangeContentFilter,
+}: {
+  radarMode: RadarMode;
+  viewMode: ViewMode;
+  isLoadingMode: boolean;
+  filteredCount: number;
+  contentFilter: ContentFilterKey;
+  filterCounts: FilterCount[];
+  onChangeRadarMode: (m: RadarMode) => void;
+  onChangeViewMode: (m: ViewMode) => void;
+  onChangeContentFilter: (f: ContentFilterKey) => void;
+}) {
+  const visibleFilters = filterCounts.filter(
+    (fc) => fc.key === "all" || fc.count > 0,
+  );
+
+  return (
+    <div className="sticky top-0 z-40 -mx-4 mb-5 border-y border-white/[0.07] bg-[#050713]/94 px-4 py-2 shadow-[0_18px_48px_rgba(0,0,0,0.28)] backdrop-blur-xl sm:-mx-6 sm:px-6 md:-mx-8 md:px-8 lg:-mx-10 lg:mb-7 lg:px-10 lg:py-2.5">
+      <div className="mx-auto flex max-w-[1600px] flex-col gap-1.5 xl:flex-row xl:items-center xl:justify-between xl:gap-2">
+        <div className="grid grid-cols-2 items-center gap-1.5 xl:flex xl:max-w-[30%] xl:gap-2 xl:overflow-x-auto xl:no-scrollbar">
+          <button
+            type="button"
+            onClick={() => onChangeRadarMode("general")}
+            disabled={isLoadingMode}
+            className={`flex h-8 min-w-0 items-center justify-center gap-2 rounded-xl border px-2.5 text-[10px] font-black transition sm:px-4 sm:text-[11px] xl:h-9 xl:shrink-0 xl:rounded-full ${
+              radarMode === "general"
+                ? "border-sky-300/25 bg-sky-400/[0.14] text-sky-100 shadow-[0_0_18px_rgba(56,189,248,0.12)]"
+                : "border-white/[0.09] bg-white/[0.035] text-white/45 hover:text-white/70"
+            } disabled:opacity-60`}
+          >
+            Descobrir
+          </button>
+
+          <button
+            type="button"
+            onClick={() => onChangeRadarMode("personal")}
+            disabled={isLoadingMode}
+            className={`flex h-8 min-w-0 items-center justify-center gap-2 rounded-xl border px-2.5 text-[10px] font-black transition sm:px-4 sm:text-[11px] xl:h-9 xl:shrink-0 xl:rounded-full ${
+              radarMode === "personal"
+                ? "border-violet-300/25 bg-violet-400/[0.14] text-violet-100 shadow-[0_0_18px_rgba(139,92,246,0.12)]"
+                : "border-white/[0.09] bg-white/[0.035] text-white/45 hover:text-white/70"
+            } disabled:opacity-60`}
+          >
+            Meu Radar
+            {isLoadingMode && (
+              <span className="h-1.5 w-1.5 rounded-full bg-white/40 animate-pulse" />
+            )}
+          </button>
+
+          <span className="hidden h-5 w-px shrink-0 bg-white/[0.10] lg:block" />
+          <span className="hidden shrink-0 text-[11px] font-medium text-white/28 lg:inline">
+            {filteredCount} {filteredCount === 1 ? "item" : "itens"}
+          </span>
+        </div>
+
+        <div className="grid grid-cols-4 items-center gap-1 rounded-xl border border-white/[0.08] bg-black/28 p-1 xl:flex xl:overflow-x-auto xl:rounded-2xl xl:no-scrollbar">
+          {VIEW_MODE_OPTIONS.map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => onChangeViewMode(value)}
+              className={`h-7 min-w-0 rounded-lg px-1.5 text-[9px] font-black transition sm:px-3 sm:text-[10px] xl:h-8 xl:shrink-0 xl:rounded-xl xl:px-4 xl:text-[11px] ${
+                viewMode === value
+                  ? "bg-sky-300/[0.15] text-sky-100 ring-1 ring-sky-300/25"
+                  : "text-white/38 hover:bg-white/[0.05] hover:text-white/70"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {visibleFilters.length > 1 && (
+          <div className="-mx-1 flex items-center gap-1.5 overflow-x-auto px-1 pb-0.5 no-scrollbar xl:mx-0 xl:max-w-[36%] xl:justify-end xl:px-0 xl:pb-0">
+            {visibleFilters.map(({ key, count }) => {
+              const isActive = key === contentFilter;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => onChangeContentFilter(key)}
+                  className={[
+                    "flex h-7 shrink-0 items-center gap-1.5 rounded-lg border px-2.5 text-[9px] font-black transition-all duration-200 sm:h-8 sm:rounded-xl sm:px-3 sm:text-[11px]",
+                    isActive
+                      ? "border-sky-300/25 bg-sky-400/[0.12] text-sky-100 shadow-[0_0_14px_rgba(56,189,248,0.10)]"
+                      : "border-white/[0.08] bg-white/[0.035] text-white/38 hover:border-white/[0.14] hover:text-white/65",
+                  ].join(" ")}
+                >
+                  {CONTENT_FILTER_LABELS[key]}
+                  <span
+                    className={[
+                      "rounded-md px-1.5 py-0.5 text-[8px] font-black tabular-nums sm:text-[9px]",
+                      isActive
+                        ? "bg-sky-400/20 text-sky-200/80"
+                        : "bg-white/[0.06] text-white/25",
+                    ].join(" ")}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Painel do modo Personalizado ───────────────────────────────────────────────
 
 function PersonalRadarPanel({ data }: { data: AgendaV2CompatResponse | null }) {
@@ -3115,60 +3234,9 @@ function PersonalRadarPanel({ data }: { data: AgendaV2CompatResponse | null }) {
   );
 }
 
-// ── ContentFilterBar ──────────────────────────────────────────────────────────
-
 interface FilterCount {
   key: ContentFilterKey;
   count: number;
-}
-
-function ContentFilterBar({
-  activeFilter,
-  counts,
-  onSelect,
-}: {
-  activeFilter: ContentFilterKey;
-  counts: FilterCount[];
-  onSelect: (f: ContentFilterKey) => void;
-}) {
-  const visibleFilters = counts.filter(
-    (fc) => fc.key === "all" || fc.count > 0,
-  );
-
-  if (visibleFilters.length <= 1) return null; // só "Todos" — não vale exibir
-
-  return (
-    <div className="flex items-center gap-1.5 flex-wrap mb-5">
-      {visibleFilters.map(({ key, count }) => {
-        const isActive = key === activeFilter;
-        return (
-          <button
-            key={key}
-            type="button"
-            onClick={() => onSelect(key)}
-            className={[
-              "flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-[11px] font-bold transition-all duration-200",
-              isActive
-                ? "border-sky-300/25 bg-sky-400/[0.12] text-sky-100 shadow-[0_0_14px_rgba(56,189,248,0.10)]"
-                : "border-white/[0.08] bg-white/[0.04] text-white/40 hover:border-white/[0.14] hover:text-white/65",
-            ].join(" ")}
-          >
-            {CONTENT_FILTER_LABELS[key]}
-            <span
-              className={[
-                "rounded-md px-1.5 py-0.5 text-[9px] font-black tabular-nums",
-                isActive
-                  ? "bg-sky-400/20 text-sky-200/80"
-                  : "bg-white/[0.06] text-white/25",
-              ].join(" ")}
-            >
-              {count}
-            </span>
-          </button>
-        );
-      })}
-    </div>
-  );
 }
 
 // ── RadarClient — componente principal ─────────────────────────────────────────
@@ -3549,6 +3617,18 @@ export default function RadarClient({
         personalLibrarySize={personalLibrarySize}
       />
 
+      <RadarStickyNav
+        radarMode={radarMode}
+        viewMode={viewMode}
+        isLoadingMode={isLoadingMode}
+        filteredCount={filteredEditorialItems.length}
+        contentFilter={contentFilter}
+        filterCounts={filterCounts}
+        onChangeRadarMode={handleChangeRadarMode}
+        onChangeViewMode={setViewMode}
+        onChangeContentFilter={handleContentFilter}
+      />
+
       {error && (
         <div className="mb-6 rounded-2xl border border-red-500/20 bg-red-950/20 px-5 py-4 text-[12px] text-red-300/80">
           Erro ao carregar feed: {error}
@@ -3559,11 +3639,6 @@ export default function RadarClient({
 
       {/* Feed unificado — mesmo componente para Geral e Personalizado */}
       <section>
-        <ContentFilterBar
-          activeFilter={contentFilter}
-          counts={filterCounts}
-          onSelect={handleContentFilter}
-        />
         {radarMode === "personal" && !isLoadingMode && personalEmpty && (
           <div className="rounded-[24px] border border-violet-500/10 bg-violet-950/10 px-6 py-14 text-center">
             <p className="text-[14px] font-black text-white/35">

@@ -95,6 +95,12 @@ function assertValidTmdbPayload(
   if (typeof obj.id !== "number") {
     throw new Error(`TMDB ${mediaType}/${id} retornou payload sem 'id'.`);
   }
+  if (obj.id <= 0) {
+    throw new Error(
+      `TMDB ${mediaType}/${id} retornou ID inválido: ${obj.id}. ` +
+      `O ID deve ser um número positivo.`
+    );
+  }
   if (!obj.title && !obj.name) {
     throw new Error(`TMDB ${mediaType}/${id} retornou payload sem 'title' nem 'name'.`);
   }
@@ -109,6 +115,13 @@ export async function syncTmdbTitle(
   options: SyncTmdbTitleOptions = {}
 ): Promise<SyncTmdbTitleResult> {
   const t0 = Date.now();
+
+  console.log("[syncTmdbTitle] iniciando sincronização", {
+    mediaType,
+    id,
+    force: options.force,
+  });
+
   const cached = await getCachedTitleWithPayload(mediaType, id);
 
   // Cache fresh E payload completo: retorna direto.
@@ -150,6 +163,14 @@ export async function syncTmdbTitle(
   });
 
   assertValidTmdbPayload(data, mediaType, id);
+
+  // Validar que o ID retornado corresponde ao ID solicitado
+  if (data.id !== id) {
+    console.warn(
+      `[syncTmdbTitle] ID mismatch para ${mediaType}/${id}: TMDB retornou id=${data.id}`,
+      { requestedId: id, returnedId: data.id }
+    );
+  }
 
   let posterPath = data.poster_path ?? null;
   let backdropPath = data.backdrop_path ?? null;

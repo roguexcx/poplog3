@@ -29,18 +29,30 @@ export default function RecentlyWatchedCard({ item, onClick }: Props) {
     ? `https://image.tmdb.org/t/p/w300${item.last_episode_still_path}`
     : item.backdrop_path
       ? `https://image.tmdb.org/t/p/w300${item.backdrop_path}`
+      : item.poster_path
+        ? `https://image.tmdb.org/t/p/w185${item.poster_path}`
       : null;
 
   const relDate = formatRelativeDate(item.watched_at);
+  const episodeLabel =
+    item.last_season != null && item.last_episode != null
+      ? `T${item.last_season}E${item.last_episode}`
+      : null;
+  const detailLabel =
+    episodeLabel
+      ? `Último visto: ${episodeLabel}${item.last_episode_name ? ` · ${item.last_episode_name}` : ""}`
+      : item.media_type === "movie"
+        ? "Filme assistido"
+        : "Série assistida";
 
   return (
     <button
       type="button"
       onClick={onClick}
-      className="group relative flex items-stretch overflow-hidden rounded-xl border border-white/[0.07] bg-zinc-900/70 text-left transition-all hover:border-white/[0.15] hover:bg-zinc-900/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30"
+      className="group relative flex h-[72px] w-full items-stretch overflow-hidden rounded-xl border border-white/[0.07] bg-zinc-900/70 text-left transition-all hover:border-white/[0.15] hover:bg-zinc-900/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/30 sm:h-[68px]"
     >
       {/* Still — proporção 16:9, largura fixa */}
-      <div className="relative shrink-0 overflow-hidden bg-white/[0.04]" style={{ width: 96, aspectRatio: "16/9" }}>
+      <div className="relative h-full w-[104px] shrink-0 overflow-hidden bg-white/[0.04] sm:w-[112px]">
         {stillUrl ? (
           <img
             src={stillUrl}
@@ -57,19 +69,14 @@ export default function RecentlyWatchedCard({ item, onClick }: Props) {
       </div>
 
       {/* Info */}
-      <div className="flex min-w-0 flex-1 flex-col justify-center px-3 py-2.5">
-        <p className="truncate text-[12px] font-black leading-tight tracking-[-0.01em] text-white">
+      <div className="flex min-w-0 flex-1 flex-col justify-center px-3 py-2">
+        <p className="line-clamp-1 text-[12px] font-black leading-tight tracking-[-0.01em] text-white">
           {item.title}
         </p>
-        {item.last_season != null && item.last_episode != null && (
-          <p className="mt-0.5 text-[10px] font-bold text-white/40">
-            T{item.last_season}E{item.last_episode}
-            {item.last_episode_name ? (
-              <span className="font-normal text-white/28"> · &ldquo;{item.last_episode_name}&rdquo;</span>
-            ) : null}
-          </p>
-        )}
-        <p className="mt-1 text-[9px] font-semibold tabular-nums text-white/22">{relDate}</p>
+        <p className="mt-0.5 line-clamp-1 text-[10px] font-semibold text-white/38">
+          {detailLabel}
+        </p>
+        <p className="mt-1 text-[9px] font-semibold tabular-nums text-white/24">{relDate}</p>
       </div>
     </button>
   );

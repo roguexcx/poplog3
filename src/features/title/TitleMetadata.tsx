@@ -221,12 +221,12 @@ export default function TitleMetadata({
             {details.map((item, index) => (
               <div
                 key={`${item.label}-${item.value}-${index}`}
-                className="flex items-baseline justify-between gap-3 py-2.5 first:pt-0 last:pb-0"
+                className="grid gap-1 py-2.5 first:pt-0 last:pb-0 sm:grid-cols-[minmax(100px,0.55fr)_minmax(0,1fr)] sm:items-start sm:gap-3"
               >
-                <dt className="shrink-0 text-[10px] font-black uppercase tracking-[0.16em] text-white/32">
+                <dt className="text-[10px] font-black uppercase tracking-[0.16em] text-white/32">
                   {item.label}
                 </dt>
-                <dd className="min-w-0 text-right text-[11.5px] font-semibold leading-[1.4] tracking-[-0.01em] text-white/70">
+                <dd className="min-w-0 text-left text-[11.5px] font-semibold leading-[1.45] tracking-[-0.01em] text-white/70 break-words sm:text-right">
                   {item.value}
                 </dd>
               </div>
