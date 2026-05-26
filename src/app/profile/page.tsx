@@ -1203,32 +1203,14 @@ export default function ProfilePage() {
       }
     } catch { /* silent */ }
 
-    // Genres
+    // Genres — via API route (server-side, service role bypasses RLS)
     try {
-      const { data: titleGenres } = await supabase
-        .from("user_titles")
-        .select("tmdb_id, media_type, poplog3_titles!inner(genres)")
-        .eq("user_id", u.id);
-
-      if (titleGenres) {
-        const genreCount: Record<string, number> = {};
-        for (const row of titleGenres) {
-          const g = (row as { poplog3_titles: { genres?: string[] } }).poplog3_titles;
-          if (Array.isArray(g?.genres)) {
-            for (const name of g.genres as string[]) {
-              genreCount[name] = (genreCount[name] ?? 0) + 1;
-            }
-          }
+      const res = await fetch("/api/user/genre-stats");
+      if (res.ok) {
+        const json = await res.json() as { ok: boolean; genres: GenreStat[] };
+        if (json.ok && Array.isArray(json.genres)) {
+          setGenres(json.genres);
         }
-        const sorted = Object.entries(genreCount)
-          .sort((a, b) => b[1] - a[1])
-          .slice(0, 8);
-        const maxCount = sorted[0]?.[1] ?? 1;
-        setGenres(sorted.map(([name, count]) => ({
-          name,
-          count,
-          pct: Math.round((count / maxCount) * 100),
-        })));
       }
     } catch { /* silent */ }
 

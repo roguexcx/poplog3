@@ -346,6 +346,7 @@ export default function TitleHero({
                     episodeCount: season.episodeCount,
                   })) ?? []
                 }
+                seriesStatus={title.status}
               />
             </div>
           </div>

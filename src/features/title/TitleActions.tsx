@@ -5,7 +5,6 @@ import { useEffect, useMemo, useState, useTransition } from "react";
 import ActionButton from "@/components/ui/ActionButton";
 import { IconBookmark, IconCheck } from "@/components/ui/icons";
 
-import ProgressMenu from "./ProgressMenu";
 import ProgressUpdateModal from "./ProgressUpdateModal";
 import {
   clearSeriesProgress,
@@ -36,6 +35,8 @@ type TitleActionsProps = {
   initialState?: TitleUserState;
   initialProgress?: TitleSeriesProgress | null;
   seasons?: TitleSeasonSummary[];
+  /** Status TMDB da serie — ex: "Ended", "Returning Series", "Canceled". */
+  seriesStatus?: string | null;
 };
 
 function userStateToStatus(
@@ -119,6 +120,7 @@ export default function TitleActions({
   initialState,
   initialProgress,
   seasons = [],
+  seriesStatus,
 }: TitleActionsProps) {
   const [status, setStatus] = useState<LibraryStatus | null>(
     userStateToStatus(initialState)
@@ -220,7 +222,6 @@ export default function TitleActions({
           : status === "watched"
             ? "Em dia"
             : "Assistindo",
-      progress: "Progresso",
       watched: status === "watched" ? "Assistido" : "Marcar assistido",
       favorite: favorite ? "Favoritado" : "Favorito",
       liked: "Gostei",
@@ -320,12 +321,9 @@ export default function TitleActions({
       status === "watching" || status === "watched" || status === "fridge";
 
     if (isCurrentlyWatching) {
-      if (localWatchedCount > 0) {
-        setAbandonConfirmOpen(true);
-        return;
-      }
-      setStatus(null);
-      commit("watching-off", { status: null });
+      // Ja assistindo — abre o modal de progresso direto.
+      // Abandonar esta acessivel como link dentro do modal.
+      setProgressModalOpen(true);
       return;
     }
 
@@ -347,14 +345,6 @@ export default function TitleActions({
     setAbandonConfirmOpen(false);
   }
 
-  function markAiredEpisodesWatched() {
-    setStatus("watched");
-
-    commit("mark-aired-watched", {
-      status: "watched",
-    });
-  }
-
   function toggleFridge() {
     const next: LibraryStatus = status === "fridge" ? "watching" : "fridge";
 
@@ -367,64 +357,95 @@ export default function TitleActions({
 
   function toggleFavorite() {
     const next = !favorite;
+    const prevFavorite = favorite;
+    const prevStatus = status;
 
+    // Atualiza otimisticamente: favoritar auto-marca como assistido
     setFavorite(next);
+    if (next) {
+      setStatus("watched");
+    }
 
-    // favorite/liked are managed exclusively by the feedback engine.
-    // Do NOT force status here -- liked/favorite don't imply watched.
+    setPendingAction("favorite");
+
     startTransition(async () => {
       try {
-        const command = next ? "favorite" : "unfavorite";
-        const res = await fetch("/api/user/feedback", {
-          method: "POST",
+        // PATCH em /api/library/title: seta favorite e (se next=true) marca watched
+        const res = await fetch("/api/library/title", {
+          method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            tmdb_id: id,
-            media_type: mediaType,
-            command,
-            surface: "title_page",
+            tmdbId: id,
+            mediaType,
+            favorite: next,
           }),
         });
         if (!res.ok) {
-          setFavorite(!next);
+          // Reverte o estado em caso de erro
+          setFavorite(prevFavorite);
+          if (next) setStatus(prevStatus);
           const json = await res.json().catch(() => ({}));
           setError(json?.error ?? `Favorite failed: ${res.status}`);
         }
       } catch (err) {
-        setFavorite(!next);
+        setFavorite(prevFavorite);
+        if (next) setStatus(prevStatus);
         setError(err instanceof Error ? err.message : "Erro inesperado");
+      } finally {
+        setPendingAction(null);
       }
     });
   }
 
   function toggleLiked(value: boolean) {
     const next = liked === value ? null : value;
+    const prevLiked = liked;
 
     setLiked(next);
+    setPendingAction(value ? "liked" : "disliked");
 
-    // liked/disliked are managed exclusively by the feedback engine.
-    // Do NOT force status here -- liked/disliked don't imply watched.
     startTransition(async () => {
       try {
-        const command = next === null ? "clear_like" : next ? "liked" : "disliked";
-        const res = await fetch("/api/user/feedback", {
-          method: "POST",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            tmdb_id: id,
-            media_type: mediaType,
-            command,
-            surface: "title_page",
-          }),
-        });
-        if (!res.ok) {
-          setLiked(liked);
-          const json = await res.json().catch(() => ({}));
-          setError(json?.error ?? `Like failed: ${res.status}`);
+        if (next === null) {
+          // Limpar like/dislike: DELETE com o tipo que estava ativo
+          const typeToDelete = prevLiked === true ? "liked" : "disliked";
+          const res = await fetch("/api/user/feedback", {
+            method: "DELETE",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              tmdb_id: id,
+              media_type: mediaType,
+              feedback_type: typeToDelete,
+            }),
+          });
+          if (!res.ok) {
+            setLiked(prevLiked);
+            const json = await res.json().catch(() => ({}));
+            setError(json?.error ?? `Like failed: ${res.status}`);
+          }
+        } else {
+          // Definir liked ou disliked — o backend limpa o tipo oposto automaticamente
+          const res = await fetch("/api/user/feedback", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              tmdb_id: id,
+              media_type: mediaType,
+              feedback_type: next ? "liked" : "disliked",
+              surface: "title_page",
+            }),
+          });
+          if (!res.ok) {
+            setLiked(prevLiked);
+            const json = await res.json().catch(() => ({}));
+            setError(json?.error ?? `Like failed: ${res.status}`);
+          }
         }
       } catch (err) {
-        setLiked(liked);
+        setLiked(prevLiked);
         setError(err instanceof Error ? err.message : "Erro inesperado");
+      } finally {
+        setPendingAction(null);
       }
     });
   }
@@ -573,16 +594,6 @@ export default function TitleActions({
               {labels.watching}
             </ActionButton>
 
-            <ProgressMenu
-              statusLabel={labels.progress}
-              isUpToDate={status === "watched"}
-              loading={
-                pendingAction === "mark-aired-watched" ||
-                pendingAction === "update-progress"
-              }
-              onUpdateProgress={() => setProgressModalOpen(true)}
-              onMarkUpToDate={markAiredEpisodesWatched}
-            />
           </>
         ) : (
           <ActionButton
@@ -700,6 +711,8 @@ export default function TitleActions({
           open={progressModalOpen}
           title="Atualizar progresso"
           seasons={modalSeasons}
+          hasProgress={localWatchedCount > 0}
+          isEnded={seriesStatus === "Ended" || seriesStatus === "Canceled"}
           loading={
             pendingAction === "update-progress" ||
             pendingAction === "mark-season" ||

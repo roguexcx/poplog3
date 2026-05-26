@@ -13,6 +13,10 @@ type ProgressUpdateModalProps = {
   }>;
   loading?: boolean;
   error?: string | null;
+  /** Indica se o usuario ja tem episodios marcados — controla visibilidade das acoes destrutivas */
+  hasProgress?: boolean;
+  /** Serie encerrada (Ended/Canceled) — adapta label do botão de temporada na última temporada */
+  isEnded?: boolean;
   onClose: () => void;
   onConfirm: (payload: {
     seasonNumber: number;
@@ -20,7 +24,7 @@ type ProgressUpdateModalProps = {
   }) => void;
   onMarkSeason: (payload: { seasonNumber: number }) => void;
   onClearProgress: () => void;
-  /** Opcional: move a serie para Abandonado preservando o progresso */
+  /** Move a serie para Abandonado preservando o progresso */
   onAbandon?: () => void;
 };
 
@@ -38,6 +42,8 @@ export default function ProgressUpdateModal({
   seasons = DEFAULT_SEASONS,
   loading = false,
   error = null,
+  hasProgress = false,
+  isEnded = false,
   onClose,
   onConfirm,
   onMarkSeason,
@@ -94,6 +100,10 @@ export default function ProgressUpdateModal({
 
   if (!mounted || !open) return null;
 
+  const lastSeasonNumber = validSeasons[validSeasons.length - 1]?.seasonNumber;
+  const isLastSeason = selectedSeason === lastSeasonNumber;
+  const markSeasonLabel = isEnded && isLastSeason ? "Assisti tudo" : `Toda T${currentSeason?.seasonNumber ?? ""}`;
+
   const episodes = Array.from(
     { length: currentSeason?.episodeCount ?? 0 },
     (_, index) => index + 1
@@ -118,69 +128,68 @@ export default function ProgressUpdateModal({
 
   const modal = (
     <div
-      className="fixed inset-0 z-[2147483647] isolate flex items-center justify-center bg-black/78 px-4 backdrop-blur-md"
+      className="fixed inset-0 z-[2147483647] isolate flex items-center justify-center bg-black/45 px-4 backdrop-blur-[2px]"
       onClick={onClose}
     >
       <div
-        className="relative z-[2147483647] w-full max-w-[520px] rounded-3xl border border-white/[0.12] bg-zinc-950/95 p-5 shadow-[0_40px_120px_rgba(0,0,0,0.78),0_0_0_1px_rgba(255,255,255,0.04),inset_0_1px_0_rgba(255,255,255,0.08)]"
+        className="relative z-[2147483647] w-full max-w-[480px] rounded-3xl border border-white/[0.12] bg-zinc-950/96 p-5 shadow-[0_40px_120px_rgba(0,0,0,0.78),0_0_0_1px_rgba(255,255,255,0.04),inset_0_1px_0_rgba(255,255,255,0.08)]"
         onClick={(event) => event.stopPropagation()}
       >
-        <div className="pointer-events-none absolute inset-0 rounded-3xl bg-[radial-gradient(circle_at_50%_0%,rgba(34,211,238,0.14),transparent_48%)]" />
+        <div className="pointer-events-none absolute inset-0 rounded-3xl bg-[radial-gradient(circle_at_50%_0%,rgba(34,211,238,0.10),transparent_52%)]" />
 
         <div className="relative">
-          <div className="mb-5 flex items-start justify-between gap-4">
+          {/* Header */}
+          <div className="mb-4 flex items-center justify-between gap-4">
             <div>
-              <p className="text-[11px] font-black uppercase tracking-[0.22em] text-cyan-100/55">
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-cyan-100/50">
                 Progresso da serie
               </p>
-
-              <h2 className="mt-1 text-xl font-black tracking-[-0.04em] text-white">
+              <h2 className="mt-0.5 text-lg font-black tracking-[-0.04em] text-white">
                 {title}
               </h2>
-
-              <p className="mt-1.5 text-sm font-medium leading-relaxed text-white/54">
-                Escolha ate qual episodio voce assistiu. O POPLOG marca tudo
-                ate ali e atualiza sua continuidade.
-              </p>
             </div>
 
             <button
               type="button"
               onClick={onClose}
-              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-white/[0.10] bg-white/[0.04] text-white/60 transition hover:bg-white/[0.08] hover:text-white"
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-white/[0.10] bg-white/[0.04] text-white/50 transition hover:bg-white/[0.08] hover:text-white"
               aria-label="Fechar"
             >
               {"×"}
             </button>
           </div>
 
-          <div className="mb-4 flex flex-wrap gap-2">
-            {validSeasons.map((season) => {
-              const active = season.seasonNumber === selectedSeason;
+          {/* Season tabs */}
+          {validSeasons.length > 1 && (
+            <div className="mb-3 flex flex-wrap gap-1.5">
+              {validSeasons.map((season) => {
+                const active = season.seasonNumber === selectedSeason;
 
-              return (
-                <button
-                  key={season.seasonNumber}
-                  type="button"
-                  onClick={() => {
-                    setSelectedSeason(season.seasonNumber);
-                    setSelectedEpisode(1);
-                  }}
-                  className={[
-                    "rounded-full border px-3.5 py-2 text-xs font-bold transition",
-                    active
-                      ? "border-cyan-200/45 bg-cyan-300/[0.16] text-cyan-50 shadow-[0_10px_28px_rgba(34,211,238,0.12)]"
-                      : "border-white/[0.10] bg-white/[0.045] text-white/58 hover:border-white/[0.18] hover:bg-white/[0.075] hover:text-white",
-                  ].join(" ")}
-                >
-                  T{season.seasonNumber}
-                </button>
-              );
-            })}
-          </div>
+                return (
+                  <button
+                    key={season.seasonNumber}
+                    type="button"
+                    onClick={() => {
+                      setSelectedSeason(season.seasonNumber);
+                      setSelectedEpisode(1);
+                    }}
+                    className={[
+                      "rounded-full border px-3 py-1.5 text-xs font-bold transition",
+                      active
+                        ? "border-cyan-200/45 bg-cyan-300/[0.16] text-cyan-50 shadow-[0_8px_20px_rgba(34,211,238,0.10)]"
+                        : "border-white/[0.10] bg-white/[0.045] text-white/55 hover:border-white/[0.18] hover:bg-white/[0.075] hover:text-white",
+                    ].join(" ")}
+                  >
+                    T{season.seasonNumber}
+                  </button>
+                );
+              })}
+            </div>
+          )}
 
-          <div className="rounded-2xl border border-white/[0.10] bg-white/[0.035] p-3">
-            <div className="grid grid-cols-5 gap-2 sm:grid-cols-6">
+          {/* Episode grid */}
+          <div className="rounded-2xl border border-white/[0.08] bg-white/[0.025] p-3">
+            <div className="grid grid-cols-5 gap-1.5 sm:grid-cols-6">
               {episodes.map((episode) => {
                 const active = episode === selectedEpisode;
                 const included = episode <= selectedEpisode;
@@ -191,12 +200,12 @@ export default function ProgressUpdateModal({
                     type="button"
                     onClick={() => setSelectedEpisode(episode)}
                     className={[
-                      "h-10 rounded-xl border text-xs font-black transition",
+                      "h-9 rounded-xl border text-xs font-black transition",
                       active
-                        ? "border-cyan-200/60 bg-cyan-200 text-zinc-950 shadow-[0_12px_28px_rgba(34,211,238,0.20)]"
+                        ? "border-cyan-200/60 bg-cyan-200 text-zinc-950 shadow-[0_8px_20px_rgba(34,211,238,0.18)]"
                         : included
-                          ? "border-cyan-200/24 bg-cyan-300/[0.12] text-cyan-50"
-                          : "border-white/[0.08] bg-white/[0.035] text-white/48 hover:border-white/[0.18] hover:bg-white/[0.065] hover:text-white",
+                          ? "border-cyan-200/20 bg-cyan-300/[0.10] text-cyan-50/80"
+                          : "border-white/[0.07] bg-white/[0.03] text-white/40 hover:border-white/[0.16] hover:bg-white/[0.06] hover:text-white",
                     ].join(" ")}
                   >
                     E{episode}
@@ -206,71 +215,74 @@ export default function ProgressUpdateModal({
             </div>
           </div>
 
-          <div className="mt-4 rounded-2xl border border-cyan-200/[0.12] bg-cyan-950/[0.14] px-4 py-3 text-sm font-semibold text-cyan-50/78">
-            Marcar ate:{" "}
-            <span className="text-cyan-50">
-              T{currentSeason?.seasonNumber}E{selectedEpisode}
-            </span>
-          </div>
-
           {error && (
-            <div className="mt-4 rounded-2xl border border-rose-300/18 bg-rose-500/[0.08] px-4 py-3 text-sm font-semibold leading-relaxed text-rose-100/86">
+            <div className="mt-3 rounded-2xl border border-rose-300/18 bg-rose-500/[0.08] px-4 py-3 text-sm font-semibold leading-relaxed text-rose-100/86">
               Falha ao sincronizar: {error}
             </div>
           )}
 
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-            <button
-              type="button"
-              disabled={loading}
-              onClick={onClearProgress}
-              className="flex-1 rounded-2xl border border-white/[0.09] bg-white/[0.035] px-4 py-3 text-left text-sm font-bold text-white/60 transition hover:border-white/[0.16] hover:bg-white/[0.065] hover:text-white disabled:cursor-wait disabled:opacity-60"
-            >
-              Ainda nao assisti
-            </button>
+          {/* Footer */}
+          <div className="mt-4 flex items-center justify-between gap-3">
+            {/* Acoes destrutivas — so aparecem quando ha progresso */}
+            <div className="flex items-center gap-3">
+              {hasProgress && (
+                <>
+                  <button
+                    type="button"
+                    disabled={loading}
+                    onClick={onClearProgress}
+                    className="text-xs font-semibold text-white/40 transition hover:text-white/70 disabled:cursor-wait disabled:opacity-50"
+                  >
+                    Resetar
+                  </button>
 
-            {onAbandon && (
+                  {onAbandon && (
+                    <>
+                      <span className="text-white/20" aria-hidden>·</span>
+                      <button
+                        type="button"
+                        disabled={loading}
+                        onClick={onAbandon}
+                        className="text-xs font-semibold text-amber-300/50 transition hover:text-amber-200/80 disabled:cursor-wait disabled:opacity-50"
+                      >
+                        Abandonar
+                      </button>
+                    </>
+                  )}
+                </>
+              )}
+            </div>
+
+            {/* Acoes principais */}
+            <div className="flex items-center gap-2">
               <button
                 type="button"
-                disabled={loading}
-                onClick={onAbandon}
-                className="flex-1 rounded-2xl border border-amber-300/[0.14] bg-amber-500/[0.06] px-4 py-3 text-left text-sm font-bold text-amber-200/70 transition hover:border-amber-300/[0.25] hover:bg-amber-500/[0.12] hover:text-amber-100 disabled:cursor-wait disabled:opacity-60"
+                onClick={onClose}
+                className="rounded-full border border-white/[0.10] bg-white/[0.04] px-4 py-2 text-xs font-bold text-white/55 transition hover:bg-white/[0.08] hover:text-white"
               >
-                Abandonar serie
+                Cancelar
               </button>
-            )}
-          </div>
 
-          <div className="mt-5 flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-            <button
-              type="button"
-              onClick={onClose}
-              className="rounded-full border border-white/[0.10] bg-white/[0.04] px-5 py-2.5 text-sm font-bold text-white/62 transition hover:bg-white/[0.08] hover:text-white"
-            >
-              Cancelar
-            </button>
+              <button
+                type="button"
+                disabled={loading || !currentSeason}
+                onClick={handleMarkSeason}
+                className="rounded-full border border-cyan-100/[0.18] bg-cyan-300/[0.10] px-4 py-2 text-xs font-black text-cyan-50 transition hover:border-cyan-100/30 hover:bg-cyan-300/[0.16] disabled:cursor-wait disabled:opacity-60"
+              >
+                {loading ? "..." : markSeasonLabel}
+              </button>
 
-            <button
-              type="button"
-              disabled={loading || !currentSeason}
-              onClick={handleMarkSeason}
-              className="rounded-full border border-cyan-100/[0.18] bg-cyan-300/[0.10] px-5 py-2.5 text-sm font-black text-cyan-50 shadow-[0_14px_34px_rgba(34,211,238,0.12)] transition hover:border-cyan-100/32 hover:bg-cyan-300/[0.16] disabled:cursor-wait disabled:opacity-60"
-            >
-              {loading
-                ? "Salvando..."
-                : `Marcar temporada T${currentSeason?.seasonNumber ?? ""}`}
-            </button>
-
-            <button
-              type="button"
-              disabled={loading || !currentSeason}
-              onClick={handleConfirm}
-              className="rounded-full border border-cyan-100/30 bg-cyan-200 px-5 py-2.5 text-sm font-black text-zinc-950 shadow-[0_16px_38px_rgba(34,211,238,0.22)] transition hover:bg-white disabled:cursor-wait disabled:opacity-60"
-            >
-              {loading
-                ? "Salvando..."
-                : `Marcar ate T${currentSeason?.seasonNumber ?? ""}E${selectedEpisode}`}
-            </button>
+              <button
+                type="button"
+                disabled={loading || !currentSeason}
+                onClick={handleConfirm}
+                className="rounded-full border border-cyan-100/30 bg-cyan-200 px-4 py-2 text-xs font-black text-zinc-950 shadow-[0_12px_28px_rgba(34,211,238,0.20)] transition hover:bg-white disabled:cursor-wait disabled:opacity-60"
+              >
+                {loading
+                  ? "Salvando..."
+                  : `Marcar T${currentSeason?.seasonNumber ?? ""}E${selectedEpisode}`}
+              </button>
+            </div>
           </div>
         </div>
       </div>

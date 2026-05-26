@@ -125,18 +125,12 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
     total:      library.length,
   }), [library]);
 
-  // Spotlight: non-completed item with backdrop, priority: watching > watchlist > fridge > coming-soon
-  const spotlightItem = useMemo(() => {
-    const withBackdrop = (i: Poplog3UserLibraryItem) => !!i.title?.backdrop_path;
-    return (
-      library.find((i) => isMarathoning(i) && withBackdrop(i)) ??
-      library.find((i) => isPureWatchlist(i) && !isComingSoon(i) && withBackdrop(i)) ??
-      library.find((i) => i.status === "fridge" && withBackdrop(i)) ??
-      library.find((i) => isComingSoon(i) && withBackdrop(i)) ??
-      library.find(withBackdrop) ??
-      null
-    );
-  }, [library]);
+  // Spotlight: item aleatório da biblioteca sorteado na montagem da página (estável durante a sessão)
+  const [spotlightItem] = useState<Poplog3UserLibraryItem | null>(() => {
+    const candidates = library.filter((i) => !!i.title?.backdrop_path);
+    if (candidates.length === 0) return null;
+    return candidates[Math.floor(Math.random() * candidates.length)];
+  });
 
   // Editorial rails
   const watchlistItems = useMemo(() =>

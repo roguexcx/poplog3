@@ -241,6 +241,18 @@ export async function POST(request: Request) {
     });
   }
 
+  // Quando salvar liked ou disliked, remover o tipo oposto para evitar conflito
+  if (parsed.feedbackType === "liked" || parsed.feedbackType === "disliked") {
+    const conflictingType = parsed.feedbackType === "liked" ? "disliked" : "liked";
+    await supabase
+      .from("user_title_feedback")
+      .update({ active: false })
+      .eq("user_id", user.id)
+      .eq("tmdb_id", parsed.tmdbId)
+      .eq("media_type", parsed.mediaType)
+      .eq("feedback_type", conflictingType);
+  }
+
   const error = await saveFeedback(supabase, {
     userId: user.id,
     tmdbId: parsed.tmdbId,
@@ -252,6 +264,23 @@ export async function POST(request: Request) {
   });
 
   if (error) return dbErrorResponse("save", error);
+
+  // Sincroniza user_title_state.liked para que a leitura no carregamento da
+  // página (get-title-page-data) reflita o estado correto após F5.
+  if (parsed.feedbackType === "liked" || parsed.feedbackType === "disliked") {
+    await supabase
+      .from("user_title_state")
+      .upsert(
+        {
+          user_id: user.id,
+          tmdb_id: parsed.tmdbId,
+          media_type: parsed.mediaType,
+          liked: parsed.feedbackType === "liked",
+          updated_at: new Date().toISOString(),
+        },
+        { onConflict: "user_id,tmdb_id,media_type" },
+      );
+  }
 
   const state = await readTitleState(supabase, user.id, parsed.tmdbId, parsed.mediaType);
   return NextResponse.json({
@@ -278,6 +307,16 @@ export async function DELETE(request: Request) {
     .eq("feedback_type", parsed.feedbackType);
 
   if (error) return dbErrorResponse("delete", error);
+
+  // Zera user_title_state.liked quando o voto é removido
+  if (parsed.feedbackType === "liked" || parsed.feedbackType === "disliked") {
+    await supabase
+      .from("user_title_state")
+      .update({ liked: null, updated_at: new Date().toISOString() })
+      .eq("user_id", user.id)
+      .eq("tmdb_id", parsed.tmdbId)
+      .eq("media_type", parsed.mediaType);
+  }
 
   const state = await readTitleState(supabase, user.id, parsed.tmdbId, parsed.mediaType);
   return NextResponse.json({
