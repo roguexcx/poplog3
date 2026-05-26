@@ -4,6 +4,7 @@ import { ChevronLeft, ChevronRight, Play, Sparkles } from "lucide-react";
 import Image from "next/image";
 import { useRef } from "react";
 
+import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import type { WatchlistPickItem } from "@/features/acompanhando/WatchlistPickCard";
 
 type Props = {
@@ -124,16 +125,13 @@ function StartSeriesCard({
             ))}
           </div>
 
-          <h3 className="max-w-[14ch] text-4xl font-black leading-[0.95] tracking-[-0.03em] text-white sm:text-5xl md:max-w-[16ch] md:text-6xl">
-            {item.original_title && item.original_title !== item.title
-              ? item.original_title
-              : item.title}
-          </h3>
-          {item.original_title && item.original_title !== item.title && (
-            <p className="mt-2 text-[13px] font-medium text-white/40 leading-tight">
-              {item.title}
-            </p>
-          )}
+          <LocalizedTitle
+            as="h3"
+            title={item.title}
+            originalTitle={item.original_title}
+            variant="poster"
+            className="max-w-[14ch] text-4xl font-black leading-[0.95] tracking-[-0.03em] text-white sm:text-5xl md:max-w-[16ch] md:text-6xl"
+          />
 
           <p className="mt-4 line-clamp-3 max-w-2xl text-sm leading-6 text-white/68 md:text-[15px]">
             {item.overview ?? item.editorial_reason}

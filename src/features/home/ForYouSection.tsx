@@ -4,11 +4,13 @@ import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import SynopsisText from "@/features/home/components/SynopsisText";
+import { ScrollRowArrows } from "@/components/ScrollRowArrows";
 import { CardActionButton } from "@/components/ui/CardActionButton";
 import { IconBookmark, IconCheck, IconStar, IconX } from "@/components/ui/icons";
 import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
 import { useUserFeedbackToggle } from "@/hooks/useUserFeedbackToggle";
+import { useScrollRow } from "@/hooks/useScrollRow";
 import { useUserData } from "@/context/UserDataContext";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import TmdbImage from "@/components/images/TmdbImage";
@@ -283,6 +285,13 @@ export default function ForYouSection() {
   const [featured, setFeatured] = useState<ForYouItem | null>(null);
   const [items, setItems] = useState<ForYouItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const {
+    ref: rowRef,
+    canScrollLeft,
+    canScrollRight,
+    scrollLeft: doScrollLeft,
+    scrollRight: doScrollRight,
+  } = useScrollRow({ step: 392 });
 
   const didInitRef = useRef(false);
   const [refreshCount, setRefreshCount] = useState(0);
@@ -331,7 +340,7 @@ export default function ForYouSection() {
         subtitle="Escolhas personalizadas com base no que você ama."
         className="mb-6"
         action={
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <button
               onClick={handleRefresh}
               disabled={loading}
@@ -357,6 +366,14 @@ export default function ForYouSection() {
             >
               Ver todos →
             </Link>
+            <div className="flex lg:hidden">
+              <ScrollRowArrows
+                canScrollLeft={canScrollLeft}
+                canScrollRight={canScrollRight}
+                onLeft={doScrollLeft}
+                onRight={doScrollRight}
+              />
+            </div>
           </div>
         }
       />
@@ -365,7 +382,7 @@ export default function ForYouSection() {
         <ForYouSkeleton />
       ) : (
         <>
-          <div className="no-scrollbar -mx-6 flex gap-4 overflow-x-auto px-6 pb-2 lg:hidden">
+          <div ref={rowRef} className="no-scrollbar -mx-6 flex gap-4 overflow-x-auto px-6 pb-2 lg:hidden">
             {featured && (
               <div className="w-[180px] shrink-0">
                 <SmallForYouCard item={featured} />

@@ -13,10 +13,18 @@
 //   preparados na estrutura mas desligados, prontos para ativação gradual.
 // ──────────────────────────────────────────────────────────────────────────────
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { useRouter } from "next/navigation";
 import ContextualAttribution from "@/components/attribution/ContextualAttribution";
 import PageShell from "@/components/layout/PageShell";
+import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
 import type {
   IcsSeriesGroup,
   MovieGroup,
@@ -506,13 +514,43 @@ interface SlotDef {
 }
 type RowDef = SlotDef[];
 
-const ROW_H: Record<string, string> = {
-  hero: "h-[320px]",
-  wide: "h-[240px]",
-  square: "h-[220px]",
-  poster: "h-[260px]",
-  tall: "h-[320px]",
+const ROW_H_SM: Record<CardType, string> = {
+  hero: "sm:h-[320px]",
+  wide: "sm:h-[240px]",
+  square: "sm:h-[220px]",
+  poster: "sm:h-[260px]",
+  tall: "sm:h-[320px]",
 };
+
+const MOBILE_CARD_H: Record<CardType, string> = {
+  hero: "h-[300px]",
+  wide: "h-[230px]",
+  square: "h-[210px]",
+  poster: "h-[260px]",
+  tall: "h-[300px]",
+};
+
+function mobileColSpan(rowDef: RowDef, slotIndex: number): number {
+  const slot = rowDef[slotIndex];
+  if (slot.colXs !== 6) return slot.colXs;
+
+  let runStart = slotIndex;
+  while (runStart > 0 && rowDef[runStart - 1].colXs === 6) runStart--;
+
+  let runEnd = slotIndex;
+  while (runEnd + 1 < rowDef.length && rowDef[runEnd + 1].colXs === 6)
+    runEnd++;
+
+  const runLength = runEnd - runStart + 1;
+  const runPosition = slotIndex - runStart;
+  return runLength % 2 === 1 && runPosition === runLength - 1 ? 12 : 6;
+}
+
+const slotGridStyle = (slot: SlotDef, rowDef: RowDef, slotIndex: number): CSSProperties =>
+  ({
+    "--radar-col-xs": mobileColSpan(rowDef, slotIndex),
+    "--radar-col-sm": slot.colSm,
+  }) as CSSProperties;
 
 const ROWS_DAY: RowDef[] = [
   [
@@ -1507,6 +1545,7 @@ function SignalBadge({
 interface NormalizedItem {
   tmdbId: number;
   name: string;
+  originalName: string | null;
   overview: string | null;
   backdrop: string | null;
   poster: string | null;
@@ -1541,6 +1580,7 @@ function resolveItemData(item: EditorialGroup): NormalizedItem {
     return {
       tmdbId: m.tmdb_id,
       name: m.name ?? "",
+      originalName: m.original_name ?? null,
       overview: m.overview ?? null,
       backdrop,
       poster: TMDB_IMG(m.poster_path ?? null, "w342"),
@@ -1609,6 +1649,7 @@ function resolveItemData(item: EditorialGroup): NormalizedItem {
   return {
     tmdbId,
     name: tmdb?.name ?? fallbackName,
+    originalName: tmdb?.original_name ?? null,
     overview: tmdb?.overview ?? null,
     backdrop: tmdb ? bestHorizontalImg(tmdb, "w1280") : null,
     poster: tmdb ? bestVerticalImg(tmdb) : null,
@@ -1644,6 +1685,7 @@ function AgendaEditorialHeroCard({
   const { label: catLabel, color: catColor } = d.isMovie
     ? { label: "Cinema", color: "bg-amber-500/20 text-amber-300/90 border-amber-500/25" }
     : resolveCatLabel(item.group);
+  const titleDisplay = useRandomizedTitleDisplay(d.name, d.originalName);
   const firstEp = !item.movie
     ? (episodesOnDay(item.group, item.dateStr)[0] ?? null)
     : null;
@@ -1702,8 +1744,13 @@ function AgendaEditorialHeroCard({
               {showTime && firstEp ? ` · ${formatTime(firstEp.startAt)}` : ""}
             </p>
             <h2 className="mb-3 text-3xl font-black leading-none tracking-[-0.04em] text-white sm:text-5xl">
-              {d.name}
+              {titleDisplay.mainTitle}
             </h2>
+            {titleDisplay.subTitle && (
+              <p className="mb-2 line-clamp-1 text-[12px] font-medium text-white/45">
+                {titleDisplay.subTitle}
+              </p>
+            )}
             {d.overview && (
               <p className="line-clamp-3 max-w-2xl text-[13px] leading-relaxed text-white/62">
                 {d.overview}
@@ -1726,6 +1773,7 @@ function AgendaEditorialWideCard({
   trendingWeek: Set<number>;
 }) {
   const d = resolveItemData(item);
+  const titleDisplay = useRandomizedTitleDisplay(d.name, d.originalName);
   const signal = editorialSignal(
     item.group,
     item.dateStr,
@@ -1762,8 +1810,13 @@ function AgendaEditorialWideCard({
             {d.subLabel || ""}
           </p>
           <h3 className="line-clamp-2 text-2xl font-black leading-tight tracking-[-0.035em] text-white">
-            {d.name}
+            {titleDisplay.mainTitle}
           </h3>
+          {titleDisplay.subTitle && (
+            <p className="mt-1 line-clamp-1 text-[11px] font-medium text-white/40">
+              {titleDisplay.subTitle}
+            </p>
+          )}
           {d.overview && (
             <p className="mt-2 line-clamp-2 text-[12px] leading-relaxed text-white/52">
               {d.overview}
@@ -1785,6 +1838,7 @@ function AgendaEditorialPosterCard({
   trendingWeek: Set<number>;
 }) {
   const d = resolveItemData(item);
+  const titleDisplay = useRandomizedTitleDisplay(d.name, d.originalName);
   const bgImg = d.poster ?? d.backdrop;
   const signal = editorialSignal(
     item.group,
@@ -1826,7 +1880,7 @@ function AgendaEditorialPosterCard({
             {d.subLabel ? ` · ${d.subLabel}` : ""}
           </p>
           <h3 className="line-clamp-2 text-[19px] font-black leading-tight tracking-[-0.035em] text-white">
-            {d.name}
+            {titleDisplay.mainTitle}
           </h3>
           {d.overview && (
             <p className="mt-2 line-clamp-2 text-[11px] leading-relaxed text-white/50">
@@ -1849,6 +1903,7 @@ function AgendaEditorialSquareCard({
   trendingWeek: Set<number>;
 }) {
   const d = resolveItemData(item);
+  const titleDisplay = useRandomizedTitleDisplay(d.name, d.originalName);
   const bgImg = d.backdrop ?? d.poster;
   const signal = editorialSignal(
     item.group,
@@ -1886,7 +1941,7 @@ function AgendaEditorialSquareCard({
             {d.subLabel ? ` · ${d.subLabel}` : ""}
           </p>
           <h3 className="line-clamp-2 text-[16px] font-black leading-tight tracking-[-0.03em] text-white drop-shadow-[0_1px_3px_rgba(0,0,0,0.7)]">
-            {d.name}
+            {titleDisplay.mainTitle}
           </h3>
         </div>
       </div>
@@ -1894,11 +1949,106 @@ function AgendaEditorialSquareCard({
   );
 }
 
+const MOBILE_COMPACT_PAGE_SIZE = 8;
+
 function AgendaCompactCluster({ items }: { items: EditorialGroup[] }) {
+  const [mobilePage, setMobilePage] = useState(0);
+  const mobilePageCount = Math.max(
+    1,
+    Math.ceil(items.length / MOBILE_COMPACT_PAGE_SIZE),
+  );
+  const clampedMobilePage = Math.min(mobilePage, mobilePageCount - 1);
+  const mobileItems = items.slice(
+    clampedMobilePage * MOBILE_COMPACT_PAGE_SIZE,
+    clampedMobilePage * MOBILE_COMPACT_PAGE_SIZE + MOBILE_COMPACT_PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setMobilePage(0);
+  }, [items]);
+
   if (items.length === 0) return null;
+
   return (
-    <div className="col-span-1 rounded-[24px] border border-white/[0.08] bg-zinc-900/80 shadow-[0_18px_50px_rgba(0,0,0,0.40)] backdrop-blur-xl p-4 sm:col-span-2 lg:col-span-4">
-      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+    <div className="col-span-1 rounded-[24px] border border-white/[0.08] bg-zinc-900/80 p-3 shadow-[0_18px_50px_rgba(0,0,0,0.40)] backdrop-blur-xl sm:col-span-2 sm:p-4 lg:col-span-4">
+      <div className="sm:hidden">
+        <div className="mb-3 flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <p className="text-[10px] font-black uppercase tracking-[0.16em] text-white/30">
+              Lista compacta
+            </p>
+            <p className="mt-0.5 text-[11px] font-bold text-white/45">
+              {clampedMobilePage + 1} de {mobilePageCount}
+            </p>
+          </div>
+          {mobilePageCount > 1 && (
+            <div className="flex items-center gap-1.5">
+              <button
+                type="button"
+                data-testid="radar-compact-prev-mobile"
+                onClick={() => setMobilePage((page) => Math.max(0, page - 1))}
+                disabled={clampedMobilePage === 0}
+                className="rounded-xl border border-white/[0.08] bg-white/[0.04] px-3 py-2 text-[10px] font-black uppercase text-white/55 transition-colors disabled:opacity-35"
+              >
+                Anterior
+              </button>
+              <button
+                type="button"
+                data-testid="radar-compact-next-mobile"
+                onClick={() =>
+                  setMobilePage((page) => Math.min(mobilePageCount - 1, page + 1))
+                }
+                disabled={clampedMobilePage >= mobilePageCount - 1}
+                className="rounded-xl border border-sky-300/20 bg-sky-400/[0.12] px-3 py-2 text-[10px] font-black uppercase text-sky-100 transition-colors disabled:opacity-35"
+              >
+                Próximo
+              </button>
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          {mobileItems.map((editorialItem) => {
+            const d = resolveItemData(editorialItem);
+            const image = d.poster ?? d.backdrop;
+            return (
+              <a
+                key={`${editorialItem.movie ? `movie-${d.tmdbId}` : editorialItem.group.key}-${editorialItem.dateStr}-mobile`}
+                href={d.href}
+                className="flex min-h-[82px] min-w-0 gap-2 overflow-hidden rounded-xl border border-white/[0.08] bg-white/[0.035] p-2 text-left"
+              >
+                <div className="h-[68px] w-[45px] shrink-0 overflow-hidden rounded-lg bg-white/[0.05]">
+                  {image && (
+                    <img
+                      src={image}
+                      alt=""
+                      className="h-full w-full object-cover"
+                      loading="lazy"
+                    />
+                  )}
+                </div>
+                <div className="flex min-w-0 flex-1 flex-col justify-between py-0.5">
+                  <p className="w-fit max-w-full rounded-md border border-sky-300/20 bg-sky-400/[0.12] px-1.5 py-0.5 text-[7px] font-black uppercase leading-none text-sky-100/75">
+                    {d.dateLabel}
+                  </p>
+                  <div className="min-w-0">
+                    <p className="line-clamp-2 text-[11px] font-black leading-tight text-white/85">
+                      {d.name}
+                    </p>
+                    {d.subLabel && (
+                      <p className="mt-1 line-clamp-1 text-[7.5px] font-bold uppercase leading-snug text-emerald-300/65">
+                        {d.subLabel}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              </a>
+            );
+          })}
+        </div>
+      </div>
+
+      <div className="hidden grid-cols-1 gap-2 sm:grid sm:grid-cols-2 lg:grid-cols-3">
         {items.map((editorialItem) => {
           const d = resolveItemData(editorialItem);
           return (
@@ -1983,14 +2133,14 @@ function AgendaEditorialFeed({
         {rows.slice(0, 2).map((row, rIdx) => (
           <div
             key={rIdx}
-            className={`grid gap-3 ${ROW_H[row[0].cardType]}`}
+            className={`grid gap-3 ${ROW_H_SM[row[0].cardType]}`}
             style={{ gridTemplateColumns: "repeat(12, 1fr)" }}
           >
             {row.map((slot, sIdx) => (
               <div
                 key={sIdx}
-                className="h-full rounded-2xl bg-white/[0.035] animate-pulse"
-                style={{ gridColumn: `span ${slot.colSm}` }}
+                className={`${MOBILE_CARD_H[slot.cardType]} rounded-2xl bg-white/[0.035] animate-pulse [grid-column:span_var(--radar-col-xs)_/_span_var(--radar-col-xs)] sm:h-full sm:[grid-column:span_var(--radar-col-sm)_/_span_var(--radar-col-sm)]`}
+                style={slotGridStyle(slot, row, sIdx)}
               />
             ))}
           </div>
@@ -2049,14 +2199,18 @@ function AgendaEditorialFeed({
       return (
         <div
           key={`${keyPrefix}-${rIdx}`}
-          className={`grid gap-3 ${ROW_H[dominantType]}`}
+          className={`grid gap-3 ${ROW_H_SM[dominantType]}`}
           style={{ gridTemplateColumns: "repeat(12, 1fr)" }}
         >
           {row.items.map((item, cIdx) => {
             const slot = row.rowDef[cIdx];
             const key = `${item.movie ? item.movie.key : item.group.key}-${item.dateStr}-${keyPrefix}-${rIdx}-${cIdx}`;
             return (
-              <div key={key} className="h-full min-w-0" style={{ gridColumn: `span ${slot.colSm}` }}>
+              <div
+                key={key}
+                className={`${MOBILE_CARD_H[slot.cardType]} min-w-0 [grid-column:span_var(--radar-col-xs)_/_span_var(--radar-col-xs)] sm:h-full sm:[grid-column:span_var(--radar-col-sm)_/_span_var(--radar-col-sm)]`}
+                style={slotGridStyle(slot, row.rowDef, cIdx)}
+              >
                 {slot.cardType === "hero" && (
                   <AgendaEditorialHeroCard item={item} trendingDay={trendingDay} trendingWeek={trendingWeek} />
                 )}
@@ -2286,6 +2440,10 @@ function RadarHero({
   const backdrop = tmdb ? bestHorizontalImg(tmdb, "w1280") : null;
   const poster = tmdb ? bestVerticalImg(tmdb) : null;
   const itemName = tmdb?.name ?? null;
+  const itemTitleDisplay = useRandomizedTitleDisplay(
+    itemName ?? "",
+    tmdb?.original_name ?? null,
+  );
   const { label: catLabel, color: catColor } = item
     ? resolveCatLabel(item.group)
     : { label: "", color: "" };
@@ -2358,7 +2516,7 @@ function RadarHero({
       />
 
       {/* Faixa superior */}
-      <div className="relative px-6 pt-6 pb-0 sm:px-9 sm:pt-8">
+      <div className="relative px-5 pt-5 pb-0 sm:px-9 sm:pt-8">
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div className="min-w-0">
             <div className="flex items-center gap-2 mb-1 flex-wrap">
@@ -2378,13 +2536,13 @@ function RadarHero({
           </div>
 
           {/* Tabs de período */}
-          <div className="flex items-center gap-1 rounded-2xl border border-white/[0.09] bg-black/30 p-1 backdrop-blur-md shrink-0">
+          <div className="flex w-full items-center gap-1 rounded-2xl border border-white/[0.09] bg-black/30 p-1 backdrop-blur-md shrink-0 sm:w-auto">
             {(["all", "day", "week", "month"] as ViewMode[]).map((v) => (
               <button
                 key={v}
                 type="button"
                 onClick={() => onChangeViewMode(v)}
-                className={`text-[11px] font-bold px-3.5 py-1.5 rounded-lg transition-all duration-200 ${viewMode === v ? "border border-sky-300/25 bg-sky-300/[0.14] text-sky-100 shadow-[0_0_18px_rgba(56,189,248,0.12)]" : "text-white/30 hover:text-white/55"}`}
+                className={`flex-1 rounded-lg px-2 py-1.5 text-[10px] font-bold transition-all duration-200 sm:flex-none sm:px-3.5 sm:text-[11px] ${viewMode === v ? "border border-sky-300/25 bg-sky-300/[0.14] text-sky-100 shadow-[0_0_18px_rgba(56,189,248,0.12)]" : "text-white/30 hover:text-white/55"}`}
               >
                 {v === "all"
                   ? "Todos"
@@ -2399,7 +2557,34 @@ function RadarHero({
         </div>
 
         {/* Título + métricas + seletor de modo */}
-        <div className="flex items-center gap-4 flex-wrap mt-4 mb-5">
+        <div className="mt-4 mb-4 sm:mb-5">
+          <div className="flex items-end justify-between gap-3 sm:hidden">
+            <h1 className="text-4xl font-black text-white leading-none tracking-[-0.06em]">
+              Radar
+            </h1>
+            {filteredCount > 0 && (
+              <div className="grid grid-cols-2 gap-2">
+                <div className="rounded-xl border border-white/[0.07] bg-black/20 px-2.5 py-1.5 text-right">
+                  <p className="text-[20px] font-black leading-none text-white/78 tabular-nums">
+                    {filteredCount}
+                  </p>
+                  <p className="mt-0.5 text-[9px] font-bold uppercase text-white/28">
+                    séries
+                  </p>
+                </div>
+                <div className="rounded-xl border border-emerald-300/[0.10] bg-emerald-400/[0.06] px-2.5 py-1.5 text-right">
+                  <p className="text-[20px] font-black leading-none text-emerald-300 tabular-nums">
+                    {filteredEps.toLocaleString("pt-BR")}
+                  </p>
+                  <p className="mt-0.5 text-[9px] font-bold uppercase text-white/28">
+                    eps
+                  </p>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="hidden items-center gap-4 flex-wrap sm:flex">
           <h1 className="text-4xl sm:text-5xl font-black text-white leading-none tracking-[-0.06em]">
             Radar
           </h1>
@@ -2421,16 +2606,17 @@ function RadarHero({
               </div>
             </>
           )}
+          </div>
         </div>
 
         {/* ── Seletor de modo Geral / Personalizado ── */}
-        <div className="flex items-center gap-2 pb-5">
-          <div className="flex items-center gap-1 rounded-2xl border border-white/[0.09] bg-black/40 p-1 backdrop-blur-md">
+        <div className="flex flex-col items-start gap-2 pb-4 sm:flex-row sm:items-center sm:pb-5">
+          <div className="flex w-full items-center gap-1 rounded-2xl border border-white/[0.09] bg-black/40 p-1 backdrop-blur-md sm:w-auto">
             <button
               type="button"
               onClick={() => onChangeRadarMode("general")}
               disabled={isLoadingMode}
-              className={`group flex items-center gap-2 px-4 py-2 rounded-xl text-[12px] font-bold transition-all duration-200 ${
+              className={`group flex flex-1 items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl text-[11px] font-bold transition-all duration-200 sm:flex-none sm:gap-2 sm:px-4 sm:text-[12px] ${
                 radarMode === "general"
                   ? "border border-sky-300/20 bg-sky-400/[0.12] text-sky-100 shadow-[0_0_20px_rgba(56,189,248,0.10)]"
                   : "text-white/35 hover:text-white/60"
@@ -2452,7 +2638,7 @@ function RadarHero({
               </svg>
               Geral
               {radarMode === "general" && (
-                <span className="text-[8px] font-black uppercase tracking-wide text-sky-400/60">
+                <span className="hidden text-[8px] font-black uppercase tracking-wide text-sky-400/60 sm:inline">
                   Ativo
                 </span>
               )}
@@ -2462,7 +2648,7 @@ function RadarHero({
               type="button"
               onClick={() => onChangeRadarMode("personal")}
               disabled={isLoadingMode}
-              className={`group flex items-center gap-2 px-4 py-2 rounded-xl text-[12px] font-bold transition-all duration-200 ${
+              className={`group flex flex-1 items-center justify-center gap-1.5 px-2.5 py-2 rounded-xl text-[11px] font-bold transition-all duration-200 sm:flex-none sm:gap-2 sm:px-4 sm:text-[12px] ${
                 radarMode === "personal"
                   ? "border border-violet-300/20 bg-violet-400/[0.12] text-violet-100 shadow-[0_0_20px_rgba(139,92,246,0.10)]"
                   : "text-white/35 hover:text-white/60"
@@ -2484,7 +2670,7 @@ function RadarHero({
               </svg>
               Personalizado
               {radarMode === "personal" && (
-                <span className="text-[8px] font-black uppercase tracking-wide text-violet-400/60">
+                <span className="hidden text-[8px] font-black uppercase tracking-wide text-violet-400/60 sm:inline">
                   Ativo
                 </span>
               )}
@@ -2495,12 +2681,12 @@ function RadarHero({
           </div>
 
           {radarMode === "personal" && (
-            <span className="text-[10px] text-white/25">
+            <span className="text-[9.5px] text-white/25 sm:text-[10px]">
               Baseado na sua watchlist e histórico
             </span>
           )}
           {radarMode === "general" && (
-            <span className="text-[10px] text-white/25">
+            <span className="text-[9.5px] text-white/25 sm:text-[10px]">
               Descoberta ampla — todos os lançamentos
             </span>
           )}
@@ -2510,8 +2696,7 @@ function RadarHero({
       {/* Hero cinematográfico */}
       {spotlightItems.length > 0 && item && tmdb && (
         <div
-          className="relative cursor-pointer overflow-hidden"
-          style={{ minHeight: 220 }}
+          className="relative min-h-[190px] cursor-pointer overflow-hidden sm:min-h-[220px]"
           onClick={() => router.push(href)}
         >
           <div className="absolute top-0 inset-x-6 sm:inset-x-9 h-px bg-white/[0.06]" />
@@ -2527,7 +2712,7 @@ function RadarHero({
                     (idx - 1 + spotlightItems.length) % spotlightItems.length,
                   );
                 }}
-                className="sm:hidden absolute left-3 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-8 h-8 rounded-full border border-white/[0.20] bg-black/50 backdrop-blur-sm"
+                className="sm:hidden absolute bottom-5 right-12 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.16] bg-black/45 backdrop-blur-md"
               >
                 <svg
                   viewBox="0 0 16 16"
@@ -2551,7 +2736,7 @@ function RadarHero({
                   if (timerRef.current) clearTimeout(timerRef.current);
                   goTo((idx + 1) % spotlightItems.length);
                 }}
-                className="sm:hidden absolute right-3 top-1/2 -translate-y-1/2 z-20 flex items-center justify-center w-8 h-8 rounded-full border border-white/[0.20] bg-black/50 backdrop-blur-sm"
+                className="sm:hidden absolute bottom-5 right-3 z-20 flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.16] bg-black/45 backdrop-blur-md"
               >
                 <svg
                   viewBox="0 0 16 16"
@@ -2572,14 +2757,14 @@ function RadarHero({
           <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/20 to-transparent" />
           <div className="absolute inset-0 bg-gradient-to-r from-black/60 via-transparent to-transparent" />
           <div
-            className="relative flex items-end gap-5 p-5 sm:p-7 min-h-[240px] transition-opacity duration-300"
+            className="relative flex min-h-[210px] items-end gap-5 p-5 transition-opacity duration-300 sm:min-h-[240px] sm:p-7"
             style={{ opacity: visible ? 1 : 0 }}
           >
             {poster && (
               <div className="hidden sm:block w-[80px] shrink-0 rounded-xl overflow-hidden border border-white/[0.10] shadow-xl shadow-black/40">
                 <img
                   src={poster}
-                  alt={itemName ?? ""}
+                  alt={itemTitleDisplay.mainTitle}
                   className="w-full aspect-[2/3] object-cover"
                 />
               </div>
@@ -2608,8 +2793,13 @@ function RadarHero({
                 </span>
               </div>
               <h3 className="text-2xl sm:text-[28px] font-black tracking-[-0.04em] text-white/95 leading-none mb-2 line-clamp-2">
-                {itemName}
+                {itemTitleDisplay.mainTitle}
               </h3>
+              {itemTitleDisplay.subTitle && (
+                <p className="mb-2 line-clamp-1 text-[12px] font-medium text-white/40">
+                  {itemTitleDisplay.subTitle}
+                </p>
+              )}
               {tmdb.overview && (
                 <p className="text-[12px] text-white/40 leading-relaxed line-clamp-2 max-w-lg mb-2.5">
                   {tmdb.overview}

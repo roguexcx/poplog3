@@ -317,9 +317,9 @@ export default function TrendingNowSection() {
         subtitle="O que todo mundo está assistindo."
         className="mb-6"
         action={
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
             <FilterPills active={filter} onChange={setFilter} />
-            <div className="hidden md:flex">
+            <div className="flex">
               <ScrollRowArrows
                 canScrollLeft={canScrollLeft}
                 canScrollRight={canScrollRight}

@@ -5,6 +5,7 @@ import { createClient } from "@/server/supabase/client";
 import type { User } from "@supabase/supabase-js";
 import {
   Dice5,
+  Film,
   Home,
   Library,
   LogIn,
@@ -14,6 +15,7 @@ import {
   Radar,
   Search,
   Settings,
+  Tv,
   UserCircle,
   X,
 } from "lucide-react";
@@ -72,12 +74,14 @@ const NAV_GROUPS: NavGroup[] = [
 const MOBILE_LINKS: NavLink[] = [
   { href: "/", label: "Início", icon: Home },
   { href: "/buscar", label: "Buscar", icon: Search },
-  { href: "/acompanhando", label: "Assistir", icon: PlayCircle, authRequired: true },
-  { href: "/library", label: "Biblioteca", icon: Library, authRequired: true },
+  { href: "/acompanhando", label: "Assistir", icon: PlayCircle },
+  { href: "/library", label: "Biblioteca", icon: Library },
 ];
 
 const MOBILE_MORE_LINKS: NavLink[] = [
   { href: "/radar", label: "Radar", icon: Radar },
+  { href: "/buscar?type=movie", label: "Filmes", icon: Film },
+  { href: "/buscar?type=tv", label: "Séries", icon: Tv },
   { href: "/sorteio", label: "Sorteio", icon: Dice5, authRequired: true },
   { href: "/profile", label: "Perfil", icon: UserCircle, authRequired: true },
   { href: "/settings", label: "Ajustes", icon: Settings, authRequired: true },
@@ -137,8 +141,10 @@ export default function Sidebar() {
   }
 
   function isActive(href: string) {
-    if (href === "/") return pathname === "/";
-    return pathname === href || pathname.startsWith(`${href}/`);
+    const hrefPath = href.split("?")[0];
+
+    if (hrefPath === "/") return pathname === "/";
+    return pathname === hrefPath || pathname.startsWith(`${hrefPath}/`);
   }
 
   function isVisible(link: NavLink) {

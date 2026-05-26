@@ -1,4 +1,6 @@
-import type { ElementType } from "react";
+"use client";
+
+import { useEffect, useMemo, useState, type ElementType } from "react";
 
 type TitleVariant = "hero" | "large" | "medium" | "compact" | "poster";
 
@@ -9,6 +11,12 @@ type Props = {
   as?: ElementType;
   className?: string;
 };
+
+declare global {
+  interface Window {
+    __poplogTitleShuffleSeed?: number;
+  }
+}
 
 function normalizeTitle(value?: string | null): string {
   return (value ?? "")
@@ -37,6 +45,64 @@ export function getDisplayOriginalTitle(
   return normalizeTitle(original) !== normalizeTitle(title) ? original : null;
 }
 
+function hashTitle(value: string): number {
+  let hash = 2166136261;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function titleShuffleSeed() {
+  if (typeof window === "undefined") return 0;
+  window.__poplogTitleShuffleSeed ??= Math.random();
+  return window.__poplogTitleShuffleSeed;
+}
+
+export function resolveRandomizedTitleDisplay(
+  title: string,
+  originalTitle?: string | null,
+  seed = 0,
+) {
+  const diffOriginal = getDisplayOriginalTitle(title, originalTitle);
+  if (!diffOriginal) {
+    return {
+      mainTitle: title,
+      subTitle: null as string | null,
+      fullTitle: title,
+    };
+  }
+
+  const normalizedPair = `${normalizeTitle(title)}|${normalizeTitle(diffOriginal)}`;
+  const localizedFirst =
+    ((hashTitle(normalizedPair) + Math.floor(seed * 10_000)) % 2) === 0;
+  const mainTitle = localizedFirst ? title : diffOriginal;
+  const subTitle = localizedFirst ? diffOriginal : title;
+
+  return {
+    mainTitle,
+    subTitle,
+    fullTitle: `${mainTitle} (${subTitle})`,
+  };
+}
+
+export function useRandomizedTitleDisplay(
+  title: string,
+  originalTitle?: string | null,
+) {
+  const [seed, setSeed] = useState(0);
+
+  useEffect(() => {
+    setSeed(titleShuffleSeed());
+  }, []);
+
+  return useMemo(
+    () => resolveRandomizedTitleDisplay(title, originalTitle, seed),
+    [title, originalTitle, seed],
+  );
+}
+
 export default function LocalizedTitle({
   title,
   originalTitle,
@@ -44,14 +110,10 @@ export default function LocalizedTitle({
   as: Tag = "div",
   className = "",
 }: Props) {
-  const diffOriginal = getDisplayOriginalTitle(title, originalTitle);
-
-  // Título principal: original/inglês se disponível e diferente; caso contrário, localizado
-  const mainTitle = diffOriginal ?? title;
-  // Subtítulo: título localizado (PT-BR) quando diferente do original
-  const subTitle = diffOriginal ? title : null;
-
-  const fullTitle = diffOriginal ? `${diffOriginal} (${title})` : title;
+  const { mainTitle, subTitle, fullTitle } = useRandomizedTitleDisplay(
+    title,
+    originalTitle,
+  );
 
   if (variant === "poster") {
     return (

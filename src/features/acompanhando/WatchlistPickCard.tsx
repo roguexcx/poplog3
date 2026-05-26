@@ -1,5 +1,7 @@
 "use client";
 
+import LocalizedTitle from "@/components/titles/LocalizedTitle";
+
 export type WatchlistPickItem = {
   content_id: string;
   tmdb_id: number;
@@ -150,14 +152,13 @@ export default function WatchlistPickCard({ item, onClick }: Props) {
 
       {/* Title + subtitle */}
       <div className="px-0.5">
-        <p className="mb-0.5 line-clamp-1 text-[12.5px] font-bold leading-tight tracking-[-0.02em] text-white/85 transition-colors group-hover:text-white">
-          {item.original_title && item.original_title !== item.title ? item.original_title : item.title}
-        </p>
-        {item.original_title && item.original_title !== item.title && (
-          <p className="mb-0.5 line-clamp-1 text-[10px] font-light leading-snug text-white/35">
-            {item.title}
-          </p>
-        )}
+        <LocalizedTitle
+          as="div"
+          title={item.title}
+          originalTitle={item.original_title}
+          variant="compact"
+          className="mb-0.5 transition-colors group-hover:text-white"
+        />
         <p className="text-[11px] text-white/35">
           {item.runtime_label ? `${subtitle} · ${item.runtime_label}` : subtitle}
         </p>

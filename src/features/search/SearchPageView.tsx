@@ -3,7 +3,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { Film, Search, Sparkles, Tv, UserRound, X } from "lucide-react";
+import { ChevronDown, Film, Search, Sparkles, Tv, UserRound, X } from "lucide-react";
 
 import PageShell from "@/components/layout/PageShell";
 import InteractivePosterCard from "@/components/ui/InteractivePosterCard";
@@ -200,8 +200,23 @@ export default function SearchPageView({ initialQuery, initialType }: SearchPage
   const [genreDiscover, setGenreDiscover] = useState<GenreDiscoverResponse | null>(null);
   const [specialLoading, setSpecialLoading] = useState(false);
   const [specialDiscover, setSpecialDiscover] = useState<SpecialDiscoverResponse | null>(null);
+  const [showAllGenres, setShowAllGenres] = useState(false);
+
+  useEffect(() => {
+    setQuery(initialQuery);
+    setType(initialType === "movie" || initialType === "tv" ? initialType : "all");
+  }, [initialQuery, initialType]);
 
   const trimmedQuery = useMemo(() => query.trim(), [query]);
+  const mobileGenres = useMemo(() => {
+    const genres = discovery?.genres ?? [];
+    const primary = genres.slice(0, 6);
+
+    if (showAllGenres || !selectedGenre) return showAllGenres ? genres : primary;
+    if (primary.some((genre) => genre.id === selectedGenre.id)) return primary;
+
+    return [...primary.slice(0, 5), selectedGenre];
+  }, [discovery?.genres, selectedGenre, showAllGenres]);
   const activeFiltersCount = useMemo(() => {
     let count = 0;
     if (type !== "all") count += 1;
@@ -294,34 +309,39 @@ export default function SearchPageView({ initialQuery, initialType }: SearchPage
 
   return (
     <PageShell variant="wide">
-      <div className="flex flex-col gap-8 py-6 pb-16">
+      <div className="flex flex-col gap-6 py-4 pb-2 sm:gap-8 sm:py-6 sm:pb-8">
+        <div className="pointer-events-none fixed inset-x-0 top-0 z-30 h-44 bg-gradient-to-b from-[#060719] via-[#060719]/82 to-transparent sm:h-52" />
 
         {/* Header */}
-        <section className="relative overflow-hidden rounded-[1.25rem] border border-white/[0.07] bg-white/[0.025] p-5 sm:rounded-[1.75rem] sm:p-6 md:p-8 lg:rounded-[2rem] lg:p-10">
+        <section className="sticky top-3 z-40 overflow-hidden rounded-[1.15rem] border border-white/[0.09] bg-[#080b1d]/88 p-4 shadow-[0_18px_60px_rgba(0,0,0,0.34)] backdrop-blur-2xl sm:top-4 sm:rounded-[1.75rem] sm:p-6 md:p-8 lg:rounded-[2rem] lg:p-10">
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_0%,rgba(129,140,248,0.18),transparent_34%),radial-gradient(circle_at_88%_20%,rgba(6,182,212,0.10),transparent_30%)]" />
           <div className="pointer-events-none absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/[0.08] to-transparent" />
-          <div className="relative grid gap-6 xl:grid-cols-[1.1fr_0.9fr] xl:items-center">
-            <div>
-              <div className="mb-3 flex items-center gap-2 md:mb-5">
+          <div className="relative grid gap-4 sm:gap-6 xl:grid-cols-[1.1fr_0.9fr] xl:items-center">
+            <div className="hidden sm:order-1 sm:block">
+              <div className="mb-3 hidden items-center gap-2 sm:flex md:mb-5">
                 <span className="h-px w-5 rounded-full bg-indigo-300/80 sm:w-8" />
                 <span className="text-[9.5px] font-bold uppercase tracking-[0.22em] text-indigo-200/80">Buscar &amp; Explorar</span>
               </div>
-              <h1 className="text-2xl font-black tracking-[-0.04em] text-white sm:text-4xl md:text-5xl lg:text-[3.25rem]">Encontre qualquer coisa.</h1>
-              <p className="mt-2 max-w-xl text-sm leading-6 text-white/45 sm:mt-3 md:mt-4 md:text-base md:leading-7">
+              <h1 className="text-xl font-black tracking-[-0.04em] text-white sm:text-4xl md:text-5xl lg:text-[3.25rem]">Encontre qualquer coisa.</h1>
+              <p className="mt-1.5 max-w-xl text-xs leading-5 text-white/45 sm:mt-3 sm:text-sm md:mt-4 md:text-base md:leading-7">
                 {"Títulos, pessoas, gêneros e tendências da semana."}
               </p>
             </div>
-            <div className="flex flex-col gap-3">
+            <div className="order-1 flex flex-col gap-2.5 sm:order-2 sm:gap-3">
+              <div className="flex items-center gap-2 sm:hidden">
+                <span className="h-px w-6 rounded-full bg-indigo-300/80" />
+                <span className="text-[9px] font-bold uppercase tracking-[0.22em] text-indigo-200/80">Buscar &amp; Explorar</span>
+              </div>
               <div className="relative">
                 <Search className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-white/35" />
                 <input
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder={"Título, pessoa, saga ou universo..."}
-                  className="h-12 w-full rounded-2xl border border-white/[0.08] bg-black/30 pl-11 pr-4 text-sm font-medium text-white outline-none transition placeholder:text-white/30 focus:border-indigo-400/40 focus:bg-black/40"
+                  className="h-11 w-full rounded-2xl border border-white/[0.08] bg-black/30 pl-11 pr-4 text-sm font-medium text-white outline-none transition placeholder:text-white/30 focus:border-indigo-400/40 focus:bg-black/40 sm:h-12"
                 />
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div className="grid grid-cols-3 gap-2 sm:flex sm:flex-wrap">
                 {([
                   { value: "all", label: "Todos", icon: Sparkles },
                   { value: "movie", label: "Filmes", icon: Film },
@@ -331,14 +351,14 @@ export default function SearchPageView({ initialQuery, initialType }: SearchPage
                   const active = type === item.value;
                   return (
                     <button key={item.value} onClick={() => setType(item.value)}
-                      className={`flex items-center gap-1.5 rounded-full border px-4 py-2 text-[11px] font-black uppercase tracking-[0.12em] transition ${active ? "border-indigo-300/35 bg-indigo-400/[0.13] text-indigo-100" : "border-white/[0.08] bg-white/[0.035] text-white/55 hover:bg-white/[0.07] hover:text-white/80"}`}>
+                      className={`flex items-center justify-center gap-1.5 rounded-full border px-3 py-2 text-[10px] font-black uppercase tracking-[0.10em] transition sm:justify-start sm:px-4 sm:text-[11px] sm:tracking-[0.12em] ${active ? "border-indigo-300/35 bg-indigo-400/[0.13] text-indigo-100" : "border-white/[0.08] bg-white/[0.035] text-white/55 hover:bg-white/[0.07] hover:text-white/80"}`}>
                       <Icon className="size-3.5" />{item.label}
                     </button>
                   );
                 })}
                 {activeFiltersCount > 0 && (
                   <button onClick={() => { setType("all"); setSelectedGenre(null); setSelectedSpecial(null); }}
-                    className="flex items-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.035] px-3.5 py-2 text-[11px] font-black uppercase tracking-[0.12em] text-white/45 transition hover:bg-white/[0.07] hover:text-white/70">
+                    className="col-span-3 flex items-center justify-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.035] px-3.5 py-2 text-[10px] font-black uppercase tracking-[0.10em] text-white/45 transition hover:bg-white/[0.07] hover:text-white/70 sm:col-auto sm:text-[11px] sm:tracking-[0.12em]">
                     <X className="size-3" />Limpar
                   </button>
                 )}
@@ -349,29 +369,64 @@ export default function SearchPageView({ initialQuery, initialType }: SearchPage
 
         {/* Genre pills + special filter pills */}
         {discovery?.genres?.length ? (
-          <div className="flex gap-2 overflow-x-auto pb-1 no-scrollbar">
-            {discovery.genres.slice(0, 14).map((genre) => {
-              const active = selectedGenre?.id === genre.id;
-              return (
-                <button key={genre.id}
-                  onClick={() => { setSelectedSpecial(null); setSelectedGenre(active ? null : genre); }}
-                  className={`shrink-0 rounded-full border px-4 py-2 text-[11px] font-semibold transition ${active ? "border-indigo-400/40 bg-indigo-500/15 text-indigo-300" : "border-white/[0.08] bg-white/[0.035] text-white/55 hover:bg-white/[0.07] hover:text-white/80"}`}>
-                  {genre.name}
+          <>
+            <div className="flex flex-wrap gap-1.5 rounded-2xl border border-white/[0.06] bg-white/[0.025] p-2.5 sm:hidden">
+              {mobileGenres.map((genre) => {
+                const active = selectedGenre?.id === genre.id;
+                return (
+                  <button key={genre.id}
+                    onClick={() => { setSelectedSpecial(null); setSelectedGenre(active ? null : genre); }}
+                    className={`rounded-full border px-2.5 py-1.5 text-[10.5px] font-semibold transition ${active ? "border-indigo-400/40 bg-indigo-500/15 text-indigo-300" : "border-white/[0.08] bg-black/20 text-white/55 hover:bg-white/[0.07] hover:text-white/80"}`}>
+                    {genre.name}
+                  </button>
+                );
+              })}
+              {SPECIAL_FILTERS.map((sf) => {
+                const active = selectedSpecial?.id === sf.id;
+                return (
+                  <button key={sf.id}
+                    onClick={() => { setSelectedGenre(null); setSelectedSpecial(active ? null : sf); }}
+                    className={`rounded-full border px-2.5 py-1.5 text-[10.5px] font-semibold transition ${active ? "border-violet-400/40 bg-violet-500/15 text-violet-300" : "border-white/[0.08] bg-black/20 text-white/55 hover:bg-white/[0.07] hover:text-white/80"}`}>
+                    {sf.label}
+                  </button>
+                );
+              })}
+              {discovery.genres.length > 6 ? (
+                <button
+                  type="button"
+                  onClick={() => setShowAllGenres((value) => !value)}
+                  className="flex items-center gap-1 rounded-full border border-white/[0.10] bg-white/[0.055] px-2.5 py-1.5 text-[10.5px] font-black uppercase tracking-[0.08em] text-white/60 transition hover:bg-white/[0.09] hover:text-white/80"
+                >
+                  {showAllGenres ? "Menos" : `Mais ${discovery.genres.length - mobileGenres.length}`}
+                  <ChevronDown className={`size-3 transition ${showAllGenres ? "rotate-180" : ""}`} />
                 </button>
-              );
-            })}
-            <div className="mx-1 my-auto h-4 w-px shrink-0 bg-white/[0.10]" />
-            {SPECIAL_FILTERS.map((sf) => {
-              const active = selectedSpecial?.id === sf.id;
-              return (
-                <button key={sf.id}
-                  onClick={() => { setSelectedGenre(null); setSelectedSpecial(active ? null : sf); }}
-                  className={`shrink-0 rounded-full border px-4 py-2 text-[11px] font-semibold transition ${active ? "border-violet-400/40 bg-violet-500/15 text-violet-300" : "border-white/[0.08] bg-white/[0.035] text-white/55 hover:bg-white/[0.07] hover:text-white/80"}`}>
-                  {sf.label}
-                </button>
-              );
-            })}
-          </div>
+              ) : null}
+            </div>
+
+            <div className="hidden flex-wrap gap-2 rounded-2xl border border-white/[0.055] bg-white/[0.018] p-3 sm:flex lg:gap-2.5 lg:p-3.5">
+              {discovery.genres.map((genre) => {
+                const active = selectedGenre?.id === genre.id;
+                return (
+                  <button key={genre.id}
+                    onClick={() => { setSelectedSpecial(null); setSelectedGenre(active ? null : genre); }}
+                    className={`rounded-full border px-3.5 py-1.5 text-[11px] font-semibold transition lg:px-4 lg:py-2 ${active ? "border-indigo-400/40 bg-indigo-500/15 text-indigo-300" : "border-white/[0.08] bg-black/15 text-white/55 hover:bg-white/[0.07] hover:text-white/80"}`}>
+                    {genre.name}
+                  </button>
+                );
+              })}
+              <div className="mx-1 my-auto h-4 w-px bg-white/[0.10]" />
+              {SPECIAL_FILTERS.map((sf) => {
+                const active = selectedSpecial?.id === sf.id;
+                return (
+                  <button key={sf.id}
+                    onClick={() => { setSelectedGenre(null); setSelectedSpecial(active ? null : sf); }}
+                    className={`rounded-full border px-3.5 py-1.5 text-[11px] font-semibold transition lg:px-4 lg:py-2 ${active ? "border-violet-400/40 bg-violet-500/15 text-violet-300" : "border-white/[0.08] bg-black/15 text-white/55 hover:bg-white/[0.07] hover:text-white/80"}`}>
+                    {sf.label}
+                  </button>
+                );
+              })}
+            </div>
+          </>
         ) : null}
 
         {/* Skeleton */}
@@ -411,14 +466,14 @@ export default function SearchPageView({ initialQuery, initialType }: SearchPage
               <div className="flex flex-col gap-10">
                 {specialDiscover.popularSeries?.length ? (
                   <section className="space-y-5">
-                    <SectionHeader eyebrow="Animes" title="Series de anime em alta" subtitle="Series de animacao japonesa mais assistidas agora." accent="indigo" />
+                    <SectionHeader eyebrow="Tendencias da semana" title="Animes em alta" subtitle="Series de animacao japonesa aparecendo entre as tendencias da semana." accent="indigo" />
                     <TitleGrid titles={specialDiscover.popularSeries} />
                   </section>
                 ) : null}
                 {specialDiscover.popularSeries?.length && specialDiscover.popularMovies?.length ? <SectionDivider /> : null}
                 {specialDiscover.popularMovies?.length ? (
                   <section className="space-y-5">
-                    <SectionHeader eyebrow="Animes" title="Filmes de anime em destaque" subtitle="Filmes de animacao japonesa populares no momento." accent="indigo" />
+                    <SectionHeader eyebrow="Tendencias da semana" title="Filmes de anime em alta" subtitle="Filmes de animacao japonesa aparecendo entre as tendencias da semana." accent="indigo" />
                     <TitleGrid titles={specialDiscover.popularMovies} />
                   </section>
                 ) : null}
@@ -427,7 +482,7 @@ export default function SearchPageView({ initialQuery, initialType }: SearchPage
               <div className="flex flex-col gap-10">
                 {specialDiscover.popular?.length ? (
                   <section className="space-y-5">
-                    <SectionHeader eyebrow="Plot Twist" title="Reviravoltas que ficam na memoria" subtitle="Titulos consagrados por finais e viradas inesqueciveis." accent="indigo" />
+                    <SectionHeader eyebrow="Tendencias da semana" title="Plot twists em alta" subtitle="Misterio, thriller e viradas narrativas entre os titulos que estao em tendencia esta semana." accent="indigo" />
                     <TitleGrid titles={specialDiscover.popular} />
                   </section>
                 ) : null}

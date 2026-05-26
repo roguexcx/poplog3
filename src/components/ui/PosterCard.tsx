@@ -2,6 +2,7 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
+import LocalizedTitle from "@/components/titles/LocalizedTitle";
 
 type PosterCardProps = {
   /** Caminho do poster TMDB. Pode incluir ou não a `/` inicial. */
@@ -114,14 +115,12 @@ export default function PosterCard({
       </div>
 
       <div className="px-1 pb-1 pt-3">
-        <h3 className="line-clamp-2 text-[13px] font-semibold leading-[1.35] tracking-[-0.015em] text-white/92">
-          {originalTitle && originalTitle !== title ? originalTitle : title}
-        </h3>
-        {originalTitle && originalTitle !== title && (
-          <p className="mt-0.5 line-clamp-1 text-[10px] font-light leading-snug text-white/35">
-            {title}
-          </p>
-        )}
+        <LocalizedTitle
+          as="h3"
+          title={title}
+          originalTitle={originalTitle}
+          variant="medium"
+        />
 
         {(subtitle || year || mediaType) && (
           <div className="mt-1.5 flex items-center gap-2 text-[11px] text-white/36">

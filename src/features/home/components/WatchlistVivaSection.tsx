@@ -3,11 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import TmdbImage from "@/components/images/TmdbImage";
+import { ScrollRowArrows } from "@/components/ScrollRowArrows";
 import { createClient } from "@/lib/supabase/client";
 import { useUserData } from "@/context/UserDataContext";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import { CardActionButton } from "@/components/ui/CardActionButton";
 import { IconCheck } from "@/components/ui/icons";
+import { useScrollRow } from "@/hooks/useScrollRow";
 import SectionHeader from "@/components/layout/SectionHeader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -335,6 +337,13 @@ export default function WatchlistVivaSection() {
   const [allTitles, setAllTitles] = useState<WatchlistTitle[]>([]);
   const [visible, setVisible]     = useState<Array<WatchlistTitle & { _slot: WatchlistSlot }>>([]);
   const [loading, setLoading]     = useState(true);
+  const {
+    ref: rowRef,
+    canScrollLeft,
+    canScrollRight,
+    scrollLeft: doScrollLeft,
+    scrollRight: doScrollRight,
+  } = useScrollRow({ step: 352 });
 
   const lastKeyRef = useRef<string>("");
 
@@ -437,30 +446,41 @@ export default function WatchlistVivaSection() {
         title="Da sua watchlist"
         className="mb-6"
         action={
-          <button
-            onClick={reshuffle}
-            disabled={loading || allTitles.length <= 5}
-            className={[
-              "flex items-center gap-2 rounded-full border px-4 py-1.5 backdrop-blur-[8px]",
-              "text-[10px] font-semibold uppercase tracking-[0.08em]",
-              "transition-[transform,background,border-color,box-shadow] duration-200 hover:scale-105",
-              "border-white/[0.18] bg-black/[0.72] text-white/60",
-              "hover:border-violet-500/40 hover:text-white/85",
-              "disabled:pointer-events-none disabled:opacity-30",
-            ].join(" ")}
-            aria-label="Sortear outros títulos"
-          >
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-              stroke="currentColor" strokeWidth={2.2}>
-              <path d="M1 4v6h6M23 20v-6h-6" />
-              <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15" />
-            </svg>
-            Sortear outros
-          </button>
+          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <button
+              onClick={reshuffle}
+              disabled={loading || allTitles.length <= 5}
+              className={[
+                "flex items-center gap-2 rounded-full border px-4 py-1.5 backdrop-blur-[8px]",
+                "text-[10px] font-semibold uppercase tracking-[0.08em]",
+                "transition-[transform,background,border-color,box-shadow] duration-200 hover:scale-105",
+                "border-white/[0.18] bg-black/[0.72] text-white/60",
+                "hover:border-violet-500/40 hover:text-white/85",
+                "disabled:pointer-events-none disabled:opacity-30",
+              ].join(" ")}
+              aria-label="Sortear outros títulos"
+            >
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+                stroke="currentColor" strokeWidth={2.2}>
+                <path d="M1 4v6h6M23 20v-6h-6" />
+                <path d="M20.49 9A9 9 0 0 0 5.64 5.64L1 10M23 14l-4.64 4.36A9 9 0 0 1 3.51 15" />
+              </svg>
+              Sortear outros
+            </button>
+            <div className="flex md:hidden">
+              <ScrollRowArrows
+                canScrollLeft={canScrollLeft}
+                canScrollRight={canScrollRight}
+                onLeft={doScrollLeft}
+                onRight={doScrollRight}
+              />
+            </div>
+          </div>
         }
       />
 
       <div
+        ref={rowRef}
         className="no-scrollbar -mx-4 flex gap-4 overflow-x-auto px-4 pb-2 md:mx-0 md:grid md:grid-cols-5 md:overflow-visible md:px-0 md:pb-0"
       >
         {loading

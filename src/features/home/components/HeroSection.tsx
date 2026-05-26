@@ -1,3 +1,6 @@
+import Link from "next/link";
+import { Film, Radar, Sparkles, Tv } from "lucide-react";
+
 import SearchBar from "@/features/search/SearchBar";
 import FeaturedCard from "@/features/home/components/FeaturedCard";
 import { getHeroHeadline } from "@/features/home/home-utils";
@@ -16,6 +19,44 @@ type Props = {
   seasons: number | null;
   genres: string | null;
   overview: string | null;
+};
+
+const MOBILE_NAV_TRIGGERS = [
+  {
+    href: "/radar",
+    label: "Radar",
+    desc: "O que estreia",
+    icon: Radar,
+    tone: "sky",
+  },
+  {
+    href: "#trending",
+    label: "Tendências",
+    desc: "Em alta agora",
+    icon: Sparkles,
+    tone: "violet",
+  },
+  {
+    href: "/buscar?type=movie",
+    label: "Filmes",
+    desc: "Em tendência",
+    icon: Film,
+    tone: "emerald",
+  },
+  {
+    href: "/buscar?type=tv",
+    label: "Séries",
+    desc: "Em tendência",
+    icon: Tv,
+    tone: "amber",
+  },
+] as const;
+
+const MOBILE_NAV_TONE = {
+  sky: "border-sky-300/18 bg-sky-400/[0.08] text-sky-100",
+  violet: "border-violet-300/18 bg-violet-400/[0.08] text-violet-100",
+  emerald: "border-emerald-300/18 bg-emerald-400/[0.08] text-emerald-100",
+  amber: "border-amber-300/18 bg-amber-400/[0.08] text-amber-100",
 };
 
 export default function HeroSection({
@@ -66,6 +107,42 @@ export default function HeroSection({
 
           <div className="relative z-50 mt-8 max-w-2xl">
             <SearchBar />
+          </div>
+
+          <div className="mt-5 grid grid-cols-2 gap-2 md:hidden">
+            {MOBILE_NAV_TRIGGERS.map((item) => {
+              const Icon = item.icon;
+              const className = [
+                "group flex min-h-[72px] items-center gap-3 rounded-2xl border p-3 text-left backdrop-blur-md transition active:scale-[0.98]",
+                MOBILE_NAV_TONE[item.tone],
+              ].join(" ");
+
+              const content = (
+                <>
+                  <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/[0.08] bg-black/25">
+                    <Icon className="h-5 w-5" />
+                  </span>
+                  <span className="min-w-0">
+                    <span className="block truncate text-[13px] font-black tracking-[-0.01em] text-white">
+                      {item.label}
+                    </span>
+                    <span className="mt-0.5 block truncate text-[10px] font-semibold text-white/40">
+                      {item.desc}
+                    </span>
+                  </span>
+                </>
+              );
+
+              return item.href.startsWith("#") ? (
+                <a key={item.href} href={item.href} className={className}>
+                  {content}
+                </a>
+              ) : (
+                <Link key={item.href} href={item.href} className={className}>
+                  {content}
+                </Link>
+              );
+            })}
           </div>
 
         </div>

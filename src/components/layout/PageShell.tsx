@@ -28,7 +28,7 @@ export default function PageShell({
     <div
       className={[
         VARIANT_STYLES[variant],
-        "pb-24 md:pb-10",
+        "pb-2 md:pb-4",
         className,
       ].join(" ")}
     >

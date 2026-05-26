@@ -1,3 +1,5 @@
+"use client";
+
 import Image from "next/image";
 
 import {
@@ -11,6 +13,7 @@ import {
 } from "@/lib/domain-labels";
 
 import StatusBadge from "@/components/ui/StatusBadge";
+import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
 
 import TitleActions from "./TitleActions";
 import SeriesProgressChip from "./SeriesProgressChip";
@@ -70,6 +73,10 @@ export default function TitleHero({
     typeof title.voteAverage === "number" ? title.voteAverage : null;
 
   const progress = title.userSeriesProgress ?? null;
+  const randomizedTitle = useRandomizedTitleDisplay(
+    title.title,
+    title.originalTitle,
+  );
 
   const watchedCount = progress?.watchedCount ?? 0;
 
@@ -249,17 +256,14 @@ export default function TitleHero({
             </div>
 
             <h1 className="break-words text-[clamp(1.875rem,5vw,4.25rem)] font-black leading-[0.95] tracking-[-0.05em] text-white">
-              {title.originalTitle && title.originalTitle !== title.title
-                ? title.originalTitle
-                : title.title}
+              {randomizedTitle.mainTitle}
             </h1>
 
-            {title.originalTitle &&
-              title.originalTitle !== title.title && (
-                <p className="mt-2 break-words text-sm font-medium tracking-[-0.01em] text-white/45 sm:text-base">
-                  {title.title}
-                </p>
-              )}
+            {randomizedTitle.subTitle && (
+              <p className="mt-2 break-words text-sm font-medium tracking-[-0.01em] text-white/45 sm:text-base">
+                {randomizedTitle.subTitle}
+              </p>
+            )}
 
             {title.tagline && (
               <p className="mt-3 max-w-3xl break-words text-sm italic leading-relaxed text-white/55 sm:text-base">
