@@ -1,17 +1,26 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useCallback } from "react";
+import type { ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import Image from "next/image";
+import {
+  Bookmark, Heart, PlayCircle, Calendar, CheckCircle2,
+  Pause, X, Filter, ChevronLeft, ChevronRight,
+} from "lucide-react";
 
+import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
 import SectionHeader from "@/components/ui/SectionHeader";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";
 
 import LibraryEmptyState from "./LibraryEmptyState";
 import LibraryGrid from "./LibraryGrid";
 import LibraryHero from "./LibraryHero";
-import LibraryTabs, { type LibraryTab } from "./LibraryTabs";
+import LibraryPosterCard from "./LibraryPosterCard";
+import { type LibraryTab } from "./LibraryTabs";
 
-// ── Tipos ─────────────────────────────────────────────────────────────────────
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 type MediaFilter = "all" | "movie" | "tv";
 
@@ -24,39 +33,20 @@ type SortBy =
   | "runtime-asc"
   | "runtime-desc";
 
-type SortGroup = {
-  /** Label exibido quando o chip está inativo */
-  label:          string;
-  /** Label exibido quando ativo na direção primária */
-  primaryLabel:   string;
-  /** Label exibido quando ativo na direção secundária (null = sem toggle) */
-  secondaryLabel: string | null;
-  primary:        SortBy;
-  secondary:      SortBy | null;
+type ExtendedStats = {
+  watchlist:  number;
+  favorites:  number;
+  watching:   number;
+  comingSoon: number;
+  watched:    number;
+  fridge:     number;
+  abandoned:  number;
+  total:      number;
 };
 
-const SORT_GROUPS: SortGroup[] = [
-  {
-    label: "Popularidade", primaryLabel: "Popularidade", secondaryLabel: null,
-    primary: "popularity-desc", secondary: null,
-  },
-  {
-    label: "Recente", primaryLabel: "Recente", secondaryLabel: null,
-    primary: "recent", secondary: null,
-  },
-  {
-    label: "Lançamento", primaryLabel: "Mais novo", secondaryLabel: "Mais antigo",
-    primary: "release-desc", secondary: "release-asc",
-  },
-  {
-    label: "A–Z", primaryLabel: "A–Z", secondaryLabel: null,
-    primary: "title-asc", secondary: null,
-  },
-  {
-    label: "Duração", primaryLabel: "Mais longo", secondaryLabel: "Mais curto",
-    primary: "runtime-desc", secondary: "runtime-asc",
-  },
-];
+// ── Constants ─────────────────────────────────────────────────────────────────
+
+const THEATER_WINDOW_DAYS = 45;
 
 const MEDIA_OPTIONS: { id: MediaFilter; label: string }[] = [
   { id: "all",   label: "Tudo"   },
@@ -64,13 +54,44 @@ const MEDIA_OPTIONS: { id: MediaFilter; label: string }[] = [
   { id: "tv",    label: "Séries" },
 ];
 
-/**
- * Janela de cinema: filmes lançados há menos de N dias sem provedor de streaming
- * são tratados como "indisponíveis em casa" e ficam apenas na aba "Em breve".
- */
-const THEATER_WINDOW_DAYS = 45;
+const SORT_OPTIONS: { value: SortBy; label: string }[] = [
+  { value: "popularity-desc", label: "Popularidade"       },
+  { value: "recent",          label: "Adicionados recente" },
+  { value: "release-desc",    label: "Lançamento (+ novo)" },
+  { value: "release-asc",     label: "Lançamento (+ antigo)" },
+  { value: "title-asc",       label: "Nome (A–Z)"          },
+  { value: "runtime-desc",    label: "Duração (+ longo)"   },
+  { value: "runtime-asc",     label: "Duração (+ curto)"   },
+];
 
-// ── Componente principal ──────────────────────────────────────────────────────
+const TAB_OPTIONS: { id: LibraryTab; label: string }[] = [
+  { id: "all",          label: "Tudo"        },
+  { id: "watchlist",    label: "Watchlist"   },
+  { id: "favorites",    label: "Favoritos"   },
+  { id: "watching",     label: "Maratonando" },
+  { id: "coming-soon",  label: "Em Breve"    },
+  { id: "watched",      label: "Concluídos"  },
+  { id: "abandoned",    label: "Abandonados" },
+  { id: "fridge",       label: "Geladeira"   },
+];
+
+const STATUS_BADGE_CLASSES: Record<string, string> = {
+  watching:  "border-violet-300/35 bg-violet-500/20 text-violet-100",
+  watchlist: "border-cyan-300/30  bg-cyan-500/18  text-cyan-100",
+  watched:   "border-white/[0.12] bg-white/[0.08] text-white/72",
+  abandoned: "border-rose-300/30  bg-rose-500/16  text-rose-100",
+  fridge:    "border-amber-300/30 bg-amber-500/16 text-amber-100",
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  watchlist: "Na Lista",
+  watching:  "Em Andamento",
+  watched:   "Assistido",
+  abandoned: "Abandonado",
+  fridge:    "Geladeira",
+};
+
+// ── Main component ────────────────────────────────────────────────────────────
 
 type LibraryPageProps = {
   library:     Poplog3UserLibraryItem[];
@@ -78,59 +99,114 @@ type LibraryPageProps = {
 };
 
 export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
-  const defaultTab: LibraryTab = isValidLibraryTab(initialTab) ? initialTab : "watchlist";
-  const [activeTab,   setActiveTab]   = useState<LibraryTab>(defaultTab);
-  const [mediaFilter, setMediaFilter] = useState<MediaFilter>("all");
-  const [sortBy,      setSortBy]      = useState<SortBy>(
-    defaultTab === "watchlist" ? "popularity-desc" : "release-desc",
-  );
-  const [page, setPage] = useState(1);
-  const itemsPerPage    = useLibraryItemsPerPage();
+  const defaultTab: LibraryTab = isValidLibraryTab(initialTab) ? initialTab : "all";
+
+  const [activeTab,         setActiveTab]         = useState<LibraryTab>(defaultTab);
+  const [mediaFilter,       setMediaFilter]       = useState<MediaFilter>("all");
+  const [yearFilter,        setYearFilter]        = useState<number | null>(null);
+  const [sortBy,            setSortBy]            = useState<SortBy>("popularity-desc");
+  const [page,              setPage]              = useState(1);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+
+  const gridSectionRef = useRef<HTMLDivElement>(null);
+  const itemsPerPage   = useLibraryItemsPerPage();
 
   useWatchlistHydration(library, activeTab);
 
-  const stats = useMemo(() => ({
-    total:      library.length,
+  // Extended stats
+  const extendedStats = useMemo<ExtendedStats>(() => ({
+    watchlist:  library.filter((i) => isPureWatchlist(i) && !isComingSoon(i)).length,
+    favorites:  library.filter((i) => i.favorite === true && !isComingSoon(i)).length,
+    watching:   library.filter(isMarathoning).length,
     comingSoon: library.filter(isComingSoon).length,
     watched:    library.filter(isCompletedOrUpToDate).length,
-    watchlist:  library.filter((i) => isPureWatchlist(i) && !isComingSoon(i)).length,
-    watching:   library.filter(isMarathoning).length,
-    favorites:  library.filter((i) => i.favorite === true && !isComingSoon(i)).length,
+    fridge:     library.filter((i) => i.status === "fridge").length,
+    abandoned:  library.filter((i) => i.status === "abandoned").length,
+    total:      library.length,
   }), [library]);
 
+  // Spotlight: non-completed item with backdrop, priority: watching > watchlist > fridge > coming-soon
+  const spotlightItem = useMemo(() => {
+    const withBackdrop = (i: Poplog3UserLibraryItem) => !!i.title?.backdrop_path;
+    return (
+      library.find((i) => isMarathoning(i) && withBackdrop(i)) ??
+      library.find((i) => isPureWatchlist(i) && !isComingSoon(i) && withBackdrop(i)) ??
+      library.find((i) => i.status === "fridge" && withBackdrop(i)) ??
+      library.find((i) => isComingSoon(i) && withBackdrop(i)) ??
+      library.find(withBackdrop) ??
+      null
+    );
+  }, [library]);
+
+  // Editorial rails
+  const watchlistItems = useMemo(() =>
+    library
+      .filter((i) => isPureWatchlist(i) && !isComingSoon(i))
+      .sort((a, b) => getPopularity(b) - getPopularity(a))
+      .slice(0, 12),
+    [library]);
+
+  const recentItems = useMemo(() =>
+    library
+      .filter((i) => !isComingSoon(i) && i.status !== "abandoned")
+      .sort((a, b) => getAddedTime(b) - getAddedTime(a))
+      .slice(0, 8),
+    [library]);
+
+  const shortestItems = useMemo(() => {
+    const withRuntime = library.filter((i) => !isComingSoon(i) && !isCompletedOrUpToDate(i) && getTotalRuntime(i) !== null);
+    const movies = withRuntime.filter((i) => i.media_type === "movie");
+    const tv     = withRuntime.filter((i) => i.media_type === "tv");
+    return [...movies, ...tv]
+      .sort((a, b) => (getTotalRuntime(a) ?? Infinity) - (getTotalRuntime(b) ?? Infinity))
+      .slice(0, 8);
+  }, [library]);
+
+  const favoritesItems = useMemo(() =>
+    library
+      .filter((i) => i.favorite === true && !isComingSoon(i))
+      .sort((a, b) => getPopularity(b) - getPopularity(a))
+      .slice(0, 10),
+    [library]);
+
+  const comingSoonItems = useMemo(() =>
+    library
+      .filter(isComingSoon)
+      .sort((a, b) => getReleaseTime(a) - getReleaseTime(b))
+      .slice(0, 6),
+    [library]);
+
+  // Available years for year filter dropdown
+  const availableYears = useMemo(() => {
+    const years = new Set<number>();
+    library.forEach((i) => {
+      const y = i.title?.year;
+      if (typeof y === "number" && y > 1900) years.add(y);
+    });
+    return [...years].sort((a, b) => b - a);
+  }, [library]);
+
+  // Filtered + sorted items for the main grid
   const filteredLibrary = useMemo(() => {
     let items = [...library];
 
     if (activeTab === "coming-soon") {
-      // "Em breve" = não-lançados + filmes na janela de cinema (sem streaming ainda)
       items = items.filter(isComingSoon);
     } else {
-      // Todas as outras abas: excluir títulos "em breve" (não-lançados ou janela de cinema)
       items = items.filter((i) => !isComingSoon(i));
-
-      if (activeTab === "favorites") {
-        items = items.filter((i) => i.favorite === true);
-      } else if (activeTab === "watching") {
-        items = items.filter(isMarathoning);
-      } else if (activeTab === "watched") {
-        items = items.filter(isCompletedOrUpToDate);
-      } else if (activeTab === "watchlist") {
-        // Watchlist real = nao iniciada (watched_episodes = 0).
-        // Series iniciadas com status=watchlist no DB sao anomalias de dados
-        // e devem aparecer em "Maratonando", nao aqui.
-        items = items.filter(isPureWatchlist);
-      } else if (activeTab !== "all") {
-        items = items.filter((i) => i.status === activeTab);
-      }
+      if      (activeTab === "favorites") items = items.filter((i) => i.favorite === true);
+      else if (activeTab === "watching")  items = items.filter(isMarathoning);
+      else if (activeTab === "watched")   items = items.filter(isCompletedOrUpToDate);
+      else if (activeTab === "watchlist") items = items.filter(isPureWatchlist);
+      else if (activeTab !== "all")       items = items.filter((i) => i.status === activeTab);
     }
 
-    if (mediaFilter !== "all") {
-      items = items.filter((i) => i.media_type === mediaFilter);
-    }
+    if (mediaFilter !== "all")    items = items.filter((i) => i.media_type === mediaFilter);
+    if (yearFilter  !== null)     items = items.filter((i) => i.title?.year === yearFilter);
 
     items.sort((a, b) => sortLibraryItems(a, b, sortBy));
     return items;
-  }, [library, activeTab, mediaFilter, sortBy]);
+  }, [library, activeTab, mediaFilter, yearFilter, sortBy]);
 
   const totalPages     = Math.max(1, Math.ceil(filteredLibrary.length / itemsPerPage));
   const safePage       = Math.min(page, totalPages);
@@ -139,7 +215,28 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
     return filteredLibrary.slice(start, start + itemsPerPage);
   }, [filteredLibrary, safePage, itemsPerPage]);
 
-  useEffect(() => { setPage(1); }, [activeTab, mediaFilter, sortBy, itemsPerPage]);
+  useEffect(() => { setPage(1); }, [activeTab, mediaFilter, yearFilter, sortBy, itemsPerPage]);
+
+  const hasActiveFilters = activeTab !== "all" || mediaFilter !== "all" || yearFilter !== null;
+
+  function scrollToGrid(tab: LibraryTab, sort: SortBy = "popularity-desc") {
+    setActiveTab(tab);
+    setSortBy(sort);
+    setMediaFilter("all");
+    setYearFilter(null);
+    setPage(1);
+    setTimeout(() => {
+      gridSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  }
+
+  function clearFilters() {
+    setActiveTab("all");
+    setMediaFilter("all");
+    setYearFilter(null);
+    setSortBy("popularity-desc");
+    setPage(1);
+  }
 
   return (
     <div className="relative flex flex-col gap-10 md:gap-14">
@@ -151,28 +248,140 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
         <div className="absolute left-1/3 top-[5%] h-[350px] w-[350px] rounded-full bg-cyan-600/[0.03] blur-[90px]" />
       </div>
 
-      {/* Hero */}
-      <LibraryHero stats={stats} spotlightItems={library.slice(0, 8)} />
+      {/* ── 1. Cinematic header ── */}
+      <LibraryHero library={library} totalCount={library.length} />
 
-      {/* Sticky toolbar */}
-      <LibraryToolbar
-        activeTab={activeTab}
-        onTabChange={(tab) => { setActiveTab(tab); setPage(1); }}
-        stats={stats}
-        total={filteredLibrary.length}
-        mediaFilter={mediaFilter}
-        sortBy={sortBy}
-        onMediaFilterChange={(f) => { setMediaFilter(f); setPage(1); }}
-        onSortChange={(s) => { setSortBy(s); setPage(1); }}
-      />
+      {/* ── 2. Stats row ── */}
+      <LibraryStatsRow stats={extendedStats} onStatClick={scrollToGrid} />
 
-      {/* Conteúdo */}
-      <section className="relative pb-12">
+      {/* ── 3. Spotlight + Watchlist ── */}
+      {(spotlightItem !== null || watchlistItems.length > 0) && (
+        <section className="relative grid gap-8 lg:grid-cols-[1.15fr_0.85fr] lg:gap-6">
+
+          {/* Spotlight */}
+          {spotlightItem !== null && (
+            <div className="flex min-w-0 flex-col gap-3">
+              <RailLabel label="Em destaque no seu acervo" />
+              <SpotlightCard item={spotlightItem} />
+            </div>
+          )}
+
+          {/* Watchlist rail */}
+          {watchlistItems.length > 0 && (
+            <div className="flex min-w-0 flex-col gap-3 lg:h-full">
+              <RailHeader
+                label="Sua Watchlist"
+                subtitle="Tudo que você salvou para assistir"
+                onViewAll={() => scrollToGrid("watchlist", "popularity-desc")}
+              />
+              <div className="relative flex-1 flex flex-col justify-center rounded-[1.75rem] border border-white/[0.08] bg-white/[0.025] p-4 shadow-[0_18px_56px_rgba(0,0,0,0.30)]">
+                <div className="pointer-events-none absolute -right-12 -top-10 h-40 w-40 rounded-full bg-indigo-500/[0.06] blur-[60px]" />
+                <ScrollRail>
+                  {watchlistItems.map((item, i) => (
+                    <div key={item.id} className="w-[158px] shrink-0 sm:w-[175px]">
+                      <LibraryPosterCard item={item} priority={i < 5} />
+                    </div>
+                  ))}
+                </ScrollRail>
+              </div>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ── 4. Recently Added + Shortest ── */}
+      {(recentItems.length > 0 || shortestItems.length > 0) && (
+        <section className="relative grid gap-10 lg:grid-cols-2 lg:gap-8">
+
+          {recentItems.length > 0 && (
+            <div className="flex min-w-0 flex-col gap-3">
+              <RailHeader
+                label="Adicionados Recentemente"
+                subtitle="Os últimos títulos registrados no acervo"
+                onViewAll={() => scrollToGrid("all", "recent")}
+              />
+              <ScrollRail>
+                {recentItems.map((item, i) => (
+                  <div key={item.id} className="w-[130px] shrink-0 sm:w-[140px]">
+                    <LibraryPosterCard item={item} priority={i < 4} />
+                  </div>
+                ))}
+              </ScrollRail>
+            </div>
+          )}
+
+          {shortestItems.length > 0 && (
+            <div className="flex min-w-0 flex-col gap-3">
+              <RailHeader
+                label="Mais Curtos"
+                subtitle="Títulos mais rápidos do seu acervo"
+                onViewAll={() => scrollToGrid("all", "runtime-asc")}
+              />
+              <ScrollRail>
+                {shortestItems.map((item, i) => (
+                  <div key={item.id} className="w-[130px] shrink-0 sm:w-[140px]">
+                    <LibraryPosterCard item={item} priority={i < 4} />
+                  </div>
+                ))}
+              </ScrollRail>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* ── 5. Favorites ── */}
+      {favoritesItems.length > 0 && (
+        <section className="relative">
+          <div className="relative overflow-hidden rounded-[1.75rem] border border-rose-500/[0.10] bg-gradient-to-br from-rose-950/[0.25] to-transparent p-5 shadow-[inset_0_1px_0_rgba(255,100,100,0.05)] sm:p-6">
+            <div className="pointer-events-none absolute -right-16 -top-12 h-48 w-48 rounded-full bg-rose-500/[0.07] blur-[70px]" />
+            <div className="relative flex flex-col gap-3">
+              <RailHeader
+                label="Favoritos"
+                subtitle="Obras marcadas como especiais no seu acervo"
+                accent="rose"
+                icon={<Heart className="h-3.5 w-3.5 fill-rose-400 text-rose-400" />}
+                onViewAll={() => scrollToGrid("favorites", "popularity-desc")}
+              />
+              <ScrollRail>
+                {favoritesItems.map((item, i) => (
+                  <div key={item.id} className="w-[135px] shrink-0 sm:w-[148px]">
+                    <LibraryPosterCard item={item} priority={i < 5} />
+                  </div>
+                ))}
+              </ScrollRail>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ── 6. Coming Soon ── */}
+      {comingSoonItems.length > 0 && (
+        <section className="relative flex flex-col gap-4">
+          <RailHeader
+            label="Em Breve"
+            subtitle="Títulos que ainda vão chegar na sua coleção"
+            accent="amber"
+            icon={<Calendar className="h-3.5 w-3.5 text-amber-400" />}
+            onViewAll={() => scrollToGrid("coming-soon", "release-asc")}
+          />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
+            {comingSoonItems.map((item, i) => (
+              <ComingSoonCard key={item.id} item={item} priority={i < 3} />
+            ))}
+          </div>
+        </section>
+      )}
+
+      {/* ── 7. Visão Completa da Biblioteca ── */}
+      <section
+        ref={gridSectionRef}
+        className="relative scroll-mt-6 pb-12"
+      >
         <SectionHeader
-          eyebrow="Acervo filtrado"
+          eyebrow="Acervo completo"
           accent="indigo"
-          title={getSectionTitle(activeTab)}
-          subtitle={getSectionDescription(activeTab)}
+          title="Visão Completa da Biblioteca"
+          subtitle="Explore todos os títulos com filtros e ordenação avançada."
           size="md"
           action={
             <span className="rounded-full border border-white/[0.10] bg-white/[0.05] px-3 py-1 text-[11px] font-bold text-white/50">
@@ -180,9 +389,60 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
               {filteredLibrary.length === 1 ? "título" : "títulos"}
             </span>
           }
-          className="mb-8"
+          className="mb-6"
         />
 
+        {/* Desktop filter bar */}
+        <div className="mb-6 hidden md:block">
+          <FullFilterBar
+            activeTab={activeTab}
+            mediaFilter={mediaFilter}
+            yearFilter={yearFilter}
+            sortBy={sortBy}
+            availableYears={availableYears}
+            total={filteredLibrary.length}
+            hasActiveFilters={hasActiveFilters}
+            onTabChange={(t) => { setActiveTab(t); setPage(1); }}
+            onMediaChange={(m) => { setMediaFilter(m); setPage(1); }}
+            onYearChange={(y) => { setYearFilter(y); setPage(1); }}
+            onSortChange={(s) => { setSortBy(s); setPage(1); }}
+            onClear={clearFilters}
+          />
+        </div>
+
+        {/* Mobile filter row */}
+        <div className="mb-5 flex items-center justify-between gap-3 md:hidden">
+          <div className="flex flex-wrap items-center gap-2">
+            {activeTab !== "all" && (
+              <span className="rounded-full bg-indigo-500/20 px-2.5 py-0.5 text-[11px] font-medium text-indigo-200">
+                {TAB_OPTIONS.find((t) => t.id === activeTab)?.label}
+              </span>
+            )}
+            {mediaFilter !== "all" && (
+              <span className="rounded-full bg-white/[0.07] px-2.5 py-0.5 text-[11px] text-white/60">
+                {MEDIA_OPTIONS.find((m) => m.id === mediaFilter)?.label}
+              </span>
+            )}
+            {yearFilter !== null && (
+              <span className="rounded-full bg-white/[0.07] px-2.5 py-0.5 text-[11px] text-white/60">
+                {yearFilter}
+              </span>
+            )}
+            {!hasActiveFilters && (
+              <span className="text-[12px] text-white/35">{filteredLibrary.length} títulos</span>
+            )}
+          </div>
+          <button
+            type="button"
+            onClick={() => setMobileFiltersOpen(true)}
+            className="flex shrink-0 items-center gap-2 rounded-full border border-white/[0.12] bg-white/[0.05] px-4 py-2 text-[12px] font-medium text-white/75 transition hover:bg-white/[0.10]"
+          >
+            <Filter className="h-3.5 w-3.5" />
+            Filtrar e ordenar
+          </button>
+        </div>
+
+        {/* Grid */}
         {filteredLibrary.length === 0 ? (
           <LibraryEmptyState activeTab={activeTab} />
         ) : (
@@ -199,179 +459,737 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
           </div>
         )}
       </section>
+
+      {/* Mobile filters bottom sheet */}
+      {mobileFiltersOpen && (
+        <MobileFiltersSheet
+          activeTab={activeTab}
+          mediaFilter={mediaFilter}
+          yearFilter={yearFilter}
+          sortBy={sortBy}
+          availableYears={availableYears}
+          onApply={(tab, media, year, sort) => {
+            setActiveTab(tab);
+            setMediaFilter(media);
+            setYearFilter(year);
+            setSortBy(sort);
+            setPage(1);
+            setMobileFiltersOpen(false);
+          }}
+          onClose={() => setMobileFiltersOpen(false)}
+        />
+      )}
     </div>
   );
 }
 
-// ── Toolbar ───────────────────────────────────────────────────────────────────
+// ── Stats Row ─────────────────────────────────────────────────────────────────
 
-type LibraryToolbarProps = {
-  activeTab:           LibraryTab;
-  onTabChange:         (tab: LibraryTab) => void;
-  stats: {
-    total:      number;
-    comingSoon: number;
-    watched:    number;
-    watchlist:  number;
-    watching:   number;
-    favorites:  number;
-  };
-  total:               number;
-  mediaFilter:         MediaFilter;
-  sortBy:              SortBy;
-  onMediaFilterChange: (f: MediaFilter) => void;
-  onSortChange:        (s: SortBy) => void;
-};
+const STAT_CONFIGS: {
+  key:         keyof ExtendedStats;
+  label:       string;
+  description: string;
+  tab:         LibraryTab;
+  sort:        SortBy;
+  icon:        ReactNode;
+}[] = [
+  {
+    key: "watchlist",
+    label: "Na lista",
+    description: "Salvos para ver depois",
+    tab: "watchlist",
+    sort: "popularity-desc",
+    icon: <Bookmark className="h-4 w-4 text-cyan-400" />,
+  },
+  {
+    key: "favorites",
+    label: "Favoritos",
+    description: "Os seus preferidos",
+    tab: "favorites",
+    sort: "popularity-desc",
+    icon: <Heart className="h-4 w-4 text-rose-400" />,
+  },
+  {
+    key: "watching",
+    label: "Em andamento",
+    description: "Em progresso",
+    tab: "watching",
+    sort: "recent",
+    icon: <PlayCircle className="h-4 w-4 text-violet-400" />,
+  },
+  {
+    key: "comingSoon",
+    label: "Em breve",
+    description: "Ainda não lançados",
+    tab: "coming-soon",
+    sort: "release-asc",
+    icon: <Calendar className="h-4 w-4 text-amber-400" />,
+  },
+  {
+    key: "watched",
+    label: "Assistidos",
+    description: "Histórico concluído",
+    tab: "watched",
+    sort: "release-desc",
+    icon: <CheckCircle2 className="h-4 w-4 text-emerald-400" />,
+  },
+  {
+    key: "fridge",
+    label: "Geladeira",
+    description: "Guardados por ora",
+    tab: "fridge",
+    sort: "recent",
+    icon: <Pause className="h-4 w-4 text-amber-300" />,
+  },
+  {
+    key: "abandoned",
+    label: "Abandonados",
+    description: "Você largou no meio",
+    tab: "abandoned",
+    sort: "recent",
+    icon: <X className="h-4 w-4 text-rose-300" />,
+  },
+];
 
-function LibraryToolbar({
-  activeTab, onTabChange, stats,
-  total, mediaFilter, sortBy,
-  onMediaFilterChange, onSortChange,
-}: LibraryToolbarProps) {
-  return (
-    <div className="sticky top-0 z-30 bg-[rgba(13,13,20,0.88)] backdrop-blur-xl">
-      <div className="absolute inset-x-0 top-0 h-px bg-white/[0.06]" />
-      <LibraryTabs activeTab={activeTab} onChange={onTabChange} stats={stats} />
-      <LibraryFilterBar
-        mediaFilter={mediaFilter}
-        sortBy={sortBy}
-        total={total}
-        onMediaFilterChange={onMediaFilterChange}
-        onSortChange={onSortChange}
-      />
-      <div className="absolute inset-x-0 bottom-0 h-px bg-white/[0.05]" />
-    </div>
-  );
-}
-
-// ── Barra de filtros — centralizada ──────────────────────────────────────────
-
-function LibraryFilterBar({
-  mediaFilter, sortBy, total, onMediaFilterChange, onSortChange,
+function LibraryStatsRow({
+  stats,
+  onStatClick,
 }: {
-  mediaFilter:         MediaFilter;
-  sortBy:              SortBy;
-  total:               number;
-  onMediaFilterChange: (f: MediaFilter) => void;
-  onSortChange:        (s: SortBy) => void;
+  stats:       ExtendedStats;
+  onStatClick: (tab: LibraryTab, sort: SortBy) => void;
 }) {
   return (
-    <div className="relative h-11 overflow-hidden border-t border-white/[0.05] bg-white/[0.02]">
+    <div className="-mx-1 overflow-x-auto no-scrollbar px-1 pb-1 sm:mx-0 sm:overflow-x-visible sm:pb-0">
+      <div className="grid min-w-[700px] grid-cols-7 gap-2 sm:min-w-0 sm:gap-3">
+      {STAT_CONFIGS.map((config) => (
+        <button
+          key={config.key}
+          type="button"
+          onClick={() => onStatClick(config.tab, config.sort)}
+          className="group flex flex-col gap-2 rounded-[1.25rem] border border-white/[0.08] bg-white/[0.04] px-3 py-3.5 text-left transition hover:border-white/[0.14] hover:bg-white/[0.07] sm:px-4"
+        >
+          <div className="flex items-center gap-2">
+            {config.icon}
+            <span className="text-2xl font-black tabular-nums leading-none text-white">
+              {stats[config.key]}
+            </span>
+          </div>
+          <p className="text-[10px] font-black uppercase tracking-[0.14em] text-white/65">
+            {config.label}
+          </p>
+          <p className="text-[10px] text-white/30">
+            {config.description}
+          </p>
+        </button>
+      ))}
+      </div>
+    </div>
+  );
+}
 
-      {/* Pills centralizadas — scrollável quando necessário */}
-      <div className="flex h-full items-center justify-center">
-        <div className="flex items-center gap-0 overflow-x-auto no-scrollbar px-3 sm:px-4">
+// ── Rail helpers ──────────────────────────────────────────────────────────────
 
-          {/* Grupo 1: tipo de mídia */}
-          {MEDIA_OPTIONS.map((opt, i) => (
-            <div key={opt.id} className="flex items-center">
-              {i > 0 && (
-                <span className="mx-1.5 select-none text-[10px] text-white/[0.18]">|</span>
-              )}
-              <FilterPill
-                active={mediaFilter === opt.id}
-                onClick={() => onMediaFilterChange(opt.id)}
-              >
-                {opt.label}
-              </FilterPill>
-            </div>
-          ))}
+function RailLabel({ label }: { label: string }) {
+  return (
+    <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-200/65 sm:text-[11px]">
+      {label}
+    </p>
+  );
+}
 
-          {/* Divisor entre grupos */}
-          <div className="mx-3 h-4 w-px shrink-0 bg-white/[0.12]" />
+function RailHeader({
+  label,
+  subtitle,
+  accent = "indigo",
+  icon,
+  onViewAll,
+}: {
+  label:     string;
+  subtitle?: string;
+  accent?:   "indigo" | "rose" | "amber" | "cyan";
+  icon?:     ReactNode;
+  onViewAll?: () => void;
+}) {
+  const accentText = {
+    indigo: "text-indigo-300",
+    rose:   "text-rose-300",
+    amber:  "text-amber-300",
+    cyan:   "text-cyan-300",
+  }[accent];
 
-          {/* Grupo 2: ordenação */}
-          {SORT_GROUPS.map((group) => (
-            <div key={group.label} className="mr-1.5 last:mr-0">
-              <SortPill group={group} value={sortBy} onChange={onSortChange} />
-            </div>
-          ))}
+  return (
+    <div className="flex items-start justify-between gap-4">
+      <div>
+        <div className="flex items-center gap-2">
+          {icon && <span>{icon}</span>}
+          <h2 className="text-sm font-black uppercase tracking-wide text-white sm:text-[15px]">
+            {label}
+          </h2>
         </div>
+        {subtitle && (
+          <p className="mt-0.5 text-[11px] text-white/38">{subtitle}</p>
+        )}
       </div>
-
-      {/* Contagem — absolutamente à direita, não perturba o centramento */}
-      <div className="absolute right-3 top-0 flex h-full items-center sm:right-4">
-        <p className="text-[12px] text-white/[0.35]">
-          {total} {total === 1 ? "título" : "títulos"}
-        </p>
-      </div>
-
+      {onViewAll && (
+        <button
+          type="button"
+          onClick={onViewAll}
+          className={`flex shrink-0 items-center gap-1 text-[12px] font-medium ${accentText} hover:underline`}
+        >
+          Ver tudo
+          <ChevronRight className="h-3.5 w-3.5" />
+        </button>
+      )}
     </div>
   );
 }
 
-// ── Pill de tipo de mídia ─────────────────────────────────────────────────────
+// ── Scroll Rail ───────────────────────────────────────────────────────────────
 
-function FilterPill({
-  active,
-  onClick,
+function ScrollRail({
   children,
+  className,
 }: {
-  active:   boolean;
-  onClick:  () => void;
-  children: React.ReactNode;
+  children:  ReactNode;
+  className?: string;
 }) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      className={[
-        "rounded-full px-[14px] py-[5px] text-[12px] font-medium transition duration-150",
-        active
-          ? "bg-white text-black"
-          : "border border-white/[0.10] text-white/50 hover:bg-white/[0.07] hover:text-white/75",
-      ].join(" ")}
-    >
-      {children}
-    </button>
-  );
-}
+  const ref      = useRef<HTMLDivElement>(null);
+  const [canLeft,  setCanLeft]  = useState(false);
+  const [canRight, setCanRight] = useState(false);
 
-// ── Pill de ordenação ─────────────────────────────────────────────────────────
+  const update = useCallback(() => {
+    const el = ref.current;
+    if (!el) return;
+    setCanLeft(el.scrollLeft > 4);
+    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
+  }, []);
 
-function SortPill({
-  group,
-  value,
-  onChange,
-}: {
-  group:    SortGroup;
-  value:    SortBy;
-  onChange: (s: SortBy) => void;
-}) {
-  const isPrimary   = value === group.primary;
-  const isSecondary = group.secondary !== null && value === group.secondary;
-  const isActive    = isPrimary || isSecondary;
-  const hasToggle   = group.secondary !== null;
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    update();
+    el.addEventListener("scroll", update, { passive: true });
+    const ro = new ResizeObserver(update);
+    ro.observe(el);
+    return () => { el.removeEventListener("scroll", update); ro.disconnect(); };
+  }, [update]);
 
-  function handleClick() {
-    if (!isActive)               return onChange(group.primary);
-    if (isPrimary && hasToggle)  return onChange(group.secondary!);
-    onChange(group.primary); // secondary → volta ao primary
+  function scroll(dir: -1 | 1) {
+    ref.current?.scrollBy({ left: dir * 300, behavior: "smooth" });
   }
 
-  const displayLabel = !isActive
-    ? group.label
-    : isPrimary
-      ? group.primaryLabel
-      : (group.secondaryLabel ?? group.label);
-
   return (
-    <button
-      type="button"
-      onClick={handleClick}
-      className={[
-        "rounded-full px-[14px] py-[5px] text-[12px] font-medium transition duration-150",
-        isActive
-          ? "bg-white text-black"
-          : "border border-white/[0.10] text-white/50 hover:bg-white/[0.07] hover:text-white/75",
-      ].join(" ")}
-    >
-      {displayLabel}
-    </button>
+    <div className="relative">
+      {canLeft && (
+        <button
+          type="button"
+          onClick={() => scroll(-1)}
+          aria-label="Anterior"
+          className="absolute -left-3 top-1/2 z-10 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.14] bg-black/75 text-white/80 shadow-lg backdrop-blur-sm transition hover:bg-black/95 hover:text-white"
+        >
+          <ChevronLeft className="h-4 w-4" />
+        </button>
+      )}
+      <div
+        ref={ref}
+        className={`flex gap-3 overflow-x-auto no-scrollbar pb-3 ${className ?? ""}`}
+      >
+        {children}
+      </div>
+      {canRight && (
+        <button
+          type="button"
+          onClick={() => scroll(1)}
+          aria-label="Próximo"
+          className="absolute -right-3 top-1/2 z-10 -translate-y-1/2 flex h-8 w-8 items-center justify-center rounded-full border border-white/[0.14] bg-black/75 text-white/80 shadow-lg backdrop-blur-sm transition hover:bg-black/95 hover:text-white"
+        >
+          <ChevronRight className="h-4 w-4" />
+        </button>
+      )}
+    </div>
   );
 }
 
-// ── Paginação ─────────────────────────────────────────────────────────────────
+// ── Coming Soon Card ──────────────────────────────────────────────────────────
+
+function ComingSoonCard({
+  item,
+  priority,
+}: {
+  item:      Poplog3UserLibraryItem;
+  priority?: boolean;
+}) {
+  const title        = item.title;
+  const displayTitle = title?.title ?? title?.original_title ?? "—";
+  const type         = item.media_type === "movie" ? "Filme" : "Série";
+  const rating       = title?.vote_average;
+
+  const rawDate =
+    item.media_type === "tv"
+      ? title?.first_air_date ?? title?.release_date
+      : title?.release_date  ?? title?.first_air_date;
+
+  const releaseLabel = rawDate ? formatComingSoonDate(rawDate) : null;
+
+  return (
+    <Link href={`/title/${item.media_type}/${item.tmdb_id}`} className="group block">
+      <div className="relative overflow-hidden rounded-[1.35rem] border border-white/[0.07] bg-[#07080f] shadow-[0_12px_40px_rgba(0,0,0,0.52)] transition duration-300 group-hover:border-amber-300/[0.18] group-hover:shadow-[0_20px_60px_rgba(0,0,0,0.68)]" style={{ aspectRatio: "16/9" }}>
+        {title?.backdrop_path && (
+          <TmdbImage
+            path={title.backdrop_path}
+            fallbackPath={title.poster_path ?? null}
+            size="w780"
+            alt={displayTitle}
+            fallbackLabel={displayTitle}
+            priority={priority}
+            className="absolute inset-0 h-full w-full object-cover opacity-55 transition duration-500 group-hover:scale-[1.04] group-hover:opacity-70"
+          />
+        )}
+        <div className="absolute inset-0 bg-[linear-gradient(to_top,rgba(3,4,10,0.96)_0%,rgba(3,4,10,0.38)_55%,rgba(3,4,10,0.18)_100%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(3,4,10,0.52)_0%,transparent_55%)]" />
+
+        {typeof rating === "number" && rating > 0 && (
+          <div className="absolute right-3 top-3 rounded-full border border-amber-200/[0.18] bg-black/60 px-2 py-0.5 text-[10px] font-black text-amber-100 backdrop-blur-sm">
+            ★ {rating.toFixed(1)}
+          </div>
+        )}
+
+        <div className="absolute inset-x-0 bottom-0 p-3 sm:p-4">
+          {releaseLabel && (
+            <p className="mb-1 text-[9px] font-black uppercase tracking-[0.20em] text-amber-300/75">
+              {releaseLabel}
+            </p>
+          )}
+          <h3 className="text-[13px] font-black leading-tight tracking-tight text-white line-clamp-1 sm:text-[15px]">
+            {displayTitle}
+          </h3>
+          <p className="mt-0.5 text-[10px] text-white/40">
+            {[title?.year, type].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+function formatComingSoonDate(dateStr: string): string {
+  const date = new Date(dateStr);
+  if (!Number.isFinite(date.getTime())) return "";
+  return date.toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+}
+
+// ── Spotlight Card ────────────────────────────────────────────────────────────
+
+function SpotlightCard({ item }: { item: Poplog3UserLibraryItem }) {
+  const title        = item.title;
+  const displayTitle = title?.title ?? title?.original_title ?? "—";
+  const progress     = typeof item.progress_pct === "number" ? item.progress_pct : null;
+  const isWatching   = isMarathoning(item);
+  const badgeClass   = STATUS_BADGE_CLASSES[item.status] ?? STATUS_BADGE_CLASSES.watchlist;
+  const badgeLabel   = STATUS_LABEL[item.status] ?? item.status;
+
+  const metaParts: string[] = [
+    title?.year?.toString() ?? "",
+    item.media_type === "movie" ? "Filme" : "Série",
+    item.media_type === "tv" && typeof title?.number_of_seasons === "number"
+      ? `${title.number_of_seasons} ${title.number_of_seasons === 1 ? "temporada" : "temporadas"}`
+      : "",
+    item.media_type === "movie" && typeof title?.runtime === "number" && title.runtime > 0
+      ? formatMinutes(title.runtime)
+      : "",
+    item.media_type === "tv" && item.watched_episodes && item.watched_episodes > 0
+      ? `Ep. ${item.watched_episodes} assistido${item.watched_episodes !== 1 ? "s" : ""}`
+      : "",
+  ].filter(Boolean);
+
+  return (
+    <Link href={`/title/${item.media_type}/${item.tmdb_id}`} className="group block h-full">
+      <div className="relative min-h-[340px] overflow-hidden rounded-[1.75rem] border border-white/[0.08] bg-black/40 shadow-[0_24px_80px_rgba(0,0,0,0.55)] transition duration-300 group-hover:border-white/[0.16] sm:min-h-[380px]">
+        {/* Backdrop */}
+        {title?.backdrop_path && (
+          <TmdbImage
+            path={title.backdrop_path}
+            fallbackPath={title.poster_path ?? null}
+            size="w1280"
+            alt={displayTitle}
+            fallbackLabel={displayTitle}
+            className="absolute inset-0 h-full w-full object-cover opacity-55 transition duration-500 group-hover:scale-[1.03] group-hover:opacity-65"
+          />
+        )}
+
+        {/* Gradients */}
+        <div className="absolute inset-0 bg-[linear-gradient(to_top,rgba(3,4,10,0.97)_0%,rgba(3,4,10,0.50)_50%,rgba(3,4,10,0.20)_100%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(3,4,10,0.60)_0%,transparent_50%)]" />
+
+        {/* Status badge — top left */}
+        <div className="absolute left-4 top-4">
+          <span
+            className={`rounded-full border px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.16em] shadow-[0_6px_18px_rgba(0,0,0,0.40)] backdrop-blur-md ${badgeClass}`}
+          >
+            {badgeLabel}
+          </span>
+        </div>
+
+        {/* Provider — top right */}
+        {item.best_provider_logo && (
+          <div className="absolute right-4 top-4 overflow-hidden rounded-lg border border-white/[0.14] bg-black/55 shadow-[0_4px_14px_rgba(0,0,0,0.45)] backdrop-blur-md">
+            <Image
+              src={`https://image.tmdb.org/t/p/original${item.best_provider_logo}`}
+              alt={item.best_provider_name ?? ""}
+              width={28}
+              height={28}
+              className="h-7 w-7 object-cover"
+            />
+          </div>
+        )}
+
+        {/* Content — bottom */}
+        <div className="absolute inset-x-0 bottom-0 p-5 sm:p-6">
+          {metaParts.length > 0 && (
+            <p className="mb-2 text-[11px] font-medium text-white/45">
+              {metaParts.join(" · ")}
+            </p>
+          )}
+          <h2 className="text-2xl font-black leading-tight tracking-[-0.04em] text-white line-clamp-2 sm:text-3xl">
+            {displayTitle}
+          </h2>
+
+          {isWatching && progress !== null && progress > 0 && (
+            <div className="mt-4">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <span className="text-[11px] text-white/40">
+                  {Math.round(progress)}% concluído
+                </span>
+              </div>
+              <div className="h-[3px] overflow-hidden rounded-full bg-white/[0.12]">
+                <div
+                  className="h-full bg-gradient-to-r from-violet-500 to-indigo-400 shadow-[0_0_8px_rgba(139,92,246,0.60)]"
+                  style={{ width: `${Math.min(100, progress)}%` }}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    </Link>
+  );
+}
+
+// ── Full Filter Bar (desktop) ─────────────────────────────────────────────────
+
+function FullFilterBar({
+  activeTab,
+  mediaFilter,
+  yearFilter,
+  sortBy,
+  availableYears,
+  total,
+  hasActiveFilters,
+  onTabChange,
+  onMediaChange,
+  onYearChange,
+  onSortChange,
+  onClear,
+}: {
+  activeTab:        LibraryTab;
+  mediaFilter:      MediaFilter;
+  yearFilter:       number | null;
+  sortBy:           SortBy;
+  availableYears:   number[];
+  total:            number;
+  hasActiveFilters: boolean;
+  onTabChange:      (t: LibraryTab) => void;
+  onMediaChange:    (m: MediaFilter) => void;
+  onYearChange:     (y: number | null) => void;
+  onSortChange:     (s: SortBy) => void;
+  onClear:          () => void;
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-2 rounded-[1.25rem] border border-white/[0.08] bg-white/[0.03] px-4 py-3">
+
+      {/* Estado */}
+      <FilterSelect
+        label="Estado"
+        value={activeTab}
+        options={TAB_OPTIONS.map((t) => ({ value: t.id, label: t.label }))}
+        onChange={(v) => onTabChange(v as LibraryTab)}
+      />
+
+      <FilterDivider />
+
+      {/* Tipo */}
+      <FilterSelect
+        label="Tipo"
+        value={mediaFilter}
+        options={MEDIA_OPTIONS.map((m) => ({ value: m.id, label: m.label }))}
+        onChange={(v) => onMediaChange(v as MediaFilter)}
+      />
+
+      {availableYears.length > 1 && (
+        <>
+          <FilterDivider />
+          {/* Ano */}
+          <FilterSelect
+            label="Ano"
+            value={yearFilter?.toString() ?? "all"}
+            options={[
+              { value: "all", label: "Todos" },
+              ...availableYears.map((y) => ({ value: y.toString(), label: y.toString() })),
+            ]}
+            onChange={(v) => onYearChange(v === "all" ? null : parseInt(v, 10))}
+          />
+        </>
+      )}
+
+      <FilterDivider />
+
+      {/* Ordenar por */}
+      <FilterSelect
+        label="Ordenar por"
+        value={sortBy}
+        options={SORT_OPTIONS.map((s) => ({ value: s.value, label: s.label }))}
+        onChange={(v) => onSortChange(v as SortBy)}
+        highlight
+      />
+
+      {/* Clear filters */}
+      {hasActiveFilters && (
+        <button
+          type="button"
+          onClick={onClear}
+          className="ml-1 rounded-full border border-white/[0.08] px-3 py-1 text-[11px] font-medium text-white/40 transition hover:border-white/[0.18] hover:text-white/70"
+        >
+          Limpar filtros
+        </button>
+      )}
+
+      {/* Count */}
+      <p className="ml-auto text-[12px] text-white/30">
+        {total} {total === 1 ? "título" : "títulos"}
+      </p>
+    </div>
+  );
+}
+
+function FilterDivider() {
+  return <div className="h-4 w-px shrink-0 bg-white/[0.10]" />;
+}
+
+function FilterSelect({
+  label,
+  value,
+  options,
+  onChange,
+  highlight = false,
+}: {
+  label:     string;
+  value:     string;
+  options:   { value: string; label: string }[];
+  onChange:  (v: string) => void;
+  highlight?: boolean;
+}) {
+  const isDefault = options[0]?.value === value;
+  const activeLabel = options.find((o) => o.value === value)?.label ?? label;
+
+  return (
+    <div className="relative flex items-center gap-1.5">
+      <span className="text-[10px] font-medium text-white/30">{label}</span>
+      <div className="relative">
+        <select
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ colorScheme: "dark" }}
+          className={[
+            "appearance-none rounded-full border py-1 pl-2.5 pr-6 text-[11px] font-medium transition",
+            "bg-transparent outline-none",
+            "[&_option]:bg-[#0d0d14] [&_option]:text-white",
+            highlight && !isDefault
+              ? "border-indigo-400/30 bg-indigo-500/[0.12] text-indigo-100"
+              : "border-white/[0.10] text-white/65 hover:border-white/[0.18] hover:text-white",
+          ].filter(Boolean).join(" ")}
+          aria-label={label}
+        >
+          {options.map((opt) => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+        <ChevronRight className="pointer-events-none absolute right-1.5 top-1/2 h-3 w-3 -translate-y-1/2 rotate-90 text-white/35" />
+      </div>
+    </div>
+  );
+}
+
+// ── Mobile filters bottom sheet ───────────────────────────────────────────────
+
+function MobileFiltersSheet({
+  activeTab,
+  mediaFilter,
+  yearFilter,
+  sortBy,
+  availableYears,
+  onApply,
+  onClose,
+}: {
+  activeTab:      LibraryTab;
+  mediaFilter:    MediaFilter;
+  yearFilter:     number | null;
+  sortBy:         SortBy;
+  availableYears: number[];
+  onApply:        (tab: LibraryTab, media: MediaFilter, year: number | null, sort: SortBy) => void;
+  onClose:        () => void;
+}) {
+  const [localTab,   setLocalTab]   = useState(activeTab);
+  const [localMedia, setLocalMedia] = useState(mediaFilter);
+  const [localYear,  setLocalYear]  = useState(yearFilter);
+  const [localSort,  setLocalSort]  = useState(sortBy);
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div
+        className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm"
+        onClick={onClose}
+      />
+
+      {/* Sheet */}
+      <div className="fixed inset-x-0 bottom-0 z-50 max-h-[88vh] overflow-y-auto rounded-t-[1.75rem] border-t border-white/[0.08] bg-[#0d0d16] pb-safe-area-inset-bottom">
+        {/* Handle */}
+        <div className="flex justify-center py-3">
+          <div className="h-1 w-10 rounded-full bg-white/[0.18]" />
+        </div>
+
+        <div className="px-5 pb-6">
+          <div className="mb-5 flex items-center justify-between">
+            <h3 className="text-base font-black text-white">Filtrar e ordenar</h3>
+            <button
+              type="button"
+              onClick={onClose}
+              className="rounded-full border border-white/[0.10] p-1.5 text-white/50"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+
+          {/* Estado */}
+          <SheetSection label="Estado">
+            <div className="flex flex-wrap gap-2">
+              {TAB_OPTIONS.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setLocalTab(tab.id)}
+                  className={[
+                    "rounded-full border px-3.5 py-1.5 text-[12px] font-medium transition",
+                    localTab === tab.id
+                      ? "border-indigo-400/40 bg-indigo-500/20 text-indigo-100"
+                      : "border-white/[0.10] text-white/55 hover:bg-white/[0.07]",
+                  ].join(" ")}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          </SheetSection>
+
+          {/* Tipo */}
+          <SheetSection label="Tipo">
+            <div className="flex gap-2">
+              {MEDIA_OPTIONS.map((opt) => (
+                <button
+                  key={opt.id}
+                  type="button"
+                  onClick={() => setLocalMedia(opt.id)}
+                  className={[
+                    "rounded-full border px-3.5 py-1.5 text-[12px] font-medium transition",
+                    localMedia === opt.id
+                      ? "border-indigo-400/40 bg-indigo-500/20 text-indigo-100"
+                      : "border-white/[0.10] text-white/55 hover:bg-white/[0.07]",
+                  ].join(" ")}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </SheetSection>
+
+          {/* Ano */}
+          {availableYears.length > 1 && (
+            <SheetSection label="Ano">
+              <select
+                value={localYear?.toString() ?? "all"}
+                onChange={(e) => setLocalYear(e.target.value === "all" ? null : parseInt(e.target.value, 10))}
+                style={{ colorScheme: "dark" }}
+                className="h-10 w-full appearance-none rounded-2xl border border-white/[0.08] bg-white/[0.04] px-4 text-sm text-white outline-none [&_option]:bg-[#0d0d14]"
+              >
+                <option value="all">Todos os anos</option>
+                {availableYears.map((y) => (
+                  <option key={y} value={y}>{y}</option>
+                ))}
+              </select>
+            </SheetSection>
+          )}
+
+          {/* Ordenar por */}
+          <SheetSection label="Ordenar por">
+            <div className="flex flex-wrap gap-2">
+              {SORT_OPTIONS.map((opt) => (
+                <button
+                  key={opt.value}
+                  type="button"
+                  onClick={() => setLocalSort(opt.value)}
+                  className={[
+                    "rounded-full border px-3.5 py-1.5 text-[12px] font-medium transition",
+                    localSort === opt.value
+                      ? "border-indigo-400/40 bg-indigo-500/20 text-indigo-100"
+                      : "border-white/[0.10] text-white/55 hover:bg-white/[0.07]",
+                  ].join(" ")}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </SheetSection>
+
+          {/* Actions */}
+          <div className="mt-6 flex gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                setLocalTab("all");
+                setLocalMedia("all");
+                setLocalYear(null);
+                setLocalSort("popularity-desc");
+              }}
+              className="flex-1 rounded-2xl border border-white/[0.10] py-3 text-sm font-medium text-white/55 transition hover:bg-white/[0.06]"
+            >
+              Limpar
+            </button>
+            <button
+              type="button"
+              onClick={() => onApply(localTab, localMedia, localYear, localSort)}
+              className="flex-1 rounded-2xl bg-indigo-500 py-3 text-sm font-black text-white transition hover:bg-indigo-400"
+            >
+              Aplicar
+            </button>
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+function SheetSection({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="mb-5">
+      <p className="mb-2.5 text-[10px] font-black uppercase tracking-[0.18em] text-white/40">
+        {label}
+      </p>
+      {children}
+    </div>
+  );
+}
+
+// ── Pagination ────────────────────────────────────────────────────────────────
 
 function LibraryPagination({
   page,
@@ -453,143 +1271,7 @@ function getPaginationPages(page: number, total: number): Array<number | "gap"> 
   return result;
 }
 
-// ── Textos de seção ───────────────────────────────────────────────────────────
-
-function getSectionTitle(tab: LibraryTab) {
-  const map: Record<LibraryTab, string> = {
-    watchlist:     "Sua watchlist",
-    favorites:     "Seus favoritos",
-    watching:      "Em andamento",
-    "coming-soon": "Em breve",
-    watched:       "Histórico assistido",
-    all:           "Toda sua biblioteca",
-    abandoned:     "Abandonados",
-    fridge:        "Geladeira",
-  };
-  return map[tab];
-}
-
-function getSectionDescription(tab: LibraryTab) {
-  const map: Record<LibraryTab, string> = {
-    watchlist:     "Tudo que você salvou e já está disponível para assistir.",
-    favorites:     "Os títulos que marcaram — filmes e séries que você destacou como favoritos.",
-    watching:      "Títulos ativos que conversam diretamente com a lógica do Acompanhando.",
-    "coming-soon": "Não lançados ainda ou ainda em cartaz nos cinemas — indisponíveis em casa por enquanto.",
-    watched:       "Seu histórico finalizado, preservado como memória da plataforma.",
-    all:           "Toda sua coleção disponível para assistir — excluindo títulos ainda indisponíveis em casa.",
-    abandoned:     "O que ficou pelo caminho sem poluir as áreas de continuidade.",
-    fridge:        "Títulos guardados para outro clima, longe da watchlist principal.",
-  };
-  return map[tab];
-}
-
-// ── Hook responsivo ───────────────────────────────────────────────────────────
-
-/**
- * Hidratação silenciosa e definitiva da watchlist.
- *
- * Comportamento:
- * - Só dispara quando a aba "watchlist" abre E há séries TV não iniciadas.
- * - Chama a rota uma vez para checar quantas séries precisam de hidratação
- *   (a rota consulta poplog3_episodes — fonte de verdade persistida).
- * - Se to_hydrate === 0, para imediatamente sem fazer nada.
- * - Se to_hydrate > 0, processa em loop até remaining === 0, depois recarrega.
- * - Uma vez processada, a série tem episódios em poplog3_episodes para sempre.
- *   Nas próximas aberturas a rota retorna to_hydrate = 0 e o hook para.
- * - Flag de sessão (sessionAlreadyChecked) evita re-checar dentro da mesma
- *   sessão de navegação, mesmo que o usuário alterne abas várias vezes.
- */
-function useWatchlistHydration(library: Poplog3UserLibraryItem[], activeTab: string) {
-  const router = useRouter();
-  const hydratingRef    = useRef(false);
-  const sessionChecked  = useRef(false); // uma checagem por sessão de navegação
-  const maxBatches = 30;
-
-  useEffect(() => {
-    if (activeTab !== "watchlist") return;
-
-    // Há séries TV não iniciadas na watchlist?
-    const hasTvWatchlist = library.some(
-      (item) => item.media_type === "tv" && isPureWatchlist(item),
-    );
-    if (!hasTvWatchlist) return;
-
-    // Já checou nesta sessão e não havia nada para hidratar?
-    if (sessionChecked.current) return;
-    if (hydratingRef.current) return;
-
-    hydratingRef.current = true;
-
-    async function runHydration() {
-      try {
-        let remaining = 1;
-        let refreshNeeded = false;
-        let previousRemaining: number | null = null;
-        let batchCount = 0;
-
-        // Loop de hidratação em batches.
-        // GARANTIA: router.refresh() é chamado UMA ÚNICA VEZ após o loop completo
-        // (quando remaining === 0 ou quando a API pede parada), nunca durante batches intermediários.
-        // Isso evita revalidação parcial do Server Component enquanto ainda há
-        // séries sendo processadas, prevenindo flicker visual e reordenação em tempo real.
-        while (remaining > 0 && batchCount < maxBatches) {
-          batchCount++;
-          const res = await fetch("/api/library/watchlist-hydrate", { method: "POST" });
-          if (!res.ok) break;
-          const data = await res.json() as {
-            remaining?: number;
-            hydrated?: number;
-            durationBackfilled?: number;
-            stopped?: boolean;
-            reason?: string;
-          };
-          const nextRemaining = data.remaining ?? 0;
-          if ((data.hydrated ?? 0) > 0 || (data.durationBackfilled ?? 0) > 0) {
-            refreshNeeded = true;
-          }
-
-          if (data.stopped || (previousRemaining !== null && nextRemaining >= previousRemaining)) {
-            console.warn("[watchlist-hydrate] loop interrompido no cliente", {
-              batchCount,
-              previousRemaining,
-              nextRemaining,
-              reason: data.reason ?? "remaining_not_decreasing",
-            });
-            remaining = nextRemaining;
-            break;
-          }
-
-          previousRemaining = nextRemaining;
-          remaining = nextRemaining;
-          // Throttle entre batches — apenas aguarda, nunca dispara refresh aqui
-          if (remaining > 0) await new Promise((r) => setTimeout(r, 500));
-        }
-
-        if (remaining > 0 && batchCount >= maxBatches) {
-          console.warn("[watchlist-hydrate] loop interrompido por maxBatches", {
-            maxBatches,
-            remaining,
-          });
-        }
-
-        // Marca que já checou nesta sessão — não re-dispara mesmo trocando de aba
-        sessionChecked.current = true;
-
-        // Refresh único e final — só quando algo foi efetivamente hidratado
-        // e o loop está completo (remaining === 0 ou erro que encerrou o loop)
-        if (refreshNeeded) router.refresh();
-      } catch {
-        // falha silenciosa — não quebra a UI
-      } finally {
-        hydratingRef.current = false;
-      }
-    }
-
-    void runHydration();
-  // activeTab é a única dependência intencional — library é estável (vem do servidor)
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeTab]);
-}
+// ── Hook: responsive items per page ──────────────────────────────────────────
 
 function useLibraryItemsPerPage() {
   const [itemsPerPage, setItemsPerPage] = useState(28);
@@ -608,29 +1290,85 @@ function useLibraryItemsPerPage() {
   return itemsPerPage;
 }
 
-// ── Funções de ordenação ──────────────────────────────────────────────────────
+// ── Hook: watchlist hydration ─────────────────────────────────────────────────
 
-function sortLibraryItems(
-  a:         Poplog3UserLibraryItem,
-  b:         Poplog3UserLibraryItem,
-  sortBy:    SortBy,
-) {
+function useWatchlistHydration(library: Poplog3UserLibraryItem[], activeTab: string) {
+  const router          = useRouter();
+  const hydratingRef    = useRef(false);
+  const sessionChecked  = useRef(false);
+  const maxBatches      = 30;
+
+  useEffect(() => {
+    if (activeTab !== "watchlist") return;
+
+    const hasTvWatchlist = library.some(
+      (item) => item.media_type === "tv" && isPureWatchlist(item),
+    );
+    if (!hasTvWatchlist) return;
+    if (sessionChecked.current) return;
+    if (hydratingRef.current)   return;
+
+    hydratingRef.current = true;
+
+    async function runHydration() {
+      try {
+        let remaining = 1;
+        let refreshNeeded = false;
+        let previousRemaining: number | null = null;
+        let batchCount = 0;
+
+        while (remaining > 0 && batchCount < maxBatches) {
+          batchCount++;
+          const res = await fetch("/api/library/watchlist-hydrate", { method: "POST" });
+          if (!res.ok) break;
+          const data = await res.json() as {
+            remaining?: number;
+            hydrated?: number;
+            durationBackfilled?: number;
+            stopped?: boolean;
+            reason?: string;
+          };
+          const nextRemaining = data.remaining ?? 0;
+          if ((data.hydrated ?? 0) > 0 || (data.durationBackfilled ?? 0) > 0) {
+            refreshNeeded = true;
+          }
+
+          if (data.stopped || (previousRemaining !== null && nextRemaining >= previousRemaining)) {
+            remaining = nextRemaining;
+            break;
+          }
+
+          previousRemaining = nextRemaining;
+          remaining = nextRemaining;
+          if (remaining > 0) await new Promise((r) => setTimeout(r, 500));
+        }
+
+        sessionChecked.current = true;
+        if (refreshNeeded) router.refresh();
+      } catch {
+        // silent fail
+      } finally {
+        hydratingRef.current = false;
+      }
+    }
+
+    void runHydration();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+}
+
+// ── Sorting ───────────────────────────────────────────────────────────────────
+
+function sortLibraryItems(a: Poplog3UserLibraryItem, b: Poplog3UserLibraryItem, sortBy: SortBy) {
   switch (sortBy) {
-    case "title-asc":
-      return getTitle(a).localeCompare(getTitle(b), "pt-BR");
-    case "release-desc":
-      return getReleaseTime(b) - getReleaseTime(a);
-    case "release-asc":
-      return getReleaseTime(a) - getReleaseTime(b);
-    case "popularity-desc":
-      return getPopularity(b) - getPopularity(a);
-    case "runtime-asc":
-      return compareRuntime(a, b, "asc");
-    case "runtime-desc":
-      return compareRuntime(a, b, "desc");
+    case "title-asc":      return getTitle(a).localeCompare(getTitle(b), "pt-BR");
+    case "release-desc":   return getReleaseTime(b) - getReleaseTime(a);
+    case "release-asc":    return getReleaseTime(a) - getReleaseTime(b);
+    case "popularity-desc": return getPopularity(b) - getPopularity(a);
+    case "runtime-asc":    return compareRuntime(a, b, "asc");
+    case "runtime-desc":   return compareRuntime(a, b, "desc");
     case "recent":
-    default:
-      return getAddedTime(b) - getAddedTime(a);
+    default:               return getAddedTime(b) - getAddedTime(a);
   }
 }
 
@@ -638,55 +1376,26 @@ function getTitle(item: Poplog3UserLibraryItem) {
   return item.title?.title ?? item.title?.original_title ?? "";
 }
 
-/**
- * Data de referência para "Mais novo / Mais antigo":
- * - Série:  last_air_date — populado no service a partir de poplog3_episodes
- *           (apenas episódios com air_date <= hoje, regra global).
- *           Fallback: first_air_date → release_date.
- * - Filme:  release_date → first_air_date.
- *
- * Sempre limitado a hoje (Math.min): TMDB pode ter datas futuras para episódios
- * pré-cadastrados; não deixamos isso inflacionar o rank de "mais recente".
- */
 function getReleaseTime(item: Poplog3UserLibraryItem) {
   const t   = item.title;
   const now = Date.now();
-
   const date =
     item.media_type === "tv"
       ? t?.last_air_date ?? t?.first_air_date ?? t?.release_date
       : t?.release_date  ?? t?.first_air_date;
-
   if (!date) return 0;
   const time = new Date(date).getTime();
   if (!Number.isFinite(time) || time <= 0) return 0;
-
-  // Nunca ordenar por data futura — séries em andamento devem aparecer como "hoje"
   return Math.min(time, now);
 }
 
-/**
- * Duração usada pelo filtro (minutos):
- * - Filme: runtime oficial
- * - Série: tempo restante para este usuário concluir a série
- *
- * Se a série ainda não começou, remaining_runtime_minutes equivale à previsão
- * total. Itens sem dado ficam sempre no fim, tanto em Tudo quanto nas abas.
- */
-function compareRuntime(
-  a: Poplog3UserLibraryItem,
-  b: Poplog3UserLibraryItem,
-  direction: "asc" | "desc",
-) {
-  const aRuntime = getTotalRuntime(a);
-  const bRuntime = getTotalRuntime(b);
-
-  if (aRuntime === null && bRuntime === null) return 0;
-  if (aRuntime === null) return 1;
-  if (bRuntime === null) return -1;
-
-  const delta = direction === "asc" ? aRuntime - bRuntime : bRuntime - aRuntime;
-
+function compareRuntime(a: Poplog3UserLibraryItem, b: Poplog3UserLibraryItem, direction: "asc" | "desc") {
+  const ar = getTotalRuntime(a);
+  const br = getTotalRuntime(b);
+  if (ar === null && br === null) return 0;
+  if (ar === null) return 1;
+  if (br === null) return -1;
+  const delta = direction === "asc" ? ar - br : br - ar;
   return delta || getTitle(a).localeCompare(getTitle(b), "pt-BR");
 }
 
@@ -701,13 +1410,9 @@ function getTotalRuntime(item: Poplog3UserLibraryItem) {
     item.title?.runtime_minutes,
     item.title?.runtime,
   ];
-
-  for (const runtime of candidates) {
-    if (typeof runtime === "number" && Number.isFinite(runtime) && runtime >= 0) {
-      return runtime;
-    }
+  for (const r of candidates) {
+    if (typeof r === "number" && Number.isFinite(r) && r >= 0) return r;
   }
-
   return null;
 }
 
@@ -722,30 +1427,20 @@ function getAddedTime(item: Poplog3UserLibraryItem) {
   return Number.isFinite(time) ? time : 0;
 }
 
-// ── Predicados de disponibilidade ─────────────────────────────────────────────
+// ── Predicates ────────────────────────────────────────────────────────────────
 
-/**
- * Título ainda não lançado (data de estreia no futuro).
- */
 function isUnreleased(item: Poplog3UserLibraryItem): boolean {
   const t    = item.title;
-  const date =
-    item.media_type === "tv"
-      ? t?.first_air_date ?? t?.release_date
-      : t?.release_date ?? t?.first_air_date;
+  const date = item.media_type === "tv"
+    ? t?.first_air_date ?? t?.release_date
+    : t?.release_date  ?? t?.first_air_date;
   if (!date) return false;
   const time = new Date(date).getTime();
   return Number.isFinite(time) && time > Date.now();
 }
 
-/**
- * Filme dentro da janela de cinema:
- * lançado há menos de THEATER_WINDOW_DAYS dias E sem provedor de streaming detectado.
- * Indica que o filme provavelmente ainda está em cartaz e indisponível em casa.
- */
 function isInTheaterWindow(item: Poplog3UserLibraryItem): boolean {
   if (item.media_type !== "movie") return false;
-  // Se já tem provedor de streaming, saiu da janela de cinema
   if (item.best_provider_logo || item.best_provider_name) return false;
   const releaseDate = item.title?.release_date;
   if (!releaseDate) return false;
@@ -753,48 +1448,25 @@ function isInTheaterWindow(item: Poplog3UserLibraryItem): boolean {
   if (!Number.isFinite(releasedAt)) return false;
   const now              = Date.now();
   const daysSinceRelease = (now - releasedAt) / (1000 * 60 * 60 * 24);
-  // Entre 0 e THEATER_WINDOW_DAYS dias atrás
   return daysSinceRelease >= 0 && daysSinceRelease < THEATER_WINDOW_DAYS;
 }
 
-/**
- * Título "em breve" = não lançado ainda OU filme na janela de cinema.
- * Estes títulos aparecem APENAS na aba "Em breve" — ficam ocultos nas demais.
- */
 function isComingSoon(item: Poplog3UserLibraryItem): boolean {
+  // Already available on a streaming platform — never "coming soon"
+  if (item.best_provider_logo || item.best_provider_name || item.best_provider_type) return false;
+  // High vote_average means the title has already been widely seen and rated
+  if ((item.title?.vote_average ?? 0) >= 8.5) return false;
   return isUnreleased(item) || isInTheaterWindow(item);
 }
 
-/**
- * Serie/filme "em andamento" para a aba Maratonando/Assistindo.
- *
- * Para series, considera iniciada qualquer item com watched_episodes > 0 OU
- * computed_state === "in_progress", independente de remaining_runtime_minutes
- * (que pode ser null quando o runtime ainda nao foi hidratado).
- * Geladeira (status=fridge) e um estado manual -- nunca entra aqui.
- */
 function isMarathoning(item: Poplog3UserLibraryItem): boolean {
-  if (item.media_type === "movie") {
-    return item.status === "watching";
-  }
-
+  if (item.media_type === "movie") return item.status === "watching";
   if (item.status !== "watching") return false;
-
-  // Serie iniciada = tem episodios assistidos OU state diz in_progress
-  const hasProgress = (item.watched_episodes ?? 0) > 0;
-  const isInProgress = item.computed_state === "in_progress";
-
-  return hasProgress || isInProgress;
+  return (item.watched_episodes ?? 0) > 0 || item.computed_state === "in_progress";
 }
 
-/**
- * Serie/filme concluido ou em dia com os episodios disponiveis.
- */
 function isCompletedOrUpToDate(item: Poplog3UserLibraryItem): boolean {
-  if (item.media_type === "movie") {
-    return item.status === "watched";
-  }
-
+  if (item.media_type === "movie") return item.status === "watched";
   return (
     item.status === "watched" ||
     item.computed_state === "completed" ||
@@ -802,10 +1474,6 @@ function isCompletedOrUpToDate(item: Poplog3UserLibraryItem): boolean {
   );
 }
 
-/**
- * Watchlist REAL: salva para ver mas ainda nao iniciada.
- * watched_episodes = 0 e o criterio definitivo.
- */
 function isPureWatchlist(item: Poplog3UserLibraryItem): boolean {
   return item.status === "watchlist" && (item.watched_episodes ?? 0) === 0;
 }
@@ -816,4 +1484,13 @@ function isValidLibraryTab(value?: string): value is LibraryTab {
     "coming-soon", "watched", "all",
     "abandoned", "fridge",
   ].includes(value ?? "");
+}
+
+// ── Formatters ────────────────────────────────────────────────────────────────
+
+function formatMinutes(minutes: number) {
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  if (h <= 0) return `${m}min`;
+  return m > 0 ? `${h}h${m}min` : `${h}h`;
 }
