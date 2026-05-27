@@ -1,6 +1,12 @@
 "use client";
 
-import { useMemo, type ElementType } from "react";
+import { useEffect, useMemo, useState, type ElementType } from "react";
+import {
+  getStoredTitleLanguagePreference,
+  resolveTitleLanguagePreference,
+  TITLE_LANGUAGE_CHANGED_EVENT,
+  type TitleLanguagePreference,
+} from "@/lib/title-language-preference";
 
 type TitleVariant = "hero" | "large" | "medium" | "compact" | "poster";
 
@@ -36,14 +42,24 @@ export function getDisplayOriginalTitle(
 export function resolveRandomizedTitleDisplay(
   title: string,
   originalTitle?: string | null,
-  _seed = 0,
+  preference: TitleLanguagePreference = "auto",
 ) {
   const diffOriginal = getDisplayOriginalTitle(title, originalTitle);
+  const resolvedPreference = resolveTitleLanguagePreference(preference);
+
   if (!diffOriginal) {
     return {
       mainTitle: title,
       subTitle: null as string | null,
       fullTitle: title,
+    };
+  }
+
+  if (resolvedPreference === "original" || resolvedPreference === "en") {
+    return {
+      mainTitle: diffOriginal,
+      subTitle: title,
+      fullTitle: `${diffOriginal} (${title})`,
     };
   }
 
@@ -54,13 +70,44 @@ export function resolveRandomizedTitleDisplay(
   };
 }
 
+function useTitleLanguagePreference() {
+  const [preference, setPreference] = useState<TitleLanguagePreference>("auto");
+
+  useEffect(() => {
+    setPreference(getStoredTitleLanguagePreference());
+
+    function handleChange(event: Event) {
+      const next = (event as CustomEvent<TitleLanguagePreference>).detail;
+      setPreference(next ?? getStoredTitleLanguagePreference());
+    }
+
+    function handleStorage(event: StorageEvent) {
+      if (event.key === "poplog:title-language") {
+        setPreference(getStoredTitleLanguagePreference());
+      }
+    }
+
+    window.addEventListener(TITLE_LANGUAGE_CHANGED_EVENT, handleChange);
+    window.addEventListener("storage", handleStorage);
+
+    return () => {
+      window.removeEventListener(TITLE_LANGUAGE_CHANGED_EVENT, handleChange);
+      window.removeEventListener("storage", handleStorage);
+    };
+  }, []);
+
+  return preference;
+}
+
 export function useRandomizedTitleDisplay(
   title: string,
   originalTitle?: string | null,
 ) {
+  const preference = useTitleLanguagePreference();
+
   return useMemo(
-    () => resolveRandomizedTitleDisplay(title, originalTitle),
-    [title, originalTitle],
+    () => resolveRandomizedTitleDisplay(title, originalTitle, preference),
+    [title, originalTitle, preference],
   );
 }
 

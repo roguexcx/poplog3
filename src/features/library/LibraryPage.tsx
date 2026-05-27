@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
+import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import SectionHeader from "@/components/ui/SectionHeader";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";
 
@@ -125,12 +126,16 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
     total:      library.length,
   }), [library]);
 
-  // Spotlight: item aleatório da biblioteca sorteado na montagem da página (estável durante a sessão)
-  const [spotlightItem] = useState<Poplog3UserLibraryItem | null>(() => {
+  // Spotlight: escolha pseudoaleatória, mas determinística para evitar mismatch de hidratação.
+  const spotlightItem = useMemo<Poplog3UserLibraryItem | null>(() => {
     const candidates = library.filter((i) => !!i.title?.backdrop_path);
     if (candidates.length === 0) return null;
-    return candidates[Math.floor(Math.random() * candidates.length)];
-  });
+    const seed = library.reduce((acc, item) => {
+      const id = typeof item.tmdb_id === "number" ? item.tmdb_id : Number(item.tmdb_id) || 0;
+      return (acc + id * 31 + item.media_type.length * 17) % 1_000_003;
+    }, library.length * 97);
+    return candidates[seed % candidates.length];
+  }, [library]);
 
   // Editorial rails
   const watchlistItems = useMemo(() =>
@@ -816,9 +821,13 @@ function ComingSoonCard({
               {releaseLabel}
             </p>
           )}
-          <h3 className="text-[13px] font-black leading-tight tracking-tight text-white line-clamp-1 sm:text-[15px]">
-            {displayTitle}
-          </h3>
+          <LocalizedTitle
+            as="h3"
+            variant="compact"
+            title={displayTitle}
+            originalTitle={title?.original_title}
+            className="sm:[&>span:first-child]:text-[15px]"
+          />
           <p className="mt-0.5 text-[10px] text-white/40">
             {[title?.year, type].filter(Boolean).join(" · ")}
           </p>
@@ -906,9 +915,13 @@ function SpotlightCard({ item }: { item: Poplog3UserLibraryItem }) {
               {metaParts.join(" · ")}
             </p>
           )}
-          <h2 className="text-[22px] font-black leading-tight tracking-[-0.03em] text-white line-clamp-2 sm:text-3xl sm:tracking-[-0.04em]">
-            {displayTitle}
-          </h2>
+          <LocalizedTitle
+            as="h2"
+            variant="large"
+            title={displayTitle}
+            originalTitle={title?.original_title}
+            className="[&>span:first-child]:text-[22px] sm:[&>span:first-child]:text-3xl"
+          />
 
           {isWatching && progress !== null && progress > 0 && (
             <div className="mt-4">

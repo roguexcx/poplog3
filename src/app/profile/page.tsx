@@ -4,6 +4,11 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Reorder, useDragControls } from "framer-motion";
 import { createClient } from "@/server/supabase/client";
+import {
+  getStoredTitleLanguagePreference,
+  setStoredTitleLanguagePreference,
+  type TitleLanguagePreference,
+} from "@/lib/title-language-preference";
 import type { User } from "@supabase/supabase-js";
 import {
   GripVertical, X, Search, ChevronRight,
@@ -844,9 +849,7 @@ function SaveStatusBadge({ status }: { status: SaveStatus }) {
 // TAB: PREFERÊNCIAS
 // ─────────────────────────────────────────────────────────────────────────────
 
-type LangPref = "auto" | "pt" | "en" | "original";
-
-const LANG_OPTIONS: { id: LangPref; label: string; desc: string }[] = [
+const LANG_OPTIONS: { id: TitleLanguagePreference; label: string; desc: string }[] = [
   { id: "auto",     label: "Automático",  desc: "Usa o idioma do dispositivo" },
   { id: "pt",       label: "Português",   desc: "Títulos em português"        },
   { id: "en",       label: "Inglês",      desc: "Títulos em inglês"           },
@@ -856,19 +859,21 @@ const LANG_OPTIONS: { id: LangPref; label: string; desc: string }[] = [
 function TabPreferences({
   allProviders,
   initialActiveIds,
-  userId,
 }: {
   allProviders:     StreamingProvider[];
   initialActiveIds: string[];
-  userId:           string;
 }) {
   const [activeIds,  setActiveIds]  = useState<string[]>(initialActiveIds);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-  const [langPref,   setLangPref]   = useState<LangPref>("auto");
+  const [langPref,   setLangPref]   = useState<TitleLanguagePreference>("auto");
   const saveTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isSaving = saveStatus === "saving";
+
+  useEffect(() => {
+    setLangPref(getStoredTitleLanguagePreference());
+  }, []);
 
   const doSave = useCallback(async (ids: string[]) => {
     setSaveStatus("saving");
@@ -910,6 +915,11 @@ function TabPreferences({
     scheduleProviderSave(next);
   }
 
+  function handleLanguageChange(id: TitleLanguagePreference) {
+    setLangPref(id);
+    setStoredTitleLanguagePreference(id);
+  }
+
   const activeProviders = activeIds
     .map(id => allProviders.find(p => p.id === id))
     .filter((p): p is StreamingProvider => !!p);
@@ -926,7 +936,7 @@ function TabPreferences({
             <button
               key={opt.id}
               type="button"
-              onClick={() => setLangPref(opt.id)}
+              onClick={() => handleLanguageChange(opt.id)}
               className={[
                 "rounded-2xl border p-3.5 text-left transition-all",
                 langPref === opt.id
@@ -1167,12 +1177,7 @@ export default function ProfilePage() {
     return () => subscription.unsubscribe();
   }, []);
 
-  useEffect(() => {
-    if (!user) { setDataLoading(false); return; }
-    void loadData(user);
-  }, [user]);
-
-  async function loadData(u: User) {
+  const loadData = useCallback(async (u: User) => {
     setDataLoading(true);
     const supabase = createClient();
 
@@ -1235,7 +1240,12 @@ export default function ProfilePage() {
     } catch { /* silent */ }
 
     setDataLoading(false);
-  }
+  }, []);
+
+  useEffect(() => {
+    if (!user) { setDataLoading(false); return; }
+    void loadData(user);
+  }, [user, loadData]);
 
   async function handleSignOut() {
     const supabase = createClient();
@@ -1282,7 +1292,7 @@ export default function ProfilePage() {
       {tab === "preferencias" && (
         dataLoading
           ? <div className="flex items-center justify-center py-16"><div className="w-6 h-6 rounded-full border-2 border-indigo-500/30 border-t-indigo-400 animate-spin" /></div>
-          : <TabPreferences allProviders={allProviders} initialActiveIds={activeIds} userId={user.id} />
+          : <TabPreferences allProviders={allProviders} initialActiveIds={activeIds} />
       )}
 
       {tab === "conta" && (
