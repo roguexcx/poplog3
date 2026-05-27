@@ -12,6 +12,7 @@ export type SorteioItem = {
   id: number;
   media_type: MediaType;
   title: string;
+  original_title?: string | null;
   poster_path: string | null;
   backdrop_path: string | null;
   release_date?: string;
@@ -58,6 +59,8 @@ type TmdbItem = {
   id: number;
   title?: string;
   name?: string;
+  original_title?: string;
+  original_name?: string;
   poster_path: string | null;
   backdrop_path: string | null;
   release_date?: string;
@@ -123,10 +126,12 @@ function normalizeTmdbItem(item: TmdbItem, mediaType: MediaType, source: string)
   const date = mediaType === "movie" ? item.release_date : item.first_air_date;
   if (!title?.trim() || !item.poster_path || !isPastOrToday(date)) return null;
 
+  const rawOriginalTitle = mediaType === "movie" ? item.original_title : item.original_name;
   return {
     id: item.id,
     media_type: mediaType,
     title: title.trim(),
+    original_title: rawOriginalTitle?.trim() || null,
     poster_path: item.poster_path,
     backdrop_path: item.backdrop_path ?? null,
     release_date: mediaType === "movie" ? date ?? "" : "",
@@ -398,6 +403,7 @@ async function fetchWatchlistPool(userId: string): Promise<SorteioItem[]> {
         id: tmdbId,
         media_type: mediaType,
         title,
+        original_title: (record.original_title as string | null) ?? null,
         poster_path: record.poster_path as string | null,
         backdrop_path: record.backdrop_path as string | null,
         release_date: mediaType === "movie" ? date ?? "" : "",

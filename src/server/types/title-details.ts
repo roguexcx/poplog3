@@ -35,6 +35,7 @@ export type PoplogTitleRecommendation = {
   media_type: "movie" | "tv";
   title: string;
   name: string;
+  original_title?: string | null;
   poster_path: string | null;
   backdrop_path: string | null;
   vote_average: number | null;

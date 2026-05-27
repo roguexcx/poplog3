@@ -6,6 +6,7 @@ type PersonTitle = {
   tmdb_id: number;
   media_type: "movie" | "tv";
   title: string;
+  original_title?: string | null;
   poster_path?: string | null;
   backdrop_path?: string | null;
   release_date?: string | null;
@@ -31,6 +32,7 @@ export default function PersonTitleGrid({ titles }: { titles: PersonTitle[] }) {
           href={`/title/${title.media_type}/${title.tmdb_id}`}
           mediaType={title.media_type}
           title={title.title}
+          originalTitle={title.original_title}
           posterPath={title.poster_path}
           fallbackPath={title.backdrop_path}
           year={getYear(title)}

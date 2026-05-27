@@ -10,6 +10,7 @@ export type RecentlyWatchedItem = {
   tmdb_id: number;
   media_type: "tv" | "movie";
   title: string;
+  original_title?: string | null;
   poster_path: string | null;
   backdrop_path: string | null;
   /** Still do último episódio assistido */
@@ -43,6 +44,7 @@ type TitleRow = {
   tmdb_id: number;
   media_type: "tv" | "movie";
   title: string | null;
+  original_title: string | null;
   poster_path: string | null;
   backdrop_path: string | null;
 };
@@ -124,7 +126,7 @@ export async function GET() {
 
       const { data: titlesRaw, error: titlesError } = await supabaseAdmin
         .from("poplog3_titles")
-        .select("tmdb_id, media_type, title, poster_path, backdrop_path")
+        .select("tmdb_id, media_type, title, original_title, poster_path, backdrop_path")
         .in("tmdb_id", ids)
         .eq("media_type", mediaType);
 
@@ -216,6 +218,7 @@ export async function GET() {
           title:
             title.title ??
             (state.media_type === "tv" ? `Série ${state.tmdb_id}` : `Filme ${state.tmdb_id}`),
+          original_title: title.original_title ?? null,
           poster_path: title.poster_path ?? null,
           backdrop_path: title.backdrop_path ?? null,
           last_episode_still_path: epMeta?.still_path ?? null,

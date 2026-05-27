@@ -25,9 +25,10 @@ export default function TitleRecommendations({
         {recommendations.map((item) => (
           <InteractivePosterCard
             key={`${item.mediaType}-${item.id}`}
-           id={Number(item.id)}
+            id={Number(item.id)}
             posterPath={item.posterPath ?? null}
             title={item.title}
+            originalTitle={item.originalTitle ?? null}
             year={item.year ?? null}
             mediaType={item.mediaType}
             href={`/title/${item.mediaType}/${item.id}`}

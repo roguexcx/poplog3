@@ -704,6 +704,7 @@ export async function getTitlePageData(
               id: item.id,
               mediaType: item.media_type,
               title: item.title,
+              originalTitle: item.original_title ?? null,
               year,
               posterPath: item.poster_path ?? null,
               posterUrl: tmdbImage(item.poster_path, "w342"),

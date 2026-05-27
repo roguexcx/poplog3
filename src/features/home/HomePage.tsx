@@ -9,7 +9,7 @@ import {
   translateGenres,
 } from "@/features/home/home-utils";
 
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient } from "@/server/supabase/server";
 import { buildTmdbUrl } from "@/lib/images";
 import { getMediaType, getTitle } from "@/lib/tmdb-utils";
 

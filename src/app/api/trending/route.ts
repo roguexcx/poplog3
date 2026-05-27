@@ -10,7 +10,7 @@ import {
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
 import { supabaseAdmin } from "@/server/supabase/admin";
 import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient } from "@/server/supabase/server";
 import { getUserFeedbackMap } from "@/lib/personalization/feedback";
 import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
 

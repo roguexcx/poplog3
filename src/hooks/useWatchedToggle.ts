@@ -2,7 +2,7 @@
 
 import { useCallback } from "react";
 
-import { useTitleToggle } from "@/hooks/useTitleToggle";
+import { notifyUserTitlesUpdated, useTitleToggle } from "@/hooks/useTitleToggle";
 import { isTitleWatched, toggleWatched } from "@/lib/user-title-service";
 import type { MediaType } from "@/lib/user-title-service";
 
@@ -12,11 +12,6 @@ type Input = {
   title: string;
   releaseYear?: number | null;
 };
-
-function notifyUserTitlesUpdated() {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new Event("poplog:user-titles-updated"));
-}
 
 export function useWatchedToggle({
   tmdbId,

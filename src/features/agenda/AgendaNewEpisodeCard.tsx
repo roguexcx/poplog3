@@ -1,6 +1,7 @@
 "use client";
 
 import type { NewEpisodeItem } from "@/features/acompanhando/NewEpisodeCard";
+import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
 
 export type { NewEpisodeItem };
 
@@ -30,6 +31,7 @@ function temporalBadge(
 }
 
 export default function AgendaNewEpisodeCard({ item, onClick }: Props) {
+  const { mainTitle } = useRandomizedTitleDisplay(item.title, item.original_title);
   const backdropUrl = item.next_episode_still_path
     ? `https://image.tmdb.org/t/p/w780${item.next_episode_still_path}`
     : item.backdrop_path
@@ -107,7 +109,7 @@ export default function AgendaNewEpisodeCard({ item, onClick }: Props) {
           {/* Título e episódio */}
           <div className="mt-1 min-w-0">
             <p className="truncate text-[14px] font-black leading-tight tracking-[-0.02em] text-white">
-              {item.title}
+              {mainTitle}
             </p>
             {item.next_episode_name && (
               <p className="mt-0.5 truncate text-[11.5px] leading-tight text-white/45">

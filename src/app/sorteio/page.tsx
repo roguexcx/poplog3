@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
 import {
   ArrowRight,
   Bookmark,
@@ -295,6 +296,7 @@ function ResultCard({
   const year = releaseYear(item);
   const genres = genreLabels(item.genre_ids);
   const isMovie = item.media_type === "movie";
+  const { mainTitle, subTitle } = useRandomizedTitleDisplay(item.title, item.original_title);
 
   return (
     <section className="relative overflow-hidden rounded-[22px] border border-white/12 bg-[#070a12] shadow-2xl shadow-black/50 sm:rounded-[28px]">
@@ -342,7 +344,12 @@ function ResultCard({
               </div>
 
               <h2 className="max-w-2xl text-[25px] font-black leading-[1.02] tracking-[-0.02em] text-white min-[390px]:text-[28px] sm:text-[52px] sm:leading-[0.95] sm:tracking-[-0.04em]">
-                {item.title}
+                {mainTitle}
+                {subTitle && (
+                  <span className="mt-1 block text-[14px] font-light tracking-normal text-white/40 sm:text-[18px]">
+                    {subTitle}
+                  </span>
+                )}
               </h2>
             </div>
 

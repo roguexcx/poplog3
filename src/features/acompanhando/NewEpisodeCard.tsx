@@ -1,9 +1,12 @@
 "use client";
 
+import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
+
 export type NewEpisodeItem = {
   content_id: string;
   tmdb_id: number;
   title: string;
+  original_title?: string | null;
   poster_path: string | null;
   backdrop_path: string | null;
   computed_state: string | null;
@@ -49,6 +52,7 @@ export default function NewEpisodeCard({ item, onClick }: Props) {
     : null;
 
   const epTag = episodeTag(item.next_season, item.next_episode);
+  const { mainTitle } = useRandomizedTitleDisplay(item.title, item.original_title);
   const seasonPct =
     item.season_total != null && item.season_total > 0 && item.season_watched != null
       ? Math.min(100, Math.round((item.season_watched / item.season_total) * 100))
@@ -101,7 +105,7 @@ export default function NewEpisodeCard({ item, onClick }: Props) {
           </div>
 
           <p className="truncate text-[14px] font-black leading-tight tracking-[-0.02em] text-white">
-            {item.title}
+            {mainTitle}
           </p>
 
           {item.next_episode_name && (

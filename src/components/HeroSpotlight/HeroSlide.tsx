@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Image from "next/image";
 import type { ScoredItem } from "./types";
 import HeroCTA from "./HeroCTA";
+import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
 
 interface HeroSlideProps {
   item: ScoredItem;
@@ -128,9 +129,10 @@ export default function HeroSlide({
 }: HeroSlideProps) {
   const eyebrow = (item as any).serverEyebrow ?? { text: "CURADORIA", color: "#a07ee0" };
   const cta = (item as any).serverCta ?? { primary: "Assistir agora", icon: "play" };
+  const { mainTitle } = useRandomizedTitleDisplay(item.title, item.original_title);
 
-  const backdropUrl = item.backdrop_path ? `https://image.tmdb.org/t/p/w1280${item.backdrop_path}` : null;
-  const stillUrl = item.next_episode_still_path ? `https://image.tmdb.org/t/p/w1280${item.next_episode_still_path}` : null;
+  const backdropUrl = item.backdrop_path ? `https://image.tmdb.org/t/p/w780${item.backdrop_path}` : null;
+  const stillUrl = item.next_episode_still_path ? `https://image.tmdb.org/t/p/w300${item.next_episode_still_path}` : null;
   const dominantColor = item.dominant_color ?? "#1a1a2e";
   const glowRgb = hexToRgb(dominantColor);
 
@@ -181,7 +183,7 @@ export default function HeroSlide({
             alt=""
             fill
             className="object-cover object-center"
-            sizes="100vw"
+            sizes="(max-width: 640px) 100vw, 780px"
           />
         </div>
       ) : null}
@@ -225,7 +227,7 @@ export default function HeroSlide({
           </div>
 
           <h2 className="max-w-[15ch] text-[1.65rem] font-black leading-[0.95] tracking-[-0.04em] text-white drop-shadow-[0_2px_12px_rgba(0,0,0,0.5)] max-[360px]:text-[1.45rem] sm:max-w-none sm:text-3xl md:text-4xl lg:text-[2.75rem]">
-            {item.title}
+            {mainTitle}
           </h2>
 
           <div className="flex flex-wrap items-center gap-1.5 text-[11px] text-white/55 sm:text-xs">

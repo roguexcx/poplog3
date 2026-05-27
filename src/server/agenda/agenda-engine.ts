@@ -389,6 +389,7 @@ async function buildNewEpisodeItems(userId: string | null): Promise<NewEpisodeIt
       content_id: `tv-${state.tmdb_id}`,
       tmdb_id: state.tmdb_id,
       title: typeof title?.title === "string" ? title.title : `Série ${state.tmdb_id}`,
+      original_title: typeof title?.original_title === "string" ? title.original_title : null,
       poster_path: typeof title?.poster_path === "string" ? title.poster_path : null,
       backdrop_path: typeof title?.backdrop_path === "string" ? title.backdrop_path : null,
       computed_state: state.computed_state,
@@ -492,6 +493,7 @@ type AvailabilityTitleRow = {
   tmdb_id: number;
   media_type: "movie" | "tv";
   title: string | null;
+  original_title: string | null;
   poster_path: string | null;
   backdrop_path: string | null;
   release_date: string | null;
@@ -526,14 +528,14 @@ async function fetchAvailabilityAgendaEvents(input: {
     movieIds.length
       ? supabaseAdmin
           .from("poplog3_titles")
-          .select("tmdb_id, media_type, title, poster_path, backdrop_path, release_date, first_air_date, popularity, vote_average")
+          .select("tmdb_id, media_type, title, original_title, poster_path, backdrop_path, release_date, first_air_date, popularity, vote_average")
           .eq("media_type", "movie")
           .in("tmdb_id", movieIds)
       : Promise.resolve({ data: [] }),
     tvIds.length
       ? supabaseAdmin
           .from("poplog3_titles")
-          .select("tmdb_id, media_type, title, poster_path, backdrop_path, release_date, first_air_date, popularity, vote_average")
+          .select("tmdb_id, media_type, title, original_title, poster_path, backdrop_path, release_date, first_air_date, popularity, vote_average")
           .eq("media_type", "tv")
           .in("tmdb_id", tvIds)
       : Promise.resolve({ data: [] }),
@@ -564,6 +566,7 @@ async function fetchAvailabilityAgendaEvents(input: {
         tmdbId: row.tmdb_id,
         mediaType: row.media_type,
         title: title?.title ?? `Título ${row.tmdb_id}`,
+        originalTitle: title?.original_title ?? null,
         posterPath: title?.poster_path ?? null,
         backdropPath: title?.backdrop_path ?? null,
         layer: classifyAirDate(airDate),
@@ -611,6 +614,7 @@ async function enrichPersonalEvents(
         tmdbId: item.tmdb_id,
         mediaType: "tv" as const,
         title: item.title,
+        originalTitle: item.original_title ?? null,
         posterPath: item.poster_path,
         backdropPath: item.backdrop_path,
         layer: classifyAirDate(item.next_episode_air_date),
@@ -651,6 +655,7 @@ async function enrichPersonalEvents(
       tmdbId: item.tmdb_id,
       mediaType: "tv" as const,
       title: item.title,
+      originalTitle: item.original_title ?? null,
       posterPath: item.poster_path,
       backdropPath: item.backdrop_path,
       layer: classifyAirDate(item.next_episode_air_date),

@@ -37,6 +37,7 @@ type DbTitleMeta = {
   tmdb_id: number;
   media_type: MediaType;
   title: string | null;
+  original_title: string | null;
   poster_path: string | null;
   backdrop_path: string | null;
   year: number | null;
@@ -318,7 +319,7 @@ async function getOverlayBase(userId: string, parsed: ParsedContentId) {
       .maybeSingle(),
     supabaseAdmin
       .from("poplog3_titles")
-      .select("title, poster_path, backdrop_path, year, runtime, episode_run_time, vote_average, genres, number_of_seasons, number_of_episodes, tmdb_payload")
+      .select("title, original_title, poster_path, backdrop_path, year, runtime, episode_run_time, vote_average, genres, number_of_seasons, number_of_episodes, tmdb_payload")
       .eq("tmdb_id", parsed.tmdbId)
       .eq("media_type", parsed.mediaType)
       .maybeSingle(),
@@ -430,7 +431,7 @@ export async function GET() {
   if (tmdbIds.length > 0) {
     const { data: titlesData } = await supabaseAdmin
       .from("poplog3_titles")
-      .select("tmdb_id, media_type, title, poster_path, backdrop_path, year, runtime, episode_run_time, vote_average, genres, number_of_seasons, number_of_episodes, tmdb_payload")
+      .select("tmdb_id, media_type, title, original_title, poster_path, backdrop_path, year, runtime, episode_run_time, vote_average, genres, number_of_seasons, number_of_episodes, tmdb_payload")
       .in("tmdb_id", tmdbIds)
       .in("media_type", mediaTypeValues);
 
@@ -658,6 +659,7 @@ export async function GET() {
       content_type: contentType,
 
       title: meta.title ?? "Sem título",
+      original_title: meta.original_title ?? null,
       poster_path: meta.poster_path ?? null,
       backdrop_path: meta.backdrop_path ?? null,
       dominant_color: overlay?.dominant_color ?? null,

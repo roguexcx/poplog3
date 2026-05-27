@@ -28,6 +28,7 @@ export interface UserWatching {
   content_id: string;
   content_type: ContentType;
   title: string;
+  original_title?: string | null;
   poster_path: string | null;
   backdrop_path: string | null;
   dominant_color: string | null;

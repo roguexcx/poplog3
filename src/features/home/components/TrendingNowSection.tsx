@@ -12,7 +12,7 @@ import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import { useWatchedToggle } from "@/hooks/useWatchedToggle";
 import { useUserFeedbackToggle } from "@/hooks/useUserFeedbackToggle";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
-import SectionHeader from "@/components/layout/SectionHeader";
+import SectionHeader from "@/components/ui/SectionHeader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 

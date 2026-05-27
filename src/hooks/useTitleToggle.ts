@@ -3,6 +3,12 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 
+/** Dispara o evento global que faz o UserDataContext recarregar. */
+export function notifyUserTitlesUpdated() {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new Event("poplog:user-titles-updated"));
+}
+
 type TitleToggleConfig<T> = {
   checkFn: (userId: string) => Promise<T>;
   toggleFn: (userId: string) => Promise<T>;

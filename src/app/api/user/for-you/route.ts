@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
-import { tmdbFetch } from "@/lib/tmdb";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { tmdbFetch } from "@/server/api-clients/tmdb/client";
+import { createSupabaseServerClient } from "@/server/supabase/server";
 import { getUserFeedbackMap, feedbackKey } from "@/lib/personalization/feedback";
 import { resolveEditorialPolicy } from "@/lib/personalization/editorial-policy";
 import { scoreTitleForUser } from "@/lib/personalization/scoring";
@@ -230,7 +230,7 @@ export async function POST(request: Request) {
         `/${mediaType}/${seed.tmdb_id}/similar`,
       ]) {
         try {
-          const data = await tmdbFetch<TMDBListResponse>(endpoint, { page: "1" });
+          const data = await tmdbFetch<TMDBListResponse>(endpoint, { params: { page: "1" } });
           const results: TMDBItem[] = data.results ?? [];
 
           for (const raw of results.slice(0, 16)) {

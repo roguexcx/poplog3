@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import FeaturedCardActions from "@/features/home/components/FeaturedCardActions";
 import SynopsisText from "@/features/home/components/SynopsisText";
@@ -47,8 +48,14 @@ export default function FeaturedCard({
         <div className="grid grid-cols-[132px_1fr] gap-5">
           <div className="relative aspect-[2/3] overflow-hidden rounded-2xl bg-white/5 shadow-[0_18px_50px_rgba(0,0,0,0.55)]">
             {posterUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
-              <img src={posterUrl} alt={title} className="h-full w-full object-cover" />
+              <Image
+                src={posterUrl}
+                alt={title}
+                fill
+                priority
+                sizes="132px"
+                className="object-cover"
+              />
             )}
           </div>
 

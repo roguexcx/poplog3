@@ -103,6 +103,7 @@ export type TitleRecommendation = {
   id: number | string;
   mediaType: TitleMediaType;
   title: string;
+  originalTitle?: string | null;
   year?: string | number | null;
   posterPath?: string | null;
   posterUrl?: string | null;

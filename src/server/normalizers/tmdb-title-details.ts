@@ -305,11 +305,14 @@ function normalizeRecommendationTitle(
     fallbackMediaType ??
     (item.name || item.first_air_date ? "tv" : "movie");
 
+  const rawOriginalTitle = mediaType === "movie" ? item.original_title : item.original_name;
+
   return {
     id: item.id,
     media_type: mediaType,
     title: item.title ?? item.name ?? "Untitled",
     name: item.name ?? item.title ?? "Untitled",
+    original_title: rawOriginalTitle?.trim() || null,
     poster_path: item.poster_path ?? null,
     backdrop_path: item.backdrop_path ?? null,
     vote_average: item.vote_average ?? null,

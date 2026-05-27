@@ -1,4 +1,4 @@
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient } from "@/server/supabase/server";
 import type { MediaType } from "@/types/user";
 
 export const FEEDBACK_TYPES = [

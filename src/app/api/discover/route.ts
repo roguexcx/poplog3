@@ -3,7 +3,7 @@ import { filterValidTitles } from "@/server/utils/filter-valid-titles";
 import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import { normalizeTmdbTitle } from "@/server/normalizers/tmdb-title";
 import type { TmdbTitleSummary } from "@/server/api-clients/tmdb/types";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient } from "@/server/supabase/server";
 import { getUserFeedbackMap } from "@/lib/personalization/feedback";
 import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
 

@@ -1,6 +1,7 @@
 "use client";
 
 import type { RecentlyWatchedItem } from "@/app/api/poplog3/continuity/recently-watched/route";
+import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
 
 export type { RecentlyWatchedItem };
 
@@ -24,6 +25,7 @@ function formatRelativeDate(iso: string): string {
 }
 
 export default function RecentlyWatchedCard({ item, onClick }: Props) {
+  const { mainTitle } = useRandomizedTitleDisplay(item.title, item.original_title);
   // Prioridade: still do episódio → backdrop da série → vazio
   const stillUrl = item.last_episode_still_path
     ? `https://image.tmdb.org/t/p/w300${item.last_episode_still_path}`
@@ -71,7 +73,7 @@ export default function RecentlyWatchedCard({ item, onClick }: Props) {
       {/* Info */}
       <div className="flex min-w-0 flex-1 flex-col justify-center px-3 py-2">
         <p className="line-clamp-1 text-[12px] font-black leading-tight tracking-[-0.01em] text-white">
-          {item.title}
+          {mainTitle}
         </p>
         <p className="mt-0.5 line-clamp-1 text-[10px] font-semibold text-white/38">
           {detailLabel}

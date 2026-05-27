@@ -1,3 +1,4 @@
+import Image from "next/image";
 import Link from "next/link";
 import { Film, Radar, Sparkles, Tv } from "lucide-react";
 
@@ -77,11 +78,19 @@ export default function HeroSection({
 
   return (
     <section className="-mx-4 -mt-4 relative z-30 min-h-[66vh] overflow-visible sm:-mx-6 md:-mx-8 md:-mt-6 lg:-mx-10">
+      {/* Backdrop: next/image com priority garante fetchpriority=high e preload no <head> */}
       {backdropUrl && (
-        <div
-          className="absolute inset-0 bg-cover bg-center"
-          style={{ backgroundImage: `url(${backdropUrl})` }}
-        />
+        <div className="absolute inset-0 overflow-hidden">
+          <Image
+            src={backdropUrl}
+            alt=""
+            fill
+            priority
+            sizes="(max-width: 768px) 100vw, (max-width: 1280px) 100vw, 1280px"
+            className="object-cover object-center"
+            aria-hidden
+          />
+        </div>
       )}
       <div className="absolute inset-0 bg-[linear-gradient(to_right,rgba(2,6,23,0.96)_0%,rgba(2,6,23,0.78)_32%,rgba(2,6,23,0.26)_64%,rgba(2,6,23,0.70)_100%)]" />
       <div className="absolute inset-0 bg-[linear-gradient(to_bottom,rgba(2,6,23,0.86)_0%,transparent_22%,rgba(2,6,23,0.28)_54%,#020617_100%)]" />

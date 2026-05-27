@@ -129,7 +129,7 @@ function HeroPosterCluster({
         >
           <div className="relative aspect-[2/3] overflow-hidden">
             {currentItem.poster_path ? (
-              <img src={`https://image.tmdb.org/t/p/w500${currentItem.poster_path}`} alt={currentItem.title} className="h-full w-full object-cover" loading="lazy" />
+              <img src={`https://image.tmdb.org/t/p/w500${currentItem.poster_path}`} alt={currentItem.title} className="h-full w-full object-cover" loading="eager" />
             ) : (
               <div className="h-full w-full bg-white/[0.04]" />
             )}

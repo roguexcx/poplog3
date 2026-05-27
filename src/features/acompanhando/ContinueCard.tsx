@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
 
 export type ContinueStatusSignal =
   | "new_episode"
@@ -12,6 +13,7 @@ export type ContinueItem = {
   content_id: string;
   tmdb_id: number;
   title: string;
+  original_title?: string | null;
   poster_path: string | null;
   backdrop_path: string | null;
   computed_state: string;
@@ -74,6 +76,7 @@ const SIGNAL_CONFIG: Record<
 
 export default function ContinueCard({ item, onClick }: Props) {
   const [timeScope, setTimeScope] = useState<TimeScope>("season");
+  const { mainTitle } = useRandomizedTitleDisplay(item.title, item.original_title);
 
   const posterUrl = item.poster_path
     ? `https://image.tmdb.org/t/p/w185${item.poster_path}`
@@ -178,7 +181,7 @@ export default function ContinueCard({ item, onClick }: Props) {
           {/* Title + episode name */}
           <div className="mt-1 min-w-0">
             <p className="truncate text-[13px] font-black leading-tight tracking-[-0.02em] text-white">
-              {item.title}
+              {mainTitle}
             </p>
             {item.next_episode_name && (
               <p className="mt-0.5 truncate text-[11px] leading-tight text-white/48">

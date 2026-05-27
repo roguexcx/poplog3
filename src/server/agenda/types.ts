@@ -41,6 +41,7 @@ export type AgendaEvent = {
   tmdbId: number;
   mediaType: "movie" | "tv";
   title: string;
+  originalTitle?: string | null;
   posterPath: string | null;
   backdropPath: string | null;
   layer: AgendaTemporalLayer;

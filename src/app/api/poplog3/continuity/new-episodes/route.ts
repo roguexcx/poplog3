@@ -19,6 +19,7 @@ export type NewEpisodeItem = {
   content_id: string;
   tmdb_id: number;
   title: string;
+  original_title?: string | null;
   poster_path: string | null;
   backdrop_path: string | null;
   computed_state: string | null;

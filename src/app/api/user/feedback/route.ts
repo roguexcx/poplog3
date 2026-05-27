@@ -8,7 +8,7 @@ import {
   normalizeFeedbackWeight,
   type FeedbackType,
 } from "@/lib/personalization/feedback";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient } from "@/server/supabase/server";
 import { deleteTitleState } from "@/server/state/user-title-state";
 import type { MediaType } from "@/types/user";
 

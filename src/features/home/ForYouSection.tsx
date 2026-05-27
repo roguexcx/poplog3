@@ -14,7 +14,7 @@ import { useScrollRow } from "@/hooks/useScrollRow";
 import { useUserData } from "@/context/UserDataContext";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import TmdbImage from "@/components/images/TmdbImage";
-import SectionHeader from "@/components/layout/SectionHeader";
+import SectionHeader from "@/components/ui/SectionHeader";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -123,12 +123,11 @@ function FeaturedForYouCard({ item }: { item: ForYouItem }) {
             <TmdbImage
               path={backdropPath}
               kind="backdrop"
-              size="hero"
+              size="medium"
               alt={item.title_label}
               fill
-              sizes="100vw"
+              sizes="(max-width: 1024px) 100vw, 65vw"
               className="object-cover object-right"
-              priority
             />
           </div>
         </div>
@@ -183,17 +182,17 @@ function FeaturedForYouCard({ item }: { item: ForYouItem }) {
 
 function SmallForYouCard({ item }: { item: ForYouItem }) {
   type ImagePick =
-    | { kind: "poster"; size: "hero"; path: string }
-    | { kind: "backdrop"; size: "hero"; path: string }
+    | { kind: "poster"; size: "card"; path: string }
+    | { kind: "backdrop"; size: "card"; path: string }
     | null;
 
   const pick: ImagePick =
     item.clean_poster_path
-      ? { kind: "poster", size: "hero", path: item.clean_poster_path }
+      ? { kind: "poster", size: "card", path: item.clean_poster_path }
       : item.poster_path
-        ? { kind: "poster", size: "hero", path: item.poster_path }
+        ? { kind: "poster", size: "card", path: item.poster_path }
         : item.backdrop_path
-          ? { kind: "backdrop", size: "hero", path: item.backdrop_path }
+          ? { kind: "backdrop", size: "card", path: item.backdrop_path }
           : null;
 
   const rating = formatRating(item.vote_average);

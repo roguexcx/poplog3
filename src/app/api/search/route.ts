@@ -9,7 +9,7 @@ import {
   shouldUseFuzzyFallback,
 } from "@/server/search/fuzzy-title-search";
 import type { TmdbTitleSummary } from "@/server/api-clients/tmdb/types";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { createSupabaseServerClient } from "@/server/supabase/server";
 import { getUserFeedbackMap } from "@/lib/personalization/feedback";
 import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
 

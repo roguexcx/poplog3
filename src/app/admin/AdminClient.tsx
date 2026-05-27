@@ -1,14 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { Activity, AlertTriangle, Database, Zap } from "lucide-react";
+import { Activity, AlertTriangle, Database } from "lucide-react";
 import { TabRadarCache } from "./tabs/TabRadarCache";
 import { TabEngineMonitor } from "./tabs/TabEngineMonitor";
-import { TabApisLab } from "./tabs/TabApisLab";
 
 // ─── tabs ─────────────────────────────────────────────────────────────────────
 
-type TabId = "radar" | "engine" | "apis";
+type TabId = "radar" | "engine";
 
 const TABS: { id: TabId; label: string; icon: React.ReactNode; desc: string }[] = [
   {
@@ -22,12 +21,6 @@ const TABS: { id: TabId; label: string; icon: React.ReactNode; desc: string }[] 
     label: "Engine Monitor",
     icon: <Activity size={15} />,
     desc: "Hit rate, latências e log de chamadas às APIs externas",
-  },
-  {
-    id: "apis",
-    label: "APIs Lab",
-    icon: <Zap size={15} />,
-    desc: "Diagnóstico de conectividade das APIs (TMDB, OMDb…)",
   },
 ];
 
@@ -102,7 +95,6 @@ export default function AdminClient() {
         <div>
           {activeTab === "radar"  && <TabRadarCache  secret={secret} />}
           {activeTab === "engine" && <TabEngineMonitor secret={secret} />}
-          {activeTab === "apis"   && <TabApisLab />}
         </div>
 
       </div>

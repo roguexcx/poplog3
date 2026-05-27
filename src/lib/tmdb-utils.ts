@@ -1,5 +1,4 @@
 import type { TMDBItem, TMDBMediaType } from "@/types/tmdb";
-import { buildTmdbUrlLoose } from "@/lib/images/url";
 
 export function getTitle(item: TMDBItem): string {
   return item.title ?? item.name ?? "Título desconhecido";
@@ -29,26 +28,4 @@ export function getMediaType(item: TMDBItem): TMDBMediaType {
 
 export function getMediaLabel(item: TMDBItem): string {
   return getMediaType(item) === "movie" ? "Filme" : "Série";
-}
-
-/** @deprecated Use buildTmdbUrl de @/lib/images ou o componente TmdbImage. */
-export function getImageUrl(path?: string | null, size = "w780"): string | null {
-  const kind = size.startsWith("h") ? "profile" : "backdrop";
-  return buildTmdbUrlLoose(kind, size, path);
-}
-
-/** @deprecated Use buildTmdbUrl("poster", ..., path). */
-export function getPosterUrl(
-  path?: string | null,
-  size: "w342" | "w500" | "w780" = "w500",
-): string | null {
-  return buildTmdbUrlLoose("poster", size, path);
-}
-
-/** @deprecated Use buildTmdbUrl("backdrop", ..., path). */
-export function getBackdropUrl(
-  path?: string | null,
-  size: "w780" | "w1280" | "original" = "w1280",
-): string | null {
-  return buildTmdbUrlLoose("backdrop", size, path);
 }

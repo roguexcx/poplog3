@@ -12,6 +12,7 @@ export type UpcomingEpisodeItem = {
   content_id: string;
   tmdb_id: number;
   title: string;
+  original_title?: string | null;
   poster_path: string | null;
   backdrop_path: string | null;
   status: string;
@@ -34,6 +35,7 @@ type StateRow = {
 type TitleRow = {
   tmdb_id: number;
   title: string | null;
+  original_title: string | null;
   poster_path: string | null;
   backdrop_path: string | null;
 };
@@ -162,7 +164,7 @@ export async function GET() {
 
     const { data: titlesRaw } = await supabaseAdmin
       .from("poplog3_titles")
-      .select("tmdb_id, title, poster_path, backdrop_path")
+      .select("tmdb_id, title, original_title, poster_path, backdrop_path")
       .in("tmdb_id", tmdbIds)
       .eq("media_type", "tv");
 
@@ -194,6 +196,7 @@ export async function GET() {
           content_id: `tv-${s.tmdb_id}`,
           tmdb_id: s.tmdb_id,
           title: title.title ?? `Série ${s.tmdb_id}`,
+          original_title: title.original_title ?? null,
           poster_path: title.poster_path ?? null,
           backdrop_path: title.backdrop_path ?? null,
           status: s.status ?? "watching",

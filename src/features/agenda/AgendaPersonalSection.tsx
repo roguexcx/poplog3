@@ -3,6 +3,32 @@
 import type { AgendaEvent } from "@/server/agenda/types";
 import HiatusReturnBanner from "@/features/agenda/cards/HiatusReturnBanner";
 import SeasonFinaleCard from "@/features/agenda/cards/SeasonFinaleCard";
+import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
+
+function PersonalEventCard({
+  event,
+  onSelect,
+}: {
+  event: AgendaEvent;
+  onSelect?: (event: AgendaEvent) => void;
+}) {
+  const { mainTitle } = useRandomizedTitleDisplay(event.title, event.originalTitle);
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect?.(event)}
+      className="rounded-lg border border-white/[0.08] bg-white/[0.04] p-4 text-left transition hover:border-white/20 hover:bg-white/[0.07]"
+    >
+      <p className="text-sm text-white/45">{event.airDate ?? "Sem data"}</p>
+      <h3 className="mt-1 font-semibold text-white">{mainTitle}</h3>
+      {event.episodeName && (
+        <p className="mt-1 line-clamp-1 text-sm text-white/60">
+          {event.episodeName}
+        </p>
+      )}
+    </button>
+  );
+}
 
 type Props = {
   title?: string;
@@ -36,20 +62,7 @@ export default function AgendaPersonalSection({
           ) : event.type === "season_finale" ? (
             <SeasonFinaleCard key={event.id} event={event} onSelect={onSelect} />
           ) : (
-            <button
-              key={event.id}
-              type="button"
-              onClick={() => onSelect?.(event)}
-              className="rounded-lg border border-white/[0.08] bg-white/[0.04] p-4 text-left transition hover:border-white/20 hover:bg-white/[0.07]"
-            >
-              <p className="text-sm text-white/45">{event.airDate ?? "Sem data"}</p>
-              <h3 className="mt-1 font-semibold text-white">{event.title}</h3>
-              {event.episodeName && (
-                <p className="mt-1 line-clamp-1 text-sm text-white/60">
-                  {event.episodeName}
-                </p>
-              )}
-            </button>
+            <PersonalEventCard key={event.id} event={event} onSelect={onSelect} />
           ),
         )}
       </div>

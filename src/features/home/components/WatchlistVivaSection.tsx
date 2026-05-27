@@ -8,9 +8,10 @@ import { createClient } from "@/lib/supabase/client";
 import { useUserData } from "@/context/UserDataContext";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import { CardActionButton } from "@/components/ui/CardActionButton";
+import { notifyUserTitlesUpdated } from "@/hooks/useTitleToggle";
 import { IconCheck } from "@/components/ui/icons";
 import { useScrollRow } from "@/hooks/useScrollRow";
-import SectionHeader from "@/components/layout/SectionHeader";
+import SectionHeader from "@/components/ui/SectionHeader";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -420,8 +421,7 @@ export default function WatchlistVivaSection() {
       return filtered;
     });
 
-    const notifyUpdate = () =>
-      window.dispatchEvent(new Event("poplog:user-titles-updated"));
+    const notifyUpdate = () => notifyUserTitlesUpdated();
 
     if (action === "watched") {
       fetch("/api/library/title", {

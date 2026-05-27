@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 import { useAuth } from "@/hooks/useAuth";
+import { notifyUserTitlesUpdated } from "@/hooks/useTitleToggle";
 import type { MediaType } from "@/types/user";
 
 type Input = {
@@ -11,11 +12,6 @@ type Input = {
   source: string;
   initialNotInterested?: boolean;
 };
-
-function notifyUserTitlesUpdated() {
-  if (typeof window === "undefined") return;
-  window.dispatchEvent(new Event("poplog:user-titles-updated"));
-}
 
 export function useUserFeedbackToggle({
   tmdbId,

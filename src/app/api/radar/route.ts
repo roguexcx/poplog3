@@ -37,6 +37,8 @@ export interface RadarResponse {
   libraryFiltered?: boolean;
   /** Quantidade de titulos na biblioteca do usuario */
   librarySize?: number;
+  /** tmdb_ids dos filmes na biblioteca (modo personal) */
+  libraryMovieIds?: number[];
   /** Debug info para diagnosticar filtro personalizado */
   _debug?: {
     userId: string | null;
@@ -211,12 +213,13 @@ function filterPayloadByLibrary(
   const filteredGroups   = filterGroups(payload.groups ?? []);
   const filteredFeatured = filterGroups(payload.featuredGroups ?? []);
 
-  // Filtra tambem as secoes (destaques/novosEpisodios/vemAi)
+  // Filtra tambem as secoes (today/thisWeek/next30Days)
   const filteredSections = payload.sections
     ? {
-        destaques:      filterGroups(payload.sections.destaques ?? []),
-        novosEpisodios: filterGroups(payload.sections.novosEpisodios ?? []),
-        vemAi:          filterGroups(payload.sections.vemAi ?? []),
+        ...payload.sections,
+        today:      filterGroups(payload.sections.today      ?? []),
+        thisWeek:   filterGroups(payload.sections.thisWeek   ?? []),
+        next30Days: filterGroups(payload.sections.next30Days ?? []),
       }
     : payload.sections;
 
@@ -320,10 +323,10 @@ export async function GET(req: NextRequest) {
         libraryFiltered,
         librarySize,
         libraryMovieIds,
-        cacheVersion:    payload.cacheVersion ?? null,
+        cacheVersion:    payload.cacheVersion ?? undefined,
         fromCache:       payload.fromCache ?? false,
         rawBdsMode:      false,
-        sections:        payload.sections ?? null,
+        sections:        payload.sections ?? undefined,
         generatedAt:     new Date().toISOString(),
         general:         payload,
         _debug:          debug,
@@ -341,10 +344,10 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({
       mode:          "general" as const,
-      cacheVersion:  general.cacheVersion  ?? null,
+      cacheVersion:  general.cacheVersion  ?? undefined,
       fromCache:     general.fromCache     ?? false,
       rawBdsMode:    false,
-      sections:      general.sections      ?? null,
+      sections:      general.sections      ?? undefined,
       generatedAt:   new Date().toISOString(),
       general,
     } satisfies RadarResponse, {

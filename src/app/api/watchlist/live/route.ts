@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { tmdbFetch } from "@/lib/tmdb";
+import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import {
   formatEpisodeRuntimeLabel,
   formatRuntimeLabel,
