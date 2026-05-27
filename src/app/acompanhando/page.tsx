@@ -427,9 +427,16 @@ export default function AcompanhandoPage() {
   const sortedContinueItems = useMemo(() => {
     if (continueSortMode === "easy") {
       return [...continueItems].sort(
-        (a, b) =>
-          (a.remaining_minutes ?? Number.MAX_SAFE_INTEGER) -
-          (b.remaining_minutes ?? Number.MAX_SAFE_INTEGER),
+        (a, b) => {
+          const aMinutes = a.series_remaining_minutes ?? a.remaining_minutes ?? Number.MAX_SAFE_INTEGER;
+          const bMinutes = b.series_remaining_minutes ?? b.remaining_minutes ?? Number.MAX_SAFE_INTEGER;
+
+          return (
+            aMinutes - bMinutes ||
+            a.episodes_behind - b.episodes_behind ||
+            (b.last_watched_at ?? "").localeCompare(a.last_watched_at ?? "")
+          );
+        },
       );
     }
     // "recent": já vem ordenado por last_watched_at DESC do servidor

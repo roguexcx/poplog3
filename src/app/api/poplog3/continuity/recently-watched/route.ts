@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { supabaseAdmin } from "@/server/supabase/admin";
+import { getContinuityStateRows } from "@/server/continuity/continuity-state-cache";
 
 const MAX_ITEMS = 6;
 
@@ -69,36 +70,39 @@ function parseEpisodeKey(key: string | null | undefined) {
 }
 
 export async function GET() {
+  const totalStartedAt = Date.now();
+  const perf: Record<string, number> = {};
+  let stageStartedAt = totalStartedAt;
+  const markStage = (stage: string) => {
+    perf[stage] = Date.now() - stageStartedAt;
+    stageStartedAt = Date.now();
+  };
+
   try {
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     }
+    markStage("auth");
 
-    const { data: statesRaw, error: statesError } = await supabaseAdmin
-      .from("user_title_state")
-      .select(
-        "tmdb_id, media_type, status, computed_state, watched_episodes, watched_keys, last_watched_at, last_event_at",
+    const statesRaw = (await getContinuityStateRows(user.id))
+      .filter(
+        (state) =>
+          state.status === "watched" ||
+          state.computed_state === "watched" ||
+          state.computed_state === "completed" ||
+          state.computed_state === "up_to_date" ||
+          (state.watched_episodes ?? 0) > 0,
       )
-      .eq("user_id", user.id)
-      .or(
-        [
-          "status.eq.watched",
-          "computed_state.eq.watched",
-          "computed_state.eq.completed",
-          "computed_state.eq.up_to_date",
-          "watched_episodes.gt.0",
-        ].join(","),
-      )
-      .order("last_event_at", { ascending: false })
-      .limit(60);
+      .slice(0, 60);
+    markStage("states_read");
 
-    if (statesError) {
-      console.error("[recently-watched] user_title_state error:", statesError);
-      return NextResponse.json({ items: [] });
-    }
-
-    if (!statesRaw || statesRaw.length === 0) {
+    if (statesRaw.length === 0) {
+      console.log("[recently-watched/perf]", {
+        states: 0,
+        ...perf,
+        total: Date.now() - totalStartedAt,
+      });
       return NextResponse.json({ items: [] });
     }
 
@@ -112,8 +116,15 @@ export async function GET() {
       .slice(0, MAX_ITEMS);
 
     if (states.length === 0) {
+      console.log("[recently-watched/perf]", {
+        states: statesRaw.length,
+        active: 0,
+        ...perf,
+        total: Date.now() - totalStartedAt,
+      });
       return NextResponse.json({ items: [] });
     }
+    markStage("filtering");
 
     // Busca metadados dos títulos
     const titles: TitleRow[] = [];
@@ -137,6 +148,7 @@ export async function GET() {
 
       titles.push(...((titlesRaw ?? []) as TitleRow[]));
     }
+    markStage("titles_read");
 
     const titleMap = new Map<string, TitleRow>(
       titles.map((t) => [`${t.media_type}-${t.tmdb_id}`, t]),
@@ -166,6 +178,7 @@ export async function GET() {
         }
       }
     }
+    markStage("user_episodes_read");
 
     for (const state of states) {
       if (state.media_type !== "tv" || latestEpisodeMap.has(state.tmdb_id)) continue;
@@ -200,6 +213,7 @@ export async function GET() {
         { name: e.name ?? null, still_path: e.still_path ?? null },
       ]),
     );
+    markStage("episode_meta_read");
 
     const items: RecentlyWatchedItem[] = states
       .filter((state) => titleMap.has(`${state.media_type}-${state.tmdb_id}`))
@@ -228,7 +242,18 @@ export async function GET() {
           watched_at: ep?.watched_at ?? state.activity_at,
         };
       });
+    markStage("response_build");
 
+    console.log("[recently-watched/perf]", {
+      states: statesRaw.length,
+      active: states.length,
+      titles: titleMap.size,
+      episodes: latestEpisodes.length,
+      returned: items.length,
+      external_sync: 0,
+      ...perf,
+      total: Date.now() - totalStartedAt,
+    });
     return NextResponse.json({ items });
   } catch (err) {
     console.error("[recently-watched] unhandled error:", err);

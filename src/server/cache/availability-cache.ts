@@ -225,7 +225,7 @@ export async function replaceAvailability(
     quality: r.quality ?? null,
     raw_payload: r.rawPayload ?? null,
     last_synced_at: now,
-    provider_confidence: r.providerConfidence ?? (source === "tmdb" ? "tmdb" : "premium_fallback"),
+    provider_confidence: r.providerConfidence ?? source,
     last_checked_at: now,
     expires_at: expiresAt,
     fallback_checked_at: input.fallback?.checkedAt ?? null,

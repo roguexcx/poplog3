@@ -436,49 +436,38 @@ export async function getUserLibraryState(
   userId: string,
   status?: string,
 ): Promise<Poplog3UserLibraryItem[] | null> {
+  const totalStartedAt = Date.now();
+  const perf: Record<string, number> = {};
+  const stageRef = { value: totalStartedAt };
+  const mark = (stage: string) => {
+    perf[stage] = Date.now() - stageRef.value;
+    stageRef.value = Date.now();
+  };
   const statusFilter = status
     ? [status]
     : ["watchlist", "watching", "watched", "abandoned", "fridge"];
 
   const stateRows = await getLibraryStateRows(userId, statusFilter);
+  mark("state_read");
 
   if (stateRows.length === 0) return null;
 
   const tvIds    = stateRows.filter((r) => r.media_type === "tv").map((r) => r.tmdb_id);
-  const today    = new Date().toISOString().slice(0, 10); // "YYYY-MM-DD"
 
   // ── Batch 1: metadados dos títulos ───────────────────────────────────────
   const titles = await getLibraryTitleRows({
     stateRows,
     userTitleCount: stateRows.length,
   });
+  mark("titles_read");
 
-  // ── Batch 2: data do último episódio aired por série (regra global) ──────
-  // Usa poplog3_episodes como fonte de verdade — evita o last_air_date do TMDB
-  // que pode conter datas futuras de episódios pré-cadastrados.
-  // Resultado: Map<tmdb_id → "YYYY-MM-DD"> com a data do ep mais recente <= hoje.
-  const lastAiredMap = new Map<number, string>();
-
-  if (tvIds.length > 0) {
-    const { data: epRows } = await supabaseAdmin
-      .from("poplog3_episodes")
-      .select("series_tmdb_id, air_date")
-      .in("series_tmdb_id", tvIds)
-      .not("air_date", "is", null)
-      .lte("air_date", today)
-      .order("air_date", { ascending: false });
-
-    for (const ep of (epRows ?? []) as { series_tmdb_id: number; air_date: string }[]) {
-      if (!lastAiredMap.has(ep.series_tmdb_id)) {
-        lastAiredMap.set(ep.series_tmdb_id, ep.air_date);
-      }
-    }
-  }
-
-  const [episodeRuntimesBySeries, airedEpisodeCountsBySeriesState] = await Promise.all([
-    tvIds.length > 0 ? getSeriesEpisodeRuntimesMap(tvIds, { includeUnaired: true }) : Promise.resolve(new Map()),
-    tvIds.length > 0 ? getAiredEpisodeCountsMap(tvIds)    : Promise.resolve(new Map()),
-  ]);
+  // Fast path da biblioteca: user_title_state já materializa progresso, episódios
+  // exibidos e duração ordenável. Evitamos varrer poplog3_episodes no carregamento.
+  const episodeRuntimesBySeries = new Map<
+    number,
+    NonNullable<Parameters<typeof resolveRuntimeByMediaType>[0]["episodes"]>
+  >();
+  mark("episodes_fast_path");
 
   // Key MUST include media_type — TMDB IDs are NOT globally unique across movie/tv
   // (e.g. movie 550 = Fight Club, tv 550 = Till Death Us Do Part 1966)
@@ -501,9 +490,7 @@ export async function getUserLibraryState(
       ? resolveLibraryRuntimeFields({
           mediaType: row.media_type,
           runtimeResolution,
-          // Prefere a contagem real de poplog3_episodes (sempre atualizada) sobre o
-          // state materializado, que pode ficar stale quando novos eps são ao ar.
-          airedEpisodes: airedEpisodeCountsBySeriesState.get(row.tmdb_id) || row.aired_episodes || null,
+          airedEpisodes: row.aired_episodes || null,
           watchedEpisodes: row.watched_episodes,
           totalEpisodes: titleData?.number_of_episodes ?? null,
           knownEpisodeCount: episodeRuntimesBySeries.get(row.tmdb_id)?.length ?? null,
@@ -567,12 +554,8 @@ export async function getUserLibraryState(
             year: titleData.year,
             release_date: titleData.release_date,
             first_air_date: titleData.first_air_date,
-            // last_air_date — cadeia de prioridade (regra global):
-            // 1. poplog3_episodes: último ep com air_date <= hoje (fonte de verdade)
-            // 2. coluna direta last_air_date do poplog3_titles
-            last_air_date:
-              (row.media_type === "tv" ? (lastAiredMap.get(row.tmdb_id) ?? null) : null) ??
-              titleData.last_air_date,
+            // Fast path: usa o valor materializado em poplog3_titles no carregamento.
+            last_air_date: titleData.last_air_date,
             runtime: row.media_type === "movie" ? movieRuntime : titleData.runtime,
             episode_run_time: titleData.episode_run_time,
             runtime_minutes: runtimeFields?.runtime_minutes ?? null,
@@ -587,8 +570,17 @@ export async function getUserLibraryState(
         : null,
     } as Poplog3UserLibraryItem;
   });
+  mark("response_build");
 
   logMovieDurationAnalysis(result);
+  console.log("[library/perf]", {
+    source: "user_title_state",
+    rows: stateRows.length,
+    tvIds: tvIds.length,
+    titles: titles.length,
+    ...perf,
+    total: Date.now() - totalStartedAt,
+  });
   return result;
 }
 
@@ -809,7 +801,7 @@ export async function upsertUserTitleStatus(
     updated_at: (row.watched_at as string | null) ?? (row.created_at as string),
   };
 
-  upsertTitleState({
+  await upsertTitleState({
     userId: input.userId,
     tmdbId: input.tmdbId,
     mediaType: input.mediaType,
@@ -824,7 +816,7 @@ export async function upsertUserTitleStatus(
         : "status_changed",
       payload: { status: result.status },
     },
-  }).catch((err) => console.error("[state] upsertTitleState failed", err));
+  });
 
   refreshAvailabilityForUserTitle({
     userId: input.userId,
@@ -875,7 +867,5 @@ export async function removeUserTitle(
 
   if (error) throw new Error(error.message);
 
-  deleteTitleState(userId, tmdbId, mediaType).catch((err) =>
-    console.error("[state] deleteTitleState failed", err),
-  );
+  await deleteTitleState(userId, tmdbId, mediaType);
 }

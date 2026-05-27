@@ -131,9 +131,7 @@ async function resolveConflictBeforeNegativeFeedback(
   if (data.status === "watchlist" || data.status === "fridge") {
     const { error: deleteError } = await supabase.from("user_titles").delete().eq("id", data.id);
     if (deleteError) return { canSaveNegative: false, conflict: null, error: deleteError };
-    deleteTitleState(userId, tmdbId, mediaType).catch((err) =>
-      console.error("[feedback] deleteTitleState failed", err),
-    );
+    await deleteTitleState(userId, tmdbId, mediaType);
     return { canSaveNegative: true, conflict: "removed_from_watchlist", error: null };
   }
 

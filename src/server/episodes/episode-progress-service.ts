@@ -1,9 +1,6 @@
 import { supabaseAdmin } from "@/server/supabase/admin";
 import { upsertUserTitleStatus } from "@/server/library/library-service";
-import {
-  upsertTitleState,
-  logUserEvent,
-} from "@/server/state/user-title-state";
+import { upsertTitleState } from "@/server/state/user-title-state";
 
 export type UserEpisodeRow = {
   user_id: string;
@@ -126,7 +123,7 @@ export async function toggleEpisodeWatched(
       computeUserSeriesProgress(input.userId, input.seriesTmdbId),
     ]);
 
-    upsertTitleState({
+    await upsertTitleState({
       userId: input.userId,
       tmdbId: input.seriesTmdbId,
       mediaType: "tv",
@@ -136,7 +133,7 @@ export async function toggleEpisodeWatched(
         type: "episode_watched",
         payload: { season: input.seasonNumber, episode: input.episodeNumber },
       },
-    }).catch((err) => console.error("[state] upsertTitleState failed", err));
+    });
 
     return progress;
   } else {
@@ -155,7 +152,7 @@ export async function toggleEpisodeWatched(
       computeUserSeriesProgress(input.userId, input.seriesTmdbId),
     ]);
 
-    upsertTitleState({
+    await upsertTitleState({
       userId: input.userId,
       tmdbId: input.seriesTmdbId,
       mediaType: "tv",
@@ -165,7 +162,7 @@ export async function toggleEpisodeWatched(
         type: "episode_unwatched",
         payload: { season: input.seasonNumber, episode: input.episodeNumber },
       },
-    }).catch((err) => console.error("[state] upsertTitleState failed", err));
+    });
 
     return progress;
   }
@@ -210,7 +207,7 @@ export async function bulkMarkEpisodesWatched(input: {
     computeUserSeriesProgress(input.userId, input.seriesTmdbId),
   ]);
 
-  upsertTitleState({
+  await upsertTitleState({
     userId: input.userId,
     tmdbId: input.seriesTmdbId,
     mediaType: "tv",
@@ -220,7 +217,7 @@ export async function bulkMarkEpisodesWatched(input: {
       type: input.eventType ?? "season_marked",
       payload: { count: input.episodes.length },
     },
-  }).catch((err) => console.error("[state] upsertTitleState failed", err));
+  });
 
   return progress;
 }
@@ -277,7 +274,7 @@ export async function clearSeasonProgress(
     computeUserSeriesProgress(userId, seriesTmdbId),
   ]);
 
-  upsertTitleState({
+  await upsertTitleState({
     userId,
     tmdbId: seriesTmdbId,
     mediaType: "tv",
@@ -287,7 +284,7 @@ export async function clearSeasonProgress(
       type: "season_unmarked",
       payload: { season: seasonNumber },
     },
-  }).catch((err) => console.error("[state] upsertTitleState failed", err));
+  });
 
   return progress;
 }
@@ -305,12 +302,12 @@ export async function clearSeriesProgress(
   if (error) throw new Error(error.message);
 
   // Re-computa o estado com progresso zerado (nextEpisode = primeiro aired)
-  upsertTitleState({
+  await upsertTitleState({
     userId,
     tmdbId: seriesTmdbId,
     mediaType: "tv",
     event: { type: "series_reset" },
-  }).catch((err) => console.error("[state] upsertTitleState failed on clear", err));
+  });
 }
 
 export async function getWatchedEpisodesForSeries(

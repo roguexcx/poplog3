@@ -24,6 +24,7 @@ type InteractivePosterCardProps = {
   footer?: ReactNode;
   className?: string;
   source?: string;
+  priority?: boolean;
 };
 
 function ActionButtons({
@@ -114,6 +115,7 @@ export default function InteractivePosterCard({
   footer,
   className,
   source,
+  priority = false,
 }: InteractivePosterCardProps) {
   return (
     <PosterCard
@@ -129,6 +131,7 @@ export default function InteractivePosterCard({
       topRight={topRight}
       footer={footer}
       className={className}
+      priority={priority}
       bottomOverlay={
         <ActionButtons
           id={id}

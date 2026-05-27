@@ -16,9 +16,20 @@ const CACHE_ID = "main";
 const CACHE_TTL_H = 24;
 // Deve ser igual a CACHE_SCHEMA_VERSION em agenda/route.ts e radar/route.ts
 const CACHE_SCHEMA_VERSION = 10;
+const MEMORY_CACHE_TTL_MS = 5 * 60_000;
+
+let memoryCache:
+  | { payload: IcsAgendaResponse; expiresAt: number }
+  | null = null;
 
 async function getIcsCache(): Promise<IcsAgendaResponse | null> {
   try {
+    if (memoryCache && memoryCache.expiresAt > Date.now()) {
+      console.log("[radar/page/perf]", { cacheStatus: "memory_hit" });
+      return memoryCache.payload;
+    }
+
+    const startedAt = Date.now();
     const { data, error } = await supabaseAdmin
       .from("ics_agenda_cache")
       .select("payload, cached_at")
@@ -35,6 +46,15 @@ async function getIcsCache(): Promise<IcsAgendaResponse | null> {
 
     // Rejeitar payloads com schema antigo — força o cliente a refazer o fetch
     if (payload.cacheVersion !== CACHE_SCHEMA_VERSION) return null;
+
+    memoryCache = {
+      payload,
+      expiresAt: Date.now() + MEMORY_CACHE_TTL_MS,
+    };
+    console.log("[radar/page/perf]", {
+      cacheStatus: "supabase_hit",
+      cache_read: Date.now() - startedAt,
+    });
 
     return payload;
   } catch {

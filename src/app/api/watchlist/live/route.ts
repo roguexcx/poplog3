@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { tmdbFetch } from "@/server/api-clients/tmdb/client";
+import { createHash } from "node:crypto";
 import {
   formatEpisodeRuntimeLabel,
   formatRuntimeLabel,
@@ -7,9 +7,11 @@ import {
 } from "@/lib/domain-labels";
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
 import { getCurrentUser } from "@/server/auth/get-current-user";
-import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
-import { getAvailabilityForDisplay } from "@/server/streaming/title-availability";
-import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
+import { supabaseAdmin } from "@/server/supabase/admin";
+import {
+  readContinuitySectionCache,
+  writeContinuitySectionCache,
+} from "@/server/continuity/continuity-section-cache";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -27,19 +29,27 @@ type WatchlistRow = {
   stream_status_checked_at?: string | null;
 };
 
-type TMDBDetails = {
-  id?: number;
-  title?: string;
-  name?: string;
-  original_title?: string | null;
-  original_name?: string | null;
-  poster_path?: string | null;
-  release_date?: string | null;
-  first_air_date?: string | null;
-  runtime?: number | null;
-  episode_run_time?: number[] | null;
-  number_of_seasons?: number | null;
-  genres?: Array<{ id: number; name: string }>;
+type TitleRow = {
+  tmdb_id: number;
+  media_type: MediaType;
+  title: string | null;
+  original_title: string | null;
+  poster_path: string | null;
+  release_date: string | null;
+  first_air_date: string | null;
+  runtime: number | null;
+  episode_run_time: number[] | null;
+  number_of_seasons: number | null;
+  genres: Array<{ id: number; name: string }> | string[] | null;
+};
+
+type AvailabilityRow = {
+  tmdb_id: number;
+  media_type: MediaType;
+  provider_name: string;
+  provider_logo_path: string | null;
+  availability_type: string;
+  country: string;
 };
 
 type EnrichedTitle = {
@@ -65,6 +75,14 @@ type EnrichedTitle = {
   fridge: boolean;
   stream_status_updated: boolean;
 };
+
+type WatchlistLiveCachePayload = {
+  inputKey: string;
+  titles: EnrichedTitle[];
+  generatedAt: string;
+};
+
+const WATCHLIST_LIVE_CACHE_TTL_MS = 30 * 60_000;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -113,11 +131,49 @@ function buildContextPool(title: string, mediaType: MediaType): string[] {
   ];
 }
 
+function buildInputKey(rows: WatchlistRow[]) {
+  const normalized = rows
+    .map((row) => ({
+      id: row.id,
+      tmdb_id: row.tmdb_id,
+      media_type: row.media_type,
+      created_at: row.created_at,
+      fridge: Boolean(row.fridge),
+      stream_status: row.stream_status ?? null,
+    }))
+    .sort((a, b) => a.id.localeCompare(b.id));
+
+  return createHash("sha1").update(JSON.stringify(normalized)).digest("hex");
+}
+
+function normalizeGenres(genres: TitleRow["genres"]): string | null {
+  if (!Array.isArray(genres)) return null;
+  const first = genres[0];
+  if (typeof first === "string") return translateGenreName(first) ?? first;
+  return translateGenreName(first?.name) ?? first?.name ?? null;
+}
+
+function providerType(type: string): "flatrate" | "rent" | "buy" {
+  if (type === "buy") return "buy";
+  if (type === "rent") return "rent";
+  return "flatrate";
+}
+
+function markStage(perf: Record<string, number>, stageRef: { value: number }, stage: string) {
+  perf[stage] = Date.now() - stageRef.value;
+  stageRef.value = Date.now();
+}
+
 // ─── POST handler ─────────────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
+  const totalStartedAt = Date.now();
+  const perf: Record<string, number> = {};
+  const stageRef = { value: totalStartedAt };
+
   try {
     const { titles } = await request.json();
+    markStage(perf, stageRef, "request_parse");
 
     if (!Array.isArray(titles) || titles.length === 0) {
       return NextResponse.json({ titles: [] });
@@ -125,98 +181,154 @@ export async function POST(request: Request) {
 
     const rows = titles as WatchlistRow[];
     const currentUser = await getCurrentUser();
-    const preferences = currentUser ? await getUserProviderPreferences().catch(() => null) : null;
-    const tvIds = rows
-      .filter((row) => row.media_type === "tv")
-      .map((row) => row.tmdb_id);
-    const episodeRuntimesBySeries =
-      tvIds.length > 0 ? await getSeriesEpisodeRuntimesMap(tvIds) : new Map();
+    markStage(perf, stageRef, "auth");
 
-    const enriched = await Promise.all(
-      rows.map(async (row): Promise<EnrichedTitle | null> => {
-        try {
-          const details = await tmdbFetch<TMDBDetails>(`/${row.media_type}/${row.tmdb_id}`);
+    const inputKey = buildInputKey(rows);
+    const sectionKey = "home_watchlist_live";
 
-          const releaseDate =
-            details.release_date ?? details.first_air_date ??
-            (row.release_year ? `${row.release_year}-01-01` : null);
-          const availabilityResult = await getAvailabilityForDisplay({
-            tmdbId: row.tmdb_id,
-            mediaType: row.media_type,
-            releaseDate: details.release_date ?? null,
-            firstAirDate: details.first_air_date ?? null,
-            preferences,
-            contexts: ["watchlist", "home"],
-            endpoint: "/api/watchlist/live",
-          }).catch(() => null);
+    if (currentUser) {
+      const cached = await readContinuitySectionCache<WatchlistLiveCachePayload>(sectionKey, {
+        userId: currentUser.id,
+        region: "BR",
+        language: "pt-BR",
+      });
+      markStage(perf, stageRef, "cache_read");
 
-          const genre = translateGenreName(details.genres?.[0]?.name) ?? null;
-          const seasons = row.media_type === "tv" ? (details.number_of_seasons ?? null) : null;
-          const runtimeResolution = resolveRuntimeByMediaType({
-            mediaType: row.media_type,
-            runtimeMinutes: details.runtime ?? null,
-            episodeRunTime: details.episode_run_time ?? null,
-            episodes: episodeRuntimesBySeries.get(row.tmdb_id) ?? null,
-          });
-          const runtimeLabel =
-            row.media_type === "tv"
-              ? formatEpisodeRuntimeLabel(runtimeResolution.minutes, {
-                  estimated: runtimeResolution.estimated,
-                })
-              : formatRuntimeLabel(runtimeResolution.minutes, {
-                  estimated: runtimeResolution.estimated,
-                });
-          const streamStatus = inferStreamStatus(
-            releaseDate,
-            row,
-            availabilityResult?.availability.status,
-          );
-          const providers: EnrichedTitle["providers"] =
-            availabilityResult?.providers.map((provider) => ({
-              name: provider.name,
-              logo: provider.logoPath ?? provider.logoUrl ?? "",
-              type:
-                provider.normalizedType === "subscription"
-                  ? "flatrate"
-                  : provider.normalizedType === "buy"
-                    ? "buy"
-                    : "rent",
-            })) ?? [];
+      if (cached?.status === "hit" && cached.payload.inputKey === inputKey) {
+        console.log("[watchlist/live/perf]", {
+          cacheStatus: "persistent_hit",
+          returned: cached.payload.titles.length,
+          ...perf,
+          total: Date.now() - totalStartedAt,
+        });
+        return NextResponse.json({ titles: cached.payload.titles });
+      }
+    }
 
-          return {
-            id:                    row.id,
-            tmdb_id:               row.tmdb_id,
-            media_type:            row.media_type,
-            title:                 details.title ?? details.name ?? row.title ?? "Sem título",
-            original_title_label:  details.original_title ?? details.original_name ?? null,
-            poster_path:           details.poster_path ?? null,
-            year:                  releaseDate ? String(new Date(releaseDate).getFullYear()) : null,
-            genre,
-            runtime:               runtimeResolution.minutes,
-            runtime_label:         runtimeLabel,
-            seasons,
-            origin:                "streaming",
-            release_date:          releaseDate ?? `${row.release_year ?? new Date().getFullYear()}-01-01`,
-            created_at:            row.created_at,
-            stream_status:         streamStatus,
-            providers,
-            estimated_platform:    null,
-            estimated_month:       null,
-            context_pool:          buildContextPool(
-              details.title ?? details.name ?? row.title ?? "Este título",
-              row.media_type,
-            ),
-            fridge:                row.fridge ?? false,
-            stream_status_updated: false,
-          };
-        } catch {
-          return null;
-        }
-      }),
+    const ids = Array.from(new Set(rows.map((row) => row.tmdb_id)));
+    const [titlesResult, availabilityResult] = await Promise.all([
+      supabaseAdmin
+        .from("poplog3_titles")
+        .select("tmdb_id, media_type, title, original_title, poster_path, release_date, first_air_date, runtime, episode_run_time, number_of_seasons, genres")
+        .in("tmdb_id", ids),
+      supabaseAdmin
+        .from("poplog3_title_availability")
+        .select("tmdb_id, media_type, provider_name, provider_logo_path, availability_type, country")
+        .in("tmdb_id", ids)
+        .eq("country", "BR"),
+    ]);
+    markStage(perf, stageRef, "cache_tables_read");
+
+    const titleMap = new Map<string, TitleRow>(
+      ((titlesResult.data ?? []) as TitleRow[]).map((title) => [
+        `${title.media_type}:${title.tmdb_id}`,
+        title,
+      ]),
     );
+    const providersByKey = new Map<string, AvailabilityRow[]>();
+    for (const row of (availabilityResult.data ?? []) as AvailabilityRow[]) {
+      const key = `${row.media_type}:${row.tmdb_id}`;
+      const list = providersByKey.get(key) ?? [];
+      list.push(row);
+      providersByKey.set(key, list);
+    }
 
-    return NextResponse.json({ titles: enriched.filter(Boolean) as EnrichedTitle[] });
-  } catch {
+    const enriched: EnrichedTitle[] = rows
+      .map((row): EnrichedTitle | null => {
+        const details = titleMap.get(`${row.media_type}:${row.tmdb_id}`);
+        if (!details) return null;
+        const releaseDate =
+          details.release_date ?? details.first_air_date ??
+          (row.release_year ? `${row.release_year}-01-01` : null);
+        const providerRows = providersByKey.get(`${row.media_type}:${row.tmdb_id}`) ?? [];
+        const providers: EnrichedTitle["providers"] = providerRows.map((provider) => ({
+          name: provider.provider_name,
+          logo: provider.provider_logo_path ?? "",
+          type: providerType(provider.availability_type),
+        }));
+        const hasSubscription = providerRows.some((provider) =>
+          ["streaming", "free", "ads"].includes(provider.availability_type),
+        );
+        const hasVod = providerRows.some((provider) =>
+          ["rent", "buy"].includes(provider.availability_type),
+        );
+        const availabilityStatus = hasSubscription
+          ? "streaming_confirmed_br"
+          : hasVod
+            ? "vod_available_br"
+            : undefined;
+        const seasons = row.media_type === "tv" ? (details.number_of_seasons ?? null) : null;
+        const runtimeResolution = resolveRuntimeByMediaType({
+          mediaType: row.media_type,
+          runtimeMinutes: details.runtime ?? null,
+          episodeRunTime: details.episode_run_time ?? null,
+        });
+        const runtimeLabel =
+          row.media_type === "tv"
+            ? formatEpisodeRuntimeLabel(runtimeResolution.minutes, {
+                estimated: runtimeResolution.estimated,
+              })
+            : formatRuntimeLabel(runtimeResolution.minutes, {
+                estimated: runtimeResolution.estimated,
+              });
+        const streamStatus = inferStreamStatus(releaseDate, row, availabilityStatus);
+        const title = details.title ?? row.title ?? "Sem título";
+
+        return {
+          id: row.id,
+          tmdb_id: row.tmdb_id,
+          media_type: row.media_type,
+          title,
+          original_title_label: details.original_title ?? null,
+          poster_path: details.poster_path ?? null,
+          year: releaseDate ? String(new Date(releaseDate).getFullYear()) : null,
+          genre: normalizeGenres(details.genres),
+          runtime: runtimeResolution.minutes,
+          runtime_label: runtimeLabel,
+          seasons,
+          origin: "streaming",
+          release_date: releaseDate ?? `${row.release_year ?? new Date().getFullYear()}-01-01`,
+          created_at: row.created_at,
+          stream_status: streamStatus,
+          providers,
+          estimated_platform: null,
+          estimated_month: null,
+          context_pool: buildContextPool(title, row.media_type),
+          fridge: row.fridge ?? false,
+          stream_status_updated: false,
+        };
+      })
+      .filter((title): title is EnrichedTitle => Boolean(title));
+    markStage(perf, stageRef, "response_build");
+
+    if (currentUser) {
+      await writeContinuitySectionCache({
+        sectionKey,
+        userId: currentUser.id,
+        region: "BR",
+        language: "pt-BR",
+        ttlMs: WATCHLIST_LIVE_CACHE_TTL_MS,
+        payload: {
+          inputKey,
+          titles: enriched,
+          generatedAt: new Date().toISOString(),
+        } satisfies WatchlistLiveCachePayload,
+      });
+      markStage(perf, stageRef, "cache_write");
+    }
+
+    console.log("[watchlist/live/perf]", {
+      cacheStatus: "persistent_miss",
+      input: rows.length,
+      returned: enriched.length,
+      external_sync: 0,
+      ...perf,
+      total: Date.now() - totalStartedAt,
+    });
+
+    return NextResponse.json({ titles: enriched });
+  } catch (error) {
+    console.error("[watchlist/live] unhandled error", error);
     return NextResponse.json({ titles: [] }, { status: 200 });
   }
 }

@@ -75,7 +75,7 @@ const SIGNAL_CONFIG: Record<
 };
 
 export default function ContinueCard({ item, onClick }: Props) {
-  const [timeScope, setTimeScope] = useState<TimeScope>("season");
+  const [timeScope, setTimeScope] = useState<TimeScope>("series");
   const { mainTitle } = useRandomizedTitleDisplay(item.title, item.original_title);
 
   const posterUrl = item.poster_path

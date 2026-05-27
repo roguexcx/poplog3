@@ -2,13 +2,16 @@ import { NextResponse } from "next/server";
 
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { supabaseAdmin } from "@/server/supabase/admin";
-import { getCachedEpisode } from "@/server/cache/season-cache";
 import {
   formatEpisodeRuntimeLabel,
   formatRemainingRuntimeLabel,
 } from "@/lib/domain-labels";
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
-import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
+import { getContinuityStateRows } from "@/server/continuity/continuity-state-cache";
+import {
+  scheduleContinuitySeasonRefresh,
+  scheduleContinuityTitleRefresh,
+} from "@/server/continuity/continuity-background-refresh";
 
 const NEW_EPISODE_DAYS = 30;
 const MAX_ITEMS = 24;
@@ -72,6 +75,17 @@ type TitleRow = {
   backdrop_path: string | null;
   runtime: number | null;
   episode_run_time: number[] | null;
+  last_synced_at: string | null;
+};
+
+type EpisodeMeta = {
+  series_tmdb_id: number;
+  season_number: number;
+  episode_number: number;
+  name: string | null;
+  still_path: string | null;
+  air_date: string | null;
+  runtime: number | null;
 };
 
 function resolveSignal(
@@ -86,71 +100,82 @@ function resolveSignal(
 }
 
 export async function GET() {
+  const totalStartedAt = Date.now();
+  const perf: Record<string, number> = {};
+  let stageStartedAt = totalStartedAt;
+  const markStage = (stage: string) => {
+    perf[stage] = Date.now() - stageStartedAt;
+    stageStartedAt = Date.now();
+  };
+
   try {
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     }
 
-    // Apenas séries em andamento com progresso real — nenhum recálculo no front
-    const { data: statesRaw, error: statesError } = await supabaseAdmin
-      .from("user_title_state")
-      .select(
-        "tmdb_id, computed_state, watched_episodes, aired_episodes, progress_pct, next_season, next_episode, next_episode_air_date, last_watched_at, last_event_at",
-      )
-      .eq("user_id", user.id)
-      .eq("media_type", "tv")
-      .eq("status", "watching")
-      .eq("computed_state", "in_progress")
-      .gt("watched_episodes", 0)
-      .not("next_season", "is", null)
-      .not("next_episode", "is", null)
-      .gt("next_season", 0)   // exclui temporada 0 (Especiais / fantasmas → TMDB 404)
-      .gt("next_episode", 0)  // exclui episódio 0 inválido
-      .order("last_watched_at", { ascending: false, nullsFirst: false });
+    markStage("auth");
 
-    if (statesError) {
-      console.error("[continuity/continue] states query failed", {
-        message: statesError.message,
-        code: statesError.code,
-        details: statesError.details,
+    // Apenas séries em andamento com progresso real — nenhum recálculo no front
+    const statesRaw = (await getContinuityStateRows(user.id))
+      .filter(
+        (state) =>
+          state.media_type === "tv" &&
+          state.status === "watching" &&
+          state.computed_state === "in_progress" &&
+          (state.watched_episodes ?? 0) > 0 &&
+          (state.next_season ?? 0) > 0 &&
+          (state.next_episode ?? 0) > 0,
+      )
+      .sort(
+        (a, b) =>
+          new Date(b.last_watched_at ?? 0).getTime() -
+          new Date(a.last_watched_at ?? 0).getTime(),
+      );
+    markStage("states_read");
+
+    if (statesRaw.length === 0) {
+      console.log("[continuity-continue/perf]", {
+        states: 0,
+        ...perf,
+        total: Date.now() - totalStartedAt,
       });
       return NextResponse.json({ items: [] });
     }
 
-    if (!statesRaw || statesRaw.length === 0) {
-      console.log("[continuity-continue] states=0 → returning empty");
-      return NextResponse.json({ items: [] });
-    }
-
     const states = statesRaw as StateRow[];
-    console.log("[continuity-continue] statesRaw=", states.length);
     const tmdbIds = states.map((s) => s.tmdb_id);
 
     const { data: titlesRaw } = await supabaseAdmin
       .from("poplog3_titles")
-      .select("tmdb_id, title, original_title, poster_path, backdrop_path, runtime, episode_run_time")
+      .select("tmdb_id, title, original_title, poster_path, backdrop_path, runtime, episode_run_time, last_synced_at")
       .in("tmdb_id", tmdbIds)
       .eq("media_type", "tv");
 
     const titleMap = new Map<number, TitleRow>(
       ((titlesRaw ?? []) as TitleRow[]).map((t) => [t.tmdb_id, t]),
     );
-    const episodeRuntimesBySeries = await getSeriesEpisodeRuntimesMap(tmdbIds);
+    markStage("titles_read");
 
     // Batch query para totais de episódios por temporada
     const { data: seasonsRaw } = await supabaseAdmin
       .from("title_seasons")
-      .select("series_tmdb_id, season_number, episode_count")
+      .select("series_tmdb_id, season_number, episode_count, last_synced_at")
       .in("series_tmdb_id", tmdbIds);
 
-    type SeasonRow = { series_tmdb_id: number; season_number: number; episode_count: number };
-    const seasonMap = new Map<string, number>(
+    type SeasonRow = {
+      series_tmdb_id: number;
+      season_number: number;
+      episode_count: number;
+      last_synced_at: string | null;
+    };
+    const seasonMap = new Map<string, SeasonRow>(
       ((seasonsRaw ?? []) as SeasonRow[]).map((r) => [
         `${r.series_tmdb_id}:${r.season_number}`,
-        r.episode_count,
+        r,
       ]),
     );
+    markStage("seasons_read");
 
     const cutoffStr = new Date(Date.now() - NEW_EPISODE_DAYS * 86_400_000)
       .toISOString()
@@ -162,25 +187,41 @@ export async function GET() {
     if (skipped > 0) {
       console.log(`[continuity-continue] skip=${skipped} (not in poplog3_titles catalog)`);
     }
-    console.log(`[continuity-continue] valid=${valid.length} titles=${titleMap.size}`);
     const top = valid.slice(0, MAX_ITEMS);
+    markStage("filtering");
 
-    // Enriquece com nome/still do próximo episódio em paralelo
-    const epData = await Promise.all(
-      top.map((s) => getCachedEpisode(s.tmdb_id, s.next_season, s.next_episode)),
+    const { data: episodesRaw } = top.length > 0
+      ? await supabaseAdmin
+          .from("poplog3_episodes")
+          .select("series_tmdb_id, season_number, episode_number, name, still_path, air_date, runtime")
+          .in("series_tmdb_id", top.map((s) => s.tmdb_id))
+      : { data: [] as EpisodeMeta[] };
+
+    const episodeMap = new Map<string, EpisodeMeta>(
+      ((episodesRaw ?? []) as EpisodeMeta[])
+        .filter((ep) =>
+          top.some(
+            (state) =>
+              state.tmdb_id === ep.series_tmdb_id &&
+              state.next_season === ep.season_number &&
+              state.next_episode === ep.episode_number,
+          ),
+        )
+        .map((ep) => [`${ep.series_tmdb_id}:${ep.season_number}:${ep.episode_number}`, ep]),
     );
+    markStage("episodes_cache_read");
 
-    const items: ContinueItem[] = top.map((state, i) => {
+    const items: ContinueItem[] = top.map((state) => {
       const title = titleMap.get(state.tmdb_id)!;
-      const ep = epData[i];
+      const ep = episodeMap.get(`${state.tmdb_id}:${state.next_season}:${state.next_episode}`) ?? null;
       const runtimeResolution = resolveRuntimeByMediaType({
         mediaType: "tv",
         episodeRunTime: title.episode_run_time,
-        episodes: episodeRuntimesBySeries.get(state.tmdb_id) ?? null,
       });
       const episodesBehind = Math.max(0, state.aired_episodes - state.watched_episodes);
       // Eps restantes APENAS na temporada atual
-      const seasonTotal = seasonMap.get(`${state.tmdb_id}:${state.next_season}`) ?? null;
+      const seasonMeta = seasonMap.get(`${state.tmdb_id}:${state.next_season}`) ?? null;
+      const seasonTotal = seasonMeta?.episode_count ?? null;
       const seasonEpsBehind =
         seasonTotal != null
           ? Math.max(0, seasonTotal - (state.next_episode - 1))
@@ -216,9 +257,9 @@ export async function GET() {
         backdrop_path: title.backdrop_path ?? null,
         computed_state: state.computed_state ?? "in_progress",
         watched_episodes: state.watched_episodes,
-        aired_episodes: state.aired_episodes,
+        aired_episodes: state.aired_episodes ?? 0,
         episodes_behind: episodesBehind,
-        progress_pct: state.progress_pct,
+        progress_pct: state.progress_pct ?? 0,
         next_season: state.next_season,
         next_episode: state.next_episode,
         next_episode_name: ep?.name ?? null,
@@ -236,8 +277,35 @@ export async function GET() {
         season_total: seasonTotal,
       };
     });
+    markStage("response_build");
 
-    console.log(`[continuity-continue] returned=${items.length}`);
+    scheduleContinuityTitleRefresh({
+      context: "continue",
+      targets: states.map((state) => ({
+        mediaType: "tv" as const,
+        tmdbId: state.tmdb_id,
+        lastSyncedAt: titleMap.get(state.tmdb_id)?.last_synced_at ?? null,
+      })),
+    });
+    scheduleContinuitySeasonRefresh({
+      context: "continue",
+      targets: top.map((state) => ({
+        seriesTmdbId: state.tmdb_id,
+        seasonNumber: state.next_season,
+        lastSyncedAt:
+          seasonMap.get(`${state.tmdb_id}:${state.next_season}`)?.last_synced_at ?? null,
+      })),
+    });
+
+    console.log("[continuity-continue/perf]", {
+      states: states.length,
+      valid: valid.length,
+      titles: titleMap.size,
+      returned: items.length,
+      external_sync: 0,
+      ...perf,
+      total: Date.now() - totalStartedAt,
+    });
     return NextResponse.json({ items });
   } catch (err) {
     console.error("[continuity/continue] unhandled error", err);

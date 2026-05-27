@@ -14,6 +14,10 @@ import { supabaseAdmin } from "@/server/supabase/admin";
 import type { IcsAgendaResponse, RadarSections } from "@/app/api/ics/agenda/route";
 import type { IcsSeriesGroup } from "@/lib/ics-engine";
 import { getCurrentUser } from "@/server/auth/get-current-user";
+import {
+  readContinuitySectionCache,
+  writeContinuitySectionCache,
+} from "@/server/continuity/continuity-section-cache";
 
 // Nao usar cache do Next.js -- gerenciamos o cache manualmente no Supabase
 export const revalidate = 0;
@@ -54,10 +58,21 @@ export interface RadarResponse {
 const CACHE_ID = "main";
 const CACHE_TTL_H = 24;
 const CACHE_SCHEMA_VERSION = 10; // deve ser igual ao de agenda/route.ts
+const RADAR_CACHE_TTL_MS = 10 * 60_000;
+const DEFAULT_REGION = "BR";
+const DEFAULT_LANGUAGE = "pt-BR";
+const RADAR_MEMORY_CACHE_TTL_MS = 5 * 60_000;
 
 // Statuses que definem "esta na minha biblioteca"
 // "fridge" excluido — itens pausados nao aparecem no Personalizado
 const LIBRARY_STATUSES = ["watching", "watchlist", "watched"] as const;
+const refreshes = new Map<string, Promise<void>>();
+const generalMemoryCache = new Map<string, { payload: RadarResponse; expiresAt: number }>();
+
+function markStage(perf: Record<string, number>, stageRef: { value: number }, stage: string) {
+  perf[stage] = Date.now() - stageRef.value;
+  stageRef.value = Date.now();
+}
 
 // ── Le cache Supabase do pipeline ICS ────────────────────────────────────────
 
@@ -300,15 +315,24 @@ async function buildPersonalFilteredPayload(userId: string | null): Promise<{
 // ── Handler GET ───────────────────────────────────────────────────────────────
 
 export async function GET(req: NextRequest) {
+  const totalStartedAt = Date.now();
+  const perf: Record<string, number> = {};
+  const stageRef = { value: totalStartedAt };
+
   try {
     const { searchParams } = new URL(req.url);
     const rawMode = searchParams.get("mode") ?? "general";
     const mode: RadarMode = rawMode === "personal" ? "personal" : "general";
+    const region = searchParams.get("region") ?? DEFAULT_REGION;
+    const language = searchParams.get("language") ?? DEFAULT_LANGUAGE;
+    markStage(perf, stageRef, "request_parse");
 
     if (mode === "personal") {
       const user = await getCurrentUser().catch(() => null);
+      markStage(perf, stageRef, "auth");
       const { payload, libraryFiltered, librarySize, libraryMovieIds, debug } =
         await buildPersonalFilteredPayload(user?.id ?? null);
+      markStage(perf, stageRef, "payload_build");
 
       console.log(
         `[radar/personal] user=${user?.id ?? "anon"}` +
@@ -340,9 +364,86 @@ export async function GET(req: NextRequest) {
     }
 
     // Modo geral (padrao)
-    const general = await buildGeneralPayload();
+    const sectionKey = "radar_general";
+    const memoryKey = `${sectionKey}:${region}:${language}`;
+    const memoryCached = generalMemoryCache.get(memoryKey);
+    if (memoryCached && memoryCached.expiresAt > Date.now()) {
+      markStage(perf, stageRef, "memory_cache_read");
+      console.log("[radar/general/perf]", {
+        cacheStatus: "memory_hit",
+        ...perf,
+        total: Date.now() - totalStartedAt,
+      });
+      return NextResponse.json(
+        { ...memoryCached.payload, generatedAt: new Date().toISOString() },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
 
-    return NextResponse.json({
+    const cached = await readContinuitySectionCache<RadarResponse>(sectionKey, {
+      region,
+      language,
+    });
+    markStage(perf, stageRef, "cache_read");
+
+    if (cached?.status === "hit") {
+      generalMemoryCache.set(memoryKey, {
+        payload: cached.payload,
+        expiresAt: Date.now() + RADAR_MEMORY_CACHE_TTL_MS,
+      });
+      console.log("[radar/general/perf]", {
+        cacheStatus: "persistent_hit",
+        ...perf,
+        total: Date.now() - totalStartedAt,
+      });
+      return NextResponse.json(
+        { ...cached.payload, generatedAt: new Date().toISOString() },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    if (cached?.status === "stale") {
+      const refreshKey = `${sectionKey}:${region}:${language}`;
+      if (!refreshes.has(refreshKey)) {
+        const promise = (async () => {
+          try {
+            const general = await buildGeneralPayload();
+            await writeContinuitySectionCache({
+              sectionKey,
+              region,
+              language,
+              ttlMs: RADAR_CACHE_TTL_MS,
+              payload: {
+                mode: "general" as const,
+                cacheVersion: general.cacheVersion ?? undefined,
+                fromCache: general.fromCache ?? false,
+                rawBdsMode: false,
+                sections: general.sections ?? undefined,
+                generatedAt: new Date().toISOString(),
+                general,
+              } satisfies RadarResponse,
+            });
+          } finally {
+            refreshes.delete(refreshKey);
+          }
+        })();
+        refreshes.set(refreshKey, promise);
+      }
+      console.log("[radar/general/perf]", {
+        cacheStatus: "persistent_stale",
+        ...perf,
+        total: Date.now() - totalStartedAt,
+      });
+      return NextResponse.json(
+        { ...cached.payload, generatedAt: new Date().toISOString() },
+        { headers: { "Cache-Control": "no-store" } },
+      );
+    }
+
+    const general = await buildGeneralPayload();
+    markStage(perf, stageRef, "payload_build");
+
+    const response = {
       mode:          "general" as const,
       cacheVersion:  general.cacheVersion  ?? undefined,
       fromCache:     general.fromCache     ?? false,
@@ -350,7 +451,28 @@ export async function GET(req: NextRequest) {
       sections:      general.sections      ?? undefined,
       generatedAt:   new Date().toISOString(),
       general,
-    } satisfies RadarResponse, {
+    } satisfies RadarResponse;
+
+    await writeContinuitySectionCache({
+      sectionKey,
+      region,
+      language,
+      ttlMs: RADAR_CACHE_TTL_MS,
+      payload: response,
+    });
+    generalMemoryCache.set(memoryKey, {
+      payload: response,
+      expiresAt: Date.now() + RADAR_MEMORY_CACHE_TTL_MS,
+    });
+    markStage(perf, stageRef, "cache_write");
+
+    console.log("[radar/general/perf]", {
+      cacheStatus: "persistent_miss",
+      ...perf,
+      total: Date.now() - totalStartedAt,
+    });
+
+    return NextResponse.json(response, {
       headers: {
         "Cache-Control": "no-store",
       },

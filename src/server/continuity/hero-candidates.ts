@@ -60,6 +60,7 @@ type TitleRow = {
   runtime: number | null;
   status: string | null;
   number_of_episodes: number | null;
+  genres?: { id: number; name: string }[] | null;
   tmdb_payload: TmdbPayload | null;
 };
 
@@ -202,6 +203,11 @@ function getTotalEpisodes(title?: TitleRow | null): number | null {
   return (
     title?.number_of_episodes ?? title?.tmdb_payload?.number_of_episodes ?? null
   );
+}
+
+function getGenreLabels(title?: TitleRow | null): string[] {
+  const genres = title?.genres ?? title?.tmdb_payload?.genres ?? [];
+  return genres.slice(0, 2).map((genre) => genre.name).filter(Boolean);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1076,7 +1082,7 @@ async function getTitleMap(mediaType: MediaType, tmdbIds: number[]) {
         "first_air_date",
         "runtime",
         "number_of_episodes",
-        "tmdb_payload",
+        "genres",
       ].join(", "),
     )
     .eq("media_type", mediaType)
@@ -1485,9 +1491,7 @@ export async function getHeroCandidates(
         progressPercentage: percentage,
         availability,
       });
-      const genreLabels = (title?.tmdb_payload?.genres ?? [])
-        .slice(0, 2)
-        .map((g) => g.name);
+      const genreLabels = getGenreLabels(title);
 
       const eyebrowColorMap: Record<string, string> = {
         new_episode: "#f43f5e",
@@ -1620,9 +1624,7 @@ export async function getHeroCandidates(
               progressPercentage: 0,
               availability,
             });
-      const genreLabels = (title?.tmdb_payload?.genres ?? [])
-        .slice(0, 2)
-        .map((g) => g.name);
+      const genreLabels = getGenreLabels(title);
 
       const eyebrowColorMap: Record<string, string> = {
         new_streaming: "#06b6d4",
@@ -1734,9 +1736,7 @@ export async function getHeroCandidates(
         progressPercentage: 0,
         availability,
       });
-      const genreLabels = (title?.tmdb_payload?.genres ?? [])
-        .slice(0, 2)
-        .map((g) => g.name);
+      const genreLabels = getGenreLabels(title);
 
       const eyebrowColorMap: Record<string, string> = {
         resume: "#a855f7",

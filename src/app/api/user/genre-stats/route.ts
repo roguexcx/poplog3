@@ -2,14 +2,47 @@ import { NextResponse } from "next/server";
 
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { supabaseAdmin } from "@/server/supabase/admin";
+import {
+  readContinuitySectionCache,
+  writeContinuitySectionCache,
+} from "@/server/continuity/continuity-section-cache";
 
 type GenreObj = { id: number; name: string };
+type GenreStatsPayload = { ok: true; genres: Array<{ name: string; count: number; pct: number }> };
+
+const GENRE_STATS_CACHE_TTL_MS = 10 * 60_000;
+
+function markStage(perf: Record<string, number>, stageRef: { value: number }, stage: string) {
+  perf[stage] = Date.now() - stageRef.value;
+  stageRef.value = Date.now();
+}
 
 export async function GET() {
+  const totalStartedAt = Date.now();
+  const perf: Record<string, number> = {};
+  const stageRef = { value: totalStartedAt };
+
   try {
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+    markStage(perf, stageRef, "auth");
+
+    const cached = await readContinuitySectionCache<GenreStatsPayload>("profile_genre_stats", {
+      userId: user.id,
+      region: "BR",
+      language: "pt-BR",
+    });
+    markStage(perf, stageRef, "cache_read");
+
+    if (cached?.status === "hit") {
+      console.log("[profile/genre-stats/perf]", {
+        cacheStatus: "persistent_hit",
+        ...perf,
+        total: Date.now() - totalStartedAt,
+      });
+      return NextResponse.json({ ...cached.payload, cacheStatus: "persistent_hit" });
     }
 
     // Busca os tmdb_ids e media_types do usuário
@@ -17,6 +50,7 @@ export async function GET() {
       .from("user_titles")
       .select("tmdb_id, media_type")
       .eq("user_id", user.id);
+    markStage(perf, stageRef, "user_titles_read");
 
     if (utError || !userTitles || userTitles.length === 0) {
       return NextResponse.json({ ok: true, genres: [] });
@@ -29,6 +63,7 @@ export async function GET() {
       .from("poplog3_titles")
       .select("tmdb_id, media_type, genres")
       .in("tmdb_id", tmdbIds);
+    markStage(perf, stageRef, "titles_read");
 
     if (ptError || !titleData) {
       return NextResponse.json({ ok: true, genres: [] });
@@ -64,8 +99,27 @@ export async function GET() {
       count,
       pct: Math.round((count / maxCount) * 100),
     }));
+    markStage(perf, stageRef, "response_build");
 
-    return NextResponse.json({ ok: true, genres });
+    const payload = { ok: true, genres } satisfies GenreStatsPayload;
+    await writeContinuitySectionCache({
+      sectionKey: "profile_genre_stats",
+      userId: user.id,
+      region: "BR",
+      language: "pt-BR",
+      ttlMs: GENRE_STATS_CACHE_TTL_MS,
+      payload,
+    });
+    markStage(perf, stageRef, "cache_write");
+
+    console.log("[profile/genre-stats/perf]", {
+      cacheStatus: cached?.status === "stale" ? "persistent_stale_rebuilt" : "persistent_miss",
+      genres: genres.length,
+      ...perf,
+      total: Date.now() - totalStartedAt,
+    });
+
+    return NextResponse.json({ ...payload, cacheStatus: "persistent_miss" });
   } catch (error) {
     console.error("[GENRE_STATS_ERROR]", error);
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });

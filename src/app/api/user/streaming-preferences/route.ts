@@ -2,21 +2,62 @@ import { NextResponse } from "next/server";
 
 import { createSupabaseServerClient } from "@/server/supabase/server";
 import { refreshAllUserTitleAvailability } from "@/server/streaming/batch-availability-refresh";
+import {
+  invalidateContinuitySectionCache,
+  readContinuitySectionCache,
+  writeContinuitySectionCache,
+} from "@/server/continuity/continuity-section-cache";
 
 type PreferencePayload = {
   providerIds?: string[];
   country?: string;
 };
 
+type StreamingPreferencesPayload = {
+  ok: true;
+  providers: unknown[];
+  preferences: unknown[];
+};
+
+const STREAMING_PREFS_CACHE_TTL_MS = 10 * 60_000;
+
+function markStage(perf: Record<string, number>, stageRef: { value: number }, stage: string) {
+  perf[stage] = Date.now() - stageRef.value;
+  stageRef.value = Date.now();
+}
+
 export async function GET() {
+  const totalStartedAt = Date.now();
+  const perf: Record<string, number> = {};
+  const stageRef = { value: totalStartedAt };
   const supabase = await createSupabaseServerClient();
 
   const {
     data: { user },
   } = await supabase.auth.getUser();
+  markStage(perf, stageRef, "auth");
 
   if (!user) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
+  }
+
+  const cached = await readContinuitySectionCache<StreamingPreferencesPayload>(
+    "profile_streaming_preferences",
+    {
+      userId: user.id,
+      region: "BR",
+      language: "pt-BR",
+    },
+  );
+  markStage(perf, stageRef, "cache_read");
+
+  if (cached?.status === "hit") {
+    console.log("[profile/streaming-preferences/perf]", {
+      cacheStatus: "persistent_hit",
+      ...perf,
+      total: Date.now() - totalStartedAt,
+    });
+    return NextResponse.json({ ...cached.payload, cacheStatus: "persistent_hit" });
   }
 
   const { data: providers, error: providersError } = await supabase
@@ -26,6 +67,7 @@ export async function GET() {
     .eq("country", "BR")
     .not("tmdb_provider_id", "is", null)
     .order("provider_name", { ascending: true });
+  markStage(perf, stageRef, "providers_read");
 
   if (providersError) {
     return NextResponse.json(
@@ -40,6 +82,7 @@ export async function GET() {
     .eq("user_id", user.id)
     .eq("country", "BR")
     .order("priority_order", { ascending: true });
+  markStage(perf, stageRef, "preferences_read");
 
   if (preferencesError) {
     return NextResponse.json(
@@ -48,11 +91,31 @@ export async function GET() {
     );
   }
 
-  return NextResponse.json({
+  const payload = {
     ok: true,
     providers: providers ?? [],
     preferences: preferences ?? [],
+  } satisfies StreamingPreferencesPayload;
+
+  await writeContinuitySectionCache({
+    sectionKey: "profile_streaming_preferences",
+    userId: user.id,
+    region: "BR",
+    language: "pt-BR",
+    ttlMs: STREAMING_PREFS_CACHE_TTL_MS,
+    payload,
   });
+  markStage(perf, stageRef, "cache_write");
+
+  console.log("[profile/streaming-preferences/perf]", {
+    cacheStatus: cached?.status === "stale" ? "persistent_stale_rebuilt" : "persistent_miss",
+    providers: payload.providers.length,
+    preferences: payload.preferences.length,
+    ...perf,
+    total: Date.now() - totalStartedAt,
+  });
+
+  return NextResponse.json({ ...payload, cacheStatus: "persistent_miss" });
 }
 
 export async function PUT(request: Request) {
@@ -113,6 +176,7 @@ export async function PUT(request: Request) {
 
   // Atualiza best_provider_* em todos os títulos ativos do usuário (fire-and-forget)
   const safeCountry = country === "US" ? "US" : "BR";
+  invalidateContinuitySectionCache(user.id);
   refreshAllUserTitleAvailability(user.id, safeCountry).catch(console.error);
 
   return NextResponse.json({ ok: true });

@@ -114,7 +114,7 @@ function SectionDivider() {
 function TitleGrid({ titles }: { titles: SearchResult[] }) {
   return (
     <div className="grid grid-cols-2 gap-x-4 gap-y-8 md:grid-cols-4 lg:grid-cols-6">
-      {titles.map((title) => (
+      {titles.map((title, index) => (
         <InteractivePosterCard
           key={`${title.media_type}-${title.tmdb_id}`}
           id={title.tmdb_id}
@@ -126,6 +126,7 @@ function TitleGrid({ titles }: { titles: SearchResult[] }) {
           fallbackPath={title.backdrop_path}
           year={getYear(title)}
           source="search"
+          priority={index < 2}
         />
       ))}
     </div>

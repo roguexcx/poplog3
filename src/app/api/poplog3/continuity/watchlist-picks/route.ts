@@ -9,6 +9,12 @@ import {
 } from "@/lib/domain-labels";
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
 import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
+import { getContinuityStateRows } from "@/server/continuity/continuity-state-cache";
+import { scheduleContinuityTitleRefresh } from "@/server/continuity/continuity-background-refresh";
+import {
+  readContinuitySectionCache,
+  writeContinuitySectionCache,
+} from "@/server/continuity/continuity-section-cache";
 
 /**
  * Janela mínima (dias) após release_date sem provider confirmado →
@@ -17,6 +23,9 @@ import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-run
 const THEATER_WINDOW_DAYS = 45;
 const MAX_PICKS = 9;
 const MAX_SERIES_START_PICKS = 5;
+const WATCHLIST_CACHE_TTL_MS = 30 * 60_000;
+const WATCHLIST_CACHE_POOL_SIZE = 24;
+const WATCHLIST_LIGHT_POOL_SIZE = 36;
 
 // ── Tipos públicos ────────────────────────────────────────────────────────────
 
@@ -82,6 +91,7 @@ type TitleRow = {
   number_of_seasons: number | null;
   genres?: Array<{ id?: number; name?: string }> | string[] | null;
   tmdb_payload?: Record<string, unknown> | null;
+  last_synced_at: string | null;
 };
 
 type RatingRow = {
@@ -93,6 +103,11 @@ type RatingRow = {
   metacritic_score: number | null;
   poplog_score: number | null;
   source_payload: Record<string, unknown> | null;
+};
+
+type WatchlistPicksCachePayload = {
+  items: WatchlistPickItem[];
+  generatedAt: string;
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -169,6 +184,48 @@ function scoreItem(
   return Math.max(0.1, score);
 }
 
+function scoreStateLight(
+  state: StateRow,
+  daysOnWatchlist: number,
+  excludeSet: Set<string>,
+  options: { seriesStartOnly?: boolean } = {},
+): number {
+  let score = 40;
+
+  switch (state.best_provider_type) {
+    case "subscription": score += 60; break;
+    case "free":
+    case "ads": score += 35; break;
+    case "rent": score += 10; break;
+  }
+
+  if (daysOnWatchlist > 90) score += 30;
+  else if (daysOnWatchlist > 30) score += 20;
+  else if (daysOnWatchlist < 7) score += 15;
+
+  if (options.seriesStartOnly) {
+    if ((state.total_episodes ?? 0) > 0 && (state.total_episodes ?? 0) <= 8) {
+      score += 20;
+    }
+    if ((state.total_episodes ?? 0) > 36) score -= 20;
+  }
+
+  if (excludeSet.has(`${state.media_type}-${state.tmdb_id}`)) score *= 0.05;
+  score += Math.random() * 20 - 10;
+
+  return Math.max(0.1, score);
+}
+
+function takeCachedWatchlistItems(
+  payload: WatchlistPicksCachePayload,
+  excludeSet: Set<string>,
+  maxPicks: number,
+): WatchlistPickItem[] {
+  return payload.items
+    .filter((item) => !excludeSet.has(item.content_id))
+    .slice(0, maxPicks);
+}
+
 function isFinishedSeriesStatus(status?: string | null): boolean {
   return /ended|canceled|cancelled|finalizada|encerrada/i.test(status ?? "");
 }
@@ -208,27 +265,7 @@ function normalizeGenres(title: TitleRow): string[] {
 function hasValidSeriesShape(title: TitleRow): boolean {
   const totalEpisodes = title.number_of_episodes ?? 0;
   const totalSeasons = title.number_of_seasons ?? 0;
-  if (totalEpisodes <= 0 || totalSeasons <= 0) return false;
-
-  const seasons = title.tmdb_payload?.seasons;
-  if (!Array.isArray(seasons)) return true;
-
-  const validSeasonEpisodes = seasons
-    .filter((season) => {
-      if (!season || typeof season !== "object") return false;
-      const record = season as Record<string, unknown>;
-      const seasonNumber =
-        typeof record.season_number === "number" ? record.season_number : null;
-      const episodeCount =
-        typeof record.episode_count === "number" ? record.episode_count : null;
-      return seasonNumber !== null && seasonNumber > 0 && (episodeCount ?? 0) > 0;
-    })
-    .reduce((sum, season) => {
-      const count = (season as Record<string, unknown>).episode_count;
-      return sum + (typeof count === "number" ? count : 0);
-    }, 0);
-
-  return validSeasonEpisodes > 0;
+  return totalEpisodes > 0 && totalSeasons > 0;
 }
 
 function compactOverview(overview?: string | null): string | null {
@@ -415,45 +452,90 @@ function weightedSample<T>(items: T[], weights: number[], n: number): T[] {
 // ── Handler ───────────────────────────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
+  const totalStartedAt = Date.now();
+  const perf: Record<string, number> = {};
+  let stageStartedAt = totalStartedAt;
+  const markStage = (stage: string) => {
+    perf[stage] = Date.now() - stageStartedAt;
+    stageStartedAt = Date.now();
+  };
+
   try {
     const user = await getCurrentUser();
     if (!user) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     }
+    markStage("auth");
 
     // IDs recentemente exibidos (para cooldown de refresh)
     const { searchParams } = new URL(request.url);
     const excludeParam = searchParams.get("exclude") ?? "";
     const excludeSet = new Set(excludeParam.split(",").filter(Boolean));
     const seriesStartOnly = searchParams.get("seriesStart") === "1";
+    const refreshCache = searchParams.get("refresh") === "1";
     const maxPicks = seriesStartOnly ? MAX_SERIES_START_PICKS : MAX_PICKS;
+    const sectionKey = seriesStartOnly
+      ? "watchlist_picks_series_start"
+      : "watchlist_picks_general";
+
+    const cached = !refreshCache
+      ? await readContinuitySectionCache<WatchlistPicksCachePayload>(
+          sectionKey,
+          { userId: user.id, language: "pt-BR" },
+        )
+      : null;
+    markStage("persistent_cache_read");
+
+    if (cached) {
+      const cachedItems = takeCachedWatchlistItems(cached.payload, excludeSet, maxPicks);
+      if (cached.status === "hit" && cachedItems.length > 0) {
+        console.log("[watchlist-picks/perf]", {
+          sectionKey,
+          cacheStatus: "persistent_hit",
+          returned: cachedItems.length,
+          ...perf,
+          total: Date.now() - totalStartedAt,
+        });
+        return NextResponse.json({ items: cachedItems });
+      }
+
+      if (cached.status === "stale" && cachedItems.length > 0) {
+        console.log("[watchlist-picks/perf]", {
+          sectionKey,
+          cacheStatus: "persistent_stale",
+          returned: cachedItems.length,
+          ...perf,
+          total: Date.now() - totalStartedAt,
+        });
+        // Continua reconstruindo em background sem bloquear a resposta stale.
+        const refreshUrl = new URL(request.url);
+        refreshUrl.searchParams.set("refresh", "1");
+        void fetch(refreshUrl.toString(), {
+          cache: "no-store",
+          headers: {
+            cookie: request.headers.get("cookie") ?? "",
+          },
+        }).catch(() => undefined);
+        return NextResponse.json({ items: cachedItems });
+      }
+    }
 
     // 1. Busca itens em watchlist pura
-    let stateQuery = supabaseAdmin
-      .from("user_title_state")
-      .select(
-        "tmdb_id, media_type, watched_episodes, aired_episodes, total_episodes, computed_state, best_provider_name, best_provider_type, best_provider_logo, last_event_at",
-      )
-      .eq("user_id", user.id)
-      .eq("status", "watchlist")
-      .order("last_event_at", { ascending: false });
+    const statesRaw = (await getContinuityStateRows(user.id)).filter(
+      (state) =>
+        state.status === "watchlist" &&
+        (!seriesStartOnly ||
+          (state.media_type === "tv" && state.computed_state === "watchlist")),
+    );
+    markStage("states_read");
 
-    if (seriesStartOnly) {
-      stateQuery = stateQuery.eq("media_type", "tv").eq("computed_state", "watchlist");
-    }
-
-    const { data: statesRaw, error: statesError } = await stateQuery;
-
-    if (statesError) {
-      console.error("[watchlist-picks] states query failed", {
-        message: statesError.message,
-        code: statesError.code,
-        details: statesError.details,
+    if (statesRaw.length === 0) {
+      console.log("[watchlist-picks/perf]", {
+        states: 0,
+        seriesStartOnly,
+        ...perf,
+        total: Date.now() - totalStartedAt,
       });
-      return NextResponse.json({ items: [] });
-    }
-
-    if (!statesRaw || statesRaw.length === 0) {
       return NextResponse.json({ items: [] });
     }
 
@@ -466,20 +548,50 @@ export async function GET(request: NextRequest) {
         (s.media_type === "movie" || s.watched_episodes === 0),
     );
 
-    if (eligible.length === 0) return NextResponse.json({ items: [] });
+    markStage("prefilter");
 
-    const tmdbIds = eligible.map((s) => s.tmdb_id);
-    const tvIds = eligible
+    if (eligible.length === 0) {
+      console.log("[watchlist-picks/perf]", {
+        states: states.length,
+        eligible: 0,
+        returned: 0,
+        external_sync: 0,
+        seriesStartOnly,
+        ...perf,
+        total: Date.now() - totalStartedAt,
+      });
+      return NextResponse.json({ items: [] });
+    }
+
+    const now = Date.now();
+    const lightScored = eligible
+      .map((state) => {
+        const daysOnWatchlist = Math.floor(
+          (now - new Date(state.last_event_at).getTime()) / 86_400_000,
+        );
+        return {
+          state,
+          score: scoreStateLight(state, daysOnWatchlist, excludeSet, { seriesStartOnly }),
+        };
+      })
+      .sort((a, b) => b.score - a.score)
+      .slice(0, Math.max(WATCHLIST_LIGHT_POOL_SIZE, maxPicks * 4));
+    const enrichable = lightScored.map((entry) => entry.state);
+    markStage("light_scoring");
+
+    const tmdbIds = enrichable.map((s) => s.tmdb_id);
+    const tvIds = enrichable
       .filter((s) => s.media_type === "tv")
       .map((s) => s.tmdb_id);
     const episodeRuntimesBySeries =
       tvIds.length > 0 ? await getSeriesEpisodeRuntimesMap(tvIds) : new Map();
+    markStage("runtime_read");
 
     // 3. Metadados em batch
     const { data: titlesRaw } = await supabaseAdmin
       .from("poplog3_titles")
       .select(
-        "tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, vote_average, vote_count, popularity, release_date, first_air_date, last_air_date, runtime, episode_run_time, number_of_episodes, number_of_seasons, genres, tmdb_payload",
+        "tmdb_id, media_type, title, original_title, overview, poster_path, backdrop_path, vote_average, vote_count, popularity, release_date, first_air_date, last_air_date, runtime, episode_run_time, number_of_episodes, number_of_seasons, genres, last_synced_at",
       )
       .in("tmdb_id", tmdbIds);
 
@@ -491,14 +603,13 @@ export async function GET(request: NextRequest) {
         t,
       ]),
     );
-
-    const now = Date.now();
+    markStage("titles_read");
 
     // 4. Filtra janela de cinema e calcula scores
     type ScoredEntry = { state: StateRow; title: TitleRow; score: number };
     const scored: ScoredEntry[] = [];
 
-    for (const state of eligible) {
+    for (const state of enrichable) {
       const key = `${state.media_type}-${state.tmdb_id}`;
       const title = titleMap.get(key);
       if (!title) continue;
@@ -543,11 +654,29 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    if (scored.length === 0) return NextResponse.json({ items: [] });
+    markStage("scoring");
+
+    if (scored.length === 0) {
+      console.log("[watchlist-picks/perf]", {
+        states: states.length,
+        eligible: eligible.length,
+        scored: 0,
+        returned: 0,
+        external_sync: 0,
+        seriesStartOnly,
+        ...perf,
+        total: Date.now() - totalStartedAt,
+      });
+      return NextResponse.json({ items: [] });
+    }
 
     // 5. Amostragem ponderada
     const weights = scored.map((x) => x.score);
-    const selected = weightedSample(scored, weights, maxPicks);
+    const selected = weightedSample(
+      scored,
+      weights,
+      Math.min(WATCHLIST_CACHE_POOL_SIZE, Math.max(maxPicks, scored.length)),
+    );
 
     // 6. Garante pelo menos 1 slot para item sem provider confirmado
     //    (desde que já tenha passado a janela de cinema)
@@ -585,6 +714,7 @@ export async function GET(request: NextRequest) {
         rating,
       ]),
     );
+    markStage("ratings_read");
 
     // 7. Monta resposta
     const items: WatchlistPickItem[] = selected.map(({ state, title }) => {
@@ -666,8 +796,46 @@ export async function GET(request: NextRequest) {
         award_badges: awardBadges,
       };
     });
+    markStage("response_build");
 
-    return NextResponse.json({ items });
+    scheduleContinuityTitleRefresh({
+      context: seriesStartOnly ? "watchlist-picks-series-start" : "watchlist-picks",
+      targets: enrichable.map((state) => ({
+        mediaType: state.media_type,
+        tmdbId: state.tmdb_id,
+        lastSyncedAt:
+          titleMap.get(`${state.media_type}-${state.tmdb_id}`)?.last_synced_at ?? null,
+      })),
+    });
+
+    await writeContinuitySectionCache({
+      userId: user.id,
+      sectionKey,
+      language: "pt-BR",
+      ttlMs: WATCHLIST_CACHE_TTL_MS,
+      payload: {
+        items,
+        generatedAt: new Date().toISOString(),
+      } satisfies WatchlistPicksCachePayload,
+    });
+    markStage("persistent_cache_write");
+
+    const responseItems = takeCachedWatchlistItems({ items, generatedAt: "" }, excludeSet, maxPicks);
+    console.log("[watchlist-picks/perf]", {
+      sectionKey,
+      cacheStatus: cached ? "persistent_stale_empty" : "persistent_miss",
+      states: states.length,
+      eligible: eligible.length,
+      enriched: enrichable.length,
+      scored: scored.length,
+      titles: titleMap.size,
+      returned: responseItems.length,
+      external_sync: 0,
+      seriesStartOnly,
+      ...perf,
+      total: Date.now() - totalStartedAt,
+    });
+    return NextResponse.json({ items: responseItems });
   } catch (err) {
     console.error("[watchlist-picks] unhandled error", err);
     return NextResponse.json({ items: [] });

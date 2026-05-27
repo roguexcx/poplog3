@@ -45,8 +45,13 @@ const TMDB_BASE  = "https://api.themoviedb.org/3";
 const CACHE_ID   = "main";
 const CACHE_TTL_H = 24; // horas
 const CACHE_SCHEMA_VERSION = 10; // bumped: collapse por serie+temporada ativo
+const MEMORY_CACHE_TTL_MS = 5 * 60_000;
 const DEBUG_RADAR = process.env.DEBUG_RADAR === "true";
 const DEBUG_TITLES = [/rupaul/i, /drag race/i, /tonight show/i, /jimmy fallon/i, /euphoria/i, /pela metade/i];
+
+let memoryCache:
+  | { payload: IcsAgendaResponse; cachedAt: string; expiresAt: number }
+  | null = null;
 
 // TmdbTvListItem removido — era usado por fetchTmdbTvList/fetchActiveTmdbSeries (desativados).
 
@@ -355,6 +360,14 @@ async function fetchCinemaReleasesBR(token: string): Promise<CinemaReleaseGroup[
 
 async function readCache(): Promise<{ payload: IcsAgendaResponse; cachedAt: string } | null> {
   try {
+    if (memoryCache && memoryCache.expiresAt > Date.now()) {
+      console.log("[ICS Agenda] memory cache hit");
+      return {
+        payload: memoryCache.payload,
+        cachedAt: memoryCache.cachedAt,
+      };
+    }
+
     const { data, error } = await supabaseAdmin
       .from("ics_agenda_cache")
       .select("payload, cached_at")
@@ -378,6 +391,11 @@ async function readCache(): Promise<{ payload: IcsAgendaResponse; cachedAt: stri
     }
 
     console.log(`[ICS Agenda] cache hit (${ageHours.toFixed(1)}h atras)`);
+    memoryCache = {
+      payload,
+      cachedAt: cachedAt.toISOString(),
+      expiresAt: Date.now() + MEMORY_CACHE_TTL_MS,
+    };
     return {
       payload,
       cachedAt: cachedAt.toISOString(),
@@ -390,14 +408,22 @@ async function readCache(): Promise<{ payload: IcsAgendaResponse; cachedAt: stri
 
 async function writeCache(payload: IcsAgendaResponse): Promise<void> {
   try {
+    const cachedAt = new Date().toISOString();
     const { error } = await supabaseAdmin
       .from("ics_agenda_cache")
       .upsert(
-        { id: CACHE_ID, payload: payload as unknown as Record<string, unknown>, cached_at: new Date().toISOString() },
+        { id: CACHE_ID, payload: payload as unknown as Record<string, unknown>, cached_at: cachedAt },
         { onConflict: "id" },
       );
     if (error) console.warn("[ICS Agenda] erro ao salvar cache:", error.message);
-    else console.log("[ICS Agenda] cache salvo no Supabase");
+    else {
+      memoryCache = {
+        payload,
+        cachedAt,
+        expiresAt: Date.now() + MEMORY_CACHE_TTL_MS,
+      };
+      console.log("[ICS Agenda] cache salvo no Supabase");
+    }
   } catch (err) {
     console.warn("[ICS Agenda] erro ao salvar cache:", err);
   }

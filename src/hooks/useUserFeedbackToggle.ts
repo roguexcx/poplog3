@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react";
 
 import { useAuth } from "@/hooks/useAuth";
 import { notifyUserTitlesUpdated } from "@/hooks/useTitleToggle";
+import { enqueueFeedbackBatch } from "@/lib/feedbackBatchLoader";
 import type { MediaType } from "@/types/user";
 
 type Input = {
@@ -28,23 +29,19 @@ export function useUserFeedbackToggle({
     if (authLoading || !user) return;
 
     const controller = new AbortController();
-    const params = new URLSearchParams({
-      tmdb_id: String(tmdbId),
-      media_type: mediaType,
-      feedback_type: "not_interested",
-    });
 
-    fetch(`/api/user/feedback?${params.toString()}`, { signal: controller.signal })
-      .then((response) => (response.ok ? response.json() : null))
-      .then((json) => {
-        if (json) setNotInterested(Boolean(json.titleState?.userFeedback?.notInterested));
+    // Usa o batcher para consolidar as leituras de todos os cards
+    // que montam no mesmo ciclo em um único POST /api/user/feedback/batch.
+    enqueueFeedbackBatch(tmdbId, mediaType, controller.signal)
+      .then((state) => {
+        setNotInterested(Boolean(state.notInterested));
       })
-      .catch((error) => {
-        if (error instanceof Error && error.name !== "AbortError") console.error(error);
+      .catch((err: unknown) => {
+        if (err instanceof Error && err.name !== "AbortError") console.error(err);
       });
 
     return () => controller.abort();
-  }, [authLoading, initialNotInterested, mediaType, tmdbId, user]);
+  }, [authLoading, mediaType, tmdbId, user]);
 
   const toggleNotInterested = useCallback(async () => {
     if (!user || saving) return;
@@ -75,8 +72,8 @@ export function useUserFeedbackToggle({
       }
       setNotInterested(Boolean(json.titleState?.userFeedback?.notInterested));
       notifyUserTitlesUpdated();
-    } catch (error) {
-      console.error(error);
+    } catch (err) {
+      console.error(err);
       setNotInterested(!next);
     } finally {
       setSaving(false);
