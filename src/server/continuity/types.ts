@@ -74,6 +74,7 @@ export type HeroCandidate = {
 
   posterPath: string | null;
   backdropPath: string | null;
+  alternateBackdropPath?: string | null;
 
   score: number;
   priority: number;

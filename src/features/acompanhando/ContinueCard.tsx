@@ -48,6 +48,10 @@ type Props = {
   onClick: () => void;
 };
 
+function formatCatchUpLabel(label?: string | null) {
+  return label?.replace(/\s*restantes$/i, " para ficar em dia") ?? null;
+}
+
 const SIGNAL_CONFIG: Record<
   ContinueStatusSignal,
   { label: string | null; color: string; bar: string }
@@ -111,6 +115,9 @@ export default function ContinueCard({ item, onClick }: Props) {
     timeScope === "series" && hasSeriesTime
       ? item.series_remaining_runtime_label
       : item.remaining_runtime_label;
+  const catchUpRuntimeLabel = formatCatchUpLabel(
+    item.series_remaining_runtime_label ?? item.remaining_runtime_label,
+  );
   const activeScopeLabel =
     timeScope === "series" && hasSeriesTime ? "total" : `T${item.next_season}`;
   const seasonProgressLabel =
@@ -184,9 +191,19 @@ export default function ContinueCard({ item, onClick }: Props) {
 
           {/* Title + episode name */}
           <div className="mt-1 min-w-0">
-            <p className="truncate text-[13px] font-black leading-tight tracking-[-0.02em] text-white">
-              {mainTitle}
-            </p>
+            <div className="flex min-w-0 items-center gap-1.5">
+              <p className="min-w-0 truncate text-[13px] font-black leading-tight text-white">
+                {mainTitle}
+              </p>
+              {catchUpRuntimeLabel && (
+                <span
+                  title={catchUpRuntimeLabel}
+                  className="max-w-[48%] shrink-0 truncate rounded-full border border-white/[0.10] bg-white/[0.055] px-1.5 py-px text-[9px] font-bold leading-tight text-white/50"
+                >
+                  {catchUpRuntimeLabel}
+                </span>
+              )}
+            </div>
             {item.next_episode_name && (
               <p className="mt-0.5 truncate text-[11px] leading-tight text-white/48">
                 &ldquo;{item.next_episode_name}&rdquo;

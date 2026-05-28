@@ -271,6 +271,7 @@ async function buildHeroPayload(input: {
       overview: cand.overview,
       poster_path: cand.posterPath,
       backdrop_path: cand.backdropPath,
+      alternate_backdrop_path: cand.alternateBackdropPath ?? null,
       dominant_color: cand.availability?.isPreferred ? "#231545" : "#111218",
       status: cand.context === "watchlist" ? "watchlist" : "watching",
       score: cand.score,

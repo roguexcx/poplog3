@@ -40,6 +40,14 @@ type TmdbPayload = {
   overview?: string | null;
   poster_path?: string | null;
   backdrop_path?: string | null;
+  images?: {
+    backdrops?: Array<{
+      file_path?: string | null;
+      iso_639_1?: string | null;
+      vote_average?: number | null;
+      vote_count?: number | null;
+    }> | null;
+  } | null;
   release_date?: string | null;
   first_air_date?: string | null;
   runtime?: number | null;
@@ -186,6 +194,19 @@ function getPosterPath(title?: TitleRow | null): string | null {
 }
 function getBackdropPath(title?: TitleRow | null): string | null {
   return title?.backdrop_path ?? title?.tmdb_payload?.backdrop_path ?? null;
+}
+function getAlternateBackdropPath(title?: TitleRow | null): string | null {
+  const primary = getBackdropPath(title);
+  const backdrops = title?.tmdb_payload?.images?.backdrops ?? [];
+
+  return backdrops
+    .filter((entry) => entry.file_path && entry.file_path !== primary)
+    .slice()
+    .sort((a, b) => {
+      const voteDelta = (b.vote_average ?? 0) - (a.vote_average ?? 0);
+      if (voteDelta !== 0) return voteDelta;
+      return (b.vote_count ?? 0) - (a.vote_count ?? 0);
+    })[0]?.file_path ?? null;
 }
 function getReleaseDate(title?: TitleRow | null): string | null {
   return title?.release_date ?? title?.tmdb_payload?.release_date ?? null;
@@ -1083,6 +1104,7 @@ async function getTitleMap(mediaType: MediaType, tmdbIds: number[]) {
         "runtime",
         "number_of_episodes",
         "genres",
+        "tmdb_payload",
       ].join(", "),
     )
     .eq("media_type", mediaType)
@@ -1517,6 +1539,7 @@ export async function getHeroCandidates(
         year: getYear(getFirstAirDate(title)),
         posterPath: series.posterPath ?? getPosterPath(title),
         backdropPath: series.backdropPath ?? getBackdropPath(title),
+        alternateBackdropPath: getAlternateBackdropPath(title),
         score: score + (recentActivityBoost?.boost ?? 0),
         priority: 999,
         context,
@@ -1641,6 +1664,7 @@ export async function getHeroCandidates(
         year: getYear(firstAirDate),
         posterPath: getPosterPath(title),
         backdropPath: getBackdropPath(title),
+        alternateBackdropPath: getAlternateBackdropPath(title),
         score: finalScore,
         priority: 999,
         context,
@@ -1754,6 +1778,7 @@ export async function getHeroCandidates(
         year: getYear(releaseDate),
         posterPath: getPosterPath(title),
         backdropPath: getBackdropPath(title),
+        alternateBackdropPath: getAlternateBackdropPath(title),
         score: score + surpriseScore + (recentActivityBoost?.boost ?? 0),
         priority: 999,
         context,

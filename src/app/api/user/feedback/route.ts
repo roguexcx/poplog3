@@ -167,6 +167,7 @@ async function saveFeedback(
     const { error } = await supabase
       .from("user_title_feedback")
       .update({
+        active: true,
         weight: input.weight,
         reason: input.reason,
         source: input.source,
@@ -181,6 +182,7 @@ async function saveFeedback(
     tmdb_id: input.tmdbId,
     media_type: input.mediaType,
     feedback_type: input.feedbackType,
+    active: true,
     weight: input.weight,
     reason: input.reason,
     source: input.source,

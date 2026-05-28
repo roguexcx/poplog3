@@ -216,7 +216,16 @@ export async function GET() {
       const ep = episodeMap.get(`${state.tmdb_id}:${state.next_season}:${state.next_episode}`) ?? null;
       const runtimeResolution = resolveRuntimeByMediaType({
         mediaType: "tv",
+        runtimeMinutes: title.runtime,
         episodeRunTime: title.episode_run_time,
+        episodes: ep
+          ? [{
+              seasonNumber: ep.season_number,
+              episodeNumber: ep.episode_number,
+              runtimeMinutes: ep.runtime,
+              airDate: ep.air_date,
+            }]
+          : undefined,
       });
       const episodesBehind = Math.max(0, state.aired_episodes - state.watched_episodes);
       // Eps restantes APENAS na temporada atual

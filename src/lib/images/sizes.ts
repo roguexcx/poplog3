@@ -21,6 +21,7 @@ export const IMAGE_SIZES = {
     small:  "w92",
     medium: "w185",
     large:  "w300",
+    full:   "original",
   },
   logo: {
     small:  "w45",

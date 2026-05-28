@@ -66,54 +66,6 @@ function userStateToStatus(
   return null;
 }
 
-const LikeIcon = ({ active = false }: { active?: boolean }) => (
-  <svg
-    width="15"
-    height="15"
-    viewBox="0 0 24 24"
-    fill={active ? "currentColor" : "none"}
-    xmlns="http://www.w3.org/2000/svg"
-    aria-hidden
-  >
-    <path
-      d="M7.5 21H5.25A2.25 2.25 0 0 1 3 18.75V11.5a2.25 2.25 0 0 1 2.25-2.25H7.5V21Z"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinejoin="round"
-    />
-    <path
-      d="M7.5 10.25L11.2 3.7c.35-.62 1.02-.98 1.73-.9 1.04.11 1.79 1.05 1.65 2.08l-.52 3.87h4.2a2.7 2.7 0 0 1 2.63 3.3l-1.35 5.9A3.9 3.9 0 0 1 15.74 21H7.5V10.25Z"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinejoin="round"
-    />
-  </svg>
-);
-
-const DislikeIcon = ({ active = false }: { active?: boolean }) => (
-  <svg
-    width="15"
-    height="15"
-    viewBox="0 0 24 24"
-    fill={active ? "currentColor" : "none"}
-    xmlns="http://www.w3.org/2000/svg"
-    aria-hidden
-  >
-    <path
-      d="M16.5 3h2.25A2.25 2.25 0 0 1 21 5.25v7.25a2.25 2.25 0 0 1-2.25 2.25H16.5V3Z"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinejoin="round"
-    />
-    <path
-      d="M16.5 13.75l-3.7 6.55c-.35.62-1.02.98-1.73.9-1.04-.11-1.79-1.05-1.65-2.08l.52-3.87h-4.2a2.7 2.7 0 0 1-2.63-3.3l1.35-5.9A3.9 3.9 0 0 1 8.26 3h8.24v10.75Z"
-      stroke="currentColor"
-      strokeWidth="1.8"
-      strokeLinejoin="round"
-    />
-  </svg>
-);
-
 export default function TitleActions({
   tmdbId,
   mediaType,
@@ -127,12 +79,6 @@ export default function TitleActions({
   );
 
   const [favorite, setFavorite] = useState(Boolean(initialState?.favorite));
-
-  const [liked, setLiked] = useState<boolean | null>(() => {
-    if (initialState?.liked === true) return true;
-    if (initialState?.disliked === true) return false;
-    return null;
-  });
 
   const [error, setError] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
@@ -229,8 +175,6 @@ export default function TitleActions({
               : "Adicionar série",
       watched: status === "watched" ? "Assistido" : "Marcar assistido",
       favorite: favorite ? "Favoritado" : "Favorito",
-      liked: "Gostei",
-      disliked: "Não curti",
       fridge: status === "fridge" ? "Em pausa" : "Pausar série",
     }),
     [status, favorite, hasRealProgress]
@@ -395,59 +339,6 @@ export default function TitleActions({
       } catch (err) {
         setFavorite(prevFavorite);
         if (next) setStatus(prevStatus);
-        setError(err instanceof Error ? err.message : "Erro inesperado");
-      } finally {
-        setPendingAction(null);
-      }
-    });
-  }
-
-  function toggleLiked(value: boolean) {
-    const next = liked === value ? null : value;
-    const prevLiked = liked;
-
-    setLiked(next);
-    setPendingAction(value ? "liked" : "disliked");
-
-    startTransition(async () => {
-      try {
-        if (next === null) {
-          // Limpar like/dislike: DELETE com o tipo que estava ativo
-          const typeToDelete = prevLiked === true ? "liked" : "disliked";
-          const res = await fetch("/api/user/feedback", {
-            method: "DELETE",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              tmdb_id: id,
-              media_type: mediaType,
-              feedback_type: typeToDelete,
-            }),
-          });
-          if (!res.ok) {
-            setLiked(prevLiked);
-            const json = await res.json().catch(() => ({}));
-            setError(json?.error ?? `Like failed: ${res.status}`);
-          }
-        } else {
-          // Definir liked ou disliked — o backend limpa o tipo oposto automaticamente
-          const res = await fetch("/api/user/feedback", {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              tmdb_id: id,
-              media_type: mediaType,
-              feedback_type: next ? "liked" : "disliked",
-              surface: "title_page",
-            }),
-          });
-          if (!res.ok) {
-            setLiked(prevLiked);
-            const json = await res.json().catch(() => ({}));
-            setError(json?.error ?? `Like failed: ${res.status}`);
-          }
-        }
-      } catch (err) {
-        setLiked(prevLiked);
         setError(err instanceof Error ? err.message : "Erro inesperado");
       } finally {
         setPendingAction(null);
@@ -658,28 +549,6 @@ export default function TitleActions({
           }
         >
           {labels.favorite}
-        </ActionButton>
-
-        <ActionButton
-          variant="social"
-          size="sm"
-          active={liked === true}
-          loading={pendingAction === "liked"}
-          onClick={() => toggleLiked(true)}
-          leftIcon={<LikeIcon active={liked === true} />}
-        >
-          {labels.liked}
-        </ActionButton>
-
-        <ActionButton
-          variant={liked === false ? "danger" : "social"}
-          size="sm"
-          active={liked === false}
-          loading={pendingAction === "disliked"}
-          onClick={() => toggleLiked(false)}
-          leftIcon={<DislikeIcon active={liked === false} />}
-        >
-          {labels.disliked}
         </ActionButton>
 
         {isTv && (

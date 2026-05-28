@@ -5,6 +5,7 @@ import Image from "next/image";
 import type { ScoredItem } from "./types";
 import HeroCTA from "./HeroCTA";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
+import { buildTmdbUrl } from "@/lib/images/url";
 
 interface HeroSlideProps {
   item: ScoredItem;
@@ -131,8 +132,10 @@ export default function HeroSlide({
   const cta = (item as any).serverCta ?? { primary: "Assistir agora", icon: "play" };
   const { mainTitle } = useRandomizedTitleDisplay(item.title, item.original_title);
 
-  const backdropUrl = item.backdrop_path ? `https://image.tmdb.org/t/p/w780${item.backdrop_path}` : null;
-  const stillUrl = item.next_episode_still_path ? `https://image.tmdb.org/t/p/w300${item.next_episode_still_path}` : null;
+  const backdropUrl = buildTmdbUrl("backdrop", "full", item.backdrop_path);
+  const episodeStillUrl = buildTmdbUrl("still", "full", item.next_episode_still_path);
+  const alternateBackdropUrl = buildTmdbUrl("backdrop", "full", item.alternate_backdrop_path);
+  const secondaryUrl = episodeStillUrl ?? (alternateBackdropUrl !== backdropUrl ? alternateBackdropUrl : null);
   const dominantColor = item.dominant_color ?? "#1a1a2e";
   const glowRgb = hexToRgb(dominantColor);
 
@@ -141,14 +144,14 @@ export default function HeroSlide({
   const yearStr = item.year?.toString() ?? "";
   const runtimeLabel = item.runtime_label;
 
-  // Alterna entre backdrop e still a cada 6 segundos quando ambos estão disponíveis
-  const [showStill, setShowStill] = useState(false);
+  // Alterna entre o backdrop principal e uma segunda imagem editorial quando disponível.
+  const [showSecondary, setShowSecondary] = useState(false);
   useEffect(() => {
-    setShowStill(false);
-    if (!backdropUrl || !stillUrl) return;
-    const id = setInterval(() => setShowStill((s) => !s), 6000);
+    setShowSecondary(false);
+    if (!backdropUrl || !secondaryUrl) return;
+    const id = setInterval(() => setShowSecondary((s) => !s), 6000);
     return () => clearInterval(id);
-  }, [item.content_id, backdropUrl, stillUrl]);
+  }, [item.content_id, backdropUrl, secondaryUrl]);
 
   return (
     <div
@@ -159,7 +162,7 @@ export default function HeroSlide({
       {backdropUrl ? (
         <div
           className="absolute inset-0 transition-opacity duration-[1200ms] ease-in-out"
-          style={{ opacity: showStill ? 0 : 1 }}
+          style={{ opacity: showSecondary ? 0 : 1 }}
         >
           <Image
             src={backdropUrl}
@@ -168,28 +171,30 @@ export default function HeroSlide({
             className="object-cover object-center"
             priority
             sizes="100vw"
+            quality={100}
           />
         </div>
       ) : null}
 
-      {/* Camada still do episódio */}
-      {stillUrl ? (
+      {/* Camada de segunda imagem: still de episódio ou backdrop alternativo */}
+      {secondaryUrl ? (
         <div
           className="absolute inset-0 transition-opacity duration-[1200ms] ease-in-out"
-          style={{ opacity: showStill ? 1 : 0 }}
+          style={{ opacity: !backdropUrl || showSecondary ? 1 : 0 }}
         >
           <Image
-            src={stillUrl}
+            src={secondaryUrl}
             alt=""
             fill
             className="object-cover object-center"
-            sizes="(max-width: 640px) 100vw, 780px"
+            sizes="100vw"
+            quality={100}
           />
         </div>
       ) : null}
 
       {/* Fallback gradiente quando não há imagem */}
-      {!backdropUrl && !stillUrl ? (
+      {!backdropUrl && !secondaryUrl ? (
         <div
           className="absolute inset-0"
           style={{

@@ -111,13 +111,6 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
 
             {isMovie && <TitleFinancialBadge insight={financialInsight} />}
 
-            <TitleCast cast={title.cast} />
-
-            <TitleCollectionSection
-              collection={title.metadata?.collection ?? null}
-              currentTitleId={typeof title.id === "number" ? title.id : null}
-            />
-
             {isMovie && (
               <TitleCommunityHighlights
                 movieTmdbId={Number(title.id)}
@@ -126,14 +119,17 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
               />
             )}
 
+            <TitleCast cast={title.cast} />
+
+            <TitleCollectionSection
+              collection={title.metadata?.collection ?? null}
+              currentTitleId={typeof title.id === "number" ? title.id : null}
+            />
+
             <TitleRecommendations recommendations={title.recommendations} />
           </div>
 
           <aside className="flex min-w-0 flex-col gap-5 sm:gap-6 lg:sticky lg:top-6 lg:self-start">
-            {hasTrailer && title.trailer && (
-              <TitleTrailer trailer={title.trailer} title={title.title} />
-            )}
-
             {/* Avaliação POPLOG */}
             {typeof title.id === "number" && (
               <UserRatingWidget
@@ -148,6 +144,10 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
             )}
 
             <TitleProviders providers={title.providers} />
+
+            {hasTrailer && title.trailer && (
+              <TitleTrailer trailer={title.trailer} title={title.title} />
+            )}
 
             {hasMetadata && (
               <TitleMetadata

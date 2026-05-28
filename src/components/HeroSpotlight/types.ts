@@ -31,6 +31,7 @@ export interface UserWatching {
   original_title?: string | null;
   poster_path: string | null;
   backdrop_path: string | null;
+  alternate_backdrop_path?: string | null;
   dominant_color: string | null;
 
   status: WatchStatus;
@@ -89,7 +90,7 @@ export interface UserWatching {
   genres: string[] | null;
   year: number | null;
 
-  // Episode still (series only)
+  // Episode still (series only); movies can use alternate_backdrop_path instead.
   next_episode_still_path: string | null;
 
   // Franchise / collection (movies only)

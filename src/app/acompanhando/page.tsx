@@ -22,7 +22,7 @@ import RecentlyWatchedCard, {
 
 import type { ScoredItem, SignalType } from "@/components/HeroSpotlight/types";
 
-type ContinueSortMode = "recent" | "easy";
+type ContinueSortMode = "recent" | "season" | "series";
 
 function getMediaType(item: ScoredItem) {
   return item.content_type === "filme" ? "movie" : "tv";
@@ -204,7 +204,7 @@ export default function AcompanhandoPage() {
   const [continueItems, setContinueItems] = useState<ContinueItem[]>([]);
   const [isContinueLoading, setIsContinueLoading] = useState(true);
   const [continueError, setContinueError] = useState<string | null>(null);
-  const [continueSortMode, setContinueSortMode] = useState<ContinueSortMode>("easy");
+  const [continueSortMode, setContinueSortMode] = useState<ContinueSortMode>("series");
   const [continuePage, setContinuePage] = useState(1);
   const continueItemsPerPage = useContinueItemsPerPage();
 
@@ -425,12 +425,12 @@ export default function AcompanhandoPage() {
   }
 
   const sortedContinueItems = useMemo(() => {
-    if (continueSortMode === "easy") {
+    if (continueSortMode === "season") {
       return [...continueItems].sort((a, b) => {
-        const aMinutes = a.series_remaining_minutes ?? a.remaining_minutes;
-        const bMinutes = b.series_remaining_minutes ?? b.remaining_minutes;
+        const aMinutes = a.remaining_minutes;
+        const bMinutes = b.remaining_minutes;
 
-        // Quando ambos têm dado de runtime, usa minutos restantes como critério principal
+        // "Mais fáceis": menor tempo para terminar a temporada atual do título.
         if (aMinutes != null && bMinutes != null) {
           return (
             aMinutes - bMinutes ||
@@ -439,13 +439,35 @@ export default function AcompanhandoPage() {
           );
         }
 
-        // Fallback: episódios restantes — confiável mesmo sem runtime no banco
+        // Fallback: episódios restantes — confiável mesmo sem runtime no banco.
         return (
           a.episodes_behind - b.episodes_behind ||
           (b.last_watched_at ?? "").localeCompare(a.last_watched_at ?? "")
         );
       });
     }
+
+    if (continueSortMode === "series") {
+      return [...continueItems].sort((a, b) => {
+        const aMinutes = a.series_remaining_minutes;
+        const bMinutes = b.series_remaining_minutes;
+
+        // "Ficar em dia": menor tempo total pendente da série inteira.
+        if (aMinutes != null && bMinutes != null) {
+          return (
+            aMinutes - bMinutes ||
+            a.episodes_behind - b.episodes_behind ||
+            (b.last_watched_at ?? "").localeCompare(a.last_watched_at ?? "")
+          );
+        }
+
+        return (
+          a.episodes_behind - b.episodes_behind ||
+          (b.last_watched_at ?? "").localeCompare(a.last_watched_at ?? "")
+        );
+      });
+    }
+
     // "recent": já vem ordenado por last_watched_at DESC do servidor
     return continueItems;
   }, [continueItems, continueSortMode]);
@@ -554,15 +576,27 @@ export default function AcompanhandoPage() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setContinueSortMode("easy")}
+                      onClick={() => setContinueSortMode("season")}
                       className={[
                         "rounded-full px-3 py-1 text-[11px] font-bold transition-all",
-                        continueSortMode === "easy"
+                        continueSortMode === "season"
                           ? "bg-white text-zinc-900"
                           : "text-white/45 hover:text-white/70",
                       ].join(" ")}
                     >
                       Mais fáceis
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setContinueSortMode("series")}
+                      className={[
+                        "rounded-full px-3 py-1 text-[11px] font-bold transition-all",
+                        continueSortMode === "series"
+                          ? "bg-white text-zinc-900"
+                          : "text-white/45 hover:text-white/70",
+                      ].join(" ")}
+                    >
+                      Ficar em dia
                     </button>
                   </div>
                 </div>

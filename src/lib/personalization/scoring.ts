@@ -3,6 +3,11 @@ import {
   getTitleFeedbackState,
   type UserFeedbackMap,
 } from "@/lib/personalization/feedback";
+import {
+  resolveEditorialPolicy,
+  type EditorialSurfaceInput,
+  type LegacyTitleSignals,
+} from "@/lib/personalization/editorial-policy";
 import type { MediaType } from "@/types/user";
 
 export type FeedbackScoringContext =
@@ -23,50 +28,42 @@ export type ScorableTitle = {
   vote_count?: number | null;
   personalScore?: number;
   feedbackPenaltyApplied?: number;
+  editorialScoreApplied?: number;
+  editorialShouldExclude?: boolean;
   userFeedback?: {
     notInterested?: boolean;
     activeTypes?: string[];
   };
 };
 
+export type UserRatingSignalMap = Map<string, number>;
+export type LegacyTitleSignalMap = Map<string, LegacyTitleSignals>;
+
 export type FeedbackScoringOptions<T extends ScorableTitle> = {
   userId?: string | null;
   feedbackMap?: UserFeedbackMap;
+  ratingMap?: UserRatingSignalMap;
+  legacySignalMap?: LegacyTitleSignalMap;
   context: FeedbackScoringContext;
   mediaType?: MediaType;
   getBaseScore?: (item: T, index: number) => number;
   preserveOrder?: boolean;
 };
 
-const CONTEXT_PENALTY: Record<FeedbackScoringContext, number> = {
-  home: 90,
-  for_you: 100,
-  discovery: 58,
-  oracle: 140,
-  search: 0,
-  contextual: 32,
-  trending: 52,
-  library: 0,
+const CONTEXT_TO_SURFACE: Record<FeedbackScoringContext, EditorialSurfaceInput> = {
+  home: "for_you",
+  for_you: "for_you",
+  discovery: "radar",
+  oracle: "contextual",
+  search: "search",
+  contextual: "contextual",
+  trending: "trending",
+  library: "library",
 };
 
 function resolveMediaType(item: ScorableTitle, fallback?: MediaType): MediaType | null {
   if (item.media_type === "movie" || item.media_type === "tv") return item.media_type;
   return fallback ?? null;
-}
-
-function contextualReappearanceCredit(item: ScorableTitle, context: FeedbackScoringContext): number {
-  if (context === "search" || context === "library") return CONTEXT_PENALTY[context];
-  if (context === "contextual") return 22;
-
-  const popularity = item.popularity ?? 0;
-  const rating = item.vote_average ?? 0;
-  const votes = item.vote_count ?? 0;
-
-  if (popularity >= 450) return 42;
-  if (popularity >= 220) return 26;
-  if (rating >= 8.2 && votes >= 1800) return 24;
-  if (rating >= 7.6 && votes >= 3500) return 18;
-  return 0;
 }
 
 export function scoreTitleForUser<T extends ScorableTitle>(
@@ -77,26 +74,31 @@ export function scoreTitleForUser<T extends ScorableTitle>(
   const baseScore = options.getBaseScore?.(item, index) ?? item.personalScore ?? (10_000 - index);
   const mediaType = resolveMediaType(item, options.mediaType);
 
-  if (!options.userId || !mediaType || !options.feedbackMap) {
+  if (!options.userId || !mediaType) {
     return { ...item, personalScore: baseScore, feedbackPenaltyApplied: 0 };
   }
 
   const feedback = getTitleFeedbackState(options.feedbackMap, item.id, mediaType);
-  const rows = options.feedbackMap.get(feedbackKey(item.id, mediaType)) ?? [];
-  const negativeWeight = rows
-    .filter((row) => row.feedback_type === "not_interested")
-    .reduce((total, row) => total + Math.min(row.weight, 0), 0);
-
-  const rawPenalty = Math.abs(negativeWeight) * CONTEXT_PENALTY[options.context];
-  const reappearanceCredit = feedback.notInterested
-    ? contextualReappearanceCredit(item, options.context)
-    : 0;
-  const penalty = Math.max(0, rawPenalty - reappearanceCredit);
+  const key = feedbackKey(item.id, mediaType);
+  const rows = options.feedbackMap?.get(key) ?? [];
+  const policy = resolveEditorialPolicy({
+    feedback: rows.map((row) => ({
+      feedback_type: row.feedback_type,
+      weight: row.weight,
+      updated_at: row.updated_at,
+      active: row.active,
+    })),
+    legacy: options.legacySignalMap?.get(key) ?? null,
+    rating: options.ratingMap?.get(key) ?? null,
+    surface: CONTEXT_TO_SURFACE[options.context],
+  });
 
   return {
     ...item,
-    personalScore: baseScore - penalty,
-    feedbackPenaltyApplied: penalty,
+    personalScore: baseScore + policy.surfaceScore,
+    feedbackPenaltyApplied: policy.surfaceScore < 0 ? Math.abs(policy.surfaceScore) : 0,
+    editorialScoreApplied: policy.surfaceScore,
+    editorialShouldExclude: policy.shouldExclude,
     userFeedback: {
       ...(item.userFeedback ?? {}),
       notInterested: feedback.notInterested,

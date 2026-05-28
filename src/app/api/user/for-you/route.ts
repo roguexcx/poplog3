@@ -4,7 +4,11 @@ import { createSupabaseServerClient } from "@/server/supabase/server";
 import { supabaseAdmin } from "@/server/supabase/admin";
 import { getUserFeedbackMap, feedbackKey } from "@/lib/personalization/feedback";
 import { resolveEditorialPolicy } from "@/lib/personalization/editorial-policy";
-import { scoreTitleForUser } from "@/lib/personalization/scoring";
+import {
+  scoreTitleForUser,
+  type LegacyTitleSignalMap,
+  type UserRatingSignalMap,
+} from "@/lib/personalization/scoring";
 import {
   readContinuitySectionCache,
   writeContinuitySectionCache,
@@ -20,6 +24,13 @@ type UserTitle = {
   media_type: MediaType;
   status: "watchlist" | "watched" | "watching" | "fridge" | null;
   favorite?: boolean;
+  rating?: number | null;
+};
+
+type UserRatingSignal = {
+  tmdb_id: number;
+  media_type: MediaType;
+  rating: number;
 };
 
 type TMDBGenre = { id: number; name: string };
@@ -107,6 +118,7 @@ function getOriginalTitle(item: TMDBItem): string | null {
 
 function getSignalWeight(title: UserTitle): number {
   if (title.favorite) return 5;
+  if (typeof title.rating === "number" && title.rating >= 4) return 4.5;
   if (title.status === "watchlist") return 4;
   if (title.status === "watched") return 3;
   if (title.status === "watching") return 2;
@@ -115,6 +127,7 @@ function getSignalWeight(title: UserTitle): number {
 
 function getSeedReason(seed: UserTitle): SeedReasonType {
   if (seed.favorite) return "favorite";
+  if (typeof seed.rating === "number" && seed.rating >= 4) return "watched";
   if (seed.status === "watchlist") return "watchlist";
   if (seed.status === "watched") return "watched";
   if (seed.status === "watching") return "watching";
@@ -166,6 +179,46 @@ function buildInputKey(titles: UserTitle[]) {
     );
 
   return createHash("sha1").update(JSON.stringify(normalized)).digest("hex");
+}
+
+async function getUserRatingSignals(userId: string): Promise<UserRatingSignal[]> {
+  const { data, error } = await supabaseAdmin
+    .from("user_ratings")
+    .select("tmdb_id, media_type, rating")
+    .eq("user_id", userId)
+    .in("media_type", ["movie", "tv"]);
+
+  if (error) {
+    console.warn("[home/for-you] rating signal read failed", error.message);
+    return [];
+  }
+
+  return (data ?? [])
+    .map((row) => ({
+      tmdb_id: Number(row.tmdb_id),
+      media_type: row.media_type as MediaType,
+      rating: Number(row.rating),
+    }))
+    .filter(
+      (row): row is UserRatingSignal =>
+        Number.isInteger(row.tmdb_id) &&
+        row.tmdb_id > 0 &&
+        (row.media_type === "movie" || row.media_type === "tv") &&
+        Number.isFinite(row.rating),
+    );
+}
+
+function buildRatingSignalMap(ratings: UserRatingSignal[]): UserRatingSignalMap {
+  return new Map(ratings.map((rating) => [feedbackKey(rating.tmdb_id, rating.media_type), rating.rating]));
+}
+
+function buildLegacySignalMap(titles: UserTitle[]): LegacyTitleSignalMap {
+  return new Map(
+    titles.map((title) => [
+      feedbackKey(title.tmdb_id, title.media_type),
+      { favorite: Boolean(title.favorite), status: title.status },
+    ]),
+  );
 }
 
 function markStage(perf: Record<string, number>, stageRef: { value: number }, stage: string) {
@@ -372,8 +425,24 @@ export async function POST(request: Request) {
     const userTitles: UserTitle[] = titles.filter(
       (item: UserTitle) => item.tmdb_id && item.media_type,
     );
-    const inputKey = buildInputKey(userTitles);
     const sectionKey = "home_for_you";
+
+    const [feedbackMap, ratingSignals] = user
+      ? await Promise.all([getUserFeedbackMap(user.id, supabase), getUserRatingSignals(user.id)])
+      : [undefined, [] as UserRatingSignal[]];
+    const ratingMap = buildRatingSignalMap(ratingSignals);
+    const legacySignalMap = buildLegacySignalMap(userTitles);
+    const ratingSeeds: UserTitle[] = ratingSignals
+      .filter((rating) => rating.rating >= 4)
+      .map((rating) => ({
+        tmdb_id: rating.tmdb_id,
+        media_type: rating.media_type,
+        status: "watched",
+        favorite: false,
+        rating: rating.rating,
+      }));
+    const inputKey = buildInputKey([...userTitles, ...ratingSeeds]);
+    markStage(perf, stageRef, "preference_read");
 
     if (user) {
       const cached = await readContinuitySectionCache<ForYouCachePayload>(sectionKey, {
@@ -394,13 +463,14 @@ export async function POST(request: Request) {
       }
     }
 
-    const feedbackMap = user ? await getUserFeedbackMap(user.id, supabase) : undefined;
-    markStage(perf, stageRef, "feedback_read");
-
-    const knownKeys = new Set(userTitles.map((t) => `${t.media_type}-${t.tmdb_id}`));
+    const knownKeys = new Set([
+      ...userTitles.map((t) => `${t.media_type}-${t.tmdb_id}`),
+      ...ratingSignals.map((t) => `${t.media_type}-${t.tmdb_id}`),
+    ]);
 
     const seeds = [
       ...shuffleArray(userTitles.filter((t) => t.favorite)).slice(0, 5),
+      ...shuffleArray(ratingSeeds).slice(0, 5),
       ...shuffleArray(userTitles.filter((t) => t.status === "watchlist")).slice(0, 2),
       ...shuffleArray(userTitles.filter((t) => t.status === "watched")).slice(0, 2),
       ...shuffleArray(userTitles.filter((t) => t.status === "watching")).slice(0, 1),
@@ -421,6 +491,8 @@ export async function POST(request: Request) {
           {
             userId: user?.id,
             feedbackMap,
+            ratingMap,
+            legacySignalMap,
             context: "for_you",
             mediaType: candidate.mediaType,
             getBaseScore: () => candidate.score,
@@ -434,20 +506,22 @@ export async function POST(request: Request) {
         };
       })
       .sort((a, b) => b.score - a.score)
-      // Exclude hidden titles from for_you -- editorial policy: hidden is restrictive.
-      // search and title_page are the only surfaces that keep hidden titles visible.
+      // Exclude hard blocks from for_you; direct search/title pages can still show them.
       .filter((candidate) => {
-        if (!feedbackMap || feedbackMap.size === 0) return true;
         const key = feedbackKey(candidate.item.id, candidate.mediaType);
-        const rows = feedbackMap.get(key) ?? [];
-        if (rows.length === 0) return true;
+        const rows = feedbackMap?.get(key) ?? [];
         const feedbackInput = rows.map((r) => ({
           feedback_type: r.feedback_type,
           weight: r.weight,
           updated_at: r.updated_at,
           active: r.active,
         }));
-        const policy = resolveEditorialPolicy({ feedback: feedbackInput, surface: "for_you" });
+        const policy = resolveEditorialPolicy({
+          feedback: feedbackInput,
+          legacy: legacySignalMap.get(key) ?? null,
+          rating: ratingMap.get(key) ?? null,
+          surface: "for_you",
+        });
         return !policy.shouldExclude;
       });
     markStage(perf, stageRef, "scoring");

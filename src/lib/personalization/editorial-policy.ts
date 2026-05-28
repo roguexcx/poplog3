@@ -22,6 +22,7 @@ export type LegacyTitleSignals = {
 export type EditorialPolicyInput = {
   feedback?: Array<Pick<UserTitleFeedback, "feedback_type" | "weight" | "updated_at" | "active">>;
   legacy?: LegacyTitleSignals | null;
+  rating?: number | null;
   surface?: EditorialSurfaceInput;
   now?: Date;
 };
@@ -35,6 +36,7 @@ export type EditorialSignalState = {
   boosted: boolean;
   dismissed: boolean;
   protectedByLibrary: boolean;
+  ratingWeight: number;
   activeFeedbackTypes: FeedbackType[];
   neutralizedFeedbackTypes: FeedbackType[];
 };
@@ -60,6 +62,12 @@ export const EDITORIAL_SIGNAL_WEIGHTS: Record<FeedbackType | "favorite", number>
   not_interested: -70,
   hidden: -1000,
 };
+
+export const EDITORIAL_RATING_WEIGHTS = {
+  high: 35,
+  neutral: 0,
+  low: -45,
+} as const;
 
 export const EDITORIAL_SURFACE_MULTIPLIERS: Record<EditorialSurface, number> = {
   hero: 1.6,
@@ -104,10 +112,11 @@ function deriveSignalState(input: EditorialPolicyInput): EditorialSignalState {
   const feedbackTypes = collectFeedbackTypes(input.feedback);
   const legacy = input.legacy ?? {};
   const favorite = legacy.favorite === true;
-  const liked = favorite || legacy.liked === true || feedbackTypes.has("liked");
+  const liked = legacy.liked === true || feedbackTypes.has("liked");
   const disliked = legacy.liked === false || feedbackTypes.has("disliked");
   const protectedByLibrary =
     favorite || POSITIVE_LIBRARY_STATUSES.has(String(legacy.status ?? ""));
+  const ratingWeight = scoreRatingSignal(input.rating);
 
   const neutralizedFeedbackTypes: FeedbackType[] = [];
   let notInterested = feedbackTypes.has("not_interested");
@@ -141,16 +150,25 @@ function deriveSignalState(input: EditorialPolicyInput): EditorialSignalState {
     boosted: feedbackTypes.has("boosted"),
     dismissed,
     protectedByLibrary,
+    ratingWeight,
     activeFeedbackTypes: [...feedbackTypes],
     neutralizedFeedbackTypes: [...new Set(neutralizedFeedbackTypes)],
   };
+}
+
+function scoreRatingSignal(rating: number | null | undefined): number {
+  if (typeof rating !== "number" || !Number.isFinite(rating)) return EDITORIAL_RATING_WEIGHTS.neutral;
+  if (rating >= 4) return EDITORIAL_RATING_WEIGHTS.high;
+  if (rating <= 2.5) return EDITORIAL_RATING_WEIGHTS.low;
+  return EDITORIAL_RATING_WEIGHTS.neutral;
 }
 
 function scoreSignals(state: EditorialSignalState): number {
   let score = 0;
 
   if (state.favorite) score += EDITORIAL_SIGNAL_WEIGHTS.favorite;
-  else if (state.liked) score += EDITORIAL_SIGNAL_WEIGHTS.liked;
+  if (state.liked) score += EDITORIAL_SIGNAL_WEIGHTS.liked;
+  score += state.ratingWeight;
 
   if (state.boosted) score += EDITORIAL_SIGNAL_WEIGHTS.boosted;
   if (state.dismissed) score += EDITORIAL_SIGNAL_WEIGHTS.dismissed_from_section;
@@ -165,7 +183,9 @@ function buildExplanation(state: EditorialSignalState): string[] {
   const explanation: string[] = [];
 
   if (state.favorite) explanation.push("favorite_priority");
-  else if (state.liked) explanation.push("liked_boost");
+  if (state.liked) explanation.push("liked_boost");
+  if (state.ratingWeight > 0) explanation.push("high_rating_boost");
+  if (state.ratingWeight < 0) explanation.push("low_rating_penalty");
 
   if (state.boosted) explanation.push("contextual_boost");
   if (state.dismissed) explanation.push("contextual_dismissal");
@@ -205,7 +225,11 @@ export function resolveEditorialPolicy(input: EditorialPolicyInput): EditorialPo
   const baseScore = scoreSignals(state);
   const surfaceMultiplier = EDITORIAL_SURFACE_MULTIPLIERS[surface];
   const surfaceScore = Math.round(baseScore * surfaceMultiplier);
-  const shouldExclude = state.hidden && surface !== "search" && surface !== "title_page";
+  const shouldExclude =
+    (state.hidden || state.notInterested) &&
+    surface !== "search" &&
+    surface !== "title_page" &&
+    surface !== "library";
 
   return {
     surface,
