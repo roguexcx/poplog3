@@ -113,6 +113,10 @@ export default function ContinueCard({ item, onClick }: Props) {
       : item.remaining_runtime_label;
   const activeScopeLabel =
     timeScope === "series" && hasSeriesTime ? "total" : `T${item.next_season}`;
+  const seasonProgressLabel =
+    item.season_total != null
+      ? `${item.season_watched} de ${item.season_total} eps na T${item.next_season}`
+      : null;
 
   function handleTimeScopeToggle(e: React.MouseEvent) {
     if (!hasSeriesTime) return;
@@ -188,11 +192,11 @@ export default function ContinueCard({ item, onClick }: Props) {
                 &ldquo;{item.next_episode_name}&rdquo;
               </p>
             )}
-            {item.season_total != null && (
+            {(seasonProgressLabel || activeRuntimeLabel) && (
               <p className="mt-0.5 flex items-center gap-1 truncate text-[10px] text-white/35">
-                <span className="shrink-0">
-                  {item.season_watched} de {item.season_total} eps na T{item.next_season}
-                </span>
+                {seasonProgressLabel && (
+                  <span className="shrink-0">{seasonProgressLabel}</span>
+                )}
                 {activeRuntimeLabel && (
                   // span em vez de button — ContinueCard já é um <button>, não pode aninhar
                   <span

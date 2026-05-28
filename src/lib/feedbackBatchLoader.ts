@@ -18,6 +18,7 @@ import type { TitleFeedbackState } from "@/lib/personalization/feedback";
 // 30 ms é suficiente para coletar todos os cards de um render síncrono.
 const FLUSH_DELAY_MS = 90;
 const MEMORY_TTL_MS = 5 * 60 * 1000;
+const DISABLED_TTL_MS = 5 * 60 * 1000;
 
 type QueueItem = {
   tmdbId: number;
@@ -30,6 +31,7 @@ let pendingQueue: QueueItem[] = [];
 let flushTimer: ReturnType<typeof setTimeout> | null = null;
 const memoryCache = new Map<string, { state: TitleFeedbackState; expiresAt: number }>();
 const inFlight = new Map<string, Promise<TitleFeedbackState>>();
+let endpointDisabledUntil = 0;
 
 const NEUTRAL_STATE: TitleFeedbackState = {
   notInterested: false,
@@ -59,6 +61,11 @@ function flushQueue(): void {
   });
   if (active.length === 0) return;
 
+  if (endpointDisabledUntil > Date.now()) {
+    for (const item of active) item.resolve(NEUTRAL_STATE);
+    return;
+  }
+
   // Deduplica itens idênticos para não inflar o payload (mesma chave, vários cards)
   const seen = new Set<string>();
   const uniqueItems = active.filter((item) => {
@@ -67,6 +74,8 @@ function flushQueue(): void {
     seen.add(key);
     return true;
   });
+
+  if (uniqueItems.length === 0) return;
 
   const jsonPromise: Promise<{ results?: Record<string, TitleFeedbackState> } | null> =
     fetch("/api/user/feedback/batch", {
@@ -78,7 +87,13 @@ function flushQueue(): void {
         media_type: item.mediaType,
       })),
     }),
-  }).then((res) => (res.ok ? res.json() : null));
+  }).then((res) => {
+    if (res.status === 404 || res.status === 405 || res.status === 501) {
+      endpointDisabledUntil = Date.now() + DISABLED_TTL_MS;
+      return null;
+    }
+    return res.ok ? res.json() : null;
+  });
 
   for (const item of uniqueItems) {
     const key = `${item.mediaType}:${item.tmdbId}`;

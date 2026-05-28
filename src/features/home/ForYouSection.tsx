@@ -313,6 +313,10 @@ export default function ForYouSection() {
           setItems(json.items ?? []);
         }
       })
+      .catch(() => {
+        setFeatured(null);
+        setItems([]);
+      })
       .finally(() => setLoading(false));
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

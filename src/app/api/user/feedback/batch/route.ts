@@ -9,6 +9,7 @@ import { createSupabaseServerClient } from "@/server/supabase/server";
 import type { MediaType } from "@/types/user";
 
 const MAX_ITEMS = 60;
+const AUTH_TIMEOUT_MS = 700;
 
 type BatchItem = { tmdb_id: unknown; media_type: unknown };
 
@@ -28,6 +29,25 @@ function parseItems(
   return parsed.slice(0, MAX_ITEMS);
 }
 
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  fallback: T,
+): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), timeoutMs)),
+  ]);
+}
+
+function neutralResults(items: Array<{ tmdbId: number; mediaType: MediaType }>) {
+  const results: Record<string, { notInterested: boolean; activeFeedbackTypes: string[] }> = {};
+  for (const { tmdbId, mediaType } of items) {
+    results[`${mediaType}:${tmdbId}`] = { notInterested: false, activeFeedbackTypes: [] };
+  }
+  return results;
+}
+
 /**
  * POST /api/user/feedback/batch
  * Body: { items: Array<{ tmdb_id: number; media_type: "movie" | "tv" }> }
@@ -41,22 +61,20 @@ export async function POST(request: Request) {
   const body = await request.json().catch(() => ({})) as { items?: unknown };
   const items = parseItems(body?.items);
 
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  // Sem autenticação: devolve estados neutros para todos os itens solicitados
-  if (!user) {
-    const results: Record<string, { notInterested: boolean; activeFeedbackTypes: string[] }> = {};
-    for (const { tmdbId, mediaType } of items) {
-      results[`${mediaType}:${tmdbId}`] = { notInterested: false, activeFeedbackTypes: [] };
-    }
-    return NextResponse.json({ results });
-  }
-
   if (items.length === 0) {
     return NextResponse.json({ results: {} });
+  }
+
+  const supabase = await createSupabaseServerClient();
+  const { user, timedOut } = await withTimeout(
+    supabase.auth.getUser().then(({ data }) => ({ user: data.user, timedOut: false })),
+    AUTH_TIMEOUT_MS,
+    { user: null, timedOut: true },
+  );
+
+  // Sem autenticação: devolve estados neutros para todos os itens solicitados
+  if (!user || timedOut) {
+    return NextResponse.json({ results: neutralResults(items), skipped: timedOut ? "auth_timeout" : "anonymous" });
   }
 
   // Uma única query carrega todos os feedbacks ativos do usuário

@@ -1,4 +1,5 @@
 import type { TitleAvailabilityState } from "@/lib/series";
+import type { UserRatingData, CommunityRatingData } from "@/types/user";
 
 export type TitleMediaType = "movie" | "tv";
 
@@ -153,7 +154,12 @@ export type TitleUserState = {
   isAuthenticated?: boolean;
   /** Estado computado global — fonte de verdade para exibição de status visual. */
   computedState?: string | null;
+  /** Avaliação pessoal POPLOG do usuário para este título (0–5). */
+  userRating?: UserRatingData | null;
 };
+
+// Re-export for consumers that import from this module
+export type { UserRatingData, CommunityRatingData };
 
 export type TitleCompany = {
   id: number;
@@ -272,7 +278,11 @@ export type TitlePageData = {
   nextEpisode?: TitleEpisodeStub | null;
   seasons?: TitleSeasonInfo[];
   ratings?: TitleRatings | null;
+  /** Índice geral /10, referência global de nota do site. */
+  generalIndex?: number | null;
   userState?: TitleUserState;
+  /** Nota pública da comunidade POPLOG para este título. */
+  communityRating?: CommunityRatingData | null;
   /** Apenas para series, quando o usuario esta logado. */
   userSeriesProgress?: TitleSeriesProgress | null;
   providers?: TitleProvider[];

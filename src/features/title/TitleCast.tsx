@@ -62,44 +62,32 @@ export default function TitleCast({ cast }: TitleCastProps) {
       />
 
       <div className="relative">
-        {/* Gradiente esquerdo + seta */}
+        {/* Seta esquerda */}
         {canScrollLeft && (
-          <>
-            <div
-              className="pointer-events-none absolute inset-y-0 left-0 z-[2] w-12 bg-gradient-to-r from-zinc-950 via-zinc-950/65 to-transparent"
-              aria-hidden
-            />
-            <button
-              type="button"
-              onClick={() => scrollBy("left")}
-              aria-label="Rolar elenco para a esquerda"
-              className="absolute left-1 top-1/2 z-[3] grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-white/[0.14] bg-black/72 text-white/85 shadow-[0_12px_36px_rgba(0,0,0,0.45)] backdrop-blur-md transition hover:border-white/[0.28] hover:bg-black/82 hover:text-white"
-            >
-              <span className="text-base leading-none" aria-hidden>
-                ‹
-              </span>
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={() => scrollBy("left")}
+            aria-label="Rolar elenco para a esquerda"
+            className="absolute left-1 top-1/2 z-[3] grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-white/[0.14] bg-black/72 text-white/85 shadow-[0_12px_36px_rgba(0,0,0,0.45)] backdrop-blur-md transition hover:border-white/[0.28] hover:bg-black/82 hover:text-white"
+          >
+            <span className="text-base leading-none" aria-hidden>
+              ‹
+            </span>
+          </button>
         )}
 
-        {/* Gradiente direito + seta */}
+        {/* Seta direita */}
         {canScrollRight && (
-          <>
-            <div
-              className="pointer-events-none absolute inset-y-0 right-0 z-[2] w-12 bg-gradient-to-l from-zinc-950 via-zinc-950/65 to-transparent"
-              aria-hidden
-            />
-            <button
-              type="button"
-              onClick={() => scrollBy("right")}
-              aria-label="Rolar elenco para a direita"
-              className="absolute right-1 top-1/2 z-[3] grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-white/[0.14] bg-black/72 text-white/85 shadow-[0_12px_36px_rgba(0,0,0,0.45)] backdrop-blur-md transition hover:border-white/[0.28] hover:bg-black/82 hover:text-white"
-            >
-              <span className="text-base leading-none" aria-hidden>
-                ›
-              </span>
-            </button>
-          </>
+          <button
+            type="button"
+            onClick={() => scrollBy("right")}
+            aria-label="Rolar elenco para a direita"
+            className="absolute right-1 top-1/2 z-[3] grid h-10 w-10 -translate-y-1/2 place-items-center rounded-full border border-white/[0.14] bg-black/72 text-white/85 shadow-[0_12px_36px_rgba(0,0,0,0.45)] backdrop-blur-md transition hover:border-white/[0.28] hover:bg-black/82 hover:text-white"
+          >
+            <span className="text-base leading-none" aria-hidden>
+              ›
+            </span>
+          </button>
         )}
 
         <div

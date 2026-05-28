@@ -5,19 +5,24 @@ import {
   useCallback,
   useEffect,
   useMemo,
+  useRef,
   useState,
   useTransition,
 } from "react";
 
+import StarRating from "@/components/ui/StarRating";
 import SectionHeader from "@/components/ui/SectionHeader";
 import { formatRuntimeLabel } from "@/lib/domain-labels";
+import { useUserRating } from "@/hooks/useUserRating";
 
 import {
   dispatchLibraryStatusChanged as dispatchGlobalLibraryStatusChanged,
+  dispatchSeriesProgressRefresh,
   episodeKey,
   postEpisodeProgress,
 } from "./episodeProgressClient";
 import type { TitleSeasonInfo, TitleSeriesProgress } from "./types";
+import type { CommunityRatingData } from "@/types/user";
 
 type EpisodeDto = {
   episodeNumber: number;
@@ -50,6 +55,8 @@ type TitleEpisodeBrowserProps = {
   seasons: TitleSeasonInfo[];
   initialSeason?: number | null;
   initialProgress?: TitleSeriesProgress | null;
+  isAuthenticated?: boolean;
+  onSeriesCommunityRatingChange?: (rating: CommunityRatingData | null) => void;
 };
 
 type ActiveEpisode = {
@@ -89,54 +96,6 @@ type CachedEpisodeComments = {
   comments: EpisodeCommentDto[];
 };
 
-type RedditEpisodeCommentDto = {
-  id: string;
-  parentId: string | null;
-  author: string;
-  body: string;
-  bodyOriginal?: string;
-  bodyTranslated?: string;
-  translated?: boolean;
-  sourceLanguage?: string | null;
-  translationError?: string;
-  score: number;
-  createdUtc: number;
-  permalink: string;
-  depth: number;
-  replyCount: number;
-};
-
-type RedditEpisodeThreadDto = {
-  id: string;
-  title: string;
-  subreddit: string;
-  author: string;
-  score: number;
-  comments: number;
-  createdUtc: number;
-  url: string;
-  permalink: string;
-  selftext: string;
-  query: string;
-  relevance: number;
-  category: string;
-  isOfficialDiscussion: boolean;
-  isSpam: boolean;
-  episodeMatch: boolean;
-  fandomMatches: string[];
-  matchReasons: string[];
-  topComments: RedditEpisodeCommentDto[];
-  totalFlatComments: number;
-  totalUsefulComments: number;
-};
-
-type RedditEpisodeResponse = {
-  source?: string;
-  threads?: RedditEpisodeThreadDto[];
-  error?: string;
-  message?: string;
-};
-
 const EPISODES_PER_PAGE = 24;
 
 function formatAirDate(date: string | null) {
@@ -165,6 +124,8 @@ export default function TitleEpisodeBrowser({
   seasons,
   initialSeason,
   initialProgress,
+  isAuthenticated = false,
+  onSeriesCommunityRatingChange,
 }: TitleEpisodeBrowserProps) {
   const seasonNumbers = useMemo(
     () => seasons.map((s) => s.seasonNumber),
@@ -198,6 +159,7 @@ export default function TitleEpisodeBrowser({
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(EPISODES_PER_PAGE);
+  const seasonCacheRef = useRef<Map<number, SeasonDto>>(new Map());
 
   const [watchedKeys, setWatchedKeys] = useState<Set<string>>(
     () => new Set(initialProgress?.watchedKeys ?? []),
@@ -240,6 +202,17 @@ export default function TitleEpisodeBrowser({
       return;
     }
 
+    const cachedSeason = seasonCacheRef.current.get(selected);
+    if (cachedSeason) {
+      setSeason(cachedSeason);
+      setLoading(false);
+      setError(null);
+      setVisibleCount(EPISODES_PER_PAGE);
+      setActiveEpisode(null);
+      return;
+    }
+
+    const controller = new AbortController();
     let cancelled = false;
 
     setLoading(true);
@@ -248,7 +221,9 @@ export default function TitleEpisodeBrowser({
     setVisibleCount(EPISODES_PER_PAGE);
     setActiveEpisode(null);
 
-    fetch(`/api/poplog3/tv/${seriesTmdbId}/seasons/${selected}`)
+    fetch(`/api/poplog3/tv/${seriesTmdbId}/seasons/${selected}`, {
+      signal: controller.signal,
+    })
       .then(async (res) => {
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
@@ -259,10 +234,12 @@ export default function TitleEpisodeBrowser({
       .then((data) => {
         if (cancelled) return;
 
+        seasonCacheRef.current.set(selected, data);
         setSeason(data);
       })
       .catch((err) => {
         if (cancelled) return;
+        if (err instanceof DOMException && err.name === "AbortError") return;
 
         setError(err instanceof Error ? err.message : "Erro desconhecido");
         setSeason(null);
@@ -275,6 +252,7 @@ export default function TitleEpisodeBrowser({
 
     return () => {
       cancelled = true;
+      controller.abort();
     };
   }, [seriesTmdbId, selected]);
 
@@ -527,6 +505,30 @@ export default function TitleEpisodeBrowser({
     }
   }
 
+  async function handleMarkAllAired() {
+    if (seasonSaving) return;
+
+    setSeasonSaving(true);
+
+    try {
+      const body = await postEpisodeProgress({
+        seriesTmdbId,
+        markAllAired: true,
+      });
+
+      if (body.ok && body.progress?.watchedKeys) {
+        setWatchedKeys(new Set(body.progress.watchedKeys));
+      }
+
+      dispatchLibraryStatusChanged("watching");
+      dispatchSeriesProgressRefresh(seriesTmdbId);
+    } catch (err) {
+      console.warn("[series mark all aired] erro:", err);
+    } finally {
+      setSeasonSaving(false);
+    }
+  }
+
   async function handleClearSeason(seasonNumber: number) {
     if (!season || seasonSaving) return;
 
@@ -607,6 +609,19 @@ export default function TitleEpisodeBrowser({
           );
         })}
       </div>
+
+      {isAuthenticated && (
+        <div className="flex justify-end">
+          <button
+            type="button"
+            disabled={seasonSaving}
+            onClick={handleMarkAllAired}
+            className="rounded-xl border border-emerald-300/28 bg-emerald-500/10 px-3.5 py-1.5 text-[12px] font-semibold tracking-[-0.01em] text-emerald-200/90 transition duration-200 hover:border-emerald-300/48 hover:bg-emerald-500/20 disabled:cursor-wait disabled:opacity-50"
+          >
+            {seasonSaving ? "Salvando..." : "Vi tudo"}
+          </button>
+        </div>
+      )}
 
       {season && season.episodes.length > 0 && (() => {
         const now = Date.now();
@@ -744,10 +759,15 @@ export default function TitleEpisodeBrowser({
 
       {activeEpisode && (
         <EpisodeModal
+          key={episodeKey(
+            activeEpisode.seasonNumber,
+            activeEpisode.episode.episodeNumber,
+          )}
           seriesName={seriesName}
           seriesTmdbId={seriesTmdbId}
           episode={activeEpisode.episode}
           seasonNumber={activeEpisode.seasonNumber}
+          isAuthenticated={isAuthenticated}
           watched={watchedKeys.has(
             episodeKey(
               activeEpisode.seasonNumber,
@@ -770,6 +790,7 @@ export default function TitleEpisodeBrowser({
             ]
           }
           onCacheComments={handleCacheComments}
+          onSeriesCommunityRatingChange={onSeriesCommunityRatingChange}
           onClose={() => setActiveEpisode(null)}
           onToggle={(next) =>
             toggleEpisode(
@@ -822,7 +843,7 @@ function PreviousEpisodesDialog({
 }: PreviousEpisodesDialogProps) {
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-end justify-center bg-black/60 px-4 py-4 backdrop-blur-sm sm:items-center"
+      className="fixed inset-0 z-[90] flex items-end justify-center bg-black/72 px-4 py-4 sm:items-center"
       role="dialog"
       aria-modal="true"
       aria-label="Marcar episódios anteriores"
@@ -938,8 +959,8 @@ function EpisodeCard({
     episode.episodeType === "season_premiere" ||
     episode.episodeType === "premiere";
 
-  const aired =
-    !episode.airDate || new Date(episode.airDate).getTime() <= Date.now();
+  const airTime = episode.airDate ? new Date(episode.airDate).getTime() : NaN;
+  const aired = Number.isFinite(airTime) && airTime <= Date.now();
 
   const communityLabel = !aired
     ? null
@@ -1101,10 +1122,12 @@ type EpisodeModalProps = {
   seriesName?: string | null;
   episode: EpisodeDto;
   seasonNumber: number;
+  isAuthenticated?: boolean;
   watched: boolean;
   saving: boolean;
   cachedComments?: CachedEpisodeComments;
   onCacheComments: (cacheKey: string, payload: CachedEpisodeComments) => void;
+  onSeriesCommunityRatingChange?: (rating: CommunityRatingData | null) => void;
   onClose: () => void;
   onToggle: (next: boolean) => void;
 };
@@ -1114,10 +1137,12 @@ function EpisodeModal({
   seriesName,
   episode,
   seasonNumber,
+  isAuthenticated = false,
   watched,
   saving,
   cachedComments,
   onCacheComments,
+  onSeriesCommunityRatingChange,
   onClose,
   onToggle,
 }: EpisodeModalProps) {
@@ -1127,6 +1152,16 @@ function EpisodeModal({
     !episode.airDate || new Date(episode.airDate).getTime() <= Date.now();
 
   const commentCacheKey = episodeKey(seasonNumber, episode.episodeNumber);
+
+  // ── Avaliação pessoal do episódio ─────────────────────────────────────────
+  const episodeRating = useUserRating({
+    mediaType: "episode",
+    tmdbId: seriesTmdbId,
+    seasonNumber,
+    episodeNumber: episode.episodeNumber,
+    isAuthenticated,
+    onParentCommunityRatingChange: onSeriesCommunityRatingChange,
+  });
 
   const isFinale = episode.episodeType === "finale";
   const isPremiere =
@@ -1150,45 +1185,7 @@ function EpisodeModal({
   );
   const [commentsRefreshToken, setCommentsRefreshToken] = useState(0);
 
-  const [socialTab, setSocialTab] = useState<"trakt" | "reddit">("trakt");
-  const [redditThreads, setRedditThreads] = useState<RedditEpisodeThreadDto[]>([]);
-  const [redditLoading, setRedditLoading] = useState(false);
-  const [redditError, setRedditError] = useState<string | null>(null);
-
-  function getRedditCategoryLabel(category: string) {
-    switch (category) {
-      case "episode_exact":
-        return "Discussão oficial";
-      case "episode_near":
-        return "Discussão do episódio";
-      case "review":
-        return "Review";
-      case "reaction":
-        return "Reação";
-      case "recap":
-        return "Recap";
-      case "explained":
-        return "Explicação";
-      case "theory":
-        return "Teoria";
-      case "series_general":
-        return "Série geral";
-      default:
-        return category;
-    }
-  }
-
-  function getRedditHeatLabel(thread: RedditEpisodeThreadDto) {
-    const heat =
-      (thread.comments || 0) +
-      (thread.totalUsefulComments || 0) +
-      (thread.topComments?.length || 0) * 4;
-
-    if (heat >= 300) return "Comunidade em choque";
-    if (heat >= 180) return "Discussão intensa";
-    if (heat >= 90) return "Muito comentado";
-    return "Conversando sobre";
-  }
+  const socialTab = "trakt";
 
   useEffect(() => {
     let cancelled = false;
@@ -1251,13 +1248,6 @@ function EpisodeModal({
         const nextTotal =
           typeof body.total === "number" ? body.total : nextComments.length;
 
-        console.log("[trakt episode comments] resposta:", {
-          url: commentsUrl,
-          total: nextTotal,
-          commentsLength: nextComments.length,
-          source: body.source,
-        });
-
         setComments(nextComments);
         setCommentsTotal(nextTotal);
         onCacheComments(commentCacheKey, {
@@ -1307,80 +1297,6 @@ function EpisodeModal({
     seriesTmdbId,
   ]);
 
-  useEffect(() => {
-    let cancelled = false;
-
-    setRedditThreads([]);
-    setRedditError(null);
-
-    if (!aired) {
-      setRedditLoading(false);
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    setRedditLoading(true);
-
-    const params = new URLSearchParams({
-      tmdbId: String(seriesTmdbId),
-      mediaType: "tv",
-      seasonNumber: String(seasonNumber),
-      episodeNumber: String(episode.episodeNumber),
-    });
-
-    const redditUrl = `/api/social/reddit/contextual?${params.toString()}`;
-
-    fetch(redditUrl, { cache: "no-store" })
-      .then(async (res) => {
-        const body = (await res.json().catch(() => null)) as
-          | RedditEpisodeResponse
-          | null;
-
-        if (cancelled) return null;
-
-        if (!res.ok) {
-          throw new Error(body?.message || body?.error || `HTTP ${res.status}`);
-        }
-
-        if (body?.error) {
-          throw new Error(body.message || body.error);
-        }
-
-        return body;
-      })
-      .then((body) => {
-        if (cancelled || !body) return;
-
-        setRedditThreads(Array.isArray(body.threads) ? body.threads : []);
-      })
-      .catch((err) => {
-        if (cancelled) return;
-
-        const message =
-          err instanceof Error ? err.message : "Erro ao carregar Reddit";
-
-        console.warn("[reddit contextual social] erro:", {
-          url: redditUrl,
-          seriesTmdbId,
-          seasonNumber,
-          episodeNumber: episode.episodeNumber,
-          message,
-        });
-
-        setRedditError(message);
-        setRedditThreads([]);
-      })
-      .finally(() => {
-        if (cancelled) return;
-        setRedditLoading(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [aired, episode.episodeNumber, seasonNumber, seriesTmdbId]);
-
   const socialTabs = [
     {
       id: "trakt" as const,
@@ -1388,17 +1304,11 @@ function EpisodeModal({
       count: commentsTotal || comments.length || 0,
       loading: commentsLoading,
     },
-    {
-      id: "reddit" as const,
-      label: "Reddit",
-      count: redditThreads.length || 0,
-      loading: redditLoading,
-    },
   ];
 
   return (
     <div
-      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/78 px-3 py-3 backdrop-blur-xl sm:items-center sm:px-5 sm:py-6"
+      className="fixed inset-0 z-[80] flex items-end justify-center bg-black/82 px-3 py-3 sm:items-center sm:px-5 sm:py-6"
       role="dialog"
       aria-modal="true"
       aria-label={`Detalhes do episódio ${episodeKey(
@@ -1414,7 +1324,7 @@ function EpisodeModal({
         <button
           type="button"
           onClick={onClose}
-          className="absolute right-3 top-3 z-20 grid h-9 w-9 place-items-center rounded-full border border-white/[0.12] bg-black/55 text-lg leading-none text-white/80 backdrop-blur-md transition hover:border-white/[0.25] hover:bg-white/[0.10] hover:text-white"
+          className="absolute right-3 top-3 z-20 grid h-9 w-9 place-items-center rounded-full border border-white/[0.12] bg-black/70 text-lg leading-none text-white/80 transition hover:border-white/[0.25] hover:bg-white/[0.10] hover:text-white"
           aria-label="Fechar episódio"
         >
           ×
@@ -1430,7 +1340,6 @@ function EpisodeModal({
                 unoptimized
                 sizes="(max-width: 768px) 100vw, 1024px"
                 className="object-cover brightness-[0.78] saturate-[1.08]"
-                priority
               />
             ) : (
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_25%_15%,rgba(99,102,241,0.28),transparent_42%),linear-gradient(135deg,#111827,#020617_65%,#000)]" />
@@ -1530,17 +1439,77 @@ function EpisodeModal({
           </div>
 
           <div className="flex flex-col gap-5 p-5 sm:p-7">
-            <div className="w-full">
-              <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] p-4 sm:p-5">
-                <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-200/80">
-                  Sinopse
-                </p>
+            <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] p-4 sm:p-5">
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-200/80">
+                Sua nota para este episódio
+              </p>
 
-                <p className="mt-3 text-[13.5px] leading-7 text-white/68 sm:text-[14px]">
-                  {episode.overview ||
-                    "Ainda não há sinopse oficial para este episódio."}
+              {isAuthenticated ? (
+                <div className="mt-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:gap-4">
+                  <StarRating
+                    value={episodeRating.rating}
+                    size="lg"
+                    interactive
+                    onChange={episodeRating.selectRating}
+                    ariaLabel="Sua nota para este episódio"
+                  />
+
+                  <div className="flex items-center gap-2.5">
+                    {episodeRating.rating !== null ? (
+                      <>
+                        <span className="text-[22px] font-black tabular-nums leading-none text-amber-300">
+                          {episodeRating.rating.toFixed(1)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={episodeRating.clearRating}
+                          disabled={episodeRating.isPending}
+                          className="rounded-full border border-white/[0.09] bg-white/[0.04] px-2.5 py-1 text-[9.5px] font-black uppercase tracking-[0.16em] text-white/38 transition hover:border-rose-300/28 hover:bg-rose-500/10 hover:text-rose-200/80 disabled:opacity-40"
+                        >
+                          Remover
+                        </button>
+                      </>
+                    ) : (
+                      <span className="text-[12px] text-white/32">
+                        {episodeRating.isPending ? "Salvando…" : "Sem nota"}
+                      </span>
+                    )}
+
+                    {episodeRating.isPending && episodeRating.rating !== null && (
+                      <span className="h-3 w-3 animate-spin rounded-full border border-amber-300/60 border-t-transparent" />
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="mt-3 flex items-center gap-3">
+                  <StarRating
+                    value={null}
+                    size="lg"
+                    interactive={false}
+                    ariaLabel="Avaliação bloqueada para visitantes"
+                  />
+                  <span className="text-[12px] text-white/35">
+                    Entre para avaliar
+                  </span>
+                </div>
+              )}
+
+              {episodeRating.error && (
+                <p className="mt-2 text-[11px] text-rose-300/80">
+                  {episodeRating.error}
                 </p>
-              </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-white/[0.08] bg-white/[0.035] p-4 sm:p-5">
+              <p className="text-[10px] font-black uppercase tracking-[0.22em] text-indigo-200/80">
+                Sinopse
+              </p>
+
+              <p className="mt-3 text-[13.5px] leading-7 text-white/68 sm:text-[14px]">
+                {episode.overview ||
+                  "Ainda não há sinopse oficial para este episódio."}
+              </p>
             </div>
 
             <div className="flex flex-col gap-4">
@@ -1550,13 +1519,6 @@ function EpisodeModal({
                     {commentsLoading ? (
                       <span className="h-2 w-2 animate-pulse rounded-full bg-fuchsia-400/70" />
                     ) : comments.length > 0 ? (
-                      <>
-                        <span className="absolute inset-0 animate-ping rounded-full bg-fuchsia-500/20" />
-                        <span className="h-2 w-2 rounded-full bg-fuchsia-400" />
-                      </>
-                    ) : redditLoading ? (
-                      <span className="h-2 w-2 animate-pulse rounded-full bg-fuchsia-400/40" />
-                    ) : redditThreads.length > 0 ? (
                       <>
                         <span className="absolute inset-0 animate-ping rounded-full bg-fuchsia-500/20" />
                         <span className="h-2 w-2 rounded-full bg-fuchsia-400" />
@@ -1576,16 +1538,8 @@ function EpisodeModal({
                         : commentsLoading
                           ? "Buscando reações…"
                           : comments.length > 0
-                            ? `${commentsTotal || comments.length || 0} no Trakt · ${
-                                redditLoading
-                                  ? "Reddit carregando…"
-                                  : `${redditThreads.length} ${redditThreads.length === 1 ? "thread" : "threads"} no Reddit`
-                              }`
-                            : redditLoading
-                              ? "Reddit carregando…"
-                              : redditThreads.length > 0
-                                ? `${redditThreads.length} ${redditThreads.length === 1 ? "thread" : "threads"} no Reddit`
-                                : "Sem comentários por enquanto"}
+                            ? `${commentsTotal || comments.length || 0} no Trakt`
+                            : "Sem comentários por enquanto"}
                     </h3>
                   </div>
                 </div>
@@ -1604,7 +1558,7 @@ function EpisodeModal({
 
               {aired && (
                 <p className="text-[11px] leading-5 text-white/25">
-                  Trakt prioriza comentários diretos. Reddit traz discussões, respostas e temperatura da comunidade. Ambos são traduzidos automaticamente para PT-BR quando possível.
+                  Comentários do Trakt são traduzidos automaticamente para PT-BR quando possível.
                 </p>
               )}
 
@@ -1616,7 +1570,7 @@ function EpisodeModal({
                     <button
                       key={tab.id}
                       type="button"
-                      onClick={() => setSocialTab(tab.id)}
+                      onClick={() => undefined}
                       className={[
                         "rounded-full border px-3.5 py-1.5 text-[10px] font-black uppercase tracking-[0.16em] transition",
                         active
@@ -1813,130 +1767,6 @@ function EpisodeModal({
                 </>
               )}
 
-              {socialTab === "reddit" && (
-                <>
-                  {redditLoading && (
-                    <div className="grid gap-3">
-                      {Array.from({ length: 3 }).map((_, index) => (
-                        <div
-                          key={index}
-                          className="h-32 animate-pulse rounded-2xl border border-white/[0.05] bg-white/[0.02]"
-                        />
-                      ))}
-                    </div>
-                  )}
-
-                  {!redditLoading && redditError && (
-                    <div className="flex items-start gap-3 rounded-2xl border border-rose-300/14 bg-rose-500/[0.07] p-4">
-                      <span className="mt-0.5 text-base leading-none text-rose-400/60">
-                        ⚠
-                      </span>
-                      <p className="text-[12.5px] leading-6 text-rose-100/68">
-                        Não consegui carregar discussões do Reddit agora: {redditError}
-                      </p>
-                    </div>
-                  )}
-
-                  {!redditLoading && !redditError && redditThreads.length === 0 && (
-                    <p className="text-[12.5px] leading-6 text-white/35">
-                      Nenhuma discussão relevante do Reddit foi encontrada para este episódio.
-                    </p>
-                  )}
-
-                  {!redditLoading && redditThreads.length > 0 && (
-                    <div className="flex flex-col gap-4">
-                      {redditThreads.map((thread) => (
-                        <div
-                          key={thread.id}
-                          className="overflow-hidden rounded-2xl border border-white/[0.07] bg-white/[0.025]"
-                        >
-                          <div className="border-b border-white/[0.06] p-4">
-                            <div className="flex flex-wrap gap-2">
-                              <span className="rounded-full border border-fuchsia-300/18 bg-fuchsia-500/[0.08] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-fuchsia-100/75">
-                                {getRedditHeatLabel(thread)}
-                              </span>
-                              <span className="rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-white/45">
-                                {getRedditCategoryLabel(thread.category)}
-                              </span>
-                              {thread.isOfficialDiscussion && (
-                                <span className="rounded-full border border-emerald-300/18 bg-emerald-500/[0.08] px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] text-emerald-100/75">
-                                  Oficial
-                                </span>
-                              )}
-                              <span className="rounded-full border border-white/[0.08] bg-white/[0.03] px-2.5 py-1 text-[9px] font-bold text-white/42">
-                                r/{thread.subreddit}
-                              </span>
-                            </div>
-
-                            <h4 className="mt-3 text-[15px] font-bold leading-snug tracking-[-0.02em] text-white/88">
-                              {thread.title}
-                            </h4>
-
-                            <div className="mt-2 flex flex-wrap gap-3 text-[10.5px] font-semibold text-white/30">
-                              <span>⬆ {thread.score}</span>
-                              <span>💬 {thread.comments}</span>
-                              <span>úteis {thread.totalUsefulComments}</span>
-                              <span>relevância {thread.relevance}</span>
-                            </div>
-                          </div>
-
-                          {thread.topComments.length > 0 && (
-                            <div className="grid gap-3 p-4 xl:grid-cols-2">
-                              {thread.topComments.map((comment) => (
-                                <div
-                                  key={comment.id}
-                                  className="rounded-xl border border-white/[0.05] bg-black/20 p-3.5"
-                                >
-                                  <div className="flex flex-wrap items-center gap-2 text-[10px] text-white/32">
-                                    <span className="font-bold text-white/55">
-                                      u/{comment.author}
-                                    </span>
-                                    <span>⬆ {comment.score}</span>
-                                    {comment.replyCount > 0 && (
-                                      <span>{comment.replyCount} respostas</span>
-                                    )}
-                                    {comment.translated && (
-                                      <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-[9px] font-bold text-emerald-200/70">
-                                        PT-BR
-                                      </span>
-                                    )}
-                                  </div>
-
-                                  <p className="mt-2 whitespace-pre-line text-[12.5px] leading-6 text-white/55">
-                                    {comment.bodyTranslated || comment.body}
-                                  </p>
-
-                                  {comment.translated && comment.bodyOriginal && (
-                                    <details className="mt-3 rounded-xl border border-white/[0.06] bg-white/[0.02] p-3">
-                                      <summary className="cursor-pointer text-[9px] font-black uppercase tracking-[0.16em] text-white/32">
-                                        Ver original
-                                      </summary>
-                                      <p className="mt-2 whitespace-pre-line text-[12px] leading-6 text-white/38">
-                                        {comment.bodyOriginal}
-                                      </p>
-                                    </details>
-                                  )}
-                                </div>
-                              ))}
-                            </div>
-                          )}
-
-                          <div className="border-t border-white/[0.06] px-4 py-3">
-                            <a
-                              href={thread.permalink}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="text-[10px] font-black uppercase tracking-[0.16em] text-white/38 underline decoration-white/20 underline-offset-4 transition hover:text-white/70"
-                            >
-                              Abrir thread no Reddit
-                            </a>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </>
-              )}
             </div>
           </div>
         </div>

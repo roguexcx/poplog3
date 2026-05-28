@@ -1,9 +1,13 @@
 import ContextualAttribution from "@/components/attribution/ContextualAttribution";
 import { getRatingSourceIds } from "@/attribution/helpers";
+import { getGeneralIndex } from "@/lib/ratings/general-index";
 import type { TitleRatings } from "./types";
+import type { CommunityRatingData } from "@/types/user";
 
 type TitleScoreCardProps = {
   ratings?: TitleRatings | null;
+  communityRating?: CommunityRatingData | null;
+  generalIndex?: number | null;
 };
 
 type VisibleRating = {
@@ -61,15 +65,22 @@ function scoreTone(score: number): {
   };
 }
 
-export default function TitleScoreCard({ ratings }: TitleScoreCardProps) {
-  if (!ratings) return null;
+export default function TitleScoreCard({
+  ratings,
+  communityRating,
+  generalIndex,
+}: TitleScoreCardProps) {
+  if (!ratings && !communityRating) return null;
 
-  const score = ratings.poplogScore ?? null;
+  const score =
+    typeof generalIndex === "number"
+      ? generalIndex
+      : getGeneralIndex({ communityRating, ratings });
   const tone = score !== null ? scoreTone(score) : null;
-  const votes = formatVotes(ratings.imdbVotes);
+  const votes = formatVotes(ratings?.imdbVotes);
 
   const rawRatings: (VisibleRating | null)[] = [
-    typeof ratings.imdbRating === "number"
+    typeof ratings?.imdbRating === "number"
       ? {
           label: "IMDb",
           value: ratings.imdbRating.toFixed(1),
@@ -78,7 +89,7 @@ export default function TitleScoreCard({ ratings }: TitleScoreCardProps) {
         }
       : null,
 
-    typeof ratings.rottenTomatoesScore === "number"
+    typeof ratings?.rottenTomatoesScore === "number"
       ? {
           label: "Rotten Tom.",
           value: String(ratings.rottenTomatoesScore),
@@ -86,7 +97,7 @@ export default function TitleScoreCard({ ratings }: TitleScoreCardProps) {
         }
       : null,
 
-    typeof ratings.metacriticScore === "number"
+    typeof ratings?.metacriticScore === "number"
       ? {
           label: "Metacritic",
           value: String(ratings.metacriticScore),
@@ -94,7 +105,7 @@ export default function TitleScoreCard({ ratings }: TitleScoreCardProps) {
         }
       : null,
 
-    typeof ratings.tmdbRating === "number"
+    typeof ratings?.tmdbRating === "number"
       ? {
           label: "TMDB",
           value: ratings.tmdbRating.toFixed(1),
@@ -111,8 +122,9 @@ export default function TitleScoreCard({ ratings }: TitleScoreCardProps) {
   }
 
   const componentsUsed =
-    ratings.poplogComponents ?? visibleRatings.length;
-  const sourcesUsed = getRatingSourceIds(ratings);
+    (communityRating?.ratingCount ? 1 : 0) +
+    (ratings?.poplogComponents ?? visibleRatings.length);
+  const sourcesUsed = ratings ? getRatingSourceIds(ratings) : [];
 
   return (
     <section className="relative overflow-hidden rounded-[1.5rem] border border-white/[0.08] bg-white/[0.035] p-5 backdrop-blur-xl sm:p-6">
@@ -131,7 +143,7 @@ export default function TitleScoreCard({ ratings }: TitleScoreCardProps) {
           <div className="flex items-center gap-2 text-indigo-300/80">
             <span aria-hidden className="text-[13px]">{"★"}</span>
             <span className="text-xs font-black uppercase tracking-[0.18em]">
-              Notas
+              Índice geral
             </span>
           </div>
           <ContextualAttribution
@@ -171,11 +183,11 @@ export default function TitleScoreCard({ ratings }: TitleScoreCardProps) {
           <div className="min-w-0 flex-1">
             {score !== null ? (
               <p className="text-[12px] leading-[1.5] text-white/60">
-                Score POPLOG baseado em{" "}
+                Nota referência do site, calculada com{" "}
                 <span className="font-semibold text-white/80">
                   {componentsUsed}
                 </span>{" "}
-                {componentsUsed === 1 ? "fonte" : "fontes"}.
+                {componentsUsed === 1 ? "fonte disponível" : "fontes disponíveis"}.
               </p>
             ) : (
               <p className="text-[12px] leading-[1.5] text-white/45">

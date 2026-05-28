@@ -6,12 +6,13 @@ import {
   translateGenreName,
 } from "@/lib/domain-labels";
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
-import { getCurrentUser } from "@/server/auth/get-current-user";
+import { createSupabaseServerClient } from "@/server/supabase/server";
 import { supabaseAdmin } from "@/server/supabase/admin";
 import {
   readContinuitySectionCache,
   writeContinuitySectionCache,
 } from "@/server/continuity/continuity-section-cache";
+import type { User } from "@supabase/supabase-js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -83,6 +84,8 @@ type WatchlistLiveCachePayload = {
 };
 
 const WATCHLIST_LIVE_CACHE_TTL_MS = 30 * 60_000;
+const AUTH_TIMEOUT_MS = 900;
+const TABLE_READ_TIMEOUT_MS = 2_500;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -164,6 +167,67 @@ function markStage(perf: Record<string, number>, stageRef: { value: number }, st
   stageRef.value = Date.now();
 }
 
+function markLocalStage(perf: Record<string, number>, stageRef: { value: number }, stage: string) {
+  markStage(perf, stageRef, stage);
+}
+
+async function withTimeout<T>(
+  promise: Promise<T>,
+  timeoutMs: number,
+  fallback: T,
+): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), timeoutMs)),
+  ]);
+}
+
+async function resolveCurrentUserWithPerf(): Promise<{
+  user: User | null;
+  timedOut: boolean;
+  perf: Record<string, number>;
+}> {
+  const perf: Record<string, number> = {};
+  const stageRef = { value: Date.now() };
+
+  const authPromise = (async () => {
+    const supabase = await createSupabaseServerClient();
+    markLocalStage(perf, stageRef, "create_client");
+    perf.read_cookies = 0;
+
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    markLocalStage(perf, stageRef, "get_session");
+
+    if (!session?.user) {
+      perf.get_user = 0;
+      perf.profile_lookup = 0;
+      perf.fallback_user_resolution = 0;
+      return { user: null, timedOut: false, perf };
+    }
+
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser();
+    markLocalStage(perf, stageRef, "get_user");
+    perf.profile_lookup = 0;
+    perf.fallback_user_resolution = 0;
+
+    return { user: error ? null : user, timedOut: false, perf };
+  })();
+
+  return withTimeout(authPromise, AUTH_TIMEOUT_MS, {
+    user: null,
+    timedOut: true,
+    perf: {
+      ...perf,
+      fallback_user_resolution: Date.now() - stageRef.value,
+    },
+  });
+}
+
 // ─── POST handler ─────────────────────────────────────────────────────────────
 
 export async function POST(request: Request) {
@@ -180,7 +244,12 @@ export async function POST(request: Request) {
     }
 
     const rows = titles as WatchlistRow[];
-    const currentUser = await getCurrentUser();
+    const authResolution = await resolveCurrentUserWithPerf();
+    const currentUser = authResolution.user;
+    Object.entries(authResolution.perf).forEach(([key, value]) => {
+      perf[`auth_${key}`] = value;
+    });
+    perf.auth_timed_out = authResolution.timedOut ? 1 : 0;
     markStage(perf, stageRef, "auth");
 
     const inputKey = buildInputKey(rows);
@@ -194,29 +263,39 @@ export async function POST(request: Request) {
       });
       markStage(perf, stageRef, "cache_read");
 
-      if (cached?.status === "hit" && cached.payload.inputKey === inputKey) {
+      if ((cached?.status === "hit" || cached?.status === "stale") && cached.payload.inputKey === inputKey) {
         console.log("[watchlist/live/perf]", {
-          cacheStatus: "persistent_hit",
+          cacheStatus: cached.status === "hit" ? "persistent_hit" : "persistent_stale",
           returned: cached.payload.titles.length,
+          external_sync: 0,
           ...perf,
           total: Date.now() - totalStartedAt,
         });
         return NextResponse.json({ titles: cached.payload.titles });
       }
+    } else {
+      perf.cache_read = 0;
     }
 
     const ids = Array.from(new Set(rows.map((row) => row.tmdb_id)));
-    const [titlesResult, availabilityResult] = await Promise.all([
-      supabaseAdmin
-        .from("poplog3_titles")
-        .select("tmdb_id, media_type, title, original_title, poster_path, release_date, first_air_date, runtime, episode_run_time, number_of_seasons, genres")
-        .in("tmdb_id", ids),
-      supabaseAdmin
-        .from("poplog3_title_availability")
-        .select("tmdb_id, media_type, provider_name, provider_logo_path, availability_type, country")
-        .in("tmdb_id", ids)
-        .eq("country", "BR"),
-    ]);
+    const [titlesResult, availabilityResult] = await withTimeout(
+      (async (): Promise<[{ data: unknown[] | null }, { data: unknown[] | null }]> => {
+        const [titleRows, availabilityRows] = await Promise.all([
+          supabaseAdmin
+            .from("poplog3_titles")
+            .select("tmdb_id, media_type, title, original_title, poster_path, release_date, first_air_date, runtime, episode_run_time, number_of_seasons, genres")
+            .in("tmdb_id", ids),
+          supabaseAdmin
+            .from("poplog3_title_availability")
+            .select("tmdb_id, media_type, provider_name, provider_logo_path, availability_type, country")
+            .in("tmdb_id", ids)
+            .eq("country", "BR"),
+        ]);
+        return [titleRows, availabilityRows];
+      })(),
+      TABLE_READ_TIMEOUT_MS,
+      [{ data: [] }, { data: [] }],
+    );
     markStage(perf, stageRef, "cache_tables_read");
 
     const titleMap = new Map<string, TitleRow>(
@@ -302,7 +381,7 @@ export async function POST(request: Request) {
     markStage(perf, stageRef, "response_build");
 
     if (currentUser) {
-      await writeContinuitySectionCache({
+      void writeContinuitySectionCache({
         sectionKey,
         userId: currentUser.id,
         region: "BR",
@@ -314,7 +393,7 @@ export async function POST(request: Request) {
           generatedAt: new Date().toISOString(),
         } satisfies WatchlistLiveCachePayload,
       });
-      markStage(perf, stageRef, "cache_write");
+      perf.cache_write = 0;
     }
 
     console.log("[watchlist/live/perf]", {

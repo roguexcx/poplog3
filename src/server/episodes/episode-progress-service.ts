@@ -1,6 +1,11 @@
 import { supabaseAdmin } from "@/server/supabase/admin";
 import { upsertUserTitleStatus } from "@/server/library/library-service";
 import { upsertTitleState } from "@/server/state/user-title-state";
+import {
+  filterValidAiredEpisodes,
+  getValidSeasonNumbers,
+  isValidAiredEpisode,
+} from "@/lib/episodes/episode-validators";
 
 export type UserEpisodeRow = {
   user_id: string;
@@ -239,13 +244,19 @@ export async function markSeasonWatched(
 
   if (error) throw new Error(error.message);
 
-  const eps = (episodes ?? []).map(
-    (e: { episode_number: number; runtime: number | null }) => ({
+  const eps = (episodes ?? [])
+    .filter((e: { episode_number: number; runtime: number | null }) =>
+      isValidAiredEpisode({
+        season_number: seasonNumber,
+        episode_number: e.episode_number,
+        air_date: today,
+      })
+    )
+    .map((e: { episode_number: number; runtime: number | null }) => ({
       seasonNumber,
       episodeNumber: e.episode_number,
       runtimeMinutes: e.runtime ?? null,
-    })
-  );
+    }));
 
   return bulkMarkEpisodesWatched({
     userId,
@@ -371,22 +382,26 @@ export async function computeUserSeriesProgress(
     air_date: string | null;
   }>;
 
+  const validCatalogKeys = new Set(
+    allEpisodes
+      .filter((ep) => isValidAiredEpisode(ep, now))
+      .map((ep) => `${ep.season_number}-${ep.episode_number}`)
+  );
+  const watchedValid = watched.filter((w) =>
+    validCatalogKeys.has(`${w.season_number}-${w.episode_number}`)
+  );
   const watchedSet = new Set(
-    watched.map((w) => `${w.season_number}-${w.episode_number}`)
+    watchedValid.map((w) => `${w.season_number}-${w.episode_number}`)
   );
 
-  const airedEps = allEpisodes.filter((ep) => {
-    if (!ep.air_date) return false;
-    const t = new Date(ep.air_date).getTime();
-    return Number.isFinite(t) && t <= now;
-  });
+  const airedEps = filterValidAiredEpisodes(allEpisodes, now);
   const confirmedEpisodes = allEpisodes.filter((ep) => {
     if (!ep.air_date) return false;
     const t = new Date(ep.air_date).getTime();
     return Number.isFinite(t);
   });
 
-  const validSeasonsSet = new Set(airedEps.map((ep) => ep.season_number));
+  const validSeasonsSet = getValidSeasonNumbers(allEpisodes, now);
 
   let nextEpisode: UserSeriesProgress["nextEpisode"] = null;
   for (const ep of allEpisodes) {
@@ -404,17 +419,17 @@ export async function computeUserSeriesProgress(
   }
 
   const lastWatchedAt =
-    watched.length > 0
-      ? watched.map((w) => w.watched_at).sort().reverse()[0]
+    watchedValid.length > 0
+      ? watchedValid.map((w) => w.watched_at).sort().reverse()[0]
       : null;
 
   return {
     seriesTmdbId,
-    watchedCount: watched.length,
+    watchedCount: watchedValid.length,
     totalEpisodes: confirmedEpisodes.length > 0 ? confirmedEpisodes.length : null,
     airedEpisodes: airedEps.length,
     lastWatchedAt,
-    watchedKeys: watched.map((w) =>
+    watchedKeys: watchedValid.map((w) =>
       episodeKey(w.season_number, w.episode_number)
     ),
     nextEpisode,
@@ -571,16 +586,20 @@ export async function getUserWatchingSeries(
     const catalogEps = catalogBySeriesId.get(seriesId) ?? [];
     const meta = titleMap.get(seriesId) ?? null;
 
+    const validCatalogKeys = new Set(
+      catalogEps
+        .filter((ep) => isValidAiredEpisode(ep, now))
+        .map((ep) => `${ep.season_number}-${ep.episode_number}`)
+    );
+    const watchedValid = watchedEps.filter((w) =>
+      validCatalogKeys.has(`${w.season_number}-${w.episode_number}`)
+    );
     const watchedSet = new Set(
-      watchedEps.map((w) => `${w.season_number}-${w.episode_number}`)
+      watchedValid.map((w) => `${w.season_number}-${w.episode_number}`)
     );
 
     // Episódios realmente aired — fonte de verdade
-    const airedEps = catalogEps.filter((ep) => {
-      if (!ep.air_date) return false;
-      const t = new Date(ep.air_date).getTime();
-      return Number.isFinite(t) && t <= now;
-    });
+    const airedEps = filterValidAiredEpisodes(catalogEps, now);
     const confirmedEpisodes = catalogEps.filter((ep) => {
       if (!ep.air_date) return false;
       const t = new Date(ep.air_date).getTime();
@@ -588,7 +607,7 @@ export async function getUserWatchingSeries(
     });
 
     // Temporadas com ao menos 1 episódio aired (guard contra temporadas fantasma)
-    const validSeasonsSet = new Set(airedEps.map((ep) => ep.season_number));
+    const validSeasonsSet = getValidSeasonNumbers(catalogEps, now);
 
     let nextEpisode: UserSeriesProgress["nextEpisode"] = null;
     for (const ep of catalogEps) {
@@ -606,19 +625,19 @@ export async function getUserWatchingSeries(
     }
 
     const lastWatchedAt =
-      watchedEps.length > 0
-        ? watchedEps.map((w) => w.watched_at).sort().reverse()[0]
+      watchedValid.length > 0
+        ? watchedValid.map((w) => w.watched_at).sort().reverse()[0]
         : null;
 
     const totalEpisodes = confirmedEpisodes.length > 0 ? confirmedEpisodes.length : null;
 
     results.push({
       seriesTmdbId: seriesId,
-      watchedCount: watchedEps.length,
+      watchedCount: watchedValid.length,
       totalEpisodes,
       airedEpisodes: airedEps.length,
       lastWatchedAt,
-      watchedKeys: watchedEps.map((w) =>
+      watchedKeys: watchedValid.map((w) =>
         episodeKey(w.season_number, w.episode_number)
       ),
       nextEpisode,
@@ -656,12 +675,7 @@ export async function markAllAiredEpisodes(
     episode_number: number;
     air_date: string | null;
     runtime: number | null;
-  }>).filter((e) => {
-    if (e.season_number <= 0) return false;
-    if (!e.air_date) return false;
-    const t = new Date(e.air_date).getTime();
-    return Number.isFinite(t) && t <= now;
-  });
+  }>).filter((e) => isValidAiredEpisode(e, now));
 
   if (toMark.length === 0) {
     return computeUserSeriesProgress(userId, seriesTmdbId);
@@ -673,6 +687,7 @@ export async function markAllAiredEpisodes(
     episodes: toMark.map((e) => ({
       seasonNumber: e.season_number,
       episodeNumber: e.episode_number,
+      runtimeMinutes: e.runtime ?? null,
     })),
     eventType: "series_completed",
   });
@@ -706,11 +721,7 @@ export async function markEpisodesUntil(input: {
     runtime: number | null;
   }>).filter((ep) => {
     // nunca marcar episódio futuro
-    if (!ep.air_date) return false;
-
-    const airTime = new Date(ep.air_date).getTime();
-
-    if (!Number.isFinite(airTime) || airTime > now) {
+    if (!isValidAiredEpisode(ep, now)) {
       return false;
     }
 

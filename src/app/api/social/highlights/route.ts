@@ -5,7 +5,7 @@ import { translateToPtBr } from "@/server/translate/translate-to-pt-br";
 
 const TRAKT_API_BASE = "https://api.trakt.tv";
 
-type HighlightSource = "tmdb" | "trakt" | "reddit";
+type HighlightSource = "tmdb" | "trakt";
 
 type TmdbReview = {
   id: string;

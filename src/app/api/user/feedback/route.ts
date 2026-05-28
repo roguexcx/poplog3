@@ -10,6 +10,7 @@ import {
 } from "@/lib/personalization/feedback";
 import { createSupabaseServerClient } from "@/server/supabase/server";
 import { deleteTitleState } from "@/server/state/user-title-state";
+import { invalidateContinuitySectionCache } from "@/server/continuity/continuity-section-cache";
 import type { MediaType } from "@/types/user";
 
 type SupabaseServer = Awaited<ReturnType<typeof createSupabaseServerClient>>;
@@ -281,6 +282,7 @@ export async function POST(request: Request) {
   }
 
   const state = await readTitleState(supabase, user.id, parsed.tmdbId, parsed.mediaType);
+  invalidateContinuitySectionCache(user.id);
   return NextResponse.json({
     titleState: {
       userFeedback: state,
@@ -317,6 +319,7 @@ export async function DELETE(request: Request) {
   }
 
   const state = await readTitleState(supabase, user.id, parsed.tmdbId, parsed.mediaType);
+  invalidateContinuitySectionCache(user.id);
   return NextResponse.json({
     titleState: {
       userFeedback: state,

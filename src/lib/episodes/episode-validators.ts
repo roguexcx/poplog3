@@ -24,6 +24,7 @@
 
 export type EpisodeValidationInput = {
   season_number?: number | null;
+  episode_number?: number | null;
   air_date?: string | null;
 };
 
@@ -45,6 +46,18 @@ export function hasValidAirDate(episode: EpisodeValidationInput): boolean {
   if (!episode.air_date) return false;
   const t = new Date(episode.air_date).getTime();
   return Number.isFinite(t) && t > 0;
+}
+
+/**
+ * Retorna true se o número do episódio é real. Quando o campo não está
+ * disponível no caller, mantém compatibilidade e valida pelos demais critérios.
+ */
+export function hasValidEpisodeNumber(episode: EpisodeValidationInput): boolean {
+  if (episode.episode_number === undefined || episode.episode_number === null) {
+    return true;
+  }
+
+  return typeof episode.episode_number === "number" && episode.episode_number > 0;
 }
 
 /**
@@ -78,7 +91,11 @@ export function isValidAiredEpisode(
   episode: EpisodeValidationInput,
   nowMs: number = Date.now(),
 ): boolean {
-  return isRegularSeason(episode) && isAired(episode, nowMs);
+  return (
+    isRegularSeason(episode) &&
+    hasValidEpisodeNumber(episode) &&
+    isAired(episode, nowMs)
+  );
 }
 
 /**

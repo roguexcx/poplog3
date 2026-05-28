@@ -64,13 +64,10 @@ export default function TitleHero({
     ? availabilityStateToBadgeVariant(title.availabilityState)
     : "neutral";
 
-  const poplogScore =
-    typeof title.ratings?.poplogScore === "number"
-      ? title.ratings.poplogScore
+  const generalIndex =
+    typeof title.generalIndex === "number"
+      ? title.generalIndex
       : null;
-
-  const tmdbScore =
-    typeof title.voteAverage === "number" ? title.voteAverage : null;
 
   const progress = title.userSeriesProgress ?? null;
   const randomizedTitle = useRandomizedTitleDisplay(
@@ -237,21 +234,14 @@ export default function TitleHero({
                   </span>
                 )}
 
-              {poplogScore !== null ? (
+              {generalIndex !== null && (
                 <span className="inline-flex items-center gap-1.5 rounded-full border border-cyan-300/30 bg-cyan-400/10 px-3 py-1 text-[11px] font-black tracking-[-0.01em] text-cyan-100 backdrop-blur-md">
                   <span className="text-[8px] font-black uppercase tracking-[0.2em] text-cyan-200/80">
-                    POPLOG
+                    Índice
                   </span>
 
-                  <span>{poplogScore.toFixed(1)}</span>
+                  <span>{generalIndex.toFixed(1)}</span>
                 </span>
-              ) : (
-                tmdbScore !== null && (
-                  <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-300/22 bg-amber-400/12 px-3 py-1 text-[11px] font-black text-amber-100 backdrop-blur-md">
-                    <span aria-hidden>★</span>
-                    {tmdbScore.toFixed(1)}
-                  </span>
-                )
               )}
             </div>
 

@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Activity, AlertTriangle, CheckCircle2, Clock,
+  Activity, CheckCircle2, Clock,
   RefreshCw, RotateCcw, TrendingUp, XCircle, Zap,
 } from "lucide-react";
 import { AdminCard, AdminFeedback, StatCard } from "../_components";
@@ -12,7 +12,7 @@ import { AdminCard, AdminFeedback, StatCard } from "../_components";
 type ApiRow    = { api: string; calls: number; hits: number; misses: number; errors: number; hitRate: string; avgMs: number; p95Ms: number; maxMs: number };
 type OriginRow = { origin: string; count: number };
 type LogEntry  = { id: number; time: string; api: string; op: string; origin: string; mediaType?: string; tmdbId?: number; endpoint?: string; cache: string; ms: number; ok: boolean; status?: number; error?: string; fallbackFrom?: string };
-type EngineData = { summary: { uptime: string; totalCalls: number; cacheHitRate: string; startedAt: string }; perApi: ApiRow[]; perOrigin: OriginRow[]; recentErrors: LogEntry[]; recentCalls: LogEntry[] };
+type EngineData = { summary: { uptime: string; totalCalls: number; cacheHitRate: string; startedAt: string; window?: string; source?: string }; perApi: ApiRow[]; perOrigin: OriginRow[]; recentErrors: LogEntry[]; recentCalls: LogEntry[] };
 
 type View =
   | { kind: "idle" }
@@ -121,14 +121,14 @@ function EngineBody({ data, fetchedAt, fullMode }: { data: EngineData; fetchedAt
     <div className="space-y-6">
       {/* summary */}
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatCard label="Uptime"        value={data.summary.uptime}           sub={`desde ${new Date(data.summary.startedAt).toLocaleTimeString("pt-BR")}`} icon={<Clock size={15} className="text-indigo-300" />} />
-        <StatCard label="Chamadas"      value={String(data.summary.totalCalls)} sub="desde o último reinício"          icon={<Activity size={15} className="text-indigo-300" />} />
+        <StatCard label={data.summary.source === "persistent" ? "Janela" : "Uptime"} value={data.summary.source === "persistent" ? "24h" : data.summary.uptime} sub={`desde ${new Date(data.summary.startedAt).toLocaleTimeString("pt-BR")}`} icon={<Clock size={15} className="text-indigo-300" />} />
+        <StatCard label="Chamadas"      value={String(data.summary.totalCalls)} sub={data.summary.window ?? "Sessão atual"} icon={<Activity size={15} className="text-indigo-300" />} />
         <StatCard label="Cache hit rate" value={data.summary.cacheHitRate}      sub="chamadas do cache"                 icon={<Zap size={15} className="text-emerald-300" />} tone={hitRate >= 70 ? "good" : hitRate >= 40 ? "neutral" : "bad"} />
         <StatCard label="Atualizado"    value={fetchedAt.toLocaleTimeString("pt-BR")} sub={fullMode ? "500 entradas" : "50 entradas"} icon={<RefreshCw size={15} className="text-zinc-400" />} />
       </div>
 
       {/* per-api */}
-      <AdminCard title="APIs externas" desc="Métricas acumuladas desde o último reinício.">
+      <AdminCard title="APIs externas" desc={data.summary.source === "persistent" ? "Métricas persistidas das últimas 24h." : "Métricas acumuladas na sessão atual."}>
         <ApiTable rows={data.perApi} />
       </AdminCard>
 

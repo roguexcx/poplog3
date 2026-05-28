@@ -3,6 +3,7 @@
 import { useState } from "react";
 
 import { buildFinancialBadgeInsight } from "@/lib/editorial-finance";
+import { getGeneralIndex } from "@/lib/ratings/general-index";
 
 import TitleCast from "./TitleCast";
 import TitleCommunityHighlights from "./TitleCommunityHighlights";
@@ -14,12 +15,13 @@ import TitleMetadata from "./TitleMetadata";
 import MovieSocialModal from "./MovieSocialModal";
 import TitleProviders from "./TitleProviders";
 import TitleRecommendations from "./TitleRecommendations";
-import TitleScoreCard from "./TitleScoreCard";
 import TitleSeasonsCard from "./TitleSeasonsCard";
 import TitleSyncBar from "./TitleSyncBar";
 import TitleTrailer from "./TitleTrailer";
+import UserRatingWidget from "./UserRatingWidget";
 
 import type { TitlePageData } from "./types";
+import type { CommunityRatingData } from "@/types/user";
 
 type TitlePageViewProps = {
   title: TitlePageData;
@@ -27,9 +29,21 @@ type TitlePageViewProps = {
 
 export default function TitlePageView({ title }: TitlePageViewProps) {
   const [movieSocialOpen, setMovieSocialOpen] = useState(false);
+  const [communityRating, setCommunityRating] =
+    useState<CommunityRatingData | null>(title.communityRating ?? null);
+
+  const generalIndex = getGeneralIndex({
+    communityRating,
+    ratings: title.ratings ?? null,
+  });
+
+  const liveTitle: TitlePageData = {
+    ...title,
+    communityRating,
+    generalIndex,
+  };
 
   const hasTrailer = Boolean(title.trailer);
-  const hasRatings = Boolean(title.ratings);
   const hasMetadata = Boolean(title.metadata);
 
   const isMovie = title.mediaType === "movie";
@@ -72,7 +86,7 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
   return (
     <div className="relative text-white">
       <TitleHero
-        title={title}
+        title={liveTitle}
         onOpenMovieSocial={
           isMovie ? () => setMovieSocialOpen(true) : undefined
         }
@@ -90,6 +104,8 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
                 seasons={seasons}
                 initialSeason={initialSeason}
                 initialProgress={title.userSeriesProgress ?? null}
+                isAuthenticated={Boolean(title.userState?.isAuthenticated)}
+                onSeriesCommunityRatingChange={setCommunityRating}
               />
             )}
 
@@ -118,7 +134,18 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
               <TitleTrailer trailer={title.trailer} title={title.title} />
             )}
 
-            {hasRatings && <TitleScoreCard ratings={title.ratings} />}
+            {/* Avaliação POPLOG */}
+            {typeof title.id === "number" && (
+              <UserRatingWidget
+                mediaType={title.mediaType}
+                tmdbId={title.id}
+                userRating={title.userState?.userRating ?? null}
+                communityRating={communityRating}
+                ratings={title.ratings ?? null}
+                isAuthenticated={Boolean(title.userState?.isAuthenticated)}
+                onCommunityRatingChange={setCommunityRating}
+              />
+            )}
 
             <TitleProviders providers={title.providers} />
 

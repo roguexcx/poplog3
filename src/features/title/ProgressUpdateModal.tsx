@@ -23,6 +23,7 @@ type ProgressUpdateModalProps = {
     episodeNumber: number;
   }) => void;
   onMarkSeason: (payload: { seasonNumber: number }) => void;
+  onMarkAllAired?: () => void;
   onClearProgress: () => void;
   /** Move a serie para Abandonado preservando o progresso */
   onAbandon?: () => void;
@@ -47,6 +48,7 @@ export default function ProgressUpdateModal({
   onClose,
   onConfirm,
   onMarkSeason,
+  onMarkAllAired,
   onClearProgress,
   onAbandon,
 }: ProgressUpdateModalProps) {
@@ -128,11 +130,11 @@ export default function ProgressUpdateModal({
 
   const modal = (
     <div
-      className="fixed inset-0 z-[2147483647] isolate flex items-center justify-center bg-black/45 px-4 backdrop-blur-[2px]"
+      className="fixed inset-0 z-[2147483647] isolate flex items-center justify-center bg-black/68 px-4"
       onClick={onClose}
     >
       <div
-        className="relative z-[2147483647] w-full max-w-[480px] rounded-3xl border border-white/[0.12] bg-zinc-950/96 p-5 shadow-[0_40px_120px_rgba(0,0,0,0.78),0_0_0_1px_rgba(255,255,255,0.04),inset_0_1px_0_rgba(255,255,255,0.08)]"
+        className="relative z-[2147483647] w-full max-w-[480px] rounded-3xl border border-white/[0.12] bg-zinc-950 p-5 shadow-[0_24px_72px_rgba(0,0,0,0.64),0_0_0_1px_rgba(255,255,255,0.04)]"
         onClick={(event) => event.stopPropagation()}
       >
         <div className="pointer-events-none absolute inset-0 rounded-3xl bg-[radial-gradient(circle_at_50%_0%,rgba(34,211,238,0.10),transparent_52%)]" />
@@ -261,6 +263,15 @@ export default function ProgressUpdateModal({
                 className="rounded-full border border-white/[0.10] bg-white/[0.04] px-4 py-2 text-xs font-bold text-white/55 transition hover:bg-white/[0.08] hover:text-white"
               >
                 Cancelar
+              </button>
+
+              <button
+                type="button"
+                disabled={loading || !currentSeason || !onMarkAllAired}
+                onClick={onMarkAllAired}
+                className="rounded-full border border-emerald-100/[0.18] bg-emerald-300/[0.10] px-4 py-2 text-xs font-black text-emerald-50 transition hover:border-emerald-100/30 hover:bg-emerald-300/[0.16] disabled:cursor-wait disabled:opacity-60"
+              >
+                {loading ? "..." : "Vi tudo"}
               </button>
 
               <button

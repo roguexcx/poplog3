@@ -23,6 +23,8 @@ export type PoplogTitleVideo = {
   type: string;
   official?: boolean | null;
   iso_639_1?: string | null;
+  iso_3166_1?: string | null;
+  published_at?: string | null;
 };
 
 export type PoplogTitleGenre = {

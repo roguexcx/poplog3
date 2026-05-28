@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getStats, getEntries, clear } from "@/server/engine-logger";
+import {
+  clear,
+  clearPersistentEntries,
+  getEntries,
+  getPersistentSnapshot,
+  getStats,
+} from "@/server/engine-logger";
 
 /** Acesso protegido por ?secret= ou header x-admin-secret */
 function isAuthorized(req: NextRequest): boolean {
@@ -21,8 +27,10 @@ export async function GET(req: NextRequest) {
   }
 
   const full = req.nextUrl.searchParams.get("full") === "1";
-  const stats = getStats();
-  const entries = getEntries(full ? 500 : 50);
+  const limit = full ? 500 : 50;
+  const persistent = await getPersistentSnapshot(limit);
+  const stats = persistent?.stats ?? getStats();
+  const entries = persistent?.entries ?? getEntries(limit);
 
   const formatted = {
     summary: {
@@ -30,6 +38,8 @@ export async function GET(req: NextRequest) {
       totalCalls: stats.totalCalls,
       cacheHitRate: `${stats.cacheHitRate}%`,
       startedAt: new Date(stats.startedAt).toISOString(),
+      window: persistent ? "Últimas 24h" : "Sessão atual",
+      source: persistent?.source ?? "memory",
     },
     perApi: Object.entries(stats.perApi).map(([name, s]) => ({
       api: name,
@@ -59,7 +69,14 @@ export async function DELETE(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   clear();
-  return NextResponse.json({ ok: true, message: "Engine logger resetado." });
+  const persistentCleared = await clearPersistentEntries();
+  return NextResponse.json({
+    ok: true,
+    persistentCleared,
+    message: persistentCleared
+      ? "Engine logger resetado no buffer e no registro persistente."
+      : "Engine logger resetado no buffer; registro persistente indisponível.",
+  });
 }
 
 function fmtEntry(e: ReturnType<typeof getEntries>[number]) {

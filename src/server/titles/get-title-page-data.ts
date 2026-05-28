@@ -17,6 +17,7 @@ import { getCurrentUser } from "@/server/auth/get-current-user";
 import { getExternalIds } from "@/server/cache/external-ids-cache";
 import { computeUserSeriesProgress } from "@/server/episodes/episode-progress-service";
 import {
+  getUserKnownTitleIds,
   readTitleState,
 } from "@/server/state/user-title-state";
 import { getUserTitleStatus } from "@/server/library/library-service";
@@ -29,8 +30,14 @@ import { syncTmdbTitle } from "@/server/sync/sync-tmdb-title";
 import { fetchTmdbCollection } from "@/server/api-clients/tmdb/client";
 import { findOfficialTrailerOnYouTube } from "@/server/trailers/youtube-trailer";
 import { getSeriesEpisodeRuntimes } from "@/server/runtime/series-episode-runtimes";
+import { rankRecommendationsByEditorialOrigin } from "@/server/recommendations/editorial-origin-ranker";
+import { getGeneralIndex } from "@/lib/ratings/general-index";
+import { getTitleFeedbackState, getUserFeedbackMap, type UserFeedbackMap } from "@/lib/personalization/feedback";
 import type { PoplogTitleDetails } from "@/server/types/title-details";
 import type { TitlePageData } from "@/features/title/types";
+import type { UserRatingData } from "@/types/user";
+import { getUserRating } from "@/server/ratings/user-rating-service";
+import { getPublicRating } from "@/server/ratings/rating-aggregate-service";
 
 type MediaType = "movie" | "tv";
 
@@ -110,6 +117,8 @@ export async function getTitlePageData(
 
       const details = hasDetailFields(title) ? title : null;
       const currentUser = await getCurrentUser();
+      let userKnownTitleIds = new Set<string>();
+      let userFeedbackMap: UserFeedbackMap | null = null;
 
       let userState: {
         isAuthenticated: boolean;
@@ -120,6 +129,7 @@ export async function getTitlePageData(
         liked?: boolean;
         disliked?: boolean;
         computedState?: string | null;
+        userRating?: UserRatingData | null;
       } = { isAuthenticated: Boolean(currentUser) };
 
       let userSeriesProgress: {
@@ -133,7 +143,14 @@ export async function getTitlePageData(
 
       if (currentUser) {
         try {
-          const state = await readTitleState(currentUser.id, id, mediaType);
+          const [state, knownTitleIds, feedbackMap] = await Promise.all([
+            readTitleState(currentUser.id, id, mediaType),
+            getUserKnownTitleIds(currentUser.id),
+            getUserFeedbackMap(currentUser.id),
+          ]);
+
+          userKnownTitleIds = knownTitleIds;
+          userFeedbackMap = feedbackMap;
 
           if (state) {
             userState = {
@@ -196,6 +213,21 @@ export async function getTitlePageData(
           console.warn("[getTitlePageData] state lookup falhou:", error);
           userState = { isAuthenticated: true };
         }
+      }
+
+      // ── Avaliações POPLOG (pessoal + comunidade) ────────────────────────────────────────────
+      const ratingMediaType = mediaType as "movie" | "tv";
+
+      const [userRatingData, communityRatingData] = await Promise.all([
+        currentUser
+          ? getUserRating(currentUser.id, ratingMediaType, id).catch(() => null)
+          : Promise.resolve(null),
+        getPublicRating(ratingMediaType, id).catch(() => null),
+      ]);
+
+      // Injeta nota pessoal no userState
+      if (userRatingData) {
+        userState = { ...userState, userRating: userRatingData };
       }
 
       const externalIds = await getExternalIds(mediaType, id);
@@ -263,6 +295,11 @@ export async function getTitlePageData(
       } catch (error) {
         console.warn("[getTitlePageData] ratings sync falhou:", error);
       }
+
+      const generalIndex = getGeneralIndex({
+        communityRating: communityRatingData,
+        ratings,
+      });
 
       let availabilityCache: {
         source: string;
@@ -344,6 +381,52 @@ export async function getTitlePageData(
           const includesAny = (text: string, terms: string[]) =>
             terms.some((term) => text.includes(normalize(term)));
 
+          const significantTokens = (value: string | null | undefined) => {
+            const stopWords = new Set([
+              "a",
+              "as",
+              "da",
+              "das",
+              "de",
+              "do",
+              "dos",
+              "e",
+              "em",
+              "o",
+              "os",
+              "the",
+            ]);
+
+            return normalize(value)
+              .split(" ")
+              .filter((token) => token.length >= 3 && !stopWords.has(token));
+          };
+
+          const titleNames = [
+            title.title,
+            title.original_title,
+            "name" in title ? title.name : null,
+          ]
+            .map((value) => normalize(value as string | null | undefined))
+            .filter(Boolean);
+
+          const titleTokenSet = new Set(
+            [title.title, title.original_title]
+              .flatMap((value) => significantTokens(value))
+              .filter(Boolean),
+          );
+
+          const hasTitleRelation = (name: string) => {
+            if (titleNames.some((candidate) => name.includes(candidate))) return true;
+            if (titleTokenSet.size === 0) return true;
+
+            const matched = Array.from(titleTokenSet).filter((token) =>
+              name.includes(token),
+            ).length;
+
+            return matched / titleTokenSet.size >= 0.7;
+          };
+
           const getVideoScore = (v: (typeof youTube)[number]) => {
             const name = normalize(v.name);
             let score = 0;
@@ -363,6 +446,8 @@ export async function getTitlePageData(
               "na tv",
               "hoje",
               "amanha",
+              "all trailers",
+              "compilation",
               "review",
               "reaction",
               "explained",
@@ -372,11 +457,13 @@ export async function getTitlePageData(
               "scene",
               "cena",
               "clip",
+              "clips",
               "recap",
               "making of",
               "behind the scenes",
               "featurette",
               "bloopers",
+              "ending explained",
               "fanmade",
               "fandub",
               "trailer fan",
@@ -385,20 +472,29 @@ export async function getTitlePageData(
             ];
 
             if (includesAny(name, badTerms)) return -999;
+            if (!["Trailer", "Teaser"].includes(v.type)) return -999;
+            if (!hasTitleRelation(name) && v.official !== true) return -999;
 
-            if (v.type === "Trailer") score += 140;
-            if (v.type === "Teaser") score += 25;
-            if (v.official === true) score += 120;
+            if (v.type === "Trailer") score += 180;
+            if (v.type === "Teaser") score += 70;
+            if (v.official === true) score += 180;
+            if (v.official === false) score -= 90;
 
-            if (name.includes("trailer oficial")) score += 130;
-            if (name.includes("official trailer")) score += 120;
+            if (titleNames.some((candidate) => name.includes(candidate))) score += 80;
+            if (hasTitleRelation(name)) score += 45;
+
+            if (name.includes("trailer oficial")) score += 160;
+            if (name.includes("official trailer")) score += 150;
+            if (name.includes("teaser oficial")) score += 95;
+            if (name.includes("official teaser")) score += 90;
             if (name.includes("trailer")) score += 80;
 
             if (
               name.includes("dublado") ||
               name.includes("dubbed") ||
               name.includes("pt br") ||
-              name.includes("portugues brasileiro")
+              name.includes("portugues brasileiro") ||
+              v.iso_3166_1 === "BR"
             ) {
               score += 140;
             } else if (
@@ -414,14 +510,14 @@ export async function getTitlePageData(
               score += 40;
             }
 
-            if (name.includes("teaser")) score -= 35;
+            if (name.includes("teaser") && v.type !== "Trailer") score -= 25;
 
             return score;
           };
 
           const tmdbPick = youTube
             .map((video) => ({ video, score: getVideoScore(video) }))
-            .filter((item) => item.score >= 160)
+            .filter((item) => item.score >= 260)
             .sort((a, b) => b.score - a.score)[0];
 
           if (tmdbPick?.video) {
@@ -443,6 +539,7 @@ export async function getTitlePageData(
 
           const youtubeKey = await findOfficialTrailerOnYouTube({
             title: title.title ?? title.original_title ?? "Título",
+            alternativeTitles: [title.original_title ?? ""],
             year: title.year ? String(title.year) : null,
             mediaType,
           });
@@ -503,6 +600,22 @@ export async function getTitlePageData(
         episodeRunTime: details?.episode_run_time ?? null,
         episodes: seriesEpisodeRuntimes,
       });
+
+      const filteredRecommendations = (details?.recommendations ?? []).filter(
+        (item) =>
+          !userKnownTitleIds.has(`${item.id}:${item.media_type}`) &&
+          !getTitleFeedbackState(
+            userFeedbackMap,
+            item.id,
+            item.media_type,
+          ).notInterested,
+      );
+
+      const rankedRecommendations =
+        await rankRecommendationsByEditorialOrigin({
+          source: details,
+          recommendations: filteredRecommendations,
+        });
 
       const numberOfEpisodes = validSeasons.reduce(
         (total, season) => total + (season.episode_count ?? 0),
@@ -669,7 +782,9 @@ export async function getTitlePageData(
         nextEpisode,
         seasons: seasonsForUi,
         ratings,
+        generalIndex,
         userState,
+        communityRating: communityRatingData,
         userSeriesProgress,
         providers,
         availability,
@@ -692,7 +807,7 @@ export async function getTitlePageData(
             photoUrl: tmdbImage(person.profile_path, "w185"),
           })) ?? [],
 
-        recommendations: (details?.recommendations ?? [])
+        recommendations: rankedRecommendations
           .slice(0, 12)
           .map((item) => {
             const year =

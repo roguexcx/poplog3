@@ -213,6 +213,9 @@ export default function TitleActions({
     };
   }, [id, isTv]);
 
+  // Considera "progresso real" quando há episódios marcados OU estado oficial de andamento
+  const hasRealProgress = localWatchedCount > 0 || status === "watching";
+
   const labels = useMemo(
     () => ({
       watchlist: status === "watchlist" ? "Na watchlist" : "Watchlist",
@@ -221,14 +224,16 @@ export default function TitleActions({
           ? "Série pausada"
           : status === "watched"
             ? "Em dia"
-            : "Assistindo",
+            : hasRealProgress
+              ? "Assistindo"
+              : "Adicionar série",
       watched: status === "watched" ? "Assistido" : "Marcar assistido",
       favorite: favorite ? "Favoritado" : "Favorito",
       liked: "Gostei",
       disliked: "Não curti",
       fridge: status === "fridge" ? "Em pausa" : "Pausar série",
     }),
-    [status, favorite]
+    [status, favorite, hasRealProgress]
   );
 
   async function syncEpisodes(target: LibraryStatus | null) {
@@ -522,6 +527,36 @@ export default function TitleActions({
     }
   }
 
+  async function markAllAiredProgress() {
+    setError(null);
+    setPendingAction("mark-all-aired");
+    setStatus("watching");
+    setProgressModalOpen(false);
+
+    try {
+      if (id <= 0) {
+        throw new Error("ID TMDB invalido");
+      }
+
+      const body = await postEpisodeProgress({
+        seriesTmdbId: id,
+        markAllAired: true,
+      });
+
+      if (typeof body.progress?.watchedCount === "number") {
+        setLocalWatchedCount(body.progress.watchedCount);
+      } else {
+        setLocalWatchedCount((prev) => Math.max(prev, 1));
+      }
+
+      dispatchSeriesProgressRefresh(id);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Erro inesperado");
+    } finally {
+      setPendingAction(null);
+    }
+  }
+
   async function clearEpisodeProgress() {
     setError(null);
     setPendingAction("clear-progress");
@@ -584,7 +619,7 @@ export default function TitleActions({
               variant={status === "fridge" ? "utility" : "secondary"}
               size="md"
               active={
-                status === "watching" ||
+                hasRealProgress ||
                 status === "watched" ||
                 status === "fridge"
               }
@@ -716,11 +751,13 @@ export default function TitleActions({
           loading={
             pendingAction === "update-progress" ||
             pendingAction === "mark-season" ||
+            pendingAction === "mark-all-aired" ||
             pendingAction === "clear-progress"
           }
           error={
             pendingAction === "update-progress" ||
             pendingAction === "mark-season" ||
+            pendingAction === "mark-all-aired" ||
             pendingAction === "clear-progress" ||
             progressModalOpen
               ? error
@@ -729,6 +766,7 @@ export default function TitleActions({
           onClose={() => setProgressModalOpen(false)}
           onConfirm={confirmProgress}
           onMarkSeason={markSeasonProgress}
+          onMarkAllAired={markAllAiredProgress}
           onClearProgress={clearEpisodeProgress}
           onAbandon={markAbandoned}
         />

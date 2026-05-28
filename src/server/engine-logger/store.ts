@@ -38,7 +38,7 @@ const g = globalThis as typeof globalThis & { __engineStore?: Store };
 if (!g.__engineStore) g.__engineStore = makeStore();
 const S = g.__engineStore;
 
-export function push(entry: Omit<EngineLogEntry, "id">): void {
+export function push(entry: Omit<EngineLogEntry, "id">): EngineLogEntry {
   const full: EngineLogEntry = { ...entry, id: ++S.seq };
   S.buf[S.head] = full;
   S.head = (S.head + 1) % MAX;
@@ -53,6 +53,8 @@ export function push(entry: Omit<EngineLogEntry, "id">): void {
   }
 
   S.perOrigin[entry.origin] = (S.perOrigin[entry.origin] ?? 0) + 1;
+
+  return full;
 }
 
 function getAll(): EngineLogEntry[] {

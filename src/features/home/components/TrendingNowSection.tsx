@@ -305,7 +305,20 @@ export default function TrendingNowSection() {
     useScrollRow({ step: 640 });
 
   useEffect(() => {
-    fetchTrending().then((data) => { setItems(data); setLoading(false); });
+    let active = true;
+    fetchTrending()
+      .then((data) => {
+        if (active) setItems(data);
+      })
+      .catch(() => {
+        if (active) setItems([]);
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   const visible = filter === "all" ? items : items.filter((i) => i.media_type === filter);

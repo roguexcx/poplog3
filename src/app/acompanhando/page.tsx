@@ -426,18 +426,25 @@ export default function AcompanhandoPage() {
 
   const sortedContinueItems = useMemo(() => {
     if (continueSortMode === "easy") {
-      return [...continueItems].sort(
-        (a, b) => {
-          const aMinutes = a.series_remaining_minutes ?? a.remaining_minutes ?? Number.MAX_SAFE_INTEGER;
-          const bMinutes = b.series_remaining_minutes ?? b.remaining_minutes ?? Number.MAX_SAFE_INTEGER;
+      return [...continueItems].sort((a, b) => {
+        const aMinutes = a.series_remaining_minutes ?? a.remaining_minutes;
+        const bMinutes = b.series_remaining_minutes ?? b.remaining_minutes;
 
+        // Quando ambos têm dado de runtime, usa minutos restantes como critério principal
+        if (aMinutes != null && bMinutes != null) {
           return (
             aMinutes - bMinutes ||
             a.episodes_behind - b.episodes_behind ||
             (b.last_watched_at ?? "").localeCompare(a.last_watched_at ?? "")
           );
-        },
-      );
+        }
+
+        // Fallback: episódios restantes — confiável mesmo sem runtime no banco
+        return (
+          a.episodes_behind - b.episodes_behind ||
+          (b.last_watched_at ?? "").localeCompare(a.last_watched_at ?? "")
+        );
+      });
     }
     // "recent": já vem ordenado por last_watched_at DESC do servidor
     return continueItems;

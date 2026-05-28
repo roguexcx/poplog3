@@ -13,14 +13,14 @@ import type { User } from "@supabase/supabase-js";
 import {
   GripVertical, X, Search, ChevronRight,
   LogOut, Trash2, Mail, Lock, Check,
-  Film, Tv, BarChart2, ChevronDown,
+  Film, Tv, BarChart2, ChevronDown, RotateCcw,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────────────────────────────────────────
 
-type Tab = "visao-geral" | "preferencias" | "conta";
+type Tab = "visao-geral" | "preferencias" | "nao-interesse" | "conta";
 
 type LibraryStats = {
   watched:   number;
@@ -47,11 +47,25 @@ type StreamingProvider = {
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
+type NotInterestedTitle = {
+  tmdbId: number;
+  mediaType: "movie" | "tv";
+  title: string;
+  originalTitle: string | null;
+  year: string | null;
+  source: string | null;
+  updatedAt: string;
+};
+
 type GenreStatsResponse = { ok: boolean; genres: GenreStat[] };
 type StreamingPreferencesResponse = {
   ok:          boolean;
   providers:   StreamingProvider[];
   preferences: Array<{ provider_id: string; is_enabled: boolean; priority_order: number }>;
+};
+type NotInterestedResponse = {
+  ok: boolean;
+  items: NotInterestedTitle[];
 };
 
 const PROFILE_CLIENT_CACHE_TTL_MS = 5 * 60_000;
@@ -86,6 +100,13 @@ function fetchStreamingPreferencesOnce() {
   });
   streamingPreferencesCache = { promise, expiresAt: Date.now() + PROFILE_CLIENT_CACHE_TTL_MS };
   return promise;
+}
+
+function fetchNotInterestedTitles() {
+  return fetch("/api/user/not-interested").then((res) => {
+    if (!res.ok) throw new Error("not interested failed");
+    return res.json() as Promise<NotInterestedResponse>;
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -383,6 +404,7 @@ function ProfileHeader({
 const TABS: { id: Tab; label: string }[] = [
   { id: "visao-geral",  label: "Visão geral" },
   { id: "preferencias", label: "Preferências" },
+  { id: "nao-interesse", label: "Não tenho interesse" },
   { id: "conta",        label: "Conta" },
 ];
 
@@ -1065,6 +1087,95 @@ function TabPreferences({
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// TAB: NÃO TENHO INTERESSE
+// ─────────────────────────────────────────────────────────────────────────────
+
+function mediaLabel(mediaType: NotInterestedTitle["mediaType"]) {
+  return mediaType === "tv" ? "Série" : "Filme";
+}
+
+function formatShortDate(value: string | null | undefined) {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return new Intl.DateTimeFormat("pt-BR", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  }).format(date);
+}
+
+function TabNotInterested({
+  titles,
+  onUndo,
+}: {
+  titles: NotInterestedTitle[];
+  onUndo: (title: NotInterestedTitle) => void;
+}) {
+  return (
+    <div className="space-y-4">
+      <Block>
+        <Eyebrow color="rose">Preferências negativas</Eyebrow>
+        <BlockTitle>Não tenho interesse</BlockTitle>
+
+        <div className="mb-5 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
+          <StatPill value={titles.length} label="títulos bloqueados" accent />
+          <StatPill value={titles.filter((item) => item.mediaType === "movie").length} label="filmes" />
+          <StatPill value={titles.filter((item) => item.mediaType === "tv").length} label="séries" />
+        </div>
+
+        {titles.length === 0 ? (
+          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.025] px-4 py-8 text-center">
+            <p className="text-[13px] font-semibold text-white/55">Nenhum título marcado.</p>
+            <p className="mt-1 text-[11px] text-white/28">
+              Quando você usar &quot;Não tenho interesse&quot;, ele aparece aqui e perde força nas recomendações.
+            </p>
+          </div>
+        ) : (
+          <div className="divide-y divide-white/[0.06]">
+            {titles.map((item) => {
+              const changedAt = formatShortDate(item.updatedAt);
+              return (
+                <div
+                  key={`${item.mediaType}:${item.tmdbId}`}
+                  className="flex flex-col gap-3 py-3.5 sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <a
+                    href={`/title/${item.mediaType}/${item.tmdbId}`}
+                    className="min-w-0 flex-1 rounded-xl px-1 py-1 transition-colors hover:bg-white/[0.03]"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full border border-rose-400/20 bg-rose-950/25 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.16em] text-rose-300/75">
+                        {mediaLabel(item.mediaType)}
+                      </span>
+                      {item.year && <span className="text-[11px] text-white/28">{item.year}</span>}
+                      {changedAt && <span className="text-[11px] text-white/22">marcado em {changedAt}</span>}
+                    </div>
+                    <p className="mt-1 truncate text-[14px] font-bold text-white/82">{item.title}</p>
+                    <p className="mt-0.5 truncate text-[11px] text-white/35">
+                      Original: {item.originalTitle?.trim() || item.title}
+                    </p>
+                  </a>
+
+                  <button
+                    type="button"
+                    onClick={() => onUndo(item)}
+                    className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-2 text-[11px] font-bold text-white/55 transition-colors hover:border-teal-400/25 hover:bg-teal-950/20 hover:text-teal-200"
+                  >
+                    <RotateCcw size={13} />
+                    Desfazer
+                  </button>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </Block>
+    </div>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // TAB: CONTA
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1195,10 +1306,11 @@ export default function ProfilePageClient() {
   const [genres,       setGenres]       = useState<GenreStat[]>([]);
   const [allProviders, setAllProviders] = useState<StreamingProvider[]>([]);
   const [activeIds,    setActiveIds]    = useState<string[]>([]);
+  const [notInterestedTitles, setNotInterestedTitles] = useState<NotInterestedTitle[]>([]);
   const [dataLoading,  setDataLoading]  = useState(true);
 
   const rawTab    = searchParams.get("tab") as Tab | null;
-  const validTabs: Tab[] = ["visao-geral", "preferencias", "conta"];
+  const validTabs: Tab[] = ["visao-geral", "preferencias", "nao-interesse", "conta"];
   const [tab, setTab] = useState<Tab>(validTabs.includes(rawTab as Tab) ? (rawTab as Tab) : "visao-geral");
 
   function changeTab(t: Tab) {
@@ -1271,6 +1383,14 @@ export default function ProfilePageClient() {
       }
     } catch { /* silent */ }
 
+    // Lista de titulos marcados como "Nao tenho interesse"
+    try {
+      const json = await fetchNotInterestedTitles();
+      if (json.ok && Array.isArray(json.items)) {
+        setNotInterestedTitles(json.items);
+      }
+    } catch { /* silent */ }
+
     setDataLoading(false);
   }, []);
 
@@ -1284,6 +1404,31 @@ export default function ProfilePageClient() {
     await supabase.auth.signOut();
     router.push("/");
     router.refresh();
+  }
+
+  async function handleUndoNotInterested(title: NotInterestedTitle) {
+    const previous = notInterestedTitles;
+    setNotInterestedTitles((current) =>
+      current.filter((item) => item.tmdbId !== title.tmdbId || item.mediaType !== title.mediaType),
+    );
+
+    try {
+      const response = await fetch("/api/user/feedback", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          tmdb_id: title.tmdbId,
+          media_type: title.mediaType,
+          feedback_type: "not_interested",
+          source: "profile_not_interested",
+        }),
+      });
+
+      if (!response.ok) throw new Error("undo failed");
+      router.refresh();
+    } catch {
+      setNotInterestedTitles(previous);
+    }
   }
 
   if (authLoading) {
@@ -1325,6 +1470,12 @@ export default function ProfilePageClient() {
         dataLoading
           ? <div className="flex items-center justify-center py-16"><div className="w-6 h-6 rounded-full border-2 border-indigo-500/30 border-t-indigo-400 animate-spin" /></div>
           : <TabPreferences allProviders={allProviders} initialActiveIds={activeIds} />
+      )}
+
+      {tab === "nao-interesse" && (
+        dataLoading
+          ? <div className="flex items-center justify-center py-16"><div className="w-6 h-6 rounded-full border-2 border-rose-500/30 border-t-rose-400 animate-spin" /></div>
+          : <TabNotInterested titles={notInterestedTitles} onUndo={handleUndoNotInterested} />
       )}
 
       {tab === "conta" && (

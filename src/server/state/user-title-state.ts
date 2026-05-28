@@ -935,3 +935,30 @@ export async function refreshTitleStateAvailability(
     console.error("[user-title-state] refreshAvailability failed", error);
   }
 }
+
+/**
+ * Retorna um Set com chaves "tmdbId:mediaType" de todos os títulos
+ * que o usuário já tem em qualquer status na biblioteca.
+ *
+ * Leitura mínima (só tmdb_id e media_type) — usada para filtrar
+ * seções de descoberta como recomendações e títulos similares.
+ */
+export async function getUserKnownTitleIds(
+  userId: string,
+): Promise<Set<string>> {
+  const { data, error } = await supabaseAdmin
+    .from("user_title_state")
+    .select("tmdb_id, media_type")
+    .eq("user_id", userId);
+
+  if (error) {
+    console.warn("[user-title-state] getUserKnownTitleIds falhou", error);
+    return new Set();
+  }
+
+  const keys = new Set<string>();
+  for (const row of (data ?? []) as Array<{ tmdb_id: number; media_type: string }>) {
+    keys.add(`${row.tmdb_id}:${row.media_type}`);
+  }
+  return keys;
+}

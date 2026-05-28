@@ -3,6 +3,7 @@
 export type EpisodeProgressResponse = {
   ok?: boolean;
   progress?: {
+    watchedCount?: number;
     watchedKeys?: string[];
   };
   watchedKeys?: string[];

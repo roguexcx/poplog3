@@ -5,7 +5,7 @@ import ContextualAttribution from "@/components/attribution/ContextualAttributio
 import { ChevronDown, Quote } from "lucide-react";
 import { useEffect, useState } from "react";
 
-type CommunityHighlightSource = "tmdb" | "trakt" | "reddit";
+type CommunityHighlightSource = "tmdb" | "trakt";
 
 type CommunityHighlight = {
   id: string;

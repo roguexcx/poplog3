@@ -55,6 +55,8 @@ type EngineData = {
     totalCalls: number;
     cacheHitRate: string;
     startedAt: string;
+    window?: string;
+    source?: string;
   };
   perApi: ApiRow[];
   perOrigin: OriginRow[];
@@ -264,14 +266,14 @@ function Dashboard({
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard
           label="Uptime"
-          value={data.summary.uptime}
+          value={data.summary.source === "persistent" ? "24h" : data.summary.uptime}
           sub={`desde ${new Date(data.summary.startedAt).toLocaleTimeString("pt-BR")}`}
           icon={<Clock size={16} className="text-indigo-300" />}
         />
         <SummaryCard
           label="Total de chamadas"
           value={String(data.summary.totalCalls)}
-          sub="desde o último reinício"
+          sub={data.summary.window ?? "Sessão atual"}
           icon={<Activity size={16} className="text-indigo-300" />}
         />
         <SummaryCard
@@ -296,7 +298,7 @@ function Dashboard({
       </div>
 
       {/* per-api table */}
-      <Section title="APIs externas" description="Métricas acumuladas desde o último reinício do servidor.">
+      <Section title="APIs externas" description={data.summary.source === "persistent" ? "Métricas persistidas das últimas 24h." : "Métricas acumuladas na sessão atual."}>
         <ApiTable rows={data.perApi} />
       </Section>
 

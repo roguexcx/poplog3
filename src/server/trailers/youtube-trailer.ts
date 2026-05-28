@@ -24,6 +24,27 @@ const TRUSTED_TRAILER_CHANNEL_HINTS = [
   "warner",
 ];
 
+const GENERIC_OR_UNRELATED_HINTS = [
+  "all trailers",
+  "behind the scenes",
+  "breakdown",
+  "celebrity",
+  "clip",
+  "clips",
+  "compilation",
+  "ending explained",
+  "explained",
+  "featurette",
+  "interview",
+  "movieclips",
+  "recap",
+  "reaction",
+  "review",
+  "scene",
+  "teoria",
+  "theories",
+];
+
 const FAN_CONTENT_HINTS = [
   "dublagem caseira",
   "dublagem de fa",
@@ -50,6 +71,40 @@ function normalize(value: string) {
     .trim();
 }
 
+function significantTokens(value: string) {
+  const stopWords = new Set([
+    "a",
+    "as",
+    "da",
+    "das",
+    "de",
+    "do",
+    "dos",
+    "e",
+    "em",
+    "o",
+    "os",
+    "the",
+  ]);
+
+  return normalize(value)
+    .split(" ")
+    .filter((token) => token.length >= 3 && !stopWords.has(token));
+}
+
+function titleRelevanceScore(candidateTitle: string, title: string) {
+  const normalizedCandidateTitle = normalize(candidateTitle);
+  const normalizedTitle = normalize(title);
+  const tokens = significantTokens(title);
+
+  if (!normalizedTitle || !normalizedCandidateTitle) return 0;
+  if (normalizedCandidateTitle.includes(normalizedTitle)) return 1;
+  if (tokens.length === 0) return 0;
+
+  const matched = tokens.filter((token) => normalizedCandidateTitle.includes(token)).length;
+  return matched / tokens.length;
+}
+
 function isFanContent(value: string) {
   const normalized = normalize(value);
   return FAN_CONTENT_HINTS.some((hint) => normalized.includes(normalize(hint)));
@@ -60,16 +115,31 @@ function scoreCandidate(
   title: string,
   preference: TrailerPreference,
   year?: string | null,
+  alternativeTitles: string[] = [],
 ): number {
   const haystack = normalize(`${candidate.title} ${candidate.channelTitle ?? ""}`);
-  const normalizedTitle = normalize(title);
+  const normalizedCandidateTitle = normalize(candidate.title);
+  const titleVariants = [title, ...alternativeTitles]
+    .map((value) => value.trim())
+    .filter(Boolean);
+  const relevance = Math.max(
+    ...titleVariants.map((variant) => titleRelevanceScore(candidate.title, variant)),
+  );
+  const hasExactTitle = titleVariants.some((variant) =>
+    normalizedCandidateTitle.includes(normalize(variant)),
+  );
   let score = 0;
 
   if (isFanContent(`${candidate.title} ${candidate.channelTitle ?? ""}`)) return -999;
-  if (haystack.includes(normalizedTitle)) score += 80;
-  if (haystack.includes("official trailer")) score += 60;
-  if (haystack.includes("trailer oficial")) score += 60;
-  if (haystack.includes("trailer")) score += 24;
+  if (GENERIC_OR_UNRELATED_HINTS.some((hint) => haystack.includes(normalize(hint)))) return -999;
+  if (relevance < 0.7) return -999;
+  if (hasExactTitle) score += 120;
+  else score += Math.round(relevance * 70);
+  if (normalizedCandidateTitle.includes("official trailer")) score += 85;
+  if (normalizedCandidateTitle.includes("trailer oficial")) score += 85;
+  if (normalizedCandidateTitle.includes("trailer")) score += 34;
+  if (normalizedCandidateTitle.includes("teaser oficial")) score += 44;
+  if (normalizedCandidateTitle.includes("official teaser")) score += 44;
   if (year && haystack.includes(year)) score += 10;
 
   if (preference === "dubbed") {
@@ -85,10 +155,8 @@ function scoreCandidate(
     if (haystack.includes("dublado") || haystack.includes("legendado") || haystack.includes("subtitled")) score -= 8;
   }
 
-  if (TRUSTED_TRAILER_CHANNEL_HINTS.some((hint) => haystack.includes(hint))) score += 18;
-  if (haystack.includes("reaction") || haystack.includes("review") || haystack.includes("explained")) score -= 45;
-  if (haystack.includes("clip") || haystack.includes("scene")) score -= 20;
-  if (haystack.includes("teaser")) score -= 8;
+  if (TRUSTED_TRAILER_CHANNEL_HINTS.some((hint) => haystack.includes(hint))) score += 32;
+  if (normalizedCandidateTitle.includes("teaser")) score -= 10;
 
   return score;
 }
@@ -158,6 +226,7 @@ async function searchWithYouTubePage(query: string): Promise<YouTubeCandidate[]>
 
 export async function findOfficialTrailerOnYouTube(input: {
   title: string;
+  alternativeTitles?: string[];
   year?: string | null;
   mediaType: "movie" | "tv";
 }): Promise<string | null> {
@@ -169,17 +238,17 @@ export async function findOfficialTrailerOnYouTube(input: {
     {
       preference: "dubbed",
       query: [title, input.year, mediaHint, "trailer oficial dublado"].filter(Boolean).join(" "),
-      minScore: 95,
+      minScore: 180,
     },
     {
       preference: "subtitled",
       query: [title, input.year, mediaHint, "trailer oficial legendado"].filter(Boolean).join(" "),
-      minScore: 95,
+      minScore: 175,
     },
     {
       preference: "english",
       query: [title, input.year, mediaHint, "official trailer"].filter(Boolean).join(" "),
-      minScore: 90,
+      minScore: 170,
     },
   ];
 
@@ -190,7 +259,13 @@ export async function findOfficialTrailerOnYouTube(input: {
       const candidates = [...apiResults, ...pageResults]
         .map((candidate) => ({
           ...candidate,
-          score: scoreCandidate(candidate, title, search.preference, input.year),
+          score: scoreCandidate(
+            candidate,
+            title,
+            search.preference,
+            input.year,
+            input.alternativeTitles,
+          ),
         }))
         .filter((candidate) => candidate.score >= search.minScore)
         .sort((a, b) => b.score - a.score);

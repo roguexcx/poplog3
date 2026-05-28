@@ -40,6 +40,10 @@ type TmdbVideo = {
   name: string;
   site: string;
   type: string;
+  official?: boolean | null;
+  iso_639_1?: string | null;
+  iso_3166_1?: string | null;
+  published_at?: string | null;
 };
 
 type TmdbEpisodeStub = {
@@ -170,13 +174,17 @@ export function normalizeTmdbTitleDetails(
   const videos: PoplogTitleVideo[] =
     data.videos?.results
       ?.filter((video) => video.site === "YouTube")
-      ?.slice(0, 5)
+      ?.slice(0, 20)
       ?.map((video) => ({
         id: video.id,
         key: video.key,
         name: video.name,
         site: video.site,
         type: video.type,
+        official: video.official ?? null,
+        iso_639_1: video.iso_639_1 ?? null,
+        iso_3166_1: video.iso_3166_1 ?? null,
+        published_at: video.published_at ?? null,
       })) ?? [];
 
   const recommendations =

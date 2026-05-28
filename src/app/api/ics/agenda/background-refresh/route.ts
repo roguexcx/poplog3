@@ -1,7 +1,6 @@
 // ── /api/ics/agenda/background-refresh ────────────────────────────────────────
 // Called silently on site entry (any page) to keep the agenda cache warm.
-// Checks cache age — if older than REFRESH_THRESHOLD_H hours, triggers a full
-// rebuild in the background. Returns immediately so the client never blocks.
+// Checks cache age lightly and never starts a heavy rebuild during page load.
 //
 // The client (AgendaBackgroundRefresh component in the root layout) calls this
 // once per session via sessionStorage guard.
@@ -13,8 +12,8 @@ import { supabaseAdmin } from "@/server/supabase/admin";
 export const revalidate = 0;
 
 const CACHE_ID             = "main";
-const CACHE_TTL_H          = 24;   // same as the main route
 const REFRESH_THRESHOLD_H  = 6;    // proactively refresh when cache is 6h+ old
+const CACHE_CHECK_TIMEOUT_MS = 400;
 
 async function getCacheAgeHours(): Promise<number | null> {
   try {
@@ -35,39 +34,33 @@ async function getCacheAgeHours(): Promise<number | null> {
 
 export async function GET(request: Request) {
   try {
-    const ageHours = await getCacheAgeHours();
+    const isBackgroundRequest = request.headers.get("x-background-refresh") === "1";
+    const ageHours = await Promise.race([
+      getCacheAgeHours(),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), CACHE_CHECK_TIMEOUT_MS)),
+    ]);
 
     // Cache is missing or expired — needs refresh
     const needsRefresh =
       ageHours === null || ageHours >= REFRESH_THRESHOLD_H;
 
-    if (!needsRefresh) {
+    if (!needsRefresh || isBackgroundRequest) {
       return NextResponse.json({
         ok: true,
         triggered: false,
+        skipped: true,
         ageHours: ageHours?.toFixed(1),
-        message: "Cache is fresh — no refresh needed",
+        message: "Background refresh skipped during page load",
       });
     }
 
-    // Trigger background rebuild by calling the full agenda endpoint.
-    // We use fetch() to the same origin so it runs in its own request context.
-    // We do NOT await it — fire and forget.
-    const origin = new URL(request.url).origin;
-    void fetch(`${origin}/api/ics/agenda`, {
-      method: "GET",
-      headers: { "x-background-refresh": "1" },
-      // No signal — intentionally detached from this request
-    }).catch((err) => {
-      console.warn("[background-refresh] trigger failed:", err);
-    });
-
     return NextResponse.json({
       ok: true,
-      triggered: true,
+      triggered: false,
+      skipped: true,
       ageHours: ageHours?.toFixed(1) ?? "unknown",
       threshold: REFRESH_THRESHOLD_H,
-      message: "Background refresh triggered",
+      message: "Agenda refresh deferred",
     });
   } catch (error) {
     console.error("[background-refresh]", error);
