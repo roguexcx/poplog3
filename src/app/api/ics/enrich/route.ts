@@ -9,8 +9,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import type { TmdbEnrichment, TmdbNetwork, TmdbProductionCompany, ContentCategory } from "@/lib/ics-engine";
 import { refineCategoryFromTmdb, classifyTitle } from "@/lib/ics-engine";
+import { buildTmdbUrl, buildTmdbHeaders, getTmdbToken } from "@/server/api-clients/tmdb/client";
 
-const TMDB_BASE    = "https://api.themoviedb.org/3";
 const MIN_INTERVAL = Math.ceil(1000 / 15); // 15 req/s
 const RETRY_PAUSE  = 5000;
 const MAX_TITLES   = 20;
@@ -23,20 +23,20 @@ const GENRE_NAMES: Record<number, string> = {
 };
 
 let lastAt = 0;
-async function throttled(url: string, token: string, retries = 2): Promise<Response | null> {
+async function throttled(url: string, retries = 2): Promise<Response | null> {
   const now = Date.now();
   const wait = MIN_INTERVAL - (now - lastAt);
   if (wait > 0) await new Promise((r) => setTimeout(r, wait));
   lastAt = Date.now();
 
   const res = await fetch(url, {
-    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" },
+    headers: buildTmdbHeaders(),
     cache: "no-store",
   });
 
   if ((res.status === 429 || res.status >= 500) && retries > 0) {
     await new Promise((r) => setTimeout(r, RETRY_PAUSE));
-    return throttled(url, token, retries - 1);
+    return throttled(url, retries - 1);
   }
 
   return res.ok ? res : null;
@@ -51,18 +51,17 @@ interface TmdbTvDetails {
   production_companies?: TmdbProductionCompany[];
 }
 
-async function fetchTvDetails(tmdbId: number, token: string): Promise<TmdbTvDetails | null> {
-  const res = await throttled(`${TMDB_BASE}/tv/${tmdbId}?language=pt-BR`, token);
+async function fetchTvDetails(tmdbId: number): Promise<TmdbTvDetails | null> {
+  const res = await throttled(buildTmdbUrl(`/tv/${tmdbId}`));
   if (!res) return null;
   try {
     return await res.json() as TmdbTvDetails;
   } catch { return null; }
 }
 
-async function fetchCleanBackdrop(tmdbId: number, token: string): Promise<string | null> {
+async function fetchCleanBackdrop(tmdbId: number): Promise<string | null> {
   const res = await throttled(
-    `${TMDB_BASE}/tv/${tmdbId}/images?include_image_language=null,xx`,
-    token,
+    buildTmdbUrl(`/tv/${tmdbId}/images`, { include_image_language: "null,xx" }),
   );
   if (!res) return null;
   try {
@@ -73,13 +72,9 @@ async function fetchCleanBackdrop(tmdbId: number, token: string): Promise<string
   } catch { return null; }
 }
 
-async function searchTv(title: string, token: string): Promise<TmdbEnrichment | null> {
-  const url = new URL(`${TMDB_BASE}/search/tv`);
-  url.searchParams.set("query", title);
-  url.searchParams.set("language", "pt-BR");
-  url.searchParams.set("page", "1");
-
-  const res = await throttled(url.toString(), token);
+async function searchTv(title: string): Promise<TmdbEnrichment | null> {
+  const url = buildTmdbUrl("/search/tv", { query: title, page: "1" });
+  const res = await throttled(url);
   if (!res) return null;
 
   const data = await res.json() as { results?: Array<{
@@ -112,8 +107,8 @@ async function searchTv(title: string, token: string): Promise<TmdbEnrichment | 
   }
 
   const [details, cleanBackdrop] = await Promise.all([
-    fetchTvDetails(hit.id, token),
-    fetchCleanBackdrop(hit.id, token),
+    fetchTvDetails(hit.id),
+    fetchCleanBackdrop(hit.id),
   ]);
   const tmdb_type = details?.type ?? null;
   const localCat: ContentCategory = preferAnimation ? "ANIMATION" : "SERIES";
@@ -145,8 +140,9 @@ async function searchTv(title: string, token: string): Promise<TmdbEnrichment | 
 }
 
 export async function POST(req: NextRequest) {
-  const token = process.env.TMDB_ACCESS_TOKEN?.trim();
-  if (!token) {
+  try {
+    getTmdbToken(); // validates token is present
+  } catch {
     return NextResponse.json({ error: "TMDB not configured" }, { status: 503 });
   }
 
@@ -170,7 +166,7 @@ export async function POST(req: NextRequest) {
   await Promise.allSettled(
     titles.map(async (title) => {
       try {
-        results[title] = await searchTv(title, token);
+        results[title] = await searchTv(title);
       } catch {
         results[title] = null;
       }

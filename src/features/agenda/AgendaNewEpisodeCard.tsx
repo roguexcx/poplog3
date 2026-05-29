@@ -2,6 +2,8 @@
 
 import type { NewEpisodeItem } from "@/features/acompanhando/NewEpisodeCard";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
+import { buildTmdbRawUrl } from "@/lib/images/url";
+import TmdbImage from "@/components/images/TmdbImage";
 
 export type { NewEpisodeItem };
 
@@ -32,15 +34,11 @@ function temporalBadge(
 
 export default function AgendaNewEpisodeCard({ item, onClick }: Props) {
   const { mainTitle } = useRandomizedTitleDisplay(item.title, item.original_title);
-  const backdropUrl = item.next_episode_still_path
-    ? `https://image.tmdb.org/t/p/w780${item.next_episode_still_path}`
-    : item.backdrop_path
-      ? `https://image.tmdb.org/t/p/w780${item.backdrop_path}`
-      : null;
+  const backdropUrl =
+    buildTmdbRawUrl("w780", item.next_episode_still_path) ??
+    buildTmdbRawUrl("w780", item.backdrop_path);
 
-  const posterUrl = item.poster_path
-    ? `https://image.tmdb.org/t/p/w92${item.poster_path}`
-    : null;
+  const posterUrl = buildTmdbRawUrl("w92", item.poster_path);
 
   const tag = epTag(item.next_season, item.next_episode);
   const badge = temporalBadge(item.days_since_new_episode, item.next_episode_air_date);
@@ -79,7 +77,7 @@ export default function AgendaNewEpisodeCard({ item, onClick }: Props) {
             className="relative shrink-0 self-stretch overflow-hidden rounded-l-2xl"
             style={{ width: 64 }}
           >
-            <img src={posterUrl} alt="" className="h-full w-full object-cover" />
+            <TmdbImage path={item.poster_path} kind="poster" size="thumb" alt="" fill className="object-cover" />
             {tag && (
               <div className="absolute inset-x-0 bottom-0 flex justify-center pb-1.5">
                 <span className="rounded-full bg-black/75 px-1.5 py-0.5 text-[9px] font-black text-white/90 backdrop-blur-sm">
@@ -148,4 +146,4 @@ export default function AgendaNewEpisodeCard({ item, onClick }: Props) {
       </div>
     </button>
   );
-}
+}

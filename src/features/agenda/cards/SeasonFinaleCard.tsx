@@ -2,6 +2,7 @@
 
 import type { AgendaEvent } from "@/server/agenda/types";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
+import TmdbImage from "@/components/images/TmdbImage";
 
 type Props = {
   event: AgendaEvent;
@@ -18,13 +19,14 @@ export default function SeasonFinaleCard({ event, onSelect }: Props) {
       onClick={() => onSelect?.(event)}
       className="group relative min-h-44 overflow-hidden rounded-lg border border-rose-400/25 bg-rose-950/30 p-5 text-left transition hover:border-rose-300/50"
     >
-      {image && (
-        <img
-          src={`https://image.tmdb.org/t/p/w780${image}`}
-          alt=""
-          className="absolute inset-0 h-full w-full object-cover opacity-35 transition group-hover:opacity-45"
-        />
-      )}
+      <TmdbImage
+        path={image}
+        kind="backdrop"
+        size="medium"
+        alt=""
+        fill
+        className="object-cover opacity-35 transition group-hover:opacity-45"
+      />
       <div className="absolute inset-0 bg-gradient-to-r from-zinc-950 via-zinc-950/75 to-zinc-950/20" />
       <div className="relative">
         <p className="text-xs font-semibold uppercase tracking-[0.2em] text-rose-200">

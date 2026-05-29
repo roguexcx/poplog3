@@ -32,6 +32,7 @@ import {
   accumulateDiagnostics,
 } from "@/lib/radar/eligibility";
 import { ALL_BLOCKED_CATEGORIES } from "@/lib/ics-engine";
+import { tmdbFetchSafe, getTmdbToken } from "@/server/api-clients/tmdb/client";
 
 // ── Feature flag ──────────────────────────────────────────────────────────────
 // Lida com dois níveis:
@@ -112,61 +113,32 @@ const GENRE_NAMES: Record<number, string> = {
 
 // ── Fetch helpers ─────────────────────────────────────────────────────────────
 
-const TMDB_BASE = "https://api.themoviedb.org/3";
 const FETCH_TIMEOUT_MS = 8000;
 const DETAILS_CONCURRENCY = 8; // max parallel detail fetches
 
-function tmdbHeaders(token: string) {
-  return {
-    Authorization: `Bearer ${token}`,
-    Accept: "application/json",
-  };
-}
-
-async function tmdbGet<T>(path: string, token: string, params: Record<string, string> = {}): Promise<T | null> {
-  try {
-    const url = new URL(`${TMDB_BASE}${path}`);
-    url.searchParams.set("language", "pt-BR");
-    for (const [k, v] of Object.entries(params)) url.searchParams.set(k, v);
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-    const res = await fetch(url.toString(), {
-      headers: tmdbHeaders(token),
-      signal: controller.signal,
-      cache: "no-store",
-    });
-    clearTimeout(timer);
-
-    if (!res.ok) {
-      console.warn(`[tmdb-trending] ${path} returned ${res.status}`);
-      return null;
-    }
-    return res.json() as Promise<T>;
-  } catch (err) {
-    console.warn(`[tmdb-trending] fetch error ${path}:`, err);
-    return null;
-  }
-}
-
-async function fetchPage(path: string, token: string, page = 1): Promise<TmdbTvItem[]> {
-  const data = await tmdbGet<TmdbPageResponse>(path, token, { page: String(page) });
+async function fetchPage(path: string, page = 1): Promise<TmdbTvItem[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const data = await tmdbFetchSafe<TmdbPageResponse>(path, {
+    params: { page: String(page) },
+    cache: "no-store",
+    signal: controller.signal,
+  }).finally(() => clearTimeout(timer));
   return data?.results ?? [];
 }
 
-async function fetchTvDetails(id: number, token: string): Promise<TmdbTvDetails | null> {
-  return tmdbGet<TmdbTvDetails>(`/tv/${id}`, token);
+async function fetchTvDetails(id: number): Promise<TmdbTvDetails | null> {
+  return tmdbFetchSafe<TmdbTvDetails>(`/tv/${id}`, { cache: "no-store" });
 }
 
 // Processa um chunk de items em paralelo com concorrência limitada
 async function fetchDetailsInBatches(
   items: TmdbTvItem[],
-  token: string,
 ): Promise<Map<number, TmdbTvDetails>> {
   const map = new Map<number, TmdbTvDetails>();
   for (let i = 0; i < items.length; i += DETAILS_CONCURRENCY) {
     const batch = items.slice(i, i + DETAILS_CONCURRENCY);
-    const results = await Promise.all(batch.map((item) => fetchTvDetails(item.id, token)));
+    const results = await Promise.all(batch.map((item) => fetchTvDetails(item.id)));
     for (let j = 0; j < batch.length; j++) {
       const d = results[j];
       if (d) map.set(batch[j].id, d);
@@ -289,8 +261,9 @@ export async function fetchTmdbTrendingFeed(): Promise<TmdbTrendingResult> {
   // ── Feature flag ────────────────────────────────────────────────────────────
   if (!isTmdbFeedEnabled()) return empty;
 
-  const token = process.env.TMDB_ACCESS_TOKEN?.trim();
-  if (!token) {
+  try {
+    getTmdbToken(); // validate token is present
+  } catch {
     console.warn("[tmdb-trending] TMDB_ACCESS_TOKEN não configurado — feed desabilitado");
     return empty;
   }
@@ -300,10 +273,10 @@ export async function fetchTmdbTrendingFeed(): Promise<TmdbTrendingResult> {
 
   // ── 1. Fetch paralelo das 3 fontes ─────────────────────────────────────────
   const [dayItems, weekItems, airingP1, airingP2] = await Promise.all([
-    fetchPage("/trending/tv/day",    token, 1),
-    fetchPage("/trending/tv/week",   token, 1),
-    fetchPage("/tv/airing_today",    token, 1),
-    fetchPage("/tv/airing_today",    token, 2),
+    fetchPage("/trending/tv/day",    1),
+    fetchPage("/trending/tv/week",   1),
+    fetchPage("/tv/airing_today",    1),
+    fetchPage("/tv/airing_today",    2),
   ]);
 
   const airingItems = [...airingP1, ...airingP2];
@@ -337,7 +310,7 @@ export async function fetchTmdbTrendingFeed(): Promise<TmdbTrendingResult> {
 
   // ── 3. Buscar detalhes completos em batches ────────────────────────────────
   const allItems = consolidated.map((e) => e.item);
-  const detailsMap = await fetchDetailsInBatches(allItems, token);
+  const detailsMap = await fetchDetailsInBatches(allItems);
 
   console.log(
     `[tmdb-trending] detalhes buscados: ${detailsMap.size}/${allItems.length}` +

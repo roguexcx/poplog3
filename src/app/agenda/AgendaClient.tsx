@@ -9,11 +9,12 @@ import PageShell from "@/components/layout/PageShell";
 import type { IcsSeriesGroup, MovieGroup, ContentCategory } from "@/lib/ics-engine";
 import { CATEGORY_PRIORITY, ALL_BLOCKED_CATEGORIES } from "@/lib/ics-engine";
 import type { IcsAgendaResponse } from "@/app/api/ics/agenda/route";
+import { buildTmdbRawUrl } from "@/lib/images/url";
 
 // ── Constantes ─────────────────────────────────────────────────────────────────
 
 const TMDB_IMG = (path: string | null, size: string) =>
-  path ? `https://image.tmdb.org/t/p/${size}${path}` : null;
+  buildTmdbRawUrl(size, path);
 
 // Idiomas com texto não-latino nos posters — preferir backdrop nesses casos
 const POSTER_TEXT_LANGS = new Set(["ja","ko","zh","th","hi","ar","he","ru","uk","vi","id"]);

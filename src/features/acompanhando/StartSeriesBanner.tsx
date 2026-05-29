@@ -3,6 +3,7 @@
 import { ChevronLeft, ChevronRight, Play, Sparkles } from "lucide-react";
 import Image from "next/image";
 import { useRef } from "react";
+import { buildTmdbRawUrl } from "@/lib/images/url";
 
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import type { WatchlistPickItem } from "@/features/acompanhando/WatchlistPickCard";
@@ -14,7 +15,7 @@ type Props = {
 };
 
 function tmdbImage(path: string | null, size: "w92" | "w185" | "w342" | "w500" | "w780" | "w1280" | "original" = "w780") {
-  return path ? `https://image.tmdb.org/t/p/${size}${path}` : null;
+  return buildTmdbRawUrl(size, path);
 }
 
 function ProviderPill({ item }: { item: WatchlistPickItem }) {

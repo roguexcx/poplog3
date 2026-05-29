@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
+import { buildTmdbRawUrl } from "@/lib/images/url";
 
 export type ContinueStatusSignal =
   | "new_episode"
@@ -82,16 +83,11 @@ export default function ContinueCard({ item, onClick }: Props) {
   const [timeScope, setTimeScope] = useState<TimeScope>("series");
   const { mainTitle } = useRandomizedTitleDisplay(item.title, item.original_title);
 
-  const posterUrl = item.poster_path
-    ? `https://image.tmdb.org/t/p/w185${item.poster_path}`
-    : null;
+  const posterUrl = buildTmdbRawUrl("w185", item.poster_path);
 
   const backdropUrl =
-    item.next_episode_still_path
-      ? `https://image.tmdb.org/t/p/w780${item.next_episode_still_path}`
-      : item.backdrop_path
-        ? `https://image.tmdb.org/t/p/w780${item.backdrop_path}`
-        : null;
+    buildTmdbRawUrl("w780", item.next_episode_still_path) ??
+    buildTmdbRawUrl("w780", item.backdrop_path);
 
   const cfg = SIGNAL_CONFIG[item.status_signal];
   const seasonPct =

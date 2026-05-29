@@ -1,6 +1,7 @@
 "use client";
 
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
+import { buildTmdbRawUrl } from "@/lib/images/url";
 
 export type WatchlistPickItem = {
   content_id: string;
@@ -51,7 +52,7 @@ function ProviderBadge({
     <div className="flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 backdrop-blur-sm">
       {logoPath ? (
         <img
-          src={`https://image.tmdb.org/t/p/original${logoPath}`}
+          src={buildTmdbRawUrl("original", logoPath) ?? ""}
           alt={name}
           className="h-3 w-3 rounded-sm object-contain"
         />
@@ -69,11 +70,9 @@ function ProviderBadge({
 }
 
 export default function WatchlistPickCard({ item, onClick }: Props) {
-  const posterUrl = item.poster_path
-    ? `https://image.tmdb.org/t/p/w342${item.poster_path}`
-    : item.backdrop_path
-      ? `https://image.tmdb.org/t/p/w780${item.backdrop_path}`
-      : null;
+  const posterUrl =
+    buildTmdbRawUrl("w342", item.poster_path) ??
+    buildTmdbRawUrl("w780", item.backdrop_path);
 
   const isMovie = item.media_type === "movie";
 

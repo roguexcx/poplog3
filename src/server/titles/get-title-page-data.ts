@@ -38,15 +38,12 @@ import type { TitlePageData } from "@/features/title/types";
 import type { UserRatingData } from "@/types/user";
 import { getUserRating } from "@/server/ratings/user-rating-service";
 import { getPublicRating } from "@/server/ratings/rating-aggregate-service";
+import { buildTmdbRawUrl } from "@/lib/images/url";
 
 type MediaType = "movie" | "tv";
 
-const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
-
 function tmdbImage(path: string | null | undefined, size: string) {
-  if (!path) return null;
-  const normalized = path.startsWith("/") ? path : `/${path}`;
-  return `${TMDB_IMAGE_BASE}/${size}${normalized}`;
+  return buildTmdbRawUrl(size, path);
 }
 
 function hasDetailFields(

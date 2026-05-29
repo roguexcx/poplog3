@@ -5,6 +5,7 @@ import { useCallback, useEffect, useReducer, useRef } from "react";
 import type { ScoredItem, SignalType } from "./types";
 import HeroSlide from "./HeroSlide";
 import HeroNavDots from "./HeroNavDots";
+import TmdbImage from "@/components/images/TmdbImage";
 
 interface HeroSpotlightProps {
   items: ScoredItem[];
@@ -109,11 +110,15 @@ function HeroPosterCluster({
               }}
             >
               <div className="relative aspect-[2/3] overflow-hidden">
-                {item.poster_path ? (
-                  <img src={`https://image.tmdb.org/t/p/w342${item.poster_path}`} alt="" className="h-full w-full object-cover" loading="lazy" />
-                ) : (
-                  <div className="h-full w-full bg-white/[0.04]" />
-                )}
+                <TmdbImage
+                  path={item.poster_path}
+                  kind="poster"
+                  size="card"
+                  alt=""
+                  fill
+                  className="object-cover"
+                  fallback={<div className="h-full w-full bg-white/[0.04]" />}
+                />
                 <div className="absolute inset-0 bg-black/35" />
               </div>
             </button>
@@ -128,11 +133,16 @@ function HeroPosterCluster({
           style={{ width: 195 }}
         >
           <div className="relative aspect-[2/3] overflow-hidden">
-            {currentItem.poster_path ? (
-              <img src={`https://image.tmdb.org/t/p/w500${currentItem.poster_path}`} alt={currentItem.title} className="h-full w-full object-cover" loading="eager" />
-            ) : (
-              <div className="h-full w-full bg-white/[0.04]" />
-            )}
+            <TmdbImage
+              path={currentItem.poster_path}
+              kind="poster"
+              size="detail"
+              alt={currentItem.title}
+              fill
+              priority
+              className="object-cover"
+              fallback={<div className="h-full w-full bg-white/[0.04]" />}
+            />
             <div className="pointer-events-none absolute inset-0 rounded-[28px] ring-1 ring-white/15" />
           </div>
         </button>

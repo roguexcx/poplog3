@@ -36,12 +36,12 @@ import {
   fetchTmdbTrendingFeed,
   isTmdbFeedEnabled,
 } from "@/lib/radar/tmdb-trending-feed";
+import { buildTmdbUrl, buildTmdbHeaders, getTmdbToken } from "@/server/api-clients/tmdb/client";
 
 // Nao usar cache do Next.js — gerenciamos o cache manualmente no Supabase
 export const revalidate = 0;
 
 const ICS_URL    = "http://bancodeseries.com.br/ical.php";
-const TMDB_BASE  = "https://api.themoviedb.org/3";
 const CACHE_ID   = "main";
 const CACHE_TTL_H = 24; // horas
 const CACHE_SCHEMA_VERSION = 10; // bumped: collapse por serie+temporada ativo
@@ -208,8 +208,8 @@ async function fetchMovieReleaseDateBR(
 ): Promise<{ date: string; confidence: CinemaReleaseGroup["dateConfidence"] } | null> {
   try {
     const res = await fetch(
-      `${TMDB_BASE}/movie/${tmdbId}/release_dates`,
-      { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } },
+      buildTmdbUrl(`/movie/${tmdbId}/release_dates`),
+      { headers: buildTmdbHeaders(token) },
     );
     if (!res.ok) {
       if (globalReleaseDate) return { date: globalReleaseDate, confidence: "cinema_global_fallback" };
@@ -259,10 +259,16 @@ async function fetchCinemaReleasesBR(token: string): Promise<CinemaReleaseGroup[
     (async (): Promise<TmdbMovieListItem[]> => {
       try {
         const res = await fetch(
-          `${TMDB_BASE}/discover/movie?language=pt-BR&region=BR&sort_by=primary_release_date.desc` +
-          `&primary_release_date.gte=${tenDaysAgo}&primary_release_date.lte=${today}` +
-          `&with_release_type=3&vote_count.gte=0&page=1`,
-          { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } },
+          buildTmdbUrl("/discover/movie", {
+            region: "BR",
+            sort_by: "primary_release_date.desc",
+            "primary_release_date.gte": tenDaysAgo,
+            "primary_release_date.lte": today,
+            with_release_type: "3",
+            "vote_count.gte": "0",
+            page: "1",
+          }),
+          { headers: buildTmdbHeaders(token) },
         );
         if (!res.ok) return [];
         const data = await res.json() as { results?: TmdbMovieListItem[] };
@@ -274,10 +280,16 @@ async function fetchCinemaReleasesBR(token: string): Promise<CinemaReleaseGroup[
       try {
         const tomorrow = dateAdd(1);
         const res = await fetch(
-          `${TMDB_BASE}/discover/movie?language=pt-BR&region=BR&sort_by=primary_release_date.asc` +
-          `&primary_release_date.gte=${tomorrow}&primary_release_date.lte=${thirtyDaysAhead}` +
-          `&with_release_type=3&vote_count.gte=0&page=1`,
-          { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } },
+          buildTmdbUrl("/discover/movie", {
+            region: "BR",
+            sort_by: "primary_release_date.asc",
+            "primary_release_date.gte": tomorrow,
+            "primary_release_date.lte": thirtyDaysAhead,
+            with_release_type: "3",
+            "vote_count.gte": "0",
+            page: "1",
+          }),
+          { headers: buildTmdbHeaders(token) },
         );
         if (!res.ok) return [];
         const data = await res.json() as { results?: TmdbMovieListItem[] };
@@ -288,8 +300,8 @@ async function fetchCinemaReleasesBR(token: string): Promise<CinemaReleaseGroup[
     (async (): Promise<TmdbMovieListItem[]> => {
       try {
         const res = await fetch(
-          `${TMDB_BASE}/movie/upcoming?language=pt-BR&region=BR&page=1`,
-          { headers: { Authorization: `Bearer ${token}`, Accept: "application/json" } },
+          buildTmdbUrl("/movie/upcoming", { region: "BR", page: "1" }),
+          { headers: buildTmdbHeaders(token) },
         );
         if (!res.ok) return [];
         const data = await res.json() as { results?: TmdbMovieListItem[] };
@@ -516,11 +528,11 @@ async function buildAgendaPayload(): Promise<IcsAgendaResponse> {
     includeHidden: false,
   });
 
-  const accessToken = process.env.TMDB_ACCESS_TOKEN?.trim() ?? "";
-
   // 4. Estreias de cinema BR (unica chamada ativa ao TMDB como fonte primaria).
   //    Trending IDs removidos — sem score editorial no pipeline unificado.
   let cinemaReleases: CinemaReleaseGroup[] = [];
+  let accessToken = "";
+  try { accessToken = getTmdbToken(); } catch { /* token not configured — cinema releases skipped */ }
 
   if (accessToken) {
     cinemaReleases = await fetchCinemaReleasesBR(accessToken);

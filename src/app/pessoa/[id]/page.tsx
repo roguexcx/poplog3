@@ -5,6 +5,7 @@ import { headers } from "next/headers";
 import EmptyState from "@/components/ui/EmptyState";
 import SectionHeader from "@/components/ui/SectionHeader";
 import PersonTitleGrid from "./_components/PersonTitleGrid";
+import { buildTmdbRawUrl } from "@/lib/images/url";
 
 type PersonTitle = {
   tmdb_id: number;
@@ -60,8 +61,7 @@ type PessoaPageProps = {
 };
 
 function imageUrl(path?: string | null, size = "w500") {
-  if (!path) return null;
-  return `https://image.tmdb.org/t/p/${size}${path}`;
+  return buildTmdbRawUrl(size, path);
 }
 
 export default async function PessoaPage({ params }: PessoaPageProps) {

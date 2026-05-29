@@ -2,6 +2,7 @@
 
 import type { AgendaEvent } from "@/server/agenda/types";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
+import TmdbImage from "@/components/images/TmdbImage";
 
 type Props = {
   providerName: string;
@@ -23,14 +24,15 @@ function ProviderEventCard({
       onClick={() => onSelect?.(event)}
       className="w-40 shrink-0 text-left"
     >
-      <div className="aspect-[2/3] overflow-hidden rounded-lg bg-white/[0.04] ring-1 ring-white/[0.08]">
-        {event.posterPath && (
-          <img
-            src={`https://image.tmdb.org/t/p/w342${event.posterPath}`}
-            alt=""
-            className="h-full w-full object-cover"
-          />
-        )}
+      <div className="relative aspect-[2/3] overflow-hidden rounded-lg bg-white/[0.04] ring-1 ring-white/[0.08]">
+        <TmdbImage
+          path={event.posterPath}
+          kind="poster"
+          size="card"
+          alt=""
+          fill
+          className="object-cover"
+        />
       </div>
       <h3 className="mt-2 line-clamp-2 text-sm font-medium text-white">{mainTitle}</h3>
     </button>

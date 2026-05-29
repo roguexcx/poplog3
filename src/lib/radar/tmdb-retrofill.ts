@@ -21,8 +21,8 @@
 // ────────────────────────────────────────────────────────────────────────────
 
 import type { IcsSeriesGroup, SeriesEpisodeWindow } from "@/lib/ics-engine";
+import { tmdbFetchSafe } from "@/server/api-clients/tmdb/client";
 
-const TMDB_BASE = "https://api.themoviedb.org/3";
 
 // Janela: episodio anterior aceitavel se air_date >= hoje - RETRO_WINDOW_DAYS
 const RETRO_WINDOW_DAYS     = 14;
@@ -75,7 +75,6 @@ function epKey(season: number, episode: number): string {
 async function fetchSeasonEpisodes(
   tmdbId: number,
   seasonNumber: number,
-  accessToken: string,
 ): Promise<TmdbSeasonEpisode[]> {
   const key = `${tmdbId}_s${seasonNumber}`;
   if (seasonCache.has(key)) {
@@ -86,38 +85,27 @@ async function fetchSeasonEpisodes(
     return seasonCache.get(key)!;
   }
 
-  try {
-    const res = await fetch(
-      `${TMDB_BASE}/tv/${tmdbId}/season/${seasonNumber}?language=pt-BR`,
-      {
-        headers: { Authorization: `Bearer ${accessToken}`, Accept: "application/json" },
-        cache: "no-store",
-      },
-    );
-    if (!res.ok) {
-      console.log(
-        `[radar-retrofill] skipped tmdbId=${tmdbId} season=${seasonNumber}` +
-        ` reason="http_${res.status}"`,
-      );
-      seasonCache.set(key, []);
-      return [];
-    }
-    const data = await res.json() as TmdbSeasonResponse;
-    const episodes = data.episodes ?? [];
-    seasonCache.set(key, episodes);
-    console.log(
-      `[radar-retrofill] fetched tmdbId=${tmdbId} season=${seasonNumber}` +
-      ` episodes=${episodes.length}`,
-    );
-    return episodes;
-  } catch {
+  const data = await tmdbFetchSafe<TmdbSeasonResponse>(
+    `/tv/${tmdbId}/season/${seasonNumber}`,
+    { cache: "no-store" },
+  );
+
+  if (!data) {
     console.log(
       `[radar-retrofill] skipped tmdbId=${tmdbId} season=${seasonNumber}` +
-      ` reason="fetch_error"`,
+      ` reason="fetch_error_or_not_ok"`,
     );
     seasonCache.set(key, []);
     return [];
   }
+
+  const episodes = data.episodes ?? [];
+  seasonCache.set(key, episodes);
+  console.log(
+    `[radar-retrofill] fetched tmdbId=${tmdbId} season=${seasonNumber}` +
+    ` episodes=${episodes.length}`,
+  );
+  return episodes;
 }
 
 // ── Deduplicacao pos-retrofill ────────────────────────────────────────────────
@@ -209,7 +197,7 @@ export async function applyRetrofill(
   groups: IcsSeriesGroup[],
   accessToken: string,
 ): Promise<void> {
-  if (!accessToken) return;
+  if (!accessToken) return; // keep for backward compat — token is read centrally
 
   const today       = todayStr();
   const windowStart = dateAddDays(-RETRO_WINDOW_DAYS);
@@ -262,7 +250,7 @@ console.log(
   for (let i = 0; i < targets.length; i++) {
     const { group, tmdbId, seasonNumber } = targets[i];
 
-    const tmdbEpisodes = await fetchSeasonEpisodes(tmdbId, seasonNumber, accessToken);
+    const tmdbEpisodes = await fetchSeasonEpisodes(tmdbId, seasonNumber);
     if (tmdbEpisodes.length === 0) {
       console.log(
         `[radar-retrofill] skipped title="${group.rawTitle}"` +

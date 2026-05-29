@@ -49,11 +49,12 @@ import type {
   LegacyAgendaTv,
   LegacyAgendaMovie,
 } from "@/server/agenda/types";
+import { buildTmdbRawUrl } from "@/lib/images/url";
 
 // ── Constantes ─────────────────────────────────────────────────────────────────
 
 const TMDB_IMG = (path: string | null | undefined, size: string) =>
-  path ? `https://image.tmdb.org/t/p/${size}${path}` : null;
+  buildTmdbRawUrl(size, path);
 
 const POSTER_TEXT_LANGS = new Set([
   "ja",

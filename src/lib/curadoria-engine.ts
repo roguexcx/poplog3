@@ -6,6 +6,7 @@ import type {
   HeroCTA,
   HeroEyebrow,
 } from "@/components/HeroSpotlight/types";
+import { buildTmdbRawUrl } from "@/lib/images/url";
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
@@ -313,6 +314,5 @@ export function tmdbImage(
   path: string | null,
   size: "w342" | "w500" | "w780" | "w1280" | "original" = "w780"
 ): string {
-  if (!path) return "";
-  return `https://image.tmdb.org/t/p/${size}${path}`;
+  return buildTmdbRawUrl(size, path) ?? "";
 }

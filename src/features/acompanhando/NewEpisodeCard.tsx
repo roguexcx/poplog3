@@ -1,6 +1,7 @@
 "use client";
 
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
+import { buildTmdbRawUrl } from "@/lib/images/url";
 
 export type NewEpisodeItem = {
   content_id: string;
@@ -41,15 +42,11 @@ function episodeTag(
 }
 
 export default function NewEpisodeCard({ item, onClick }: Props) {
-  const backdropUrl = item.backdrop_path
-    ? `https://image.tmdb.org/t/p/w780${item.backdrop_path}`
-    : item.poster_path
-      ? `https://image.tmdb.org/t/p/w780${item.poster_path}`
-      : null;
+  const backdropUrl =
+    buildTmdbRawUrl("w780", item.backdrop_path) ??
+    buildTmdbRawUrl("w780", item.poster_path);
 
-  const posterUrl = item.poster_path
-    ? `https://image.tmdb.org/t/p/w92${item.poster_path}`
-    : null;
+  const posterUrl = buildTmdbRawUrl("w92", item.poster_path);
 
   const epTag = episodeTag(item.next_season, item.next_episode);
   const { mainTitle } = useRandomizedTitleDisplay(item.title, item.original_title);
@@ -147,4 +144,4 @@ export default function NewEpisodeCard({ item, onClick }: Props) {
       </div>
     </button>
   );
-}
+}

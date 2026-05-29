@@ -22,4 +22,4 @@ export function buildTmdbUrlLoose(
   const sizes = IMAGE_SIZES[kind] as Record<string, string>;
   const sizeValue = sizes[size] ?? size;
   return `${TMDB_IMAGE_BASE}/${sizeValue}${path}`;
-}
+}

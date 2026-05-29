@@ -12,6 +12,7 @@
 import pLimit from "p-limit";
 import type { IcsSeriesGroup, TmdbEnrichment } from "./ics-engine";
 import { refineCategoryFromTmdb } from "./ics-engine";
+import { buildTmdbHeaders, buildTmdbUrl, getTmdbToken } from "@/server/api-clients/tmdb/client";
 
 // ── Configuração de rate limit ────────────────────────────────────────────────
 
@@ -41,7 +42,9 @@ async function throttledFetch(url: string, opts?: RequestInit): Promise<Response
     await sleep(MIN_REQUEST_INTERVAL - elapsed);
   }
   lastRequestAt = Date.now();
-  return fetch(url, opts);
+  // Merge centralized TMDB headers into opts (caller may override)
+  const headers = { ...buildTmdbHeaders(), ...(opts?.headers as Record<string, string> | undefined) };
+  return fetch(url, { ...opts, headers });
 }
 
 // ── Busca TMDB: /search/tv ────────────────────────────────────────────────────
@@ -142,21 +145,12 @@ function extractRegionalSuffix(title: string): { base: string; suffix: string } 
 
 async function searchTmdbTvByQuery(
   query: string,
-  accessToken: string,
 ): Promise<TmdbSearchTvResponse | null> {
-  const url = new URL("https://api.themoviedb.org/3/search/tv");
-  url.searchParams.set("query", query);
-  url.searchParams.set("language", "pt-BR");
-  url.searchParams.set("page", "1");
+  const url = buildTmdbUrl("/search/tv", { query, page: "1" });
 
   let attempts = 0;
   while (attempts <= MAX_RETRIES) {
-    const res = await throttledFetch(url.toString(), {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/json",
-      },
-    });
+    const res = await throttledFetch(url, {});
 
     if (res.status === 429 || res.status >= 500) {
       if (attempts >= MAX_RETRIES) return null;
@@ -267,14 +261,13 @@ interface TmdbSearchResult {
 
 async function searchTmdbTv(
   title: string,
-  accessToken: string,
   preferAnimation = false,
 ): Promise<TmdbSearchResult | null> {
   const cleaned = title.toLowerCase().trim();
   const regional = extractRegionalSuffix(title);
 
   // 1ª tentativa: busca com o título completo (incluindo sufixo, se houver)
-  const fullData = await searchTmdbTvByQuery(title, accessToken);
+  const fullData = await searchTmdbTvByQuery(title);
   if (fullData?.results?.length) {
     // Passa o sufixo regional para que pickBestResult prefira o país certo
     // (ex: "The Assembly UK" → prefere result com origin_country GB)
@@ -288,7 +281,7 @@ async function searchTmdbTv(
   // Nesse caso, marcamos como variante regional — o match é provavelmente do show-mãe,
   // não de uma versão regional específica.
   if (regional) {
-    const baseData = await searchTmdbTvByQuery(regional.base, accessToken);
+    const baseData = await searchTmdbTvByQuery(regional.base);
     if (baseData?.results?.length) {
       const baseCleaned = regional.base.toLowerCase().trim();
       // Passa o sufixo regional: mesmo buscando pelo título-base, queremos
@@ -330,16 +323,10 @@ async function searchTmdbTv(
 
 async function fetchTvDetails(
   tmdbId: number,
-  accessToken: string,
 ): Promise<TmdbTvDetails | null> {
-  const url = `https://api.themoviedb.org/3/tv/${tmdbId}?language=pt-BR`;
+  const url = buildTmdbUrl(`/tv/${tmdbId}`);
   try {
-    const res = await throttledFetch(url, {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        Accept: "application/json",
-      },
-    });
+    const res = await throttledFetch(url, {});
     if (!res.ok) return null;
     return (await res.json()) as TmdbTvDetails;
   } catch {
@@ -351,10 +338,9 @@ async function fetchTvDetails(
 
 async function enrichGroup(
   group: IcsSeriesGroup,
-  accessToken: string,
 ): Promise<TmdbEnrichment | null> {
   const preferAnimation = group.category === "ANIMATION";
-  const searchResult = await searchTmdbTv(group.rawTitle, accessToken, preferAnimation);
+  const searchResult = await searchTmdbTv(group.rawTitle, preferAnimation);
   if (!searchResult) return null;
 
   const { result, variantSuffix, matchedWithoutSuffix } = searchResult;
@@ -366,7 +352,7 @@ async function enrichGroup(
   }
 
   // Busca detalhes completos: type, vote_count, number_of_seasons, networks
-  const details = await fetchTvDetails(result.id, accessToken);
+  const details = await fetchTvDetails(result.id);
   const tmdb_type = details?.type ?? null;
 
   const refined = refineCategoryFromTmdb(
@@ -442,10 +428,12 @@ export async function enrichSeriesGroups(
   const {
     concurrency  = CONCURRENCY_LIMIT,
     onBatchDone,
-    accessToken  = process.env.TMDB_ACCESS_TOKEN?.trim() ?? "",
   } = options;
 
-  if (!accessToken) {
+  try {
+    // Validate token is present (may be overridden via options.accessToken for tests)
+    void (options.accessToken?.trim() || getTmdbToken());
+  } catch {
     console.error("[ics-enricher] TMDB_ACCESS_TOKEN não configurado");
     return groups;
   }
@@ -458,7 +446,7 @@ export async function enrichSeriesGroups(
     groups.map((group) =>
       limit(async () => {
         try {
-          const enrichment = await enrichGroup(group, accessToken);
+          const enrichment = await enrichGroup(group);
           if (enrichment) {
             group.tmdb = enrichment;
             // Refina categoria com dados TMDB

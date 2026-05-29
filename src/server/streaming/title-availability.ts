@@ -17,8 +17,7 @@ import {
   type AvailabilityProvider,
 } from "./availability-service";
 import type { ProviderPreferenceInput } from "./provider-preferences";
-
-const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
+import { buildTmdbRawUrl } from "@/lib/images/url";
 
 export type AvailabilityPriorityContext =
   | "library"
@@ -71,9 +70,7 @@ export type TitleAvailabilityResult = {
 type AvailabilityMode = "display" | "user_title_refresh" | "admin_refresh";
 
 function tmdbImage(path: string | null | undefined, size: string): string | null {
-  if (!path) return null;
-  const normalized = path.startsWith("/") ? path : `/${path}`;
-  return `${TMDB_IMAGE_BASE}/${size}${normalized}`;
+  return buildTmdbRawUrl(size, path);
 }
 
 function daysSinceDate(value?: string | null): number | null {
