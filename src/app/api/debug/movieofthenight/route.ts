@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { adminUnauthorizedResponse, isAdminRequest } from "@/server/auth/admin-guard";
 import {
   asArray,
   asRecord,
@@ -17,7 +18,9 @@ import {
 
 const BASE_URL = "https://api.movieofthenight.com/v4";
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!isAdminRequest(request)) return adminUnauthorizedResponse();
+
   const apiKey = process.env.MOVIEOFTHENIGHT_API_KEY;
   if (!apiKey) {
     return NextResponse.json(buildMissingKeyResponse("MovieOfTheNight", "MOVIEOFTHENIGHT_API_KEY"), {

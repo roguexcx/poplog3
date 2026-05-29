@@ -6,6 +6,5 @@ export async function GET() {
     service: "poplog3",
     layer: "debug-health",
     timestamp: new Date().toISOString(),
-    environment: process.env.NODE_ENV ?? "unknown",
   });
 }

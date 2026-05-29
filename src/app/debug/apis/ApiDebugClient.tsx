@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { CheckCircle2, Clock, RefreshCw, XCircle } from "lucide-react";
 
 type DebugEndpointResult = {
@@ -70,19 +70,25 @@ const APIS: Omit<ApiState, "loading">[] = [
 ];
 
 export default function ApiDebugClient() {
+  const [secret, setSecret] = useState("");
   const [apis, setApis] = useState<ApiState[]>(
-    APIS.map((api) => ({ ...api, loading: true })),
+    APIS.map((api) => ({ ...api, loading: false })),
   );
   const [lastRun, setLastRun] = useState<Date | null>(null);
 
   async function loadAll(reset = true) {
+    if (!secret.trim()) return;
+
     if (reset) {
       setApis(APIS.map((api) => ({ ...api, loading: true })));
     }
 
     const results = await Promise.all(APIS.map(async (api) => {
       try {
-        const response = await fetch(api.path, { cache: "no-store" });
+        const response = await fetch(api.path, {
+          cache: "no-store",
+          headers: { "x-admin-secret": secret },
+        });
         const data = await response.json() as ApiDebugResponse;
         return { ...api, data, loading: false };
       } catch (error) {
@@ -97,14 +103,6 @@ export default function ApiDebugClient() {
     setApis(results);
     setLastRun(new Date());
   }
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void loadAll(false);
-    }, 0);
-
-    return () => window.clearTimeout(timer);
-  }, []);
 
   const metrics = useMemo(() => {
     const completed = apis.filter((api) => !api.loading);
@@ -135,11 +133,26 @@ export default function ApiDebugClient() {
             <button
               type="button"
               onClick={() => void loadAll()}
+              disabled={!secret.trim()}
               className="inline-flex h-11 items-center justify-center gap-2 rounded-lg border border-indigo-400/30 bg-indigo-500/10 px-4 text-sm font-bold text-indigo-100 transition hover:bg-indigo-500/20"
             >
               <RefreshCw size={17} />
               Recarregar amostra
             </button>
+          </div>
+
+          <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <label className="shrink-0 text-xs font-semibold uppercase tracking-widest text-zinc-500 sm:w-28">
+              Admin Secret
+            </label>
+            <input
+              type="password"
+              placeholder="ADMIN_SECRET"
+              value={secret}
+              onChange={(event) => setSecret(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && void loadAll()}
+              className="h-10 w-full max-w-sm rounded-lg border border-white/10 bg-white/[0.06] px-3 text-sm text-white placeholder-zinc-500 outline-none focus:border-indigo-400/40 focus:ring-1 focus:ring-indigo-400/20"
+            />
           </div>
 
           <div className="mt-7 grid gap-3 sm:grid-cols-2 lg:grid-cols-5">

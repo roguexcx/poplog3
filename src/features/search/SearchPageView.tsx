@@ -2,8 +2,9 @@
 
 import Image from "next/image";
 import Link from "next/link";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, Film, Search, Sparkles, Tv, UserRound, X } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, Film, Search, Sparkles, Tv, UserRound, X } from "lucide-react";
 
 import PageShell from "@/components/layout/PageShell";
 import InteractivePosterCard from "@/components/ui/InteractivePosterCard";
@@ -93,6 +94,23 @@ type SearchPageViewProps = {
   initialType: string;
   initialPage: number;
 };
+
+type SearchMeta = {
+  page: number;
+  totalPages: number;
+  totalResults: number;
+  count: number;
+};
+
+const SEARCH_DEBOUNCE_MS = 300;
+
+function normalizeMediaType(value: string): SearchMediaType {
+  return value === "movie" || value === "tv" ? value : "all";
+}
+
+function normalizePage(value: number) {
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : 1;
+}
 
 function getYear(title: SearchResult) {
   const date = title.release_date ?? title.first_air_date;
@@ -184,17 +202,20 @@ const SPECIAL_FILTERS: SpecialFilter[] = [
   { id: "plot-twist", label: "Plot Twist" },
 ];
 
-export default function SearchPageView({ initialQuery, initialType }: SearchPageViewProps) {
+export default function SearchPageView({ initialQuery, initialType, initialPage }: SearchPageViewProps) {
+  const router = useRouter();
+  const pathname = usePathname();
   const [query, setQuery] = useState(initialQuery);
-  const [type, setType] = useState<SearchMediaType>(
-    initialType === "movie" || initialType === "tv" ? initialType : "all"
-  );
+  const [type, setType] = useState<SearchMediaType>(normalizeMediaType(initialType));
+  const [page, setPage] = useState(() => normalizePage(initialPage));
   const [selectedGenre, setSelectedGenre] = useState<DiscoveryGenre | null>(null);
   const [selectedSpecial, setSelectedSpecial] = useState<SpecialFilter | null>(null);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [people, setPeople] = useState<SearchPerson[]>([]);
   const [hasSearched, setHasSearched] = useState(false);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchMeta, setSearchMeta] = useState<SearchMeta | null>(null);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
   const [discovery, setDiscovery] = useState<DiscoveryResponse | null>(null);
   const [genreLoading, setGenreLoading] = useState(false);
@@ -205,10 +226,20 @@ export default function SearchPageView({ initialQuery, initialType }: SearchPage
 
   useEffect(() => {
     setQuery(initialQuery);
-    setType(initialType === "movie" || initialType === "tv" ? initialType : "all");
-  }, [initialQuery, initialType]);
+    setType(normalizeMediaType(initialType));
+    setPage(normalizePage(initialPage));
+  }, [initialQuery, initialType, initialPage]);
 
   const trimmedQuery = useMemo(() => query.trim(), [query]);
+  const maxSearchPage = Math.max(1, Math.min(searchMeta?.totalPages ?? page, 500));
+  const searchSubtitle = useMemo(() => {
+    if (!searchMeta) return selectedGenre ? `${results.length} títulos em ${selectedGenre.name}` : `${results.length} títulos encontrados`;
+
+    const total = searchMeta.totalResults.toLocaleString("pt-BR");
+    const pageText = searchMeta.totalPages > 1 ? ` - pagina ${searchMeta.page} de ${searchMeta.totalPages}` : "";
+
+    return selectedGenre ? `${total} resultados em ${selectedGenre.name}${pageText}` : `${total} resultados${pageText}`;
+  }, [results.length, searchMeta, selectedGenre]);
   const mobileGenres = useMemo(() => {
     const genres = discovery?.genres ?? [];
     const primary = genres.slice(0, 6);
@@ -225,6 +256,58 @@ export default function SearchPageView({ initialQuery, initialType }: SearchPage
     if (selectedSpecial) count += 1;
     return count;
   }, [type, selectedGenre, selectedSpecial]);
+
+  function handleQueryChange(value: string) {
+    setQuery(value);
+    setPage(1);
+  }
+
+  function handleTypeChange(nextType: SearchMediaType) {
+    setType(nextType);
+    setPage(1);
+  }
+
+  function handleGenreChange(genre: DiscoveryGenre) {
+    const active = selectedGenre?.id === genre.id;
+    setSelectedSpecial(null);
+    setSelectedGenre(active ? null : genre);
+    setPage(1);
+  }
+
+  function handleSpecialChange(filter: SpecialFilter) {
+    const active = selectedSpecial?.id === filter.id;
+    setSelectedGenre(null);
+    setSelectedSpecial(active ? null : filter);
+    setPage(1);
+  }
+
+  function clearFilters() {
+    setType("all");
+    setSelectedGenre(null);
+    setSelectedSpecial(null);
+    setPage(1);
+  }
+
+  useEffect(() => {
+    const timeout = setTimeout(() => {
+      const params = new URLSearchParams();
+
+      if (trimmedQuery) params.set("q", trimmedQuery);
+      if (type !== "all") params.set("type", type);
+      if (trimmedQuery && page > 1) params.set("page", String(page));
+      if (trimmedQuery && selectedGenre) params.set("genre", String(selectedGenre.id));
+
+      const queryString = params.toString();
+      const nextUrl = queryString ? `${pathname}?${queryString}` : pathname;
+      const currentUrl = `${window.location.pathname}${window.location.search}`;
+
+      if (currentUrl !== nextUrl) {
+        router.replace(nextUrl, { scroll: false });
+      }
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => clearTimeout(timeout);
+  }, [page, pathname, router, selectedGenre, trimmedQuery, type]);
 
   useEffect(() => {
     if (trimmedQuery || selectedGenre || selectedSpecial || discovery) return;
@@ -286,27 +369,57 @@ export default function SearchPageView({ initialQuery, initialType }: SearchPage
   }, [trimmedQuery, selectedSpecial]);
 
   useEffect(() => {
-    if (!trimmedQuery) { setResults([]); setPeople([]); setHasSearched(false); return; }
+    if (!trimmedQuery) {
+      setResults([]);
+      setPeople([]);
+      setHasSearched(false);
+      setSearchError(null);
+      setSearchMeta(null);
+      setLoading(false);
+      return;
+    }
+
     const controller = new AbortController();
     const timeout = setTimeout(async () => {
       try {
         setLoading(true);
-        const params = new URLSearchParams({ q: trimmedQuery, type });
+        setSearchError(null);
+        const params = new URLSearchParams({ q: trimmedQuery, type, page: String(page) });
         if (selectedGenre) params.set("genre", String(selectedGenre.id));
         const res = await fetch(`/api/poplog3/search?${params}`, { signal: controller.signal });
         const data: SearchResponse = await res.json();
-        if (!data.ok) { setResults([]); setPeople([]); return; }
-        setResults(data.results);
+        if (!res.ok || !data.ok) {
+          setResults([]);
+          setPeople([]);
+          setSearchMeta(null);
+          setSearchError("Nao foi possivel carregar a busca agora. Tente novamente em instantes.");
+          setHasSearched(true);
+          return;
+        }
+        setResults(data.results ?? []);
         setPeople(data.people ?? []);
+        setSearchMeta({
+          page: data.page ?? page,
+          totalPages: Math.max(1, data.totalPages ?? 1),
+          totalResults: data.totalResults ?? data.count ?? 0,
+          count: data.count ?? data.results?.length ?? 0,
+        });
         setHasSearched(true);
       } catch (e) {
-        if ((e as Error).name !== "AbortError") console.error("[search]", e);
+        if ((e as Error).name !== "AbortError") {
+          console.error("[search]", e);
+          setResults([]);
+          setPeople([]);
+          setSearchMeta(null);
+          setSearchError("Nao foi possivel carregar a busca agora. Tente novamente em instantes.");
+          setHasSearched(true);
+        }
       } finally {
-        setLoading(false);
+        if (!controller.signal.aborted) setLoading(false);
       }
-    }, 300);
+    }, SEARCH_DEBOUNCE_MS);
     return () => { controller.abort(); clearTimeout(timeout); };
-  }, [trimmedQuery, type, selectedGenre]);
+  }, [page, trimmedQuery, type, selectedGenre]);
 
   return (
     <PageShell variant="wide">
@@ -337,7 +450,7 @@ export default function SearchPageView({ initialQuery, initialType }: SearchPage
                 <Search className="pointer-events-none absolute left-4 top-1/2 size-4 -translate-y-1/2 text-white/35" />
                 <input
                   value={query}
-                  onChange={(e) => setQuery(e.target.value)}
+                  onChange={(e) => handleQueryChange(e.target.value)}
                   placeholder={"Título, pessoa, saga ou universo..."}
                   className="h-11 w-full rounded-2xl border border-white/[0.08] bg-black/30 pl-11 pr-4 text-sm font-medium text-white outline-none transition placeholder:text-white/30 focus:border-indigo-400/40 focus:bg-black/40 sm:h-12"
                 />
@@ -351,14 +464,14 @@ export default function SearchPageView({ initialQuery, initialType }: SearchPage
                   const Icon = item.icon;
                   const active = type === item.value;
                   return (
-                    <button key={item.value} onClick={() => setType(item.value)}
+                    <button key={item.value} onClick={() => handleTypeChange(item.value)}
                       className={`flex items-center justify-center gap-1.5 rounded-full border px-3 py-2 text-[10px] font-black uppercase tracking-[0.10em] transition sm:justify-start sm:px-4 sm:text-[11px] sm:tracking-[0.12em] ${active ? "border-indigo-300/35 bg-indigo-400/[0.13] text-indigo-100" : "border-white/[0.08] bg-white/[0.035] text-white/55 hover:bg-white/[0.07] hover:text-white/80"}`}>
                       <Icon className="size-3.5" />{item.label}
                     </button>
                   );
                 })}
                 {activeFiltersCount > 0 && (
-                  <button onClick={() => { setType("all"); setSelectedGenre(null); setSelectedSpecial(null); }}
+                  <button onClick={clearFilters}
                     className="col-span-3 flex items-center justify-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.035] px-3.5 py-2 text-[10px] font-black uppercase tracking-[0.10em] text-white/45 transition hover:bg-white/[0.07] hover:text-white/70 sm:col-auto sm:text-[11px] sm:tracking-[0.12em]">
                     <X className="size-3" />Limpar
                   </button>
@@ -376,7 +489,7 @@ export default function SearchPageView({ initialQuery, initialType }: SearchPage
                 const active = selectedGenre?.id === genre.id;
                 return (
                   <button key={genre.id}
-                    onClick={() => { setSelectedSpecial(null); setSelectedGenre(active ? null : genre); }}
+                    onClick={() => handleGenreChange(genre)}
                     className={`rounded-full border px-2.5 py-1.5 text-[10.5px] font-semibold transition ${active ? "border-indigo-400/40 bg-indigo-500/15 text-indigo-300" : "border-white/[0.08] bg-black/20 text-white/55 hover:bg-white/[0.07] hover:text-white/80"}`}>
                     {genre.name}
                   </button>
@@ -386,7 +499,7 @@ export default function SearchPageView({ initialQuery, initialType }: SearchPage
                 const active = selectedSpecial?.id === sf.id;
                 return (
                   <button key={sf.id}
-                    onClick={() => { setSelectedGenre(null); setSelectedSpecial(active ? null : sf); }}
+                    onClick={() => handleSpecialChange(sf)}
                     className={`rounded-full border px-2.5 py-1.5 text-[10.5px] font-semibold transition ${active ? "border-violet-400/40 bg-violet-500/15 text-violet-300" : "border-white/[0.08] bg-black/20 text-white/55 hover:bg-white/[0.07] hover:text-white/80"}`}>
                     {sf.label}
                   </button>
@@ -409,7 +522,7 @@ export default function SearchPageView({ initialQuery, initialType }: SearchPage
                 const active = selectedGenre?.id === genre.id;
                 return (
                   <button key={genre.id}
-                    onClick={() => { setSelectedSpecial(null); setSelectedGenre(active ? null : genre); }}
+                    onClick={() => handleGenreChange(genre)}
                     className={`rounded-full border px-3.5 py-1.5 text-[11px] font-semibold transition lg:px-4 lg:py-2 ${active ? "border-indigo-400/40 bg-indigo-500/15 text-indigo-300" : "border-white/[0.08] bg-black/15 text-white/55 hover:bg-white/[0.07] hover:text-white/80"}`}>
                     {genre.name}
                   </button>
@@ -420,7 +533,7 @@ export default function SearchPageView({ initialQuery, initialType }: SearchPage
                 const active = selectedSpecial?.id === sf.id;
                 return (
                   <button key={sf.id}
-                    onClick={() => { setSelectedGenre(null); setSelectedSpecial(active ? null : sf); }}
+                    onClick={() => handleSpecialChange(sf)}
                     className={`rounded-full border px-3.5 py-1.5 text-[11px] font-semibold transition lg:px-4 lg:py-2 ${active ? "border-violet-400/40 bg-violet-500/15 text-violet-300" : "border-white/[0.08] bg-black/15 text-white/55 hover:bg-white/[0.07] hover:text-white/80"}`}>
                     {sf.label}
                   </button>
@@ -439,24 +552,61 @@ export default function SearchPageView({ initialQuery, initialType }: SearchPage
           </div>
         ) : null}
 
+        {loading && hasSearched ? (
+          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.025] px-4 py-3 text-sm font-medium text-white/55">
+            Atualizando resultados...
+          </div>
+        ) : null}
+
+        {searchError && hasSearched ? (
+          <EmptyState kicker="Erro na busca" title="Busca indisponivel." description={searchError} accent="neutral" />
+        ) : null}
+
         {/* People results */}
-        {!loading && hasSearched && people.length > 0 ? <PeopleGrid people={people} /> : null}
+        {!searchError && !loading && hasSearched && people.length > 0 ? <PeopleGrid people={people} /> : null}
 
         {/* Title results */}
-        {!loading && hasSearched && results.length > 0 ? (
+        {!searchError && !loading && hasSearched && results.length > 0 ? (
           <section className="space-y-5">
             <SectionHeader
               eyebrow="Resultados"
               title="Títulos encontrados"
-              subtitle={selectedGenre ? `${results.length} títulos em ${selectedGenre.name}` : `${results.length} títulos encontrados`}
+              subtitle={searchSubtitle}
               accent="indigo"
             />
             <TitleGrid titles={results} />
+            {searchMeta && searchMeta.totalPages > 1 ? (
+              <div className="flex flex-col gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.025] p-3 sm:flex-row sm:items-center sm:justify-between">
+                <p className="text-xs font-semibold text-white/45">
+                  Pagina {searchMeta.page} de {searchMeta.totalPages}
+                </p>
+                <div className="grid grid-cols-2 gap-2 sm:flex">
+                  <button
+                    type="button"
+                    onClick={() => setPage((value) => Math.max(1, value - 1))}
+                    disabled={page <= 1}
+                    className="flex items-center justify-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.035] px-4 py-2 text-[11px] font-black uppercase tracking-[0.12em] text-white/55 transition hover:bg-white/[0.07] hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-35"
+                  >
+                    <ChevronLeft className="size-3.5" />
+                    Anterior
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage((value) => Math.min(maxSearchPage, value + 1))}
+                    disabled={page >= maxSearchPage}
+                    className="flex items-center justify-center gap-1.5 rounded-full border border-white/[0.08] bg-white/[0.035] px-4 py-2 text-[11px] font-black uppercase tracking-[0.12em] text-white/55 transition hover:bg-white/[0.07] hover:text-white/80 disabled:cursor-not-allowed disabled:opacity-35"
+                  >
+                    Proxima
+                    <ChevronRight className="size-3.5" />
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </section>
         ) : null}
 
         {/* Empty search */}
-        {!loading && hasSearched && results.length === 0 && people.length === 0 ? (
+        {!searchError && !loading && hasSearched && results.length === 0 && people.length === 0 ? (
           <EmptyState kicker="Busca vazia" title="Nenhum resultado encontrado." description="Tente outro termo, tipo ou gênero." accent="neutral" />
         ) : null}
 

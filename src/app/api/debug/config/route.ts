@@ -1,10 +1,12 @@
 import { NextResponse } from "next/server";
+import { adminUnauthorizedResponse, isAdminRequest } from "@/server/auth/admin-guard";
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!isAdminRequest(request)) return adminUnauthorizedResponse();
+
   return NextResponse.json({
     ok: true,
     service: "poplog3",
-    environment: process.env.NODE_ENV ?? "unknown",
     env: {
   tmdb: Boolean(process.env.TMDB_ACCESS_TOKEN),
   omdb: Boolean(process.env.OMDB_API_KEY),

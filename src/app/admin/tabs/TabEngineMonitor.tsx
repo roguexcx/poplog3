@@ -33,9 +33,12 @@ export function TabEngineMonitor({ secret }: { secret: string }) {
     if (!secret.trim()) return;
     setView((prev) => prev.kind === "ok" ? { ...prev } : { kind: "loading" });
     try {
-      const params = new URLSearchParams({ secret });
+      const params = new URLSearchParams();
       if (full) params.set("full", "1");
-      const res = await fetch(`/api/debug/engine?${params}`, { cache: "no-store" });
+      const res = await fetch(`/api/debug/engine?${params}`, {
+        cache: "no-store",
+        headers: { "x-admin-secret": secret },
+      });
       if (res.status === 401) { setView({ kind: "unauthorized" }); return; }
       if (!res.ok)             { setView({ kind: "error", message: `HTTP ${res.status}` }); return; }
       const data = (await res.json()) as EngineData;

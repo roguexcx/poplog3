@@ -7,18 +7,15 @@ import {
   getStats,
 } from "@/server/engine-logger";
 
-/** Acesso protegido por ?secret= ou header x-admin-secret */
+/** Acesso protegido por header x-admin-secret. */
 function isAuthorized(req: NextRequest): boolean {
   const secret = process.env.ADMIN_SECRET;
   if (!secret) return false;
-  return (
-    req.nextUrl.searchParams.get("secret") === secret ||
-    req.headers.get("x-admin-secret") === secret
-  );
+  return req.headers.get("x-admin-secret") === secret;
 }
 
-/** GET /api/debug/engine?secret=X          — stats + últimas 50 entradas
- *  GET /api/debug/engine?secret=X&full=1  — últimas 500 entradas
+/** GET /api/debug/engine          — stats + últimas 50 entradas
+ *  GET /api/debug/engine?full=1  — últimas 500 entradas
  *  DELETE /api/debug/engine (x-admin-secret header) — zera o buffer
  */
 export async function GET(req: NextRequest) {

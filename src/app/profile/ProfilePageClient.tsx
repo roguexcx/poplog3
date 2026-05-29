@@ -12,7 +12,7 @@ import {
 import type { User } from "@supabase/supabase-js";
 import {
   GripVertical, X, Search, ChevronRight,
-  LogOut, Trash2, Mail, Lock, Check,
+  LogOut, Mail, Lock, Check,
   Film, Tv, BarChart2, ChevronDown, RotateCcw,
 } from "lucide-react";
 
@@ -1180,20 +1180,6 @@ function TabNotInterested({
 // ─────────────────────────────────────────────────────────────────────────────
 
 function TabAccount({ user, onSignOut }: { user: User; onSignOut: () => void }) {
-  const [deleteConfirmText, setDeleteConfirmText] = useState("");
-  const [isDeleting,        setIsDeleting]        = useState(false);
-
-  async function handleDeleteAccount() {
-    if (deleteConfirmText !== "EXCLUIR") return;
-    setIsDeleting(true);
-    try {
-      const supabase = createClient();
-      await supabase.auth.signOut();
-    } finally {
-      setIsDeleting(false);
-    }
-  }
-
   const hasProvider = (user.app_metadata?.providers as string[] | undefined)?.includes("email");
 
   return (
@@ -1253,39 +1239,22 @@ function TabAccount({ user, onSignOut }: { user: User; onSignOut: () => void }) 
 
       </div>{/* end desktop 2-col grid */}
 
-      {/* Danger zone — largura total */}
-      <Block className="border-rose-500/15">
-        <Eyebrow color="rose">Zona de risco</Eyebrow>
-        <BlockTitle>Excluir conta</BlockTitle>
+      <Block>
+        <Eyebrow color="muted">Conta</Eyebrow>
+        <BlockTitle>Gerenciar conta</BlockTitle>
 
         <p className="text-[12px] text-white/35 mb-5 leading-relaxed">
-          Esta ação é irreversível. Todos os seus dados — biblioteca, histórico e preferências — serão permanentemente apagados.
+          A exclusão permanente da conta ainda não está disponível nesta etapa. Por enquanto, você pode encerrar a sessão neste dispositivo.
         </p>
 
-        <div className="space-y-3">
-          <div>
-            <label className="block text-[10px] font-bold text-white/30 uppercase tracking-wide mb-1.5">
-              Digite EXCLUIR para confirmar
-            </label>
-            <input
-              type="text"
-              value={deleteConfirmText}
-              onChange={e => setDeleteConfirmText(e.target.value)}
-              placeholder="EXCLUIR"
-              className="w-full bg-white/[0.03] border border-white/[0.07] focus:border-rose-500/35 rounded-xl px-3.5 py-2.5 text-[13px] text-white/70 placeholder:text-white/15 outline-none transition-all"
-            />
-          </div>
-
-          <button
-            type="button"
-            disabled={deleteConfirmText !== "EXCLUIR" || isDeleting}
-            onClick={handleDeleteAccount}
-            className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-[13px] font-semibold transition-all disabled:opacity-30 disabled:cursor-not-allowed bg-rose-500/15 border border-rose-500/25 text-rose-400 hover:bg-rose-500/25 hover:border-rose-500/40 disabled:hover:bg-rose-500/15"
-          >
-            <Trash2 size={15} />
-            {isDeleting ? "Excluindo..." : "Confirmar exclusão"}
-          </button>
-        </div>
+        <button
+          type="button"
+          onClick={onSignOut}
+          className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.04] hover:bg-white/[0.07] text-[13px] font-semibold text-white/60 hover:text-white/80 transition-all"
+        >
+          <LogOut size={15} />
+          Sair da conta
+        </button>
       </Block>
 
     </div>

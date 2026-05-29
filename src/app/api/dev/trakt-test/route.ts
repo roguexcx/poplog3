@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
+import { adminUnauthorizedResponse, isAdminRequest } from "@/server/auth/admin-guard";
 
 export const dynamic = "force-dynamic";
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!isAdminRequest(request)) return adminUnauthorizedResponse();
+
   const key = process.env.TRAKT_CLIENT_ID;
 
   const response = await fetch("https://api.trakt.tv/movies/popular", {

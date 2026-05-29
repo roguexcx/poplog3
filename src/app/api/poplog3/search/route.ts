@@ -11,6 +11,7 @@ import {
 import type { TmdbMediaType, TmdbTitleSummary } from "@/server/api-clients/tmdb/types";
 
 type SearchMediaType = "all" | "movie" | "tv";
+const TMDB_MAX_SEARCH_PAGE = 500;
 
 type TmdbPersonSummary = {
   id: number;
@@ -47,7 +48,7 @@ function parsePage(value: string | null): number {
     return 1;
   }
 
-  return Math.floor(page);
+  return Math.min(Math.floor(page), TMDB_MAX_SEARCH_PAGE);
 }
 
 function parseGenre(value: string | null): number | undefined {
@@ -120,6 +121,8 @@ export async function GET(request: NextRequest) {
   }
 
   try {
+    // Texto livre do usuario usa /search. Telas profundas hidratam detalhes
+    // completos pelas rotas /movie/{id}, /tv/{id} ou /person/{id}.
     const endpoint =
       mediaType === "all" ? "/search/multi" : `/search/${mediaType}`;
 

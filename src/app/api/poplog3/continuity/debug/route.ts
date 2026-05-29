@@ -1,9 +1,12 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentUser } from "@/server/auth/get-current-user";
+import { adminUnauthorizedResponse, isAdminRequest } from "@/server/auth/admin-guard";
 import { supabaseAdmin } from "@/server/supabase/admin";
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!isAdminRequest(request)) return adminUnauthorizedResponse();
+
   const user = await getCurrentUser();
 
   if (!user) {

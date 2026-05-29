@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { adminUnauthorizedResponse, isAdminRequest } from "@/server/auth/admin-guard";
 import {
   asArray,
   asRecord,
@@ -15,7 +16,9 @@ import {
 
 const BASE_URL = "http://www.omdbapi.com/";
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!isAdminRequest(request)) return adminUnauthorizedResponse();
+
   const apiKey = process.env.OMDB_API_KEY;
   if (!apiKey) {
     return NextResponse.json(buildMissingKeyResponse("OMDb", "OMDB_API_KEY"), {

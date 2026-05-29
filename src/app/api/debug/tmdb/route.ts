@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { adminUnauthorizedResponse, isAdminRequest } from "@/server/auth/admin-guard";
 import {
   asArray,
   asRecord,
@@ -18,7 +19,9 @@ import {
 const BASE_URL = "https://api.themoviedb.org/3";
 const IMAGE_BASE = "https://image.tmdb.org/t/p/w342";
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!isAdminRequest(request)) return adminUnauthorizedResponse();
+
   const apiKey = process.env.TMDB_API_KEY;
   if (!apiKey) {
     return NextResponse.json(buildMissingKeyResponse("TMDB", "TMDB_API_KEY"), {

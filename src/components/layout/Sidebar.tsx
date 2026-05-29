@@ -72,8 +72,8 @@ const NAV_GROUPS: NavGroup[] = [
 const MOBILE_LINKS: NavLink[] = [
   { href: "/", label: "Início", icon: Home },
   { href: "/buscar", label: "Buscar", icon: Search },
-  { href: "/acompanhando", label: "Assistir", icon: PlayCircle },
-  { href: "/library", label: "Biblioteca", icon: Library },
+  { href: "/acompanhando", label: "Assistir", icon: PlayCircle, authRequired: true },
+  { href: "/library", label: "Biblioteca", icon: Library, authRequired: true },
 ];
 
 const MOBILE_MORE_LINKS: NavLink[] = [

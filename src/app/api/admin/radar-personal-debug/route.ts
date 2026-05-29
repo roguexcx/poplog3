@@ -1,11 +1,12 @@
 // GET /api/admin/radar-personal-debug
 // Diagnóstico do modo personalizado: mostra o cruzamento entre biblioteca do
-// usuário autenticado e o feed ICS. Não requer secret — usa a sessão do browser.
+// usuário autenticado e o feed ICS. Requer sessão e ADMIN_SECRET.
 
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/server/supabase/admin";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import type { IcsAgendaResponse } from "@/app/api/ics/agenda/route";
+import { adminUnauthorizedResponse, isAdminRequest } from "@/server/auth/admin-guard";
 
 export const revalidate = 0;
 
@@ -25,7 +26,9 @@ async function readCache(): Promise<IcsAgendaResponse | null> {
   }
 }
 
-export async function GET(_req: NextRequest) {
+export async function GET(req: NextRequest) {
+  if (!isAdminRequest(req)) return adminUnauthorizedResponse();
+
   const user = await getCurrentUser().catch(() => null);
   if (!user) {
     return NextResponse.json({ error: "not_authenticated" }, { status: 401 });
@@ -44,7 +47,6 @@ export async function GET(_req: NextRequest) {
     status: string;
   }>;
   const tvRows = libraryRows.filter((r) => r.media_type === "tv");
-  const libraryIds = new Set(tvRows.map((r) => r.tmdb_id));
 
   // Feed ICS do cache
   const cache = await readCache();

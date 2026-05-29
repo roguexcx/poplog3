@@ -89,10 +89,11 @@ export default function EngineMonitorClient() {
       );
 
       try {
-        const params = new URLSearchParams({ secret: currentSecret });
+        const params = new URLSearchParams();
         if (full) params.set("full", "1");
         const res = await fetch(`/api/debug/engine?${params}`, {
           cache: "no-store",
+          headers: { "x-admin-secret": currentSecret },
         });
 
         if (res.status === 401) {

@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 
+import { adminUnauthorizedResponse, isAdminRequest } from "@/server/auth/admin-guard";
 import { supabaseAdmin } from "@/server/supabase/admin";
 
-export async function GET() {
+export async function GET(request: Request) {
+  if (!isAdminRequest(request)) return adminUnauthorizedResponse();
+
   const ids = [257994, 94954, 245318, 126027, 67482];
 
   const { data, error } = await supabaseAdmin
