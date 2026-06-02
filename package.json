@@ -10,6 +10,9 @@
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:deploy": "prisma migrate deploy",
+    "db:push": "prisma db push",
+    "db:seed": "tsx scripts/seed-local-user.ts",
+    "db:reset": "prisma migrate reset",
     "db:studio": "prisma studio",
     "check:feedback-engine": "npx tsx scripts/check-feedback-engine.ts",
     "backfill:state": "npx tsx scripts/backfill-user-title-state.ts",
@@ -37,6 +40,7 @@
     "eslint-config-next": "16.2.4",
     "prisma": "^6.19.3",
     "tailwindcss": "^4",
+    "tsx": "^4.22.4",
     "typescript": "^5"
   }
 }

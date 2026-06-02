@@ -6,3 +6,793 @@ datasource db {
   provider = "mysql"
   url      = env("DATABASE_URL")
 }
+
+enum MediaType {
+  movie
+  tv
+}
+
+enum LibraryStatus {
+  watchlist
+  watching
+  watched
+  abandoned
+  fridge
+}
+
+enum WatchingContentType {
+  serie
+  filme
+}
+
+enum WatchingStatus {
+  watching
+  paused
+  abandoned
+  finished
+  watchlist
+}
+
+enum SeriesStatus {
+  returning
+  ended
+  canceled
+  hiatus
+  in_production
+}
+
+enum ComputedState {
+  watchlist
+  in_progress
+  up_to_date
+  completed
+  watched
+  abandoned
+  fridge
+}
+
+enum UserCuradoriaSignalType {
+  watched_episode
+  snoozed
+  clicked_hero
+  clicked_not_now
+  finished
+  abandoned
+  added_watchlist
+  removed_watchlist
+  rated
+}
+
+enum RatingMediaType {
+  movie
+  tv
+  season
+  episode
+}
+
+enum RatingSource {
+  explicit
+  inferred
+  imported
+  system_estimate
+}
+
+enum RatingConfidenceLevel {
+  low
+  medium
+  high
+}
+
+enum FeedbackType {
+  not_interested
+  liked
+  disliked
+  hidden
+  boosted
+  dismissed_from_section
+}
+
+enum FeedbackScope {
+  global
+  surface
+  section
+  session
+}
+
+enum FeedbackSurface {
+  hero
+  for_you
+  radar
+  acompanhando
+  trending
+  search
+  title_page
+  library
+  contextual
+}
+
+enum ProviderType {
+  subscription
+  rent
+  buy
+  free
+  ads
+  unknown
+}
+
+enum AvailabilityType {
+  streaming
+  rent
+  buy
+  free
+  ads
+}
+
+enum AvailabilitySource {
+  tmdb
+  watchmode
+  motn
+}
+
+enum PremiumApi {
+  omdb
+  watchmode
+  movieofthenight
+}
+
+enum EngineApi {
+  tmdb
+  omdb
+  watchmode
+  motn
+  trakt
+  tvdb
+  balloonerismm
+}
+
+enum CacheStatus {
+  hit
+  miss
+  stale
+  forced
+  failed
+  skipped
+  none
+}
+
+enum CatalogAvailabilitySource {
+  balloonerismm
+  watchmode
+  motn
+  local
+  manual
+  future_provider
+}
+
+enum SourceConfidence {
+  high
+  medium
+  low
+  predicted
+  stale
+  unverified
+}
+
+model User {
+  id        String   @id @default(cuid()) @db.VarChar(191)
+  email     String?  @unique @db.VarChar(191)
+  name      String?  @db.VarChar(191)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  userTitles                 UserTitle[]
+  userWatching               UserWatching[]
+  userEvents                 UserEvent[]
+  userRatings                UserRating[]
+  userTitleFeedback          UserTitleFeedback[]
+  userCuradoriaSignals       UserCuradoriaSignal[]
+  userCuradoriaPreference    UserCuradoriaPreference?
+  heroSpotlightSessions      HeroSpotlightSession[]
+  userEpisodes               UserEpisode[]
+  continuitySectionCaches    ContinuitySectionCache[]
+  availabilityFallbackStates Poplog3AvailabilityFallbackState[]
+  premiumApiUsages           Poplog3PremiumApiUsage[]
+
+  @@map("users")
+}
+
+model UserTitle {
+  id          String        @id @default(cuid()) @db.VarChar(191)
+  userId      String        @map("user_id") @db.VarChar(191)
+  tmdbId      Int           @map("tmdb_id")
+  mediaType   MediaType     @map("media_type")
+  status      LibraryStatus
+  rating      Int?
+  liked       Boolean?
+  favorite    Boolean       @default(false)
+  notes       String?       @db.Text
+  startedAt   DateTime?     @map("started_at")
+  finishedAt  DateTime?     @map("finished_at")
+  abandonedAt DateTime?     @map("abandoned_at")
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tmdbId, mediaType])
+  @@index([userId, status])
+  @@index([tmdbId, mediaType])
+  @@map("user_titles")
+}
+
+model UserWatching {
+  id                       String              @id @default(cuid()) @db.VarChar(191)
+  userId                   String              @map("user_id") @db.VarChar(191)
+  contentId                String              @map("content_id") @db.VarChar(191)
+  contentType              WatchingContentType @map("content_type")
+  title                    String              @db.VarChar(512)
+  posterPath               String?             @map("poster_path") @db.VarChar(512)
+  backdropPath             String?             @map("backdrop_path") @db.VarChar(512)
+  dominantColor            String?             @map("dominant_color") @db.VarChar(64)
+  status                   WatchingStatus      @default(watching)
+  currentSeason            Int?                @map("current_season")
+  currentEpisode           Int?                @map("current_episode")
+  totalSeasons             Int?                @map("total_seasons")
+  totalEpisodesSeason      Int?                @map("total_episodes_season")
+  episodesWatched          Int                 @default(0) @map("episodes_watched")
+  nextEpisodeName          String?             @map("next_episode_name") @db.VarChar(512)
+  nextEpisodeDuration      Int?                @map("next_episode_duration")
+  nextEpisodeAirDate       DateTime?           @map("next_episode_air_date")
+  seriesStatus             SeriesStatus?       @map("series_status")
+  newEpisodeAvailable      Boolean             @default(false) @map("new_episode_available")
+  newEpisodeAvailableSince DateTime?           @map("new_episode_available_since")
+  runtime                  Int?
+  watchProgressMinutes     Int                 @default(0) @map("watch_progress_minutes")
+  streamingPlatform        String?             @map("streaming_platform") @db.VarChar(191)
+  streamingAvailableSince  DateTime?           @map("streaming_available_since")
+  availableOnVod           Boolean             @default(false) @map("available_on_vod")
+  vodAvailableSince        DateTime?           @map("vod_available_since")
+  tmdbRating               Decimal?            @map("tmdb_rating") @db.Decimal(3, 1)
+  userRating               Int?                @map("user_rating")
+  lastWatchedAt            DateTime?           @map("last_watched_at")
+  lastSessionDuration      Int?                @map("last_session_duration")
+  sessionsLast7Days        Int                 @default(0) @map("sessions_last_7_days")
+  sessionsLast30Days       Int                 @default(0) @map("sessions_last_30_days")
+  averageSessionGapDays    Decimal?            @map("average_session_gap_days") @db.Decimal(5, 2)
+  isMarathon               Boolean             @default(false) @map("is_marathon")
+  priorityScore            Decimal             @default(0) @map("priority_score") @db.Decimal(8, 4)
+  priorityLastCalculatedAt DateTime?           @map("priority_last_calculated_at")
+  snoozedUntil             DateTime?           @map("snoozed_until")
+  snoozeCount              Int                 @default(0) @map("snooze_count")
+  heroShownCount           Int                 @default(0) @map("hero_shown_count")
+  heroLastShownAt          DateTime?           @map("hero_last_shown_at")
+  rediscoveryEligible      Boolean             @default(false) @map("rediscovery_eligible")
+  addedToWatchlistAt       DateTime?           @map("added_to_watchlist_at")
+  startedAt                DateTime?           @map("started_at")
+  finishedAt               DateTime?           @map("finished_at")
+  genres                   Json?
+  year                     Int?
+  createdAt                DateTime            @default(now()) @map("created_at")
+  updatedAt                DateTime            @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, contentId])
+  @@index([userId, status])
+  @@index([userId, priorityScore])
+  @@index([userId, lastWatchedAt])
+  @@map("user_watching")
+}
+
+model UserEvent {
+  id        String    @id @default(cuid()) @db.VarChar(191)
+  userId    String    @map("user_id") @db.VarChar(191)
+  tmdbId    Int       @map("tmdb_id")
+  mediaType MediaType @map("media_type")
+  eventType String    @map("event_type") @db.VarChar(191)
+  payload   Json
+  createdAt DateTime  @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, tmdbId, mediaType, createdAt])
+  @@map("user_events")
+}
+
+model UserRating {
+  id            String          @id @default(cuid()) @db.VarChar(191)
+  userId        String          @map("user_id") @db.VarChar(191)
+  mediaType     RatingMediaType @map("media_type")
+  tmdbId        Int             @map("tmdb_id")
+  seasonNumber  Int?            @map("season_number") @db.SmallInt
+  episodeNumber Int?            @map("episode_number") @db.SmallInt
+  itemKey       String          @map("item_key") @db.VarChar(191)
+  rating        Decimal         @db.Decimal(3, 1)
+  ratingSource  RatingSource    @default(explicit) @map("rating_source")
+  isPublic      Boolean         @default(true) @map("is_public")
+  createdAt     DateTime        @default(now()) @map("created_at")
+  updatedAt     DateTime        @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, itemKey])
+  @@index([userId])
+  @@index([mediaType, tmdbId])
+  @@map("user_ratings")
+}
+
+model UserTitleFeedback {
+  id           String           @id @default(cuid()) @db.VarChar(191)
+  userId       String           @map("user_id") @db.VarChar(191)
+  tmdbId       Int              @map("tmdb_id")
+  mediaType    MediaType        @map("media_type")
+  feedbackType FeedbackType     @map("feedback_type")
+  weight       Decimal          @default(-1) @db.Decimal(10, 4)
+  reason       String?          @db.Text
+  source       String?          @db.VarChar(191)
+  surface      FeedbackSurface?
+  scope        FeedbackScope    @default(global)
+  sectionKey   String?          @map("section_key") @db.VarChar(191)
+  expiresAt    DateTime?        @map("expires_at")
+  active       Boolean          @default(true)
+  metadata     Json
+  strength     Decimal?         @db.Decimal(10, 4)
+  confidence   Decimal?         @db.Decimal(10, 4)
+  createdAt    DateTime         @default(now()) @map("created_at")
+  updatedAt    DateTime         @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, tmdbId, mediaType, feedbackType])
+  @@index([userId, tmdbId, mediaType, active])
+  @@index([userId, feedbackType, active, updatedAt])
+  @@index([userId, surface, sectionKey, expiresAt])
+  @@map("user_title_feedback")
+}
+
+model UserCuradoriaSignal {
+  id          String                  @id @default(cuid()) @db.VarChar(191)
+  userId      String                  @map("user_id") @db.VarChar(191)
+  contentId   String                  @map("content_id") @db.VarChar(191)
+  signalType  UserCuradoriaSignalType @map("signal_type")
+  signalValue Json?                   @map("signal_value")
+  createdAt   DateTime                @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, createdAt])
+  @@index([userId, contentId, signalType])
+  @@map("user_curadoria_signals")
+}
+
+model UserCuradoriaPreference {
+  userId                          String   @id @map("user_id") @db.VarChar(191)
+  preferredSessionDurationMinutes Int      @default(60) @map("preferred_session_duration_minutes")
+  typicalWatchDays                Json?    @map("typical_watch_days")
+  typicalWatchTimeStart           Int?     @map("typical_watch_time_start")
+  typicalWatchTimeEnd             Int?     @map("typical_watch_time_end")
+  topGenres                       Json?    @map("top_genres")
+  topPlatforms                    Json?    @map("top_platforms")
+  avgEpisodesPerSession           Decimal? @map("avg_episodes_per_session") @db.Decimal(4, 2)
+  prefersShortContent             Boolean  @default(false) @map("prefers_short_content")
+  bingeTendencyScore              Decimal  @default(0.5) @map("binge_tendency_score") @db.Decimal(3, 2)
+  updatedAt                       DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("user_curadoria_preferences")
+}
+
+model HeroSpotlightSession {
+  id                 String   @id @default(cuid()) @db.VarChar(191)
+  userId             String   @map("user_id") @db.VarChar(191)
+  contentId          String   @map("content_id") @db.VarChar(191)
+  shownAt            DateTime @default(now()) @map("shown_at")
+  position           Int?
+  scoreAtTime        Decimal? @map("score_at_time") @db.Decimal(8, 4)
+  ctaClicked         String?  @map("cta_clicked") @db.VarChar(191)
+  timeVisibleSeconds Int?     @map("time_visible_seconds")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, contentId, shownAt])
+  @@map("hero_spotlight_sessions")
+}
+
+model Poplog3Title {
+  id               String    @id @default(cuid()) @db.VarChar(191)
+  tmdbId           Int       @map("tmdb_id")
+  mediaType        MediaType @map("media_type")
+  title            String?   @db.VarChar(512)
+  originalTitle    String?   @map("original_title") @db.VarChar(512)
+  overview         String?   @db.Text
+  posterPath       String?   @map("poster_path") @db.VarChar(512)
+  backdropPath     String?   @map("backdrop_path") @db.VarChar(512)
+  releaseDate      DateTime? @map("release_date") @db.Date
+  firstAirDate     DateTime? @map("first_air_date") @db.Date
+  lastAirDate      DateTime? @map("last_air_date") @db.Date
+  year             Int?
+  runtime          Int?
+  episodeRunTime   Json?     @map("episode_run_time")
+  genres           Json?
+  popularity       Decimal?  @db.Decimal(12, 4)
+  voteAverage      Decimal?  @map("vote_average") @db.Decimal(4, 2)
+  voteCount        Int?      @map("vote_count")
+  numberOfEpisodes Int?      @map("number_of_episodes")
+  numberOfSeasons  Int?      @map("number_of_seasons")
+  originalLanguage String?   @map("original_language") @db.VarChar(32)
+  tmdbPayload      Json?     @map("tmdb_payload")
+  lastSyncedAt     DateTime? @map("last_synced_at")
+  createdAt        DateTime  @default(now()) @map("created_at")
+  updatedAt        DateTime  @updatedAt @map("updated_at")
+
+  @@unique([tmdbId, mediaType])
+  @@index([mediaType, tmdbId])
+  @@index([title])
+  @@map("poplog3_titles")
+}
+
+model TitleSeason {
+  id           String    @id @default(cuid()) @db.VarChar(191)
+  seriesTmdbId Int       @map("series_tmdb_id")
+  seasonNumber Int       @map("season_number")
+  tmdbSeasonId Int?      @map("tmdb_season_id")
+  name         String?   @db.VarChar(512)
+  overview     String?   @db.Text
+  posterPath   String?   @map("poster_path") @db.VarChar(512)
+  airDate      DateTime? @map("air_date") @db.Date
+  episodeCount Int?      @map("episode_count")
+  voteAverage  Decimal?  @map("vote_average") @db.Decimal(4, 2)
+  tmdbPayload  Json?     @map("tmdb_payload")
+  lastSyncedAt DateTime? @map("last_synced_at")
+  createdAt    DateTime  @default(now()) @map("created_at")
+  updatedAt    DateTime  @updatedAt @map("updated_at")
+
+  @@unique([seriesTmdbId, seasonNumber])
+  @@index([seriesTmdbId])
+  @@map("title_seasons")
+}
+
+model Poplog3Episode {
+  id             String    @id @default(cuid()) @db.VarChar(191)
+  seriesTmdbId   Int       @map("series_tmdb_id")
+  seasonNumber   Int       @map("season_number")
+  episodeNumber  Int       @map("episode_number")
+  tmdbEpisodeId  Int?      @map("tmdb_episode_id")
+  name           String?   @db.VarChar(512)
+  overview       String?   @db.Text
+  stillPath      String?   @map("still_path") @db.VarChar(512)
+  airDate        DateTime? @map("air_date") @db.Date
+  runtime        Int?
+  voteAverage    Decimal?  @map("vote_average") @db.Decimal(4, 2)
+  voteCount      Int?      @map("vote_count")
+  productionCode String?   @map("production_code") @db.VarChar(191)
+  episodeType    String?   @map("episode_type") @db.VarChar(64)
+  lastSyncedAt   DateTime? @map("last_synced_at")
+  createdAt      DateTime  @default(now()) @map("created_at")
+  updatedAt      DateTime  @updatedAt @map("updated_at")
+
+  @@unique([seriesTmdbId, seasonNumber, episodeNumber])
+  @@index([seriesTmdbId, airDate])
+  @@index([seriesTmdbId, runtime])
+  @@map("poplog3_episodes")
+}
+
+model TitleExternalId {
+  id          String    @id @default(cuid()) @db.VarChar(191)
+  tmdbId      Int       @map("tmdb_id")
+  mediaType   MediaType @map("media_type")
+  imdbId      String?   @map("imdb_id") @db.VarChar(64)
+  tvdbId      String?   @map("tvdb_id") @db.VarChar(64)
+  traktId     String?   @map("trakt_id") @db.VarChar(64)
+  watchmodeId Int?      @map("watchmode_id")
+  motnId      String?   @map("motn_id") @db.VarChar(64)
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+
+  @@unique([tmdbId, mediaType])
+  @@map("title_external_ids")
+}
+
+model TitleRating {
+  id                  String    @id @default(cuid()) @db.VarChar(191)
+  tmdbId              Int       @map("tmdb_id")
+  mediaType           MediaType @map("media_type")
+  imdbRating          Decimal?  @map("imdb_rating") @db.Decimal(3, 1)
+  imdbVotes           Int?      @map("imdb_votes")
+  rottenTomatoesScore Int?      @map("rotten_tomatoes_score")
+  metacriticScore     Int?      @map("metacritic_score")
+  tmdbRating          Decimal?  @map("tmdb_rating") @db.Decimal(4, 2)
+  poplogScore         Decimal?  @map("poplog_score") @db.Decimal(5, 2)
+  sourcePayload       Json?     @map("source_payload")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
+
+  @@unique([tmdbId, mediaType])
+  @@map("title_ratings")
+}
+
+model UserTitleState {
+  id                      String         @id @default(cuid()) @db.VarChar(191)
+  userId                  String         @map("user_id") @db.VarChar(191)
+  tmdbId                  Int            @map("tmdb_id")
+  mediaType               MediaType      @map("media_type")
+  status                  LibraryStatus?
+  favorite                Boolean        @default(false)
+  liked                   Boolean?
+  computedState           ComputedState? @map("computed_state")
+  watchedEpisodes         Int            @default(0) @map("watched_episodes")
+  airedEpisodes           Int            @default(0) @map("aired_episodes")
+  totalEpisodes           Int?           @map("total_episodes")
+  progressPct             Int            @default(0) @map("progress_pct") @db.SmallInt
+  nextSeason              Int?           @map("next_season") @db.SmallInt
+  nextEpisode             Int?           @map("next_episode") @db.SmallInt
+  nextEpisodeAirDate      DateTime?      @map("next_episode_air_date") @db.Date
+  lastWatchedAt           DateTime?      @map("last_watched_at")
+  watchedKeys             Json           @map("watched_keys")
+  franchiseTmdbId         Int?           @map("franchise_tmdb_id")
+  franchiseName           String?        @map("franchise_name") @db.VarChar(512)
+  franchiseWatched        Int?           @map("franchise_watched")
+  franchiseTotal          Int?           @map("franchise_total")
+  bestProviderName        String?        @map("best_provider_name") @db.VarChar(191)
+  bestProviderType        String?        @map("best_provider_type") @db.VarChar(64)
+  bestProviderLogo        String?        @map("best_provider_logo") @db.VarChar(512)
+  durationSortMinutes     Int?           @map("duration_sort_minutes")
+  hydrationSkipped        Boolean        @default(false) @map("hydration_skipped")
+  durationSortUnavailable Boolean        @default(false) @map("duration_sort_unavailable")
+  editorialAffinity       Decimal        @default(0) @map("editorial_affinity") @db.Decimal(10, 4)
+  editorialPenalty        Decimal        @default(0) @map("editorial_penalty") @db.Decimal(10, 4)
+  editorialScore          Decimal        @default(0) @map("editorial_score") @db.Decimal(10, 4)
+  hasNegativeFeedback     Boolean        @default(false) @map("has_negative_feedback")
+  isHidden                Boolean        @default(false) @map("is_hidden")
+  isBoosted               Boolean        @default(false) @map("is_boosted")
+  lastFeedbackType        String?        @map("last_feedback_type") @db.VarChar(191)
+  lastFeedbackAt          DateTime?      @map("last_feedback_at")
+  lastEventAt             DateTime       @default(now()) @map("last_event_at")
+  createdAt               DateTime       @default(now()) @map("created_at")
+  updatedAt               DateTime       @updatedAt @map("updated_at")
+
+  @@unique([userId, tmdbId, mediaType])
+  @@index([userId])
+  @@index([userId, status])
+  @@index([userId, computedState])
+  @@index([userId, durationSortMinutes])
+  @@index([userId, mediaType, status, hydrationSkipped])
+  @@index([userId, mediaType, status, durationSortUnavailable])
+  @@index([userId, editorialScore, updatedAt])
+  @@index([userId, hasNegativeFeedback, isHidden, isBoosted])
+  @@index([userId, status, lastEventAt])
+  @@map("user_title_state")
+}
+
+model UserEpisode {
+  id             String   @id @default(cuid()) @db.VarChar(191)
+  userId         String   @map("user_id") @db.VarChar(191)
+  seriesTmdbId   Int      @map("series_tmdb_id")
+  seasonNumber   Int      @map("season_number")
+  episodeNumber  Int      @map("episode_number")
+  watchedAt      DateTime @default(now()) @map("watched_at")
+  runtimeMinutes Int?     @map("runtime_minutes")
+  createdAt      DateTime @default(now()) @map("created_at")
+  updatedAt      DateTime @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, seriesTmdbId, seasonNumber, episodeNumber])
+  @@index([userId, seriesTmdbId])
+  @@index([seriesTmdbId, seasonNumber, episodeNumber])
+  @@map("user_episodes")
+}
+
+model RatingAggregate {
+  id                  String                @id @default(cuid()) @db.VarChar(191)
+  mediaType           RatingMediaType       @map("media_type")
+  tmdbId              Int                   @map("tmdb_id")
+  seasonNumber        Int?                  @map("season_number") @db.SmallInt
+  episodeNumber       Int?                  @map("episode_number") @db.SmallInt
+  itemKey             String                @unique @map("item_key") @db.VarChar(191)
+  averageRating       Decimal?              @map("average_rating") @db.Decimal(4, 2)
+  explicitAvgRating   Decimal?              @map("explicit_avg_rating") @db.Decimal(4, 2)
+  ratingCount         Int                   @default(0) @map("rating_count")
+  explicitRatingCount Int                   @default(0) @map("explicit_rating_count")
+  inferredRatingCount Int                   @default(0) @map("inferred_rating_count")
+  confidenceLevel     RatingConfidenceLevel @default(low) @map("confidence_level")
+  updatedAt           DateTime              @updatedAt @map("updated_at")
+
+  @@index([mediaType, tmdbId])
+  @@map("rating_aggregates")
+}
+
+model StreamingProvider {
+  id                         String                     @id @default(cuid()) @db.VarChar(191)
+  name                       String                     @db.VarChar(191)
+  tmdbProviderId             Int?                       @unique @map("tmdb_provider_id")
+  logoPath                   String?                    @map("logo_path") @db.VarChar(512)
+  createdAt                  DateTime                   @default(now()) @map("created_at")
+  updatedAt                  DateTime                   @updatedAt @map("updated_at")
+  poplog3TitleAvailabilities Poplog3TitleAvailability[]
+
+  @@map("streaming_providers")
+}
+
+model Poplog3TitleAvailability {
+  id                    String             @id @default(cuid()) @db.VarChar(191)
+  tmdbId                Int                @map("tmdb_id")
+  mediaType             MediaType          @map("media_type")
+  providerId            String?            @map("provider_id") @db.VarChar(191)
+  providerName          String             @map("provider_name") @db.VarChar(191)
+  providerLogoPath      String?            @map("provider_logo_path") @db.VarChar(512)
+  tmdbProviderId        Int?               @map("tmdb_provider_id")
+  country               String             @db.VarChar(8)
+  availabilityType      AvailabilityType   @map("availability_type")
+  source                AvailabilitySource
+  deepLink              String?            @map("deep_link") @db.Text
+  quality               String?            @db.VarChar(64)
+  rawPayload            Json?              @map("raw_payload")
+  lastSyncedAt          DateTime?          @map("last_synced_at")
+  providerConfidence    String?            @map("provider_confidence") @db.VarChar(64)
+  lastCheckedAt         DateTime?          @map("last_checked_at")
+  expiresAt             DateTime?          @map("expires_at")
+  fallbackCheckedAt     DateTime?          @map("fallback_checked_at")
+  fallbackResult        String?            @map("fallback_result") @db.VarChar(191)
+  fallbackSource        String?            @map("fallback_source") @db.VarChar(191)
+  nextFallbackAllowedAt DateTime?          @map("next_fallback_allowed_at")
+  createdAt             DateTime           @default(now()) @map("created_at")
+  updatedAt             DateTime           @updatedAt @map("updated_at")
+
+  provider StreamingProvider? @relation(fields: [providerId], references: [id], onDelete: SetNull)
+
+  @@index([mediaType, tmdbId, country])
+  @@index([source, lastSyncedAt])
+  @@index([expiresAt])
+  @@map("poplog3_title_availability")
+}
+
+model Poplog3AvailabilityFallbackState {
+  tmdbId                Int       @map("tmdb_id")
+  mediaType             MediaType @map("media_type")
+  region                String    @db.VarChar(8)
+  fallbackSource        String    @map("fallback_source") @db.VarChar(64)
+  fallbackCheckedAt     DateTime  @default(now()) @map("fallback_checked_at")
+  fallbackResult        String    @map("fallback_result") @db.VarChar(191)
+  nextFallbackAllowedAt DateTime  @map("next_fallback_allowed_at")
+  reason                String?   @db.Text
+  originEndpoint        String?   @map("origin_endpoint") @db.VarChar(191)
+  userId                String?   @map("user_id") @db.VarChar(191)
+  action                String?   @db.VarChar(191)
+  rowsCount             Int       @default(0) @map("rows_count")
+  error                 String?   @db.Text
+  updatedAt             DateTime  @updatedAt @map("updated_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@id([tmdbId, mediaType, region, fallbackSource])
+  @@index([nextFallbackAllowedAt])
+  @@map("poplog3_availability_fallback_state")
+}
+
+model Poplog3PremiumApiUsage {
+  id           String     @id @default(cuid()) @db.VarChar(191)
+  api          PremiumApi
+  periodDay    DateTime   @default(now()) @map("period_day") @db.Date
+  periodMonth  String     @map("period_month") @db.VarChar(7)
+  usedAt       DateTime   @default(now()) @map("used_at")
+  endpoint     String?    @db.VarChar(191)
+  tmdbId       Int?       @map("tmdb_id")
+  mediaType    MediaType? @map("media_type")
+  region       String?    @db.VarChar(8)
+  userId       String?    @map("user_id") @db.VarChar(191)
+  action       String?    @db.VarChar(191)
+  reason       String?    @db.Text
+  status       String     @default("reserved") @db.VarChar(64)
+  dailyUsed    Int?       @map("daily_used")
+  dailyLimit   Int?       @map("daily_limit")
+  monthlyUsed  Int?       @map("monthly_used")
+  monthlyLimit Int?       @map("monthly_limit")
+  error        String?    @db.Text
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([api, periodDay])
+  @@index([api, periodMonth])
+  @@map("poplog3_premium_api_usage")
+}
+
+model ContinuitySectionCache {
+  id         String   @id @default(cuid()) @db.VarChar(191)
+  sectionKey String   @map("section_key") @db.VarChar(191)
+  userId     String?  @map("user_id") @db.VarChar(191)
+  region     String?  @db.VarChar(16)
+  language   String?  @db.VarChar(16)
+  payload    Json
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+  expiresAt  DateTime @map("expires_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([sectionKey, userId, region, language])
+  @@index([sectionKey])
+  @@index([userId])
+  @@index([expiresAt])
+  @@index([sectionKey, userId, region, language, expiresAt])
+  @@map("continuity_section_cache")
+}
+
+model EngineApiCallLog {
+  id           BigInt      @id @default(autoincrement())
+  ts           DateTime    @default(now())
+  api          EngineApi
+  op           String      @db.VarChar(191)
+  origin       String      @db.VarChar(191)
+  mediaType    MediaType?  @map("media_type")
+  tmdbId       Int?        @map("tmdb_id")
+  endpoint     String?     @db.Text
+  cacheStatus  CacheStatus @map("cache_status")
+  durationMs   Int         @map("duration_ms")
+  success      Boolean
+  httpStatus   Int?        @map("http_status")
+  error        String?     @db.Text
+  fallbackFrom EngineApi?  @map("fallback_from")
+  createdAt    DateTime    @default(now()) @map("created_at")
+
+  @@index([ts])
+  @@index([api, ts])
+  @@index([origin, ts])
+  @@index([api, success, cacheStatus, ts])
+  @@map("engine_api_call_logs")
+}
+
+model ApiUsageDaily {
+  id         BigInt    @id @default(autoincrement())
+  day        DateTime  @db.Date
+  api        EngineApi
+  totalCalls Int       @default(0) @map("total_calls")
+  cacheHits  Int       @default(0) @map("cache_hits")
+  errors     Int       @default(0)
+  avgMs      Int       @default(0) @map("avg_ms")
+  maxMs      Int       @default(0) @map("max_ms")
+  p95Ms      Int       @default(0) @map("p95_ms")
+  createdAt  DateTime  @default(now()) @map("created_at")
+  updatedAt  DateTime  @updatedAt @map("updated_at")
+
+  @@unique([day, api])
+  @@map("api_usage_daily")
+}
+
+model CatalogAvailability {
+  id                  BigInt                    @id @default(autoincrement())
+  imdbId              String?                   @map("imdb_id") @db.VarChar(64)
+  traktId             BigInt?                   @map("trakt_id")
+  tmdbId              BigInt?                   @map("tmdb_id")
+  mediaType           MediaType                 @map("media_type")
+  providerName        String                    @map("provider_name") @db.VarChar(191)
+  providerRegion      String                    @map("provider_region") @db.VarChar(8)
+  providerType        ProviderType              @map("provider_type")
+  providerUrl         String?                   @map("provider_url") @db.Text
+  providerLogoUrl     String?                   @map("provider_logo_url") @db.Text
+  source              CatalogAvailabilitySource
+  sourceConfidence    SourceConfidence          @map("source_confidence")
+  checkedAt           DateTime                  @default(now()) @map("checked_at")
+  expiresAt           DateTime                  @map("expires_at")
+  evidencePayloadHash String?                   @map("evidence_payload_hash") @db.VarChar(191)
+  rawPayloadJson      Json?                     @map("raw_payload_json")
+  createdAt           DateTime                  @default(now()) @map("created_at")
+  updatedAt           DateTime                  @updatedAt @map("updated_at")
+
+  @@unique([imdbId, traktId, providerName, providerRegion, providerType])
+  @@index([imdbId, providerRegion])
+  @@index([traktId, providerRegion])
+  @@index([expiresAt])
+  @@index([source, sourceConfidence])
+  @@map("catalog_availability")
+}
+
+model IcsAgendaCache {
+  id       String   @id @default("main") @db.VarChar(191)
+  payload  Json
+  cachedAt DateTime @default(now()) @map("cached_at")
+
+  @@index([cachedAt])
+  @@map("ics_agenda_cache")
+}
