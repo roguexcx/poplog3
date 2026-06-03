@@ -20,6 +20,7 @@
     "db:smoke:episode-progress": "tsx -r tsconfig-paths/register scripts/smoke-test-episode-progress.ts",
     "db:smoke:user-ratings": "tsx -r tsconfig-paths/register scripts/smoke-test-user-ratings.ts",
     "db:smoke:feedback": "tsx -r tsconfig-paths/register scripts/smoke-test-feedback.ts",
+    "db:smoke:curadoria": "tsx -r tsconfig-paths/register scripts/smoke-test-curadoria.ts",
     "db:reset": "prisma migrate reset",
     "db:studio": "prisma studio",
     "check:feedback-engine": "npx tsx scripts/check-feedback-engine.ts",

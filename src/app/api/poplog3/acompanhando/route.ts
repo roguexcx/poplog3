@@ -1,8 +1,12 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { supabaseAdmin } from "@/server/supabase/admin";
-import { upsertUserTitleStatus } from "@/server/library/library-service";
+import { getUserTitleStatus, upsertUserTitleStatus } from "@/server/library/library-service";
 import { isValidSeason, mapSeriesStatus } from "@/lib/series";
+import {
+  isLocalCuradoriaEnabled,
+  isLocalUserPreferencesEnabled,
+} from "@/server/runtime/local-db-flags";
 import type {
   ContentType,
   SignalType,
@@ -84,6 +88,11 @@ type DbCuradoriaOverlay = {
   vod_available_since: string | null;
 };
 
+type CuradoriaPreferencesResult = {
+  data: unknown;
+  error: { message: string } | null;
+};
+
 type AvailabilityOverlay = {
   streaming_platform: string | null;
   streaming_available_since: string | null;
@@ -101,7 +110,7 @@ type CuradoriaPostBody =
       action: "log_signal";
       contentId: string;
       signal: SignalType;
-      value?: object | null;
+      value?: Record<string, unknown> | null;
     }
   | {
       action: "mark_watched";
@@ -177,6 +186,14 @@ function getAverageEpisodeRuntime(meta: DbTitleMeta) {
 
 function toContentId(mediaType: MediaType, tmdbId: number) {
   return `tmdb-${mediaType}-${tmdbId}`;
+}
+
+async function getLocalUserPreferencesService() {
+  return import("@/server/local-services/user-preferences-local.service");
+}
+
+async function getLocalCuradoriaService() {
+  return import("@/server/local-services/curadoria-local.service");
 }
 
 function extractCollection(
@@ -398,6 +415,64 @@ async function logCuradoriaSignal(
   if (error) throw new Error(error.message);
 }
 
+async function readCuradoriaPreference(userId: string): Promise<CuradoriaPreferencesResult> {
+  if (isLocalUserPreferencesEnabled()) {
+    try {
+      const local = await getLocalUserPreferencesService();
+      return {
+        data: await local.getUserPreferences(userId),
+        error: null,
+      };
+    } catch (error) {
+      return {
+        data: null,
+        error: { message: error instanceof Error ? error.message : String(error) },
+      };
+    }
+  }
+
+  const result = await supabaseAdmin
+    .from("user_curadoria_preferences")
+    .select("*")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  return {
+    data: result.data ?? null,
+    error: result.error ? { message: result.error.message } : null,
+  };
+}
+
+async function logLocalCuradoriaAction(input: {
+  userId: string;
+  parsed: ParsedContentId;
+  signal: SignalType;
+  value?: Record<string, unknown> | null;
+}) {
+  if (!VALID_SIGNALS.includes(input.signal)) {
+    throw new Error("Sinal de curadoria inválido.");
+  }
+
+  const local = await getLocalCuradoriaService();
+  await local.logCuradoriaSignal(
+    input.userId,
+    input.parsed.contentId,
+    input.signal,
+    input.value ?? null,
+  );
+  await local.logUserActionEvent({
+    userId: input.userId,
+    tmdbId: input.parsed.tmdbId,
+    mediaType: input.parsed.mediaType,
+    eventType: `curadoria_${input.signal}`,
+    payload: {
+      contentId: input.parsed.contentId,
+      signal: input.signal,
+      value: input.value ?? null,
+    },
+  });
+}
+
 export async function GET() {
   const user = await getCurrentUser();
 
@@ -477,11 +552,7 @@ export async function GET() {
     episodeRowsResult,
     overlayResult,
   ] = await Promise.all([
-    supabaseAdmin
-      .from("user_curadoria_preferences")
-      .select("*")
-      .eq("user_id", user.id)
-      .maybeSingle(),
+    readCuradoriaPreference(user.id),
 
     seriesIds.length > 0
       ? supabaseAdmin
@@ -784,6 +855,22 @@ export async function POST(request: NextRequest) {
         Date.now() + durationHours * 60 * 60 * 1000
       ).toISOString();
 
+      if (isLocalCuradoriaEnabled()) {
+        await logLocalCuradoriaAction({
+          userId: user.id,
+          parsed,
+          signal: "snoozed",
+          value: { durationHours, snoozedUntil },
+        });
+
+        return NextResponse.json({
+          ok: true,
+          action: "snooze",
+          contentId: parsed.contentId,
+          snoozedUntil,
+        });
+      }
+
       await upsertCuradoriaOverlay(user.id, parsed, {
         snoozed_until: snoozedUntil,
         snooze_count: 1,
@@ -803,6 +890,21 @@ export async function POST(request: NextRequest) {
     }
 
     if (body.action === "log_signal") {
+      if (isLocalCuradoriaEnabled()) {
+        await logLocalCuradoriaAction({
+          userId: user.id,
+          parsed,
+          signal: body.signal,
+          value: body.value ?? null,
+        });
+
+        return NextResponse.json({
+          ok: true,
+          action: "log_signal",
+          contentId: parsed.contentId,
+        });
+      }
+
       await logCuradoriaSignal(
         user.id,
         parsed.contentId,
@@ -825,18 +927,13 @@ export async function POST(request: NextRequest) {
 
     if (body.action === "mark_watched") {
       const now = new Date().toISOString();
-      const { data: existingTitle } = await supabaseAdmin
-        .from("user_titles")
-        .select("favorite, liked")
-        .eq("user_id", user.id)
-        .eq("tmdb_id", parsed.tmdbId)
-        .eq("media_type", parsed.mediaType)
-        .maybeSingle();
-      const existingFavorite = Boolean(
-        (existingTitle as { favorite?: boolean } | null)?.favorite,
+      const existingTitle = await getUserTitleStatus(
+        user.id,
+        parsed.tmdbId,
+        parsed.mediaType,
       );
-      const existingLiked =
-        ((existingTitle as { liked?: boolean | null } | null)?.liked ?? null);
+      const existingFavorite = Boolean(existingTitle?.favorite);
+      const existingLiked = existingTitle?.liked ?? null;
 
       await upsertUserTitleStatus({
         userId: user.id,
@@ -847,9 +944,18 @@ export async function POST(request: NextRequest) {
         liked: existingLiked,
       });
 
-      await logCuradoriaSignal(user.id, parsed.contentId, "finished", {
-        finishedAt: now,
-      });
+      if (isLocalCuradoriaEnabled()) {
+        await logLocalCuradoriaAction({
+          userId: user.id,
+          parsed,
+          signal: "finished",
+          value: { finishedAt: now },
+        });
+      } else {
+        await logCuradoriaSignal(user.id, parsed.contentId, "finished", {
+          finishedAt: now,
+        });
+      }
 
       return NextResponse.json({
         ok: true,

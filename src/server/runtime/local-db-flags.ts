@@ -43,6 +43,14 @@ export function isLocalFeedbackEnabled(): boolean {
   return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_FEEDBACK_ENABLED");
 }
 
+export function isLocalUserPreferencesEnabled(): boolean {
+  return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_USER_PREFERENCES_ENABLED");
+}
+
+export function isLocalCuradoriaEnabled(): boolean {
+  return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_CURADORIA_ENABLED");
+}
+
 export function getLocalDbFlagState() {
   return {
     localDb: isLocalDbEnabled(),
@@ -55,5 +63,7 @@ export function getLocalDbFlagState() {
     episodeProgress: isLocalEpisodeProgressEnabled(),
     userRatings: isLocalUserRatingsEnabled(),
     feedback: isLocalFeedbackEnabled(),
+    userPreferences: isLocalUserPreferencesEnabled(),
+    curadoria: isLocalCuradoriaEnabled(),
   };
 }

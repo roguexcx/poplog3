@@ -3,8 +3,9 @@ import {
   createUserEvent,
   deleteCuradoriaSignalsForContent,
   listCuradoriaSignals,
+  listUserEvents,
 } from "@/server/repositories";
-import type { MediaType, UserCuradoriaSignal, UserCuradoriaSignalType } from "@prisma/client";
+import type { MediaType, UserCuradoriaSignal, UserCuradoriaSignalType, UserEvent } from "@prisma/client";
 
 export type CuradoriaSignalType = UserCuradoriaSignalType;
 
@@ -17,6 +18,16 @@ export type CuradoriaSignalRow = {
   created_at: string;
 };
 
+export type CuradoriaUserEventRow = {
+  id: string;
+  user_id: string;
+  tmdb_id: number;
+  media_type: MediaType;
+  event_type: string;
+  payload: unknown;
+  created_at: string;
+};
+
 function mapSignal(row: UserCuradoriaSignal): CuradoriaSignalRow {
   return {
     id: row.id,
@@ -24,6 +35,18 @@ function mapSignal(row: UserCuradoriaSignal): CuradoriaSignalRow {
     content_id: row.contentId,
     signal_type: row.signalType,
     signal_value: row.signalValue,
+    created_at: row.createdAt.toISOString(),
+  };
+}
+
+function mapEvent(row: UserEvent): CuradoriaUserEventRow {
+  return {
+    id: row.id,
+    user_id: row.userId,
+    tmdb_id: row.tmdbId,
+    media_type: row.mediaType,
+    event_type: row.eventType,
+    payload: row.payload,
     created_at: row.createdAt.toISOString(),
   };
 }
@@ -76,5 +99,18 @@ export async function logUserActionEvent(input: {
   eventType: string;
   payload?: Record<string, unknown>;
 }): Promise<void> {
-  await createUserEvent(input);
+  const result = await createUserEvent(input);
+  if (!result.ok) throw new Error(result.error);
+}
+
+export async function getUserActionEvents(input: {
+  userId: string;
+  tmdbId?: number;
+  mediaType?: MediaType;
+  eventType?: string;
+  limit?: number;
+}): Promise<CuradoriaUserEventRow[]> {
+  const result = await listUserEvents(input);
+  if (!result.ok) throw new Error(result.error);
+  return result.data.map(mapEvent);
 }
