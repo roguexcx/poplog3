@@ -540,6 +540,25 @@ async function buildLocalWatchlistPicks(
     );
     markStage("titles_read");
 
+    // Inline sync for titles missing from poplog3_titles (first load / cold cache).
+    // Capped at 5 to keep latency bounded; subsequent loads hit the cache.
+    const missingFromCache = enrichable
+      .filter((s) => !titleMap.has(`${s.media_type}-${s.tmdb_id}`))
+      .slice(0, 5);
+    if (missingFromCache.length > 0) {
+      try {
+        const { syncTmdbTitle } = await import("@/server/sync/sync-tmdb-title");
+        await Promise.allSettled(
+          missingFromCache.map((s) => syncTmdbTitle(s.media_type, s.tmdb_id)),
+        );
+        const refreshed = await getLocalTitlesBatch(missingFromCache.map((s) => s.tmdb_id));
+        for (const t of refreshed) {
+          titleMap.set(`${t.media_type}-${t.tmdb_id}`, t as unknown as TitleRow);
+        }
+      } catch { /* non-fatal */ }
+      markStage("titles_inline_sync");
+    }
+
     type ScoredEntry = { state: StateRow; title: TitleRow; score: number };
     const scored: ScoredEntry[] = [];
 

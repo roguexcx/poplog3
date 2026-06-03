@@ -91,6 +91,13 @@ export async function upsertUserTitleStatus(
   const local = await getLocalLibraryService();
   const result = await local.upsertUserTitleStatus(input);
 
+  // Sync title metadata to poplog3_titles if not already cached.
+  // Required so hero/watchlist sections can render without the user
+  // having first visited the title page.
+  import("@/server/sync/sync-tmdb-title")
+    .then(({ syncTmdbTitle }) => syncTmdbTitle(input.mediaType, input.tmdbId, { force: false }))
+    .catch((err) => console.warn("[library] title metadata sync failed", err instanceof Error ? err.message : err));
+
   import("@/server/streaming/title-availability")
     .then(({ refreshAvailabilityForUserTitle }) =>
       refreshAvailabilityForUserTitle({

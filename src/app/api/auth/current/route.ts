@@ -22,7 +22,7 @@ export async function GET() {
       user: null,
       auth: {
         local: isLocalAuthEnabled(),
-        authjsConfigured: false,
+        authjsConfigured: isAuthJsConfigured(),
       },
     });
   }

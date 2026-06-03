@@ -10,7 +10,7 @@ function googleProvider() {
 
   if (!clientId || !clientSecret) return null;
 
-  return Google({ clientId, clientSecret });
+  return Google({ clientId, clientSecret, allowDangerousEmailAccountLinking: true });
 }
 
 export function isAuthJsConfigured(): boolean {

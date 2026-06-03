@@ -336,6 +336,27 @@ export async function POST(request: Request) {
         title,
       ]),
     );
+
+    // Inline sync for titles missing from poplog3_titles (first load / cold cache).
+    // Capped at 5; all subsequent requests hit the cache and are instant.
+    const missingFromCache = rows
+      .filter((r) => !titleMap.has(`${r.media_type}:${r.tmdb_id}`))
+      .slice(0, 5);
+    if (missingFromCache.length > 0) {
+      try {
+        const { syncTmdbTitle } = await import("@/server/sync/sync-tmdb-title");
+        await Promise.allSettled(
+          missingFromCache.map((r) => syncTmdbTitle(r.media_type, r.tmdb_id)),
+        );
+        const freshRows = await db.poplog3Title.findMany({
+          where: { tmdbId: { in: missingFromCache.map((r) => r.tmdb_id) } },
+        });
+        for (const row of freshRows) {
+          titleMap.set(`${row.mediaType}:${row.tmdbId}`, mapTitleRow(row));
+        }
+      } catch { /* non-fatal */ }
+    }
+
     const providersByKey = new Map<string, AvailabilityRow[]>();
     for (const row of availabilityResult) {
       const key = `${row.media_type}:${row.tmdb_id}`;
