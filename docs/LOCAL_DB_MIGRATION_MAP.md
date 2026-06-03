@@ -7,7 +7,7 @@ O codigo atual ainda preserva os serviços antigos. A partir da Fase 7A, os modu
 | --- | --- | --- | --- | --- | --- |
 | Engine logger persistence | `src/server/engine-logger/persistence.ts` | `src/server/local-services/engine-logger-local.service.ts` | `engine-logs.repository.ts` | Plugado por flag | Controlado por `POPLOG_LOCAL_DB_ENABLED` ou `POPLOG_LOCAL_LOGS_ENABLED`. O RPC `engine_api_call_log_stats` foi substituido por agregacao em memoria sobre a janela de 24h. |
 | API usage daily | usos diretos futuros / tabela `api_usage_daily` | `src/server/local-services/api-usage-local.service.ts` | `api-usage.repository.ts` | Criado e testado | Contrato local retorna `RepositoryResult`; consumidores atuais podem precisar de adapter fino ao migrar. |
-| Premium API usage | `src/server/rate-limits/premium-api-budget.ts` | `src/server/local-services/api-usage-local.service.ts` | `premium-api-usage.repository.ts` | Criado e testado | Nao plugado na Fase 7A por participar de bloqueio/reserva de chamadas externas. Status preservados: `reserved`, `success`, `failed`, `empty`, `blocked`. |
+| Premium API usage | `src/server/rate-limits/premium-api-budget.ts` | `src/server/local-services/api-usage-local.service.ts` | `premium-api-usage.repository.ts` | Plugado por flag | Controlado por `POPLOG_LOCAL_DB_ENABLED` ou `POPLOG_LOCAL_API_USAGE_ENABLED`. Status preservados: `reserved`, `success`, `failed`, `empty`, `blocked`. `recordBlockedBudget` recebe `periodKeys` para preencher `periodDay`/`periodMonth` no Prisma. |
 | ICS agenda cache | `src/app/api/ics/agenda/route.ts`, `background-refresh/route.ts` | `src/server/local-services/ics-agenda-cache-local.service.ts` | `ics-agenda-cache.repository.ts` | Plugado por flag | Controlado por `POPLOG_LOCAL_DB_ENABLED` ou `POPLOG_LOCAL_CACHE_ENABLED`. Adapter valida `cacheVersion`; memoria em processo continua responsabilidade da rota. |
 | Continuity section cache | `src/server/continuity/continuity-section-cache.ts` | `src/server/local-services/continuity-section-cache-local.service.ts` | `continuity-section-cache.repository.ts` | Plugado por flag | Controlado por `POPLOG_LOCAL_DB_ENABLED` ou `POPLOG_LOCAL_CACHE_ENABLED`. `invalidateContinuitySectionCache` preserva fire-and-forget. |
 | Title cache | `src/server/cache/title-cache.ts` | `src/server/local-services/title-cache-local.service.ts` | `title-cache.repository.ts` | Plugado por flag | Controlado por `POPLOG_LOCAL_DB_ENABLED` ou `POPLOG_LOCAL_CACHE_ENABLED`. Datas saem como `YYYY-MM-DD`; payload TMDB tenta normalizacao por `normalizeTmdbTitleDetails`, como no servico atual. |
@@ -24,12 +24,17 @@ O codigo atual ainda preserva os serviços antigos. A partir da Fase 7A, os modu
 | Eventos de usuario | `user_events` via `state/user-title-state.ts`, feedback e sorteio | `src/server/local-services/user-title-state-local.service.ts`, `curadoria-local.service.ts`, `feedback-local.service.ts` | `user-events.repository.ts` | Criado e testado | Eventos sao fire-and-forget onde o servico antigo tambem nao bloqueia fluxo. |
 | Sinais de curadoria | `src/app/api/poplog3/acompanhando/route.ts` | `src/server/local-services/curadoria-local.service.ts` | `curadoria-signals.repository.ts`, `user-events.repository.ts` | Criado e testado | Cobre logs de sinais. Overlay `user_curadoria_state` ainda nao foi modelado no Prisma e segue fora da ponte local. |
 
-## Fora da Fase 7A
+## Fora da Fase 7B
 
 - Troca de imports em endpoints, hooks ou componentes.
 - Remocao de Supabase ou dependencias Supabase.
-- Plug do budget premium, por risco operacional em reservas/bloqueios de APIs externas.
 - Plug de catalog availability, porque o adapter cobre `catalog_availability` e o legado ainda usa estruturas de availability com semantica diferente.
+- Plug de biblioteca, user title state, progresso, feedback e curadoria em endpoints reais.
+
+## Riscos conhecidos pos-Fase 7B
+
+- `completePremiumApiBudget` usa a flag no momento da conclusao, nao no da reserva. Se a flag for alternada entre reserva e conclusao de uma mesma chamada, o ID pode ser enviado para o backend errado. Nao alternar flags durante requests ativos.
+- O teste de bloqueio por budget esgotado nao foi validado no smoke automatico por exigir insercao de centenas de registros. A logica de bloqueio nao foi alterada — apenas o backend de persistencia foi trocado.
 
 ## Diferencas conhecidas antes de plugar endpoints
 

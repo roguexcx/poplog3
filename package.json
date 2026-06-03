@@ -14,6 +14,7 @@
     "db:seed": "tsx scripts/seed-local-user.ts",
     "db:smoke": "tsx -r tsconfig-paths/register scripts/smoke-test-local-repositories.ts",
     "db:smoke:services": "tsx -r tsconfig-paths/register scripts/smoke-test-local-services.ts",
+    "db:smoke:budget": "tsx -r tsconfig-paths/register scripts/smoke-test-premium-budget.ts",
     "db:reset": "prisma migrate reset",
     "db:studio": "prisma studio",
     "check:feedback-engine": "npx tsx scripts/check-feedback-engine.ts",

@@ -1,5 +1,5 @@
-import { supabaseAdmin } from "@/server/supabase/admin";
 import { debugLog, formatError, rateLimitedWarn } from "@/server/logging/log-control";
+import { isLocalApiUsageEnabled } from "@/server/runtime/local-db-flags";
 import { API_BUDGETS } from "./api-budgets";
 import { API_COOLDOWNS } from "./api-cooldowns";
 
@@ -52,7 +52,41 @@ function cooldownMsFor(api: PremiumApi) {
   return API_COOLDOWNS[api].minIntervalMs;
 }
 
+async function getSupabaseAdmin() {
+  const { supabaseAdmin } = await import("@/server/supabase/admin");
+  return supabaseAdmin;
+}
+
 async function countUsage(api: PremiumApi, period: "day" | "month", key: string) {
+  if (isLocalApiUsageEnabled()) {
+    try {
+      const local = await import("@/server/local-services/api-usage-local.service");
+      const result = await local.countPremiumUsage({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        api: api as any,
+        period,
+        key,
+      });
+      if (result.ok) return result.data;
+      rateLimitedWarn(
+        `premium-api-budget:count:${api}:${period}`,
+        BUDGET_LOG_TTL_MS,
+        "[availability] orçamento de API externa indisponível (local)\n- fallback aplicado: tratar uso como zero",
+        result.error,
+      );
+      return 0;
+    } catch (err) {
+      rateLimitedWarn(
+        `premium-api-budget:count:${api}:${period}`,
+        BUDGET_LOG_TTL_MS,
+        "[availability] orçamento de API externa indisponível (local)\n- fallback aplicado: tratar uso como zero",
+        String(err),
+      );
+      return 0;
+    }
+  }
+
+  const supabaseAdmin = await getSupabaseAdmin();
   const column = period === "day" ? "period_day" : "period_month";
   const { count, error } = await supabaseAdmin
     .from("poplog3_premium_api_usage")
@@ -98,7 +132,7 @@ export async function reservePremiumApiBudget(
       dailyLimit: limits.daily,
       monthlyUsed,
       monthlyLimit: limits.monthly,
-    });
+    }, { day, month });
     return { ok: false, reason };
   }
 
@@ -114,10 +148,81 @@ export async function reservePremiumApiBudget(
       dailyLimit: limits.daily,
       monthlyUsed,
       monthlyLimit: limits.monthly,
-    });
+    }, { day, month });
     return { ok: false, reason };
   }
 
+  if (isLocalApiUsageEnabled()) {
+    try {
+      const local = await import("@/server/local-services/api-usage-local.service");
+      const result = await local.reservePremiumUsage({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        api: api as any,
+        periodDay: day,
+        periodMonth: month,
+        endpoint: origin.endpoint ?? null,
+        tmdbId: origin.tmdbId ?? null,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        mediaType: (origin.mediaType ?? null) as any,
+        region: origin.region ?? null,
+        userId: origin.userId ?? null,
+        action: origin.action ?? null,
+        reason: origin.reason ?? null,
+        status: "reserved",
+        dailyUsed: dailyUsed + 1,
+        dailyLimit: limits.daily,
+        monthlyUsed: monthlyUsed === null ? null : monthlyUsed + 1,
+        monthlyLimit: limits.monthly,
+      });
+
+      if (!result.ok) {
+        rateLimitedWarn(
+          `premium-api-budget:reserve:${api}`,
+          BUDGET_LOG_TTL_MS,
+          "[availability] reserva de API externa falhou (local)\n- fallback aplicado: bloquear chamada premium",
+          result.error,
+        );
+        return { ok: false, reason: "premium_api_budget_store_failed" };
+      }
+
+      debugLog("DEBUG_AVAILABILITY", "[premium-api-budget:debug] reserved (local)", {
+        api,
+        endpoint: origin.endpoint ?? null,
+        tmdbId: origin.tmdbId ?? null,
+        mediaType: origin.mediaType ?? null,
+        region: origin.region ?? null,
+        userId: origin.userId ?? null,
+        action: origin.action ?? null,
+        reason: origin.reason ?? null,
+        dailyUsed: dailyUsed + 1,
+        dailyLimit: limits.daily,
+        monthlyUsed: monthlyUsed === null ? null : monthlyUsed + 1,
+        monthlyLimit: limits.monthly,
+      });
+
+      return {
+        ok: true,
+        reservation: {
+          id: result.data?.id ?? null,
+          api,
+          dailyUsed: dailyUsed + 1,
+          dailyLimit: limits.daily,
+          monthlyUsed: monthlyUsed === null ? null : monthlyUsed + 1,
+          monthlyLimit: limits.monthly,
+        },
+      };
+    } catch (err) {
+      rateLimitedWarn(
+        `premium-api-budget:reserve:${api}`,
+        BUDGET_LOG_TTL_MS,
+        "[availability] reserva de API externa falhou (local)\n- fallback aplicado: bloquear chamada premium",
+        String(err),
+      );
+      return { ok: false, reason: "premium_api_budget_store_failed" };
+    }
+  }
+
+  const supabaseAdmin = await getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
     .from("poplog3_premium_api_usage")
     .insert({
@@ -188,35 +293,73 @@ async function recordBlockedBudget(
     monthlyUsed: number | null;
     monthlyLimit: number | null;
   },
+  periodKeys?: { day: string; month: string },
 ) {
-  await supabaseAdmin
-    .from("poplog3_premium_api_usage")
-    .insert({
-      api,
-      endpoint: origin.endpoint ?? null,
-      tmdb_id: origin.tmdbId ?? null,
-      media_type: origin.mediaType ?? null,
-      region: origin.region ?? null,
-      user_id: origin.userId ?? null,
-      action: origin.action ?? null,
-      reason: origin.reason ?? reason,
-      status: "blocked",
-      daily_used: usage.dailyUsed,
-      daily_limit: usage.dailyLimit,
-      monthly_used: usage.monthlyUsed,
-      monthly_limit: usage.monthlyLimit,
-      error: reason,
-    })
-    .then(({ error }) => {
-      if (error) {
-        rateLimitedWarn(
-          `premium-api-budget:blocked-log:${api}`,
-          BUDGET_LOG_TTL_MS,
-          "[availability] log de bloqueio premium falhou",
-          formatError(error),
-        );
-      }
-    });
+  const day = periodKeys?.day ?? todayKey();
+  const month = periodKeys?.month ?? monthKey();
+
+  if (isLocalApiUsageEnabled()) {
+    try {
+      const local = await import("@/server/local-services/api-usage-local.service");
+      await local.reservePremiumUsage({
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        api: api as any,
+        periodDay: day,
+        periodMonth: month,
+        endpoint: origin.endpoint ?? null,
+        tmdbId: origin.tmdbId ?? null,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        mediaType: (origin.mediaType ?? null) as any,
+        region: origin.region ?? null,
+        userId: origin.userId ?? null,
+        action: origin.action ?? null,
+        reason: origin.reason ?? reason,
+        status: "blocked",
+        dailyUsed: usage.dailyUsed,
+        dailyLimit: usage.dailyLimit,
+        monthlyUsed: usage.monthlyUsed,
+        monthlyLimit: usage.monthlyLimit,
+        error: reason,
+      });
+    } catch (err) {
+      rateLimitedWarn(
+        `premium-api-budget:blocked-log:${api}`,
+        BUDGET_LOG_TTL_MS,
+        "[availability] log de bloqueio premium falhou (local)",
+        String(err),
+      );
+    }
+  } else {
+    const supabaseAdmin = await getSupabaseAdmin();
+    await supabaseAdmin
+      .from("poplog3_premium_api_usage")
+      .insert({
+        api,
+        endpoint: origin.endpoint ?? null,
+        tmdb_id: origin.tmdbId ?? null,
+        media_type: origin.mediaType ?? null,
+        region: origin.region ?? null,
+        user_id: origin.userId ?? null,
+        action: origin.action ?? null,
+        reason: origin.reason ?? reason,
+        status: "blocked",
+        daily_used: usage.dailyUsed,
+        daily_limit: usage.dailyLimit,
+        monthly_used: usage.monthlyUsed,
+        monthly_limit: usage.monthlyLimit,
+        error: reason,
+      })
+      .then(({ error }) => {
+        if (error) {
+          rateLimitedWarn(
+            `premium-api-budget:blocked-log:${api}`,
+            BUDGET_LOG_TTL_MS,
+            "[availability] log de bloqueio premium falhou",
+            formatError(error),
+          );
+        }
+      });
+  }
 
   rateLimitedWarn(
     `premium-api-budget:blocked:${api}:${reason}`,
@@ -237,6 +380,27 @@ export async function completePremiumApiBudget(
 ) {
   if (!reservation?.id) return;
 
+  if (isLocalApiUsageEnabled()) {
+    try {
+      const local = await import("@/server/local-services/api-usage-local.service");
+      await local.completePremiumUsage({
+        id: reservation.id,
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        status: status as any,
+        error: error ?? null,
+      });
+    } catch (err) {
+      rateLimitedWarn(
+        `premium-api-budget:complete:${reservation.api}:${status}`,
+        BUDGET_LOG_TTL_MS,
+        "[availability] fechamento de orçamento premium falhou (local)",
+        String(err),
+      );
+    }
+    return;
+  }
+
+  const supabaseAdmin = await getSupabaseAdmin();
   const { error: updateError } = await supabaseAdmin
     .from("poplog3_premium_api_usage")
     .update({
