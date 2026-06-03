@@ -7,7 +7,7 @@ import {
 } from "@/lib/domain-labels";
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
 import { getCurrentUser } from "@/server/auth/get-current-user";
-import { supabaseAdmin } from "@/server/supabase/admin";
+import { db } from "@/server/db/client";
 import {
   readContinuitySectionCache,
   writeContinuitySectionCache,
@@ -158,9 +158,46 @@ function normalizeGenres(genres: TitleRow["genres"]): string | null {
 }
 
 function providerType(type: string): "flatrate" | "rent" | "buy" {
+  if (type === "subscription" || type === "streaming") return "flatrate";
   if (type === "buy") return "buy";
   if (type === "rent") return "rent";
   return "flatrate";
+}
+
+function dateOnly(value: Date | null | undefined): string | null {
+  return value ? value.toISOString().slice(0, 10) : null;
+}
+
+function numericJsonArray(value: unknown): number[] | null {
+  return Array.isArray(value) ? value.filter((item): item is number => typeof item === "number") : null;
+}
+
+function mapTitleRow(row: Awaited<ReturnType<typeof db.poplog3Title.findMany>>[number]): TitleRow {
+  return {
+    tmdb_id: row.tmdbId,
+    media_type: row.mediaType,
+    title: row.title,
+    original_title: row.originalTitle,
+    poster_path: row.posterPath,
+    release_date: dateOnly(row.releaseDate),
+    first_air_date: dateOnly(row.firstAirDate),
+    runtime: row.runtime,
+    episode_run_time: numericJsonArray(row.episodeRunTime),
+    number_of_seasons: row.numberOfSeasons,
+    genres: Array.isArray(row.genres) ? row.genres as Array<{ id: number; name: string }> | string[] : null,
+  };
+}
+
+function mapAvailabilityRow(row: Awaited<ReturnType<typeof db.catalogAvailability.findMany>>[number]): AvailabilityRow | null {
+  if (row.tmdbId === null) return null;
+  return {
+    tmdb_id: Number(row.tmdbId),
+    media_type: row.mediaType,
+    provider_name: row.providerName,
+    provider_logo_path: row.providerLogoUrl,
+    availability_type: row.providerType,
+    country: row.providerRegion,
+  };
 }
 
 function markStage(perf: Record<string, number>, stageRef: { value: number }, stage: string) {
@@ -273,33 +310,34 @@ export async function POST(request: Request) {
 
     const ids = Array.from(new Set(rows.map((row) => row.tmdb_id)));
     const [titlesResult, availabilityResult] = await withTimeout(
-      (async (): Promise<[{ data: unknown[] | null }, { data: unknown[] | null }]> => {
+      (async (): Promise<[TitleRow[], AvailabilityRow[]]> => {
         const [titleRows, availabilityRows] = await Promise.all([
-          supabaseAdmin
-            .from("poplog3_titles")
-            .select("tmdb_id, media_type, title, original_title, poster_path, release_date, first_air_date, runtime, episode_run_time, number_of_seasons, genres")
-            .in("tmdb_id", ids),
-          supabaseAdmin
-            .from("poplog3_title_availability")
-            .select("tmdb_id, media_type, provider_name, provider_logo_path, availability_type, country")
-            .in("tmdb_id", ids)
-            .eq("country", "BR"),
+          db.poplog3Title.findMany({
+            where: { tmdbId: { in: ids } },
+          }),
+          db.catalogAvailability.findMany({
+            where: {
+              tmdbId: { in: ids.map((id) => BigInt(id)) },
+              providerRegion: "BR",
+              expiresAt: { gt: new Date() },
+            },
+          }),
         ]);
-        return [titleRows, availabilityRows];
+        return [titleRows.map(mapTitleRow), availabilityRows.map(mapAvailabilityRow).filter((row): row is AvailabilityRow => row !== null)];
       })(),
       TABLE_READ_TIMEOUT_MS,
-      [{ data: [] }, { data: [] }],
+      [[], []],
     );
     markStage(perf, stageRef, "cache_tables_read");
 
     const titleMap = new Map<string, TitleRow>(
-      ((titlesResult.data ?? []) as TitleRow[]).map((title) => [
+      titlesResult.map((title) => [
         `${title.media_type}:${title.tmdb_id}`,
         title,
       ]),
     );
     const providersByKey = new Map<string, AvailabilityRow[]>();
-    for (const row of (availabilityResult.data ?? []) as AvailabilityRow[]) {
+    for (const row of availabilityResult) {
       const key = `${row.media_type}:${row.tmdb_id}`;
       const list = providersByKey.get(key) ?? [];
       list.push(row);

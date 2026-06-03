@@ -19,6 +19,7 @@
     "db:smoke:library-state": "tsx -r tsconfig-paths/register scripts/smoke-test-library-state-flags.ts",
     "db:smoke:episode-progress": "tsx -r tsconfig-paths/register scripts/smoke-test-episode-progress.ts",
     "db:smoke:user-ratings": "tsx -r tsconfig-paths/register scripts/smoke-test-user-ratings.ts",
+    "db:smoke:rating-aggregates": "tsx -r tsconfig-paths/register scripts/smoke-test-rating-aggregates.ts",
     "db:smoke:feedback": "tsx -r tsconfig-paths/register scripts/smoke-test-feedback.ts",
     "db:smoke:curadoria": "tsx -r tsconfig-paths/register scripts/smoke-test-curadoria.ts",
     "db:smoke:curadoria-state": "tsx -r tsconfig-paths/register scripts/smoke-test-curadoria-state.ts",

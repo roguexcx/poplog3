@@ -1,16 +1,16 @@
 # Supabase Removal Audit
 
-Status: Fase 13C. Auth.js/NextAuth + Prisma segue como caminho real de auth. Rotas simples de feedback, streaming preferences e alguns helpers de engine agora usam Prisma/local por flag. Supabase permanece instalado e funcional como fallback/legado.
+Status: Fase 13C.2. Auth.js/NextAuth + Prisma segue como caminho real de auth. As ultimas rotas/engines do escopo 13C.2 foram migradas para Prisma/local services. Supabase permanece instalado e funcional apenas como fallback/legado ate a 13D.
 
 ## Resumo
 
 | Grupo | Status | Acao |
 | --- | --- | --- |
 | Auth | Parcialmente migrado | Auth.js ativo; Supabase Auth fallback temporario |
-| Rotas de usuario | Parcial | `for-you`, `feedback`, `not-interested`, `streaming-preferences` e auth de `watchlist/live` migrados; dados de `watchlist/live` ficam para 13C.2 |
+| Rotas de usuario | Parcial | `feedback`, `not-interested`, `streaming-preferences`, `watchlist/live` e `watchlist-hydrate` usam Prisma/local no caminho principal; fallbacks legados ficam para 13D |
 | Rotas publicas | Parcial | `discover`, `search`, `trending` autenticam via `getCurrentUser()` |
-| Admin/debug/backfill | Manter temporario | Migrar/remover em 13C/13D |
-| Engines/background jobs | Parcial | Runtime de episodios e fallback-state migrados; `sorteio`, `agenda-engine`, fuzzy search, batch refresh e `rating_aggregates` ficam para 13C.2 |
+| Admin/debug/backfill | Parcial | Backfill/hydrate/radar debug uteis migrados; diagnosticos Supabase e scripts antigos ficam para 13D |
+| Engines/background jobs | Parcial | `sorteio`, `agenda-engine`, fuzzy search, batch refresh e `rating_aggregates` migrados; caches/continuity legados ficam para 13D |
 | Fallback removivel | 13D | Remover deps, wrappers, envs e functions/migrations Supabase legadas |
 
 ## Migrado na 13A
@@ -64,10 +64,31 @@ Status: Fase 13C. Auth.js/NextAuth + Prisma segue como caminho real de auth. Rot
 | `scripts/db/export-local-data.ts`, `scripts/db/import-local-data.ts` | backup/export | Inclui `streaming_providers` e `user_streaming_preferences` | Baixo |
 | `scripts/smoke-test-streaming-preferences.ts` | smoke | Cobre service local de preferencias de streaming | Baixo |
 
+## Migrado na 13C.2
+
+| Arquivo | Tipo | Status | Risco |
+| --- | --- | --- | --- |
+| `src/app/api/watchlist/live/route.ts` | rota usuario | Removeu leituras Supabase de `poplog3_titles`/availability; usa `poplog3_titles`, `catalog_availability`, `user_title_state` e helpers locais | Medio |
+| `src/app/api/library/watchlist-hydrate/route.ts` | rota usuario/job | Hidrata watchlist via Prisma para `user_title_state`, `poplog3_titles` e `poplog3_episodes`; sync TMDB preservado | Medio |
+| `src/server/sorteio/sorteio-engine.ts` | engine | Biblioteca, feedback, availability e eventos migrados para Prisma/local DB | Medio |
+| `src/server/agenda/agenda-engine.ts` | engine | Biblioteca, titulos e availability migrados para Prisma/local DB; chamadas externas preservadas | Medio |
+| `src/server/search/fuzzy-title-search.ts` | engine helper | Busca fuzzy em `poplog3_titles` via Prisma | Baixo |
+| `src/server/streaming/batch-availability-refresh.ts` | background job | Refresh em lote usa preferencias locais, availability local e `user_title_state` via Prisma | Medio |
+| `src/server/ratings/rating-aggregate-service.ts` | service | `rating_aggregates` reimplementado com Prisma | Medio |
+| `src/server/ratings/user-rating-service.ts` | service | Caminho local recalcula agregados apos upsert/delete para evitar inconsistencia | Medio |
+| `src/app/api/admin/backfill-title-state/route.ts` | admin/backfill | Leitura de biblioteca e estados via Prisma | Baixo |
+| `src/app/api/admin/hydrate-library/route.ts` | admin/hydrate | Leitura de biblioteca/titulos via Prisma | Baixo |
+| `src/app/api/admin/hydrate-series-episodes/route.ts` | admin/hydrate | Leitura de episodios locais/catalogo e contagens via Prisma | Baixo |
+| `src/app/api/admin/radar-cache-flush/route.ts` | admin/debug | Cache ICS via Prisma | Baixo |
+| `src/app/api/admin/radar-personal-debug/route.ts` | admin/debug | Cache e estado pessoal via Prisma | Baixo |
+| `scripts/smoke-test-rating-aggregates.ts` | smoke | Valida agregados de filme e inferencia serie a partir de episodios | Baixo |
+
 ## Ainda depende de Supabase Auth
 
 | Arquivo | Motivo | Fase |
 | --- | --- | --- |
+| `src/server/auth/get-current-user.ts` | Fallback Supabase Auth apos local/Auth.js | 13D |
+| `src/proxy.ts` | Fallback Supabase SSR quando Auth.js/local nao resolvem | 13D |
 | `src/lib/personalization/feedback.ts` | Cria client Supabase quando feedback local esta OFF | 13D |
 | `src/components/auth/LoginDrawer.tsx` | Formulario Supabase fallback | 13D |
 | `src/components/layout/Sidebar.tsx` | Sign-out Supabase fallback | 13D |
@@ -77,13 +98,36 @@ Status: Fase 13C. Auth.js/NextAuth + Prisma segue como caminho real de auth. Rot
 
 | Grupo | Exemplos | Fase |
 | --- | --- | --- |
-| Admin/debug/backfill/hydrate | `admin/backfill-title-state`, `hydrate-library`, `hydrate-series-episodes`, `watchlist-hydrate`, `debug/supabase` | 13C/13D |
-| Continuidade fallback | `continue`, `recently-watched`, `new-episodes`, `watchlist-picks`, `acompanhando` fallback | 13D apos paridade |
-| Watchlist live dados | `src/app/api/watchlist/live/route.ts` ainda usa `supabaseAdmin` para `poplog3_titles` e availability | 13C.2 |
-| Engines | `sorteio-engine`, `agenda-engine`, `rating-aggregate-service`, `fuzzy-title-search`, `batch-availability-refresh` | 13C.2 |
+| Admin/debug legado | `debug/supabase`, `debug/local-db/acompanhando-diff`, diagnosticos de continuidade | 13D |
+| Scripts antigos | `backfill-movie-duration`, `backfill-user-title-state`, `smoke-test-feedback-engine` | 13D |
+| Continuidade fallback | `continue`, `recently-watched`, `new-episodes`, `watchlist-picks`, `upcoming-episodes`, `acompanhando` fallback | 13D apos paridade |
+| Cache/repositorios fallback | `title-cache`, `season-cache`, `availability-cache`, `ratings-cache`, `external-ids-cache`, `library-service`, `episode-progress-service`, `engine-logger` | 13D |
+| Radar legado | `src/app/radar/page.tsx`, fallback Supabase em `src/app/api/radar/route.ts` | 13D |
+| User routes fallback | `for-you`, `genre-stats`, `feedback`, `streaming-preferences`, `not-interested`, `trending` quando flags locais estao OFF | 13D |
 | Wrappers | `src/server/supabase/*`, `src/lib/supabase/*` | 13D |
 | Pacotes/envs | `@supabase/supabase-js`, `@supabase/ssr`, envs Supabase | 13D |
 | Supabase legado | `supabase/migrations/*`, `supabase/functions/*` | 13D |
+
+## Decisoes admin/debug/backfill 13C.2
+
+| Item | Decisao | Justificativa |
+| --- | --- | --- |
+| `admin/backfill-title-state` | Migrado para Prisma | Ainda util para reconciliar `user_titles` e `user_title_state` no MySQL |
+| `hydrate-library` | Migrado para Prisma | Ainda util para preencher metadados locais |
+| `hydrate-series-episodes` | Migrado para Prisma | Ainda util para catalogo local de episodios |
+| `watchlist-hydrate` | Migrado para Prisma | Faz parte do fluxo real de biblioteca/watchlist |
+| `radar-cache-flush` | Migrado para Prisma | Operacao simples sobre cache local |
+| `radar-personal-debug` | Migrado para Prisma | Diagnostico util do estado local |
+| `debug/supabase` | Manter temporario | Diagnostico legado ate remover dependencias/envs na 13D |
+| `debug/local-db/acompanhando-diff` | Manter temporario | Comparador Supabase vs MySQL ate paridade final |
+| Scripts Supabase antigos | Manter temporario | Nao foram removidos por regra; devem ser migrados ou apagados na 13D |
+
+## Observacoes 13C.2
+
+- Nenhum modelo Prisma novo foi necessario nesta fase; nao houve migration incremental.
+- `rating_aggregates` agora e mantido via Prisma e recalculado no caminho local de notas pessoais.
+- Availability local em `sorteio` usa `catalog_availability`. Essa tabela ainda nao expoe `tmdb_provider_id`, entao o bonus de provedor preferido so fica 100% equivalente quando houver mapeamento de provider local suficiente.
+- Supabase segue instalado por regra e por fallbacks legados. A remocao final deve ser feita apenas depois de validar que as flags locais permanecem ativas em producao.
 
 ## Prisma migrations
 
@@ -97,5 +141,4 @@ Status: Fase 13C. Auth.js/NextAuth + Prisma segue como caminho real de auth. Rot
 
 | Fase | Objetivo |
 | --- | --- |
-| 13C.2 | Migrar ultimas rotas/engines: watchlist live dados, sorteio, agenda, fuzzy search, batch refresh, rating aggregates |
-| 13D | Remover Supabase Auth/deps/wrappers/envs/functions/migrations legadas |
+| 13D | Remover Supabase Auth/deps/wrappers/envs/functions/migrations legadas; apagar/desativar scripts e diagnosticos Supabase |

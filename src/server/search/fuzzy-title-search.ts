@@ -1,27 +1,27 @@
-import { supabaseAdmin } from "@/server/supabase/admin";
+import { db } from "@/server/db/client";
 import type { PoplogTitle } from "@/server/types/title";
 
 type SearchMediaType = "all" | "movie" | "tv";
 
 type CachedTitleRow = {
-  tmdb_id: number;
-  media_type: "movie" | "tv";
+  tmdbId: number;
+  mediaType: "movie" | "tv";
   title: string | null;
-  original_title: string | null;
+  originalTitle: string | null;
   overview: string | null;
-  poster_path: string | null;
-  backdrop_path: string | null;
-  release_date: string | null;
-  first_air_date: string | null;
-  last_air_date: string | null;
+  posterPath: string | null;
+  backdropPath: string | null;
+  releaseDate: Date | null;
+  firstAirDate: Date | null;
+  lastAirDate: Date | null;
   year: number | null;
   runtime: number | null;
-  episode_run_time: number[] | null;
-  genres: number[] | null;
-  popularity: number | null;
-  vote_average: number | null;
-  vote_count: number | null;
-  original_language: string | null;
+  episodeRunTime: unknown;
+  genres: unknown;
+  popularity: unknown;
+  voteAverage: unknown;
+  voteCount: number | null;
+  originalLanguage: string | null;
 };
 
 export type FuzzyTitleMatch = PoplogTitle & {
@@ -49,24 +49,24 @@ export function normalizeSearchTerm(value: string): string {
 
 function titleFromRow(row: CachedTitleRow): PoplogTitle {
   return {
-    tmdb_id: row.tmdb_id,
-    media_type: row.media_type,
-    title: row.title ?? row.original_title ?? "Untitled",
-    original_title: row.original_title,
+    tmdb_id: row.tmdbId,
+    media_type: row.mediaType,
+    title: row.title ?? row.originalTitle ?? "Untitled",
+    original_title: row.originalTitle,
     overview: row.overview,
-    poster_path: row.poster_path,
-    backdrop_path: row.backdrop_path,
-    release_date: row.release_date,
-    first_air_date: row.first_air_date,
-    last_air_date: row.last_air_date,
+    poster_path: row.posterPath,
+    backdrop_path: row.backdropPath,
+    release_date: row.releaseDate?.toISOString().slice(0, 10) ?? null,
+    first_air_date: row.firstAirDate?.toISOString().slice(0, 10) ?? null,
+    last_air_date: row.lastAirDate?.toISOString().slice(0, 10) ?? null,
     year: row.year,
     runtime: row.runtime,
-    episode_run_time: row.episode_run_time,
-    genres: row.genres ?? [],
-    popularity: row.popularity,
-    vote_average: row.vote_average,
-    vote_count: row.vote_count,
-    original_language: row.original_language,
+    episode_run_time: Array.isArray(row.episodeRunTime) ? row.episodeRunTime as number[] : null,
+    genres: Array.isArray(row.genres) ? row.genres as number[] : [],
+    popularity: row.popularity === null ? null : Number(row.popularity),
+    vote_average: row.voteAverage === null ? null : Number(row.voteAverage),
+    vote_count: row.voteCount,
+    original_language: row.originalLanguage,
   };
 }
 
@@ -196,45 +196,17 @@ export async function findCachedFuzzyTitles({
 
   if (normalizedQuery.length < 3) return [];
 
-  let request = supabaseAdmin
-    .from("poplog3_titles")
-    .select(
-      [
-        "tmdb_id",
-        "media_type",
-        "title",
-        "original_title",
-        "overview",
-        "poster_path",
-        "backdrop_path",
-        "release_date",
-        "first_air_date",
-        "last_air_date",
-        "year",
-        "runtime",
-        "episode_run_time",
-        "genres",
-        "popularity",
-        "vote_average",
-        "vote_count",
-        "original_language",
-      ].join(",")
-    )
-    .order("popularity", { ascending: false })
-    .limit(MAX_CACHE_CANDIDATES);
+  const data = await db.poplog3Title.findMany({
+    where: {
+      mediaType: mediaType === "all" ? undefined : mediaType,
+    },
+    orderBy: {
+      popularity: "desc",
+    },
+    take: MAX_CACHE_CANDIDATES,
+  });
 
-  if (mediaType !== "all") {
-    request = request.eq("media_type", mediaType);
-  }
-
-  const { data, error } = await request;
-
-  if (error) {
-    console.warn("[search/fuzzy-cache] falha ao consultar cache:", error.message);
-    return [];
-  }
-
-  return ((data ?? []) as unknown as CachedTitleRow[])
+  return (data as CachedTitleRow[])
     .map(titleFromRow)
     .filter((title) => {
       if (excludeKeys.has(`${title.media_type}-${title.tmdb_id}`)) return false;

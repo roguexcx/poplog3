@@ -9,11 +9,10 @@
  *   - explicit_avg_rating = média só das notas 'explicit' e 'imported'.
  *   - average_rating = média de todas as notas públicas (inclui inferidas).
  *   - confidence_level: low < 5 votos | medium 5-49 | high >= 50.
- *   - Escrita é sempre via supabaseAdmin (service_role) — RLS só permite leitura
- *     pública, nunca escrita pelo cliente.
+ *   - Escrita/leitura via Prisma local.
  */
 
-import { supabaseAdmin } from "@/server/supabase/admin";
+import { db } from "@/server/db/client";
 import type { RatingMediaType, CommunityRatingData } from "@/types/user";
 
 export type { RatingMediaType, CommunityRatingData };
@@ -58,8 +57,8 @@ type AggregateInput = {
 
 type RatingRow = {
   rating: unknown;
-  rating_source: unknown;
-  user_id?: unknown;
+  ratingSource: unknown;
+  userId?: unknown;
 };
 
 function confidenceLevel(count: number): "low" | "medium" | "high" {
@@ -92,10 +91,7 @@ function avg(rows: Array<{ rating: unknown }>) {
 }
 
 async function deleteAggregate(itemKey: string): Promise<void> {
-  await supabaseAdmin
-    .from("rating_aggregates")
-    .delete()
-    .eq("item_key", itemKey);
+  await db.ratingAggregate.deleteMany({ where: { itemKey } });
 }
 
 async function upsertAggregateRow({
@@ -115,31 +111,40 @@ async function upsertAggregateRow({
   explicitRows: RatingRow[];
   inferredRows: RatingRow[];
 }): Promise<void> {
-  const now = new Date().toISOString();
-
-  const { error: upsertError } = await supabaseAdmin
-    .from("rating_aggregates")
-    .upsert(
-      {
-        media_type: mediaType,
-        tmdb_id: tmdbId,
-        season_number: seasonNumber,
-        episode_number: episodeNumber,
-        average_rating: avg(allRows),
-        explicit_avg_rating: avg(explicitRows),
-        rating_count: allRows.length,
-        explicit_rating_count: explicitRows.length,
-        inferred_rating_count: inferredRows.length,
-        confidence_level: confidenceLevel(allRows.length),
-        updated_at: now,
+  try {
+    const itemKey = buildItemKey(mediaType, tmdbId, seasonNumber, episodeNumber);
+    await db.ratingAggregate.upsert({
+      where: { itemKey },
+      update: {
+        mediaType,
+        tmdbId,
+        seasonNumber,
+        episodeNumber,
+        averageRating: avg(allRows),
+        explicitAvgRating: avg(explicitRows),
+        ratingCount: allRows.length,
+        explicitRatingCount: explicitRows.length,
+        inferredRatingCount: inferredRows.length,
+        confidenceLevel: confidenceLevel(allRows.length),
       },
-      { onConflict: "item_key" }
-    );
-
-  if (upsertError) {
+      create: {
+        mediaType,
+        tmdbId,
+        seasonNumber,
+        episodeNumber,
+        itemKey,
+        averageRating: avg(allRows),
+        explicitAvgRating: avg(explicitRows),
+        ratingCount: allRows.length,
+        explicitRatingCount: explicitRows.length,
+        inferredRatingCount: inferredRows.length,
+        confidenceLevel: confidenceLevel(allRows.length),
+      },
+    });
+  } catch (error) {
     console.error(
       "[rating-aggregate-service/upsertAggregateRow] upsert error",
-      serializeError(upsertError)
+      serializeError(error)
     );
   }
 }
@@ -149,46 +154,44 @@ async function recalculateTvAggregateWithEpisodeInferences(
 ): Promise<void> {
   const itemKey = buildItemKey("tv", tmdbId, null, null);
 
-  const [titleRatingsResult, episodeRatingsResult] = await Promise.all([
-    supabaseAdmin
-      .from("user_ratings")
-      .select("user_id, rating, rating_source")
-      .eq("media_type", "tv")
-      .eq("tmdb_id", tmdbId)
-      .is("season_number", null)
-      .is("episode_number", null)
-      .eq("is_public", true),
-    supabaseAdmin
-      .from("user_ratings")
-      .select("user_id, rating")
-      .eq("media_type", "episode")
-      .eq("tmdb_id", tmdbId)
-      .eq("is_public", true),
+  const [titleRows, episodeRatings] = await Promise.all([
+    db.userRating.findMany({
+      where: {
+        mediaType: "tv",
+        tmdbId,
+        seasonNumber: null,
+        episodeNumber: null,
+        isPublic: true,
+      },
+      select: {
+        userId: true,
+        rating: true,
+        ratingSource: true,
+      },
+    }),
+    db.userRating.findMany({
+      where: {
+        mediaType: "episode",
+        tmdbId,
+        isPublic: true,
+      },
+      select: {
+        userId: true,
+        rating: true,
+      },
+    }),
   ]);
-
-  if (titleRatingsResult.error || episodeRatingsResult.error) {
-    const error = titleRatingsResult.error ?? episodeRatingsResult.error;
-    if (!isTableMissingError(error)) {
-      console.error(
-        "[rating-aggregate-service/recalculateTvAggregateWithEpisodeInferences] fetch error",
-        serializeError(error)
-      );
-    }
-    return;
-  }
-
-  const titleRows = (titleRatingsResult.data ?? []) as RatingRow[];
   const explicitTitleRows = titleRows.filter((r) =>
-    explicitSources.has(r.rating_source as string)
+    explicitSources.has(r.ratingSource as string)
   );
   const directTitleUserIds = new Set(
-    titleRows.map((r) => String(r.user_id)).filter(Boolean)
+    titleRows.map((r) => String(r.userId)).filter(Boolean)
   );
 
   const episodeRatingsByUser = new Map<string, number[]>();
 
-  for (const row of episodeRatingsResult.data ?? []) {
-    const userId = String(row.user_id ?? "");
+  for (const row of episodeRatings) {
+    const userId = String(row.userId ?? "");
     if (!userId || directTitleUserIds.has(userId)) continue;
 
     const rating = Number(row.rating);
@@ -200,13 +203,13 @@ async function recalculateTvAggregateWithEpisodeInferences(
   }
 
   const inferredTitleRows = titleRows.filter(
-    (r) => !explicitSources.has(r.rating_source as string)
+    (r) => !explicitSources.has(r.ratingSource as string)
   );
   const episodeInferredRows: RatingRow[] = Array.from(
     episodeRatingsByUser.values()
   ).map((ratings) => ({
       rating: ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length,
-      rating_source: "inferred",
+      ratingSource: "inferred",
     }));
   const inferredRows = [...inferredTitleRows, ...episodeInferredRows];
 
@@ -242,37 +245,21 @@ export async function getPublicRating(
 ): Promise<CommunityRatingData | null> {
   const itemKey = buildItemKey(mediaType, tmdbId, seasonNumber, episodeNumber);
 
-  const { data, error } = await supabaseAdmin
-    .from("rating_aggregates")
-    .select(
-      "average_rating, explicit_avg_rating, rating_count, explicit_rating_count, inferred_rating_count, confidence_level"
-    )
-    .eq("item_key", itemKey)
-    .maybeSingle();
-
-  if (error) {
-    if (!isTableMissingError(error)) {
-      console.error(
-        "[rating-aggregate-service/getPublicRating]",
-        serializeError(error)
-      );
-    }
-    return null;
-  }
+  const data = await db.ratingAggregate.findUnique({ where: { itemKey } });
 
   if (!data) return null;
 
   return {
     averageRating:
-      data.average_rating !== null ? Number(data.average_rating) : null,
+      data.averageRating !== null ? Number(data.averageRating) : null,
     explicitAvgRating:
-      data.explicit_avg_rating !== null
-        ? Number(data.explicit_avg_rating)
+      data.explicitAvgRating !== null
+        ? Number(data.explicitAvgRating)
         : null,
-    ratingCount: Number(data.rating_count),
-    explicitRatingCount: Number(data.explicit_rating_count),
-    inferredRatingCount: Number(data.inferred_rating_count),
-    confidenceLevel: (data.confidence_level as "low" | "medium" | "high") ?? "low",
+    ratingCount: data.ratingCount,
+    explicitRatingCount: data.explicitRatingCount,
+    inferredRatingCount: data.inferredRatingCount,
+    confidenceLevel: data.confidenceLevel,
   };
 }
 
@@ -294,38 +281,26 @@ export async function getPublicRatingsBatch(
     buildItemKey(i.mediaType, i.tmdbId, i.seasonNumber, i.episodeNumber)
   );
 
-  const { data, error } = await supabaseAdmin
-    .from("rating_aggregates")
-    .select(
-      "item_key, average_rating, explicit_avg_rating, rating_count, explicit_rating_count, inferred_rating_count, confidence_level"
-    )
-    .in("item_key", keys);
-
-  if (error) {
-    if (!isTableMissingError(error)) {
-      console.error(
-        "[rating-aggregate-service/getPublicRatingsBatch]",
-        serializeError(error)
-      );
-    }
-    return new Map();
-  }
+  const data = await db.ratingAggregate.findMany({
+    where: {
+      itemKey: { in: keys },
+    },
+  });
 
   const result = new Map<string, CommunityRatingData>();
 
   for (const row of data ?? []) {
-    result.set(String(row.item_key), {
+    result.set(row.itemKey, {
       averageRating:
-        row.average_rating !== null ? Number(row.average_rating) : null,
+        row.averageRating !== null ? Number(row.averageRating) : null,
       explicitAvgRating:
-        row.explicit_avg_rating !== null
-          ? Number(row.explicit_avg_rating)
+        row.explicitAvgRating !== null
+          ? Number(row.explicitAvgRating)
           : null,
-      ratingCount: Number(row.rating_count),
-      explicitRatingCount: Number(row.explicit_rating_count),
-      inferredRatingCount: Number(row.inferred_rating_count),
-      confidenceLevel:
-        (row.confidence_level as "low" | "medium" | "high") ?? "low",
+      ratingCount: row.ratingCount,
+      explicitRatingCount: row.explicitRatingCount,
+      inferredRatingCount: row.inferredRatingCount,
+      confidenceLevel: row.confidenceLevel,
     });
   }
 
@@ -352,39 +327,19 @@ export async function recalculateAggregate(
     return;
   }
 
-  // Busca todas as notas públicas do item — uma única query com filtros corretos
-  let query = supabaseAdmin
-    .from("user_ratings")
-    .select("rating, rating_source")
-    .eq("media_type", mediaType)
-    .eq("tmdb_id", tmdbId)
-    .eq("is_public", true);
-
-  if (seasonNumber !== null) {
-    query = query.eq("season_number", seasonNumber);
-  } else {
-    query = query.is("season_number", null);
-  }
-
-  if (episodeNumber !== null) {
-    query = query.eq("episode_number", episodeNumber);
-  } else {
-    query = query.is("episode_number", null);
-  }
-
-  const { data, error: fetchError } = await query;
-
-  if (fetchError) {
-    if (!isTableMissingError(fetchError)) {
-      console.error(
-        "[rating-aggregate-service/recalculateAggregate] fetch error",
-        serializeError(fetchError)
-      );
-    }
-    return;
-  }
-
-  const allRows = data ?? [];
+  const allRows = await db.userRating.findMany({
+    where: {
+      mediaType,
+      tmdbId,
+      seasonNumber,
+      episodeNumber,
+      isPublic: true,
+    },
+    select: {
+      rating: true,
+      ratingSource: true,
+    },
+  });
   const totalCount = allRows.length;
 
   if (totalCount === 0) {
@@ -395,10 +350,10 @@ export async function recalculateAggregate(
 
   // Separa explícitas vs inferidas
   const explicitRows = allRows.filter((r) =>
-    explicitSources.has(r.rating_source as string)
+    explicitSources.has(r.ratingSource as string)
   );
   const inferredRows = allRows.filter(
-    (r) => !explicitSources.has(r.rating_source as string)
+    (r) => !explicitSources.has(r.ratingSource as string)
   );
 
   await upsertAggregateRow({

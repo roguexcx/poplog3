@@ -3,7 +3,7 @@
 // usuário autenticado e o feed ICS. Requer sessão e ADMIN_SECRET.
 
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/server/supabase/admin";
+import { db } from "@/server/db/client";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import type { IcsAgendaResponse } from "@/app/api/ics/agenda/route";
 import { adminUnauthorizedResponse, isAdminRequest } from "@/server/auth/admin-guard";
@@ -15,11 +15,7 @@ const LIBRARY_STATUSES = ["watching", "watchlist", "watched", "fridge"] as const
 
 async function readCache(): Promise<IcsAgendaResponse | null> {
   try {
-    const { data } = await supabaseAdmin
-      .from("ics_agenda_cache")
-      .select("payload")
-      .eq("id", CACHE_ID)
-      .single();
+    const data = await db.icsAgendaCache.findUnique({ where: { id: CACHE_ID } });
     return data ? (data.payload as unknown as IcsAgendaResponse) : null;
   } catch {
     return null;
@@ -35,13 +31,23 @@ export async function GET(req: NextRequest) {
   }
 
   // Biblioteca — fonte primária
-  const { data: stateData } = await supabaseAdmin
-    .from("user_title_state")
-    .select("tmdb_id, media_type, status")
-    .eq("user_id", user.id)
-    .in("status", LIBRARY_STATUSES);
+  const stateData = await db.userTitleState.findMany({
+    where: {
+      userId: user.id,
+      status: { in: [...LIBRARY_STATUSES] },
+    },
+    select: {
+      tmdbId: true,
+      mediaType: true,
+      status: true,
+    },
+  });
 
-  const libraryRows = (stateData ?? []) as Array<{
+  const libraryRows = stateData.map((row) => ({
+    tmdb_id: row.tmdbId,
+    media_type: row.mediaType,
+    status: row.status ?? "",
+  })) as Array<{
     tmdb_id: number;
     media_type: string;
     status: string;

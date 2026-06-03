@@ -308,7 +308,17 @@ export async function upsertUserRating(
 ): Promise<UserRatingData> {
   if (isLocalUserRatingsEnabled()) {
     const local = await getLocalUserRatingsService();
-    return local.upsertUserRating(input);
+    const saved = await local.upsertUserRating(input);
+    await recalculateAggregateFor({
+      mediaType: input.mediaType,
+      tmdbId: input.tmdbId,
+      seasonNumber: input.seasonNumber ?? null,
+      episodeNumber: input.episodeNumber ?? null,
+    });
+    if (input.mediaType === "episode" || (input.mediaType === "tv" && input.seasonNumber == null && input.episodeNumber == null)) {
+      await recalculateAggregateFor({ mediaType: "tv", tmdbId: input.tmdbId });
+    }
+    return saved;
   }
 
   const {
@@ -377,7 +387,17 @@ export async function deleteUserRating(
 ): Promise<void> {
   if (isLocalUserRatingsEnabled()) {
     const local = await getLocalUserRatingsService();
-    return local.deleteUserRating(input);
+    await local.deleteUserRating(input);
+    await recalculateAggregateFor({
+      mediaType: input.mediaType,
+      tmdbId: input.tmdbId,
+      seasonNumber: input.seasonNumber ?? null,
+      episodeNumber: input.episodeNumber ?? null,
+    });
+    if (input.mediaType === "episode" || (input.mediaType === "tv" && input.seasonNumber == null && input.episodeNumber == null)) {
+      await recalculateAggregateFor({ mediaType: "tv", tmdbId: input.tmdbId });
+    }
+    return;
   }
 
   const {

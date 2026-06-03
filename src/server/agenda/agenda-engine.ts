@@ -28,8 +28,8 @@ import type {
   LegacyAgendaTv,
 } from "@/server/agenda/types";
 import { getCachedEpisode, getCachedSeason } from "@/server/cache/season-cache";
+import { db } from "@/server/db/client";
 import { getUserTitleStates, type UserTitleState } from "@/server/state/user-title-state";
-import { supabaseAdmin } from "@/server/supabase/admin";
 import { formatEpisodeRuntimeLabel } from "@/lib/domain-labels";
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
 import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
@@ -89,6 +89,10 @@ function mergeDedup<T extends { id: number }>(
 
 function isTalkOrNews(item: { genre_ids: number[] }): boolean {
   return item.genre_ids.some((genreId) => genreId === 10767 || genreId === 10763);
+}
+
+function dateOnly(value: Date | null | undefined): string | null {
+  return value ? value.toISOString().slice(0, 10) : null;
 }
 
 function normalizeMovie(movie: TmdbMovie): LegacyAgendaMovie {
@@ -316,14 +320,18 @@ async function fetchLegacyAgenda() {
 async function fetchUserLibraryIds(userId: string | null): Promise<Record<string, string>> {
   if (!userId) return {};
 
-  const { data } = await supabaseAdmin
-    .from("user_titles")
-    .select("tmdb_id, media_type, status")
-    .eq("user_id", userId);
+  const data = await db.userTitle.findMany({
+    where: { userId },
+    select: {
+      tmdbId: true,
+      mediaType: true,
+      status: true,
+    },
+  });
 
   const ids: Record<string, string> = {};
-  for (const row of data ?? []) {
-    ids[`${row.media_type}-${row.tmdb_id}`] = row.status;
+  for (const row of data) {
+    ids[`${row.mediaType}-${row.tmdbId}`] = row.status;
   }
   return ids;
 }
@@ -348,17 +356,27 @@ async function buildNewEpisodeItems(userId: string | null): Promise<NewEpisodeIt
 
   if (active.length === 0) return [];
 
-  const { data } = await supabaseAdmin
-    .from("poplog3_titles")
-    .select("tmdb_id, title, poster_path, backdrop_path, last_air_date, runtime, episode_run_time")
-    .in(
-      "tmdb_id",
-      active.map((state) => state.tmdb_id),
-    )
-    .eq("media_type", "tv");
+  const data = await db.poplog3Title.findMany({
+    where: {
+      mediaType: "tv",
+      tmdbId: { in: active.map((state) => state.tmdb_id) },
+    },
+  });
 
   const titleMap = new Map<number, Record<string, unknown>>(
-    (data ?? []).map((title) => [(title as { tmdb_id: number }).tmdb_id, title]),
+    data.map((title) => [
+      title.tmdbId,
+      {
+        tmdb_id: title.tmdbId,
+        title: title.title,
+        original_title: title.originalTitle,
+        poster_path: title.posterPath,
+        backdrop_path: title.backdropPath,
+        last_air_date: dateOnly(title.lastAirDate),
+        runtime: title.runtime,
+        episode_run_time: title.episodeRunTime,
+      },
+    ]),
   );
   const episodeData = await Promise.all(
     active.map((state) =>
@@ -441,17 +459,24 @@ async function buildUpcomingEpisodeItems(userId: string | null): Promise<Upcomin
 
   if (states.length === 0) return [];
 
-  const { data } = await supabaseAdmin
-    .from("poplog3_titles")
-    .select("tmdb_id, title, poster_path, backdrop_path")
-    .in(
-      "tmdb_id",
-      states.map((state) => state.tmdb_id),
-    )
-    .eq("media_type", "tv");
+  const data = await db.poplog3Title.findMany({
+    where: {
+      mediaType: "tv",
+      tmdbId: { in: states.map((state) => state.tmdb_id) },
+    },
+  });
 
   const titleMap = new Map<number, Record<string, unknown>>(
-    (data ?? []).map((title) => [(title as { tmdb_id: number }).tmdb_id, title]),
+    data.map((title) => [
+      title.tmdbId,
+      {
+        tmdb_id: title.tmdbId,
+        title: title.title,
+        original_title: title.originalTitle,
+        poster_path: title.posterPath,
+        backdrop_path: title.backdropPath,
+      },
+    ]),
   );
   const episodeData = await Promise.all(
     states.map((state) =>
@@ -509,15 +534,29 @@ async function fetchAvailabilityAgendaEvents(input: {
   baseScore: number;
   limit?: number;
 }): Promise<AgendaEvent[]> {
-  const { data: availabilityRows } = await supabaseAdmin
-    .from("poplog3_title_availability")
-    .select("tmdb_id, media_type, provider_name, provider_logo_path, availability_type, country, last_synced_at")
-    .eq("country", input.country)
-    .in("availability_type", input.availabilityTypes)
-    .order("last_synced_at", { ascending: false })
-    .limit(input.limit ?? 30);
+  const providerTypes = input.availabilityTypes.map((type) =>
+    type === "streaming" || type === "flatrate" ? "subscription" : type,
+  ) as Array<"subscription" | "rent" | "buy" | "free" | "ads" | "unknown">;
+  const availabilityRows = await db.catalogAvailability.findMany({
+    where: {
+      providerRegion: input.country,
+      providerType: { in: providerTypes },
+      tmdbId: { not: null },
+      expiresAt: { gt: new Date() },
+    },
+    orderBy: { checkedAt: "desc" },
+    take: input.limit ?? 30,
+  });
 
-  const rows = (availabilityRows ?? []) as AvailabilityAgendaRow[];
+  const rows = availabilityRows.map((row) => ({
+    tmdb_id: Number(row.tmdbId),
+    media_type: row.mediaType,
+    provider_name: row.providerName,
+    provider_logo_path: row.providerLogoUrl,
+    availability_type: row.providerType,
+    country: row.providerRegion,
+    last_synced_at: row.checkedAt.toISOString(),
+  } satisfies AvailabilityAgendaRow));
   if (!rows.length) return [];
 
   const titleKeys = rows.map((row) => `${row.media_type}:${row.tmdb_id}`);
@@ -526,25 +565,28 @@ async function fetchAvailabilityAgendaEvents(input: {
 
   const [movieTitles, tvTitles] = await Promise.all([
     movieIds.length
-      ? supabaseAdmin
-          .from("poplog3_titles")
-          .select("tmdb_id, media_type, title, original_title, poster_path, backdrop_path, release_date, first_air_date, popularity, vote_average")
-          .eq("media_type", "movie")
-          .in("tmdb_id", movieIds)
-      : Promise.resolve({ data: [] }),
+      ? db.poplog3Title.findMany({ where: { mediaType: "movie", tmdbId: { in: movieIds } } })
+      : Promise.resolve([]),
     tvIds.length
-      ? supabaseAdmin
-          .from("poplog3_titles")
-          .select("tmdb_id, media_type, title, original_title, poster_path, backdrop_path, release_date, first_air_date, popularity, vote_average")
-          .eq("media_type", "tv")
-          .in("tmdb_id", tvIds)
-      : Promise.resolve({ data: [] }),
+      ? db.poplog3Title.findMany({ where: { mediaType: "tv", tmdbId: { in: tvIds } } })
+      : Promise.resolve([]),
   ]);
 
   const titleMap = new Map<string, AvailabilityTitleRow>(
-    ([...(movieTitles.data ?? []), ...(tvTitles.data ?? [])] as AvailabilityTitleRow[]).map((title) => [
-      `${title.media_type}:${title.tmdb_id}`,
-      title,
+    [...movieTitles, ...tvTitles].map((title) => [
+      `${title.mediaType}:${title.tmdbId}`,
+      {
+        tmdb_id: title.tmdbId,
+        media_type: title.mediaType,
+        title: title.title,
+        original_title: title.originalTitle,
+        poster_path: title.posterPath,
+        backdrop_path: title.backdropPath,
+        release_date: dateOnly(title.releaseDate),
+        first_air_date: dateOnly(title.firstAirDate),
+        popularity: title.popularity === null ? null : Number(title.popularity),
+        vote_average: title.voteAverage === null ? null : Number(title.voteAverage),
+      },
     ]),
   );
 

@@ -16,7 +16,7 @@
  */
 
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/server/supabase/admin";
+import { db } from "@/server/db/client";
 import { upsertTitleState } from "@/server/state/user-title-state";
 
 const PAGE_SIZE   = 500;
@@ -65,18 +65,27 @@ async function fetchCanonicalTitles(filterUserId?: string): Promise<Map<string, 
   let offset = 0;
 
   while (true) {
-    let query = supabaseAdmin
-      .from("user_titles")
-      .select("user_id, tmdb_id, media_type, status")
-      .order("created_at", { ascending: false })
-      .range(offset, offset + PAGE_SIZE - 1);
+    const data = await db.userTitle.findMany({
+      where: { userId: filterUserId },
+      orderBy: { createdAt: "desc" },
+      skip: offset,
+      take: PAGE_SIZE,
+      select: {
+        userId: true,
+        tmdbId: true,
+        mediaType: true,
+        status: true,
+      },
+    });
+    if (data.length === 0) break;
 
-    if (filterUserId) query = query.eq("user_id", filterUserId);
-
-    const { data, error } = await query;
-    if (error || !data || data.length === 0) break;
-
-    for (const row of data as TitleRow[]) {
+    for (const item of data) {
+      const row: TitleRow = {
+        user_id: item.userId,
+        tmdb_id: item.tmdbId,
+        media_type: item.mediaType,
+        status: item.status,
+      };
       const k = rowKey(row.user_id, row.media_type, row.tmdb_id);
       if (!canonical.has(k)) canonical.set(k, row);
     }
@@ -93,17 +102,26 @@ async function fetchExistingStates(filterUserId?: string): Promise<Map<string, S
   let offset = 0;
 
   while (true) {
-    let query = supabaseAdmin
-      .from("user_title_state")
-      .select("user_id, tmdb_id, media_type, status")
-      .range(offset, offset + PAGE_SIZE - 1);
+    const data = await db.userTitleState.findMany({
+      where: { userId: filterUserId },
+      skip: offset,
+      take: PAGE_SIZE,
+      select: {
+        userId: true,
+        tmdbId: true,
+        mediaType: true,
+        status: true,
+      },
+    });
+    if (data.length === 0) break;
 
-    if (filterUserId) query = query.eq("user_id", filterUserId);
-
-    const { data, error } = await query;
-    if (error || !data || data.length === 0) break;
-
-    for (const row of data as StateRow[]) {
+    for (const item of data) {
+      const row: StateRow = {
+        user_id: item.userId,
+        tmdb_id: item.tmdbId,
+        media_type: item.mediaType,
+        status: item.status,
+      };
       stateMap.set(rowKey(row.user_id, row.media_type, row.tmdb_id), row);
     }
 

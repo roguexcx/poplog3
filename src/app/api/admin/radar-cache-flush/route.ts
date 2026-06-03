@@ -1,5 +1,5 @@
 // ── POST /api/admin/radar-cache-flush ────────────────────────────────────────
-// Invalida o cache da Agenda/Radar no Supabase: apaga o campo cached_at
+// Invalida o cache da Agenda/Radar no MySQL local: apaga o campo cached_at
 // setando-o para epoch zero, forçando reconstrução completa na próxima
 // request ao /api/ics/agenda.
 //
@@ -7,7 +7,7 @@
 // ──────────────────────────────────────────────────────────────────────────────
 
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/server/supabase/admin";
+import { db } from "@/server/db/client";
 
 const CACHE_ID = "main";
 
@@ -23,29 +23,22 @@ export async function GET(req: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { data, error } = await supabaseAdmin
-    .from("ics_agenda_cache")
-    .select("cached_at, payload->cacheVersion")
-    .eq("id", CACHE_ID)
-    .maybeSingle();
-
-  if (error) {
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
-  }
+  const data = await db.icsAgendaCache.findUnique({ where: { id: CACHE_ID } });
 
   if (!data) {
     return NextResponse.json({ ok: true, status: "empty", cachedAt: null, ageHours: null, cacheVersion: null });
   }
 
-  const cachedAt = new Date(data.cached_at as string);
+  const cachedAt = data.cachedAt;
   const ageHours = (Date.now() - cachedAt.getTime()) / 3_600_000;
+  const payload = data.payload as Record<string, unknown>;
 
   return NextResponse.json({
     ok: true,
     status: "present",
     cachedAt: cachedAt.toISOString(),
     ageHours: parseFloat(ageHours.toFixed(2)),
-    cacheVersion: (data as Record<string, unknown>)["cacheVersion"] ?? null,
+    cacheVersion: payload.cacheVersion ?? null,
   });
 }
 
@@ -59,14 +52,16 @@ export async function POST(req: Request) {
   const triggerRebuild = url.searchParams.get("rebuild") !== "false";
 
   // Invalida: seta cached_at para epoch zero — readCache() vai rejeitar como stale
-  const { error: updateError } = await supabaseAdmin
-    .from("ics_agenda_cache")
-    .update({ cached_at: new Date(0).toISOString() })
-    .eq("id", CACHE_ID);
-
-  if (updateError) {
-    return NextResponse.json({ ok: false, error: updateError.message }, { status: 500 });
-  }
+  await db.icsAgendaCache.update({
+    where: { id: CACHE_ID },
+    data: { cachedAt: new Date(0) },
+  }).catch(async () => {
+    await db.icsAgendaCache.upsert({
+      where: { id: CACHE_ID },
+      update: { cachedAt: new Date(0) },
+      create: { id: CACHE_ID, payload: {}, cachedAt: new Date(0) },
+    });
+  });
 
   let rebuildTriggered = false;
   if (triggerRebuild) {

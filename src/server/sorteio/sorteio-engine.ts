@@ -1,5 +1,5 @@
 import { tmdbFetch } from "@/server/api-clients/tmdb/client";
-import { supabaseAdmin } from "@/server/supabase/admin";
+import { db } from "@/server/db/client";
 import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
 
 type MediaType = "movie" | "tv";
@@ -176,6 +176,14 @@ function normalizeProviderType(type?: string | null) {
   return type;
 }
 
+function dateOnly(value: Date | null | undefined): string | null {
+  return value ? value.toISOString().slice(0, 10) : null;
+}
+
+function numericJsonArray(value: unknown): number[] {
+  return Array.isArray(value) ? value.filter((item): item is number => typeof item === "number") : [];
+}
+
 function availabilityScore(row: AvailabilityRow, favoriteProviderIds: Set<string>) {
   const type = row.availability_type ?? "";
   const isPreferred = row.tmdb_provider_id !== null && favoriteProviderIds.has(String(row.tmdb_provider_id));
@@ -345,72 +353,100 @@ async function fetchDiscoveryPool(favoriteProviderIds: string[], region: string)
 }
 
 async function fetchLibraryRows(userId: string) {
-  const { data } = await supabaseAdmin
-    .from("user_title_state")
-    .select("tmdb_id, media_type, status, computed_state, best_provider_name, best_provider_type, best_provider_logo")
-    .eq("user_id", userId);
-  return (data ?? []) as LibraryRow[];
+  const rows = await db.userTitleState.findMany({
+    where: { userId },
+    select: {
+      tmdbId: true,
+      mediaType: true,
+      status: true,
+      computedState: true,
+      bestProviderName: true,
+      bestProviderType: true,
+      bestProviderLogo: true,
+    },
+  });
+  return rows.map((row) => ({
+    tmdb_id: row.tmdbId,
+    media_type: row.mediaType,
+    status: row.status,
+    computed_state: row.computedState,
+    best_provider_name: row.bestProviderName,
+    best_provider_type: row.bestProviderType,
+    best_provider_logo: row.bestProviderLogo,
+  }));
 }
 
 async function fetchNotInterestedKeys(userId: string): Promise<Set<string>> {
-  const { data } = await supabaseAdmin
-    .from("user_title_feedback")
-    .select("tmdb_id, media_type")
-    .eq("user_id", userId)
-    .eq("feedback_type", "not_interested")
-    .eq("active", true);
-  return new Set((data ?? []).map((row) => `${row.media_type}-${row.tmdb_id}`));
+  const rows = await db.userTitleFeedback.findMany({
+    where: {
+      userId,
+      feedbackType: "not_interested",
+      active: true,
+    },
+    select: {
+      tmdbId: true,
+      mediaType: true,
+    },
+  });
+  return new Set(rows.map((row) => `${row.mediaType}-${row.tmdbId}`));
 }
 
 async function fetchWatchlistPool(userId: string): Promise<SorteioItem[]> {
-  const { data: stateRows } = await supabaseAdmin
-    .from("user_title_state")
-    .select("tmdb_id, media_type, status, computed_state, best_provider_name, best_provider_type, best_provider_logo")
-    .eq("user_id", userId)
-    .eq("status", "watchlist");
-
-  const states = (stateRows ?? []) as LibraryRow[];
+  const states = (await db.userTitleState.findMany({
+    where: {
+      userId,
+      status: "watchlist",
+    },
+    select: {
+      tmdbId: true,
+      mediaType: true,
+      status: true,
+      computedState: true,
+      bestProviderName: true,
+      bestProviderType: true,
+      bestProviderLogo: true,
+    },
+  })).map((row) => ({
+    tmdb_id: row.tmdbId,
+    media_type: row.mediaType,
+    status: row.status,
+    computed_state: row.computedState,
+    best_provider_name: row.bestProviderName,
+    best_provider_type: row.bestProviderType,
+    best_provider_logo: row.bestProviderLogo,
+  }));
   const movieIds = states.filter((row) => row.media_type === "movie").map((row) => row.tmdb_id);
   const tvIds = states.filter((row) => row.media_type === "tv").map((row) => row.tmdb_id);
   const [movieTitles, tvTitles] = await Promise.all([
     movieIds.length
-      ? supabaseAdmin
-          .from("poplog3_titles")
-          .select("tmdb_id, media_type, title, original_title, poster_path, backdrop_path, release_date, first_air_date, vote_average, popularity")
-          .eq("media_type", "movie")
-          .in("tmdb_id", movieIds)
-      : Promise.resolve({ data: [] }),
+      ? db.poplog3Title.findMany({ where: { mediaType: "movie", tmdbId: { in: movieIds } } })
+      : Promise.resolve([]),
     tvIds.length
-      ? supabaseAdmin
-          .from("poplog3_titles")
-          .select("tmdb_id, media_type, title, original_title, poster_path, backdrop_path, release_date, first_air_date, vote_average, popularity")
-          .eq("media_type", "tv")
-          .in("tmdb_id", tvIds)
-      : Promise.resolve({ data: [] }),
+      ? db.poplog3Title.findMany({ where: { mediaType: "tv", tmdbId: { in: tvIds } } })
+      : Promise.resolve([]),
   ]);
   const stateMap = new Map(states.map((row) => [`${row.media_type}-${row.tmdb_id}`, row]));
 
-  const mapped: Array<SorteioItem | null> = [...(movieTitles.data ?? []), ...(tvTitles.data ?? [])]
+  const mapped: Array<SorteioItem | null> = [...movieTitles, ...tvTitles]
     .map((row): SorteioItem | null => {
-      const record = row as Record<string, unknown>;
-      const mediaType = record.media_type as MediaType;
-      const tmdbId = record.tmdb_id as number;
+      const mediaType = row.mediaType as MediaType;
+      const tmdbId = row.tmdbId;
       const state = stateMap.get(`${mediaType}-${tmdbId}`);
-      const title = (record.title as string | null) ?? (record.original_title as string | null);
-      const date = mediaType === "movie" ? record.release_date as string | null : record.first_air_date as string | null;
-      if (!title || !record.poster_path || !isPastOrToday(date)) return null;
+      const title = row.title ?? row.originalTitle;
+      const date = mediaType === "movie" ? dateOnly(row.releaseDate) : dateOnly(row.firstAirDate);
+      if (!title || !row.posterPath || !isPastOrToday(date)) return null;
       return {
         id: tmdbId,
         media_type: mediaType,
         title,
-        original_title: (record.original_title as string | null) ?? null,
-        poster_path: record.poster_path as string | null,
-        backdrop_path: record.backdrop_path as string | null,
+        original_title: row.originalTitle ?? null,
+        poster_path: row.posterPath,
+        backdrop_path: row.backdropPath,
         release_date: mediaType === "movie" ? date ?? "" : "",
         first_air_date: mediaType === "tv" ? date ?? "" : "",
-        vote_average: (record.vote_average as number | null) ?? 0,
+        vote_average: row.voteAverage === null ? 0 : Number(row.voteAverage),
         vote_count: 0,
-        popularity: (record.popularity as number | null) ?? 0,
+        popularity: row.popularity === null ? 0 : Number(row.popularity),
         overview: "",
         genre_ids: [],
         user_status: state?.status ?? "watchlist",
@@ -433,25 +469,38 @@ async function enrichAvailability(items: SorteioItem[], favoriteProviderIds: Set
   const tvIds = items.filter((item) => item.media_type === "tv").map((item) => item.id);
   const [movieRows, tvRows] = await Promise.all([
     movieIds.length
-      ? supabaseAdmin
-          .from("poplog3_title_availability")
-          .select("tmdb_id, media_type, provider_name, provider_logo_path, availability_type, tmdb_provider_id")
-          .eq("media_type", "movie")
-          .eq("country", region)
-          .in("tmdb_id", movieIds)
-      : Promise.resolve({ data: [] }),
+      ? db.catalogAvailability.findMany({
+          where: {
+            mediaType: "movie",
+            tmdbId: { in: movieIds.map((id) => BigInt(id)) },
+            providerRegion: region,
+            expiresAt: { gt: new Date() },
+          },
+        })
+      : Promise.resolve([]),
     tvIds.length
-      ? supabaseAdmin
-          .from("poplog3_title_availability")
-          .select("tmdb_id, media_type, provider_name, provider_logo_path, availability_type, tmdb_provider_id")
-          .eq("media_type", "tv")
-          .eq("country", region)
-          .in("tmdb_id", tvIds)
-      : Promise.resolve({ data: [] }),
+      ? db.catalogAvailability.findMany({
+          where: {
+            mediaType: "tv",
+            tmdbId: { in: tvIds.map((id) => BigInt(id)) },
+            providerRegion: region,
+            expiresAt: { gt: new Date() },
+          },
+        })
+      : Promise.resolve([]),
   ]);
 
   const availabilityMap = new Map<string, AvailabilityRow>();
-  for (const row of [...(movieRows.data ?? []), ...(tvRows.data ?? [])] as AvailabilityRow[]) {
+  for (const availability of [...movieRows, ...tvRows]) {
+    if (availability.tmdbId === null) continue;
+    const row: AvailabilityRow = {
+      tmdb_id: Number(availability.tmdbId),
+      media_type: availability.mediaType,
+      provider_name: availability.providerName,
+      provider_logo_path: availability.providerLogoUrl,
+      availability_type: availability.providerType,
+      tmdb_provider_id: null,
+    };
     const key = `${row.media_type}-${row.tmdb_id}`;
     const current = availabilityMap.get(key);
     if (!current || availabilityScore(row, favoriteProviderIds) > availabilityScore(current, favoriteProviderIds)) {
@@ -482,24 +531,31 @@ async function enrichAvailability(items: SorteioItem[], favoriteProviderIds: Set
 }
 
 async function fetchRecentDraws(userId: string, days: number, mode: SorteioMode) {
-  const since = new Date(Date.now() - days * 86_400_000).toISOString();
-  const { data } = await supabaseAdmin
-    .from("user_events")
-    .select("tmdb_id, media_type, created_at")
-    .eq("user_id", userId)
-    .eq("event_type", "sorteio_draw")
-    .eq("payload->>mode", mode)
-    .gte("created_at", since)
-    .order("created_at", { ascending: false });
-  return (data ?? []) as RecentDrawRow[];
+  const since = new Date(Date.now() - days * 86_400_000);
+  const rows = await db.userEvent.findMany({
+    where: {
+      userId,
+      eventType: "sorteio_draw",
+      createdAt: { gte: since },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  return rows
+    .filter((row) => typeof row.payload === "object" && row.payload !== null && (row.payload as Record<string, unknown>).mode === mode)
+    .map((row) => ({
+      tmdb_id: row.tmdbId,
+      media_type: row.mediaType,
+      created_at: row.createdAt.toISOString(),
+    }));
 }
 
 async function logDraw(userId: string, item: SorteioItem, meta: SorteioPoolResult["meta"]) {
-  const { error } = await supabaseAdmin.from("user_events").insert({
-    user_id: userId,
-    tmdb_id: item.id,
-    media_type: item.media_type,
-    event_type: "sorteio_draw",
+  await db.userEvent.create({
+    data: {
+    userId,
+    tmdbId: item.id,
+    mediaType: item.media_type,
+    eventType: "sorteio_draw",
     payload: {
       mode: meta.mode,
       source: item.sorteio_source,
@@ -510,8 +566,8 @@ async function logDraw(userId: string, item: SorteioItem, meta: SorteioPoolResul
       availabilityScope: item.availability_scope ?? "none",
       poolSize: meta.totalBeforeFallback,
     },
+    },
   });
-  if (error) console.warn("[sorteio-engine] draw log failed", error);
 }
 
 function applyFallback(items: SorteioItem[], filters: SorteioFilters) {

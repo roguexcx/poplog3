@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 
+import { db } from "@/server/db/client";
 import { withOrigin } from "@/server/engine-logger";
 import { syncTmdbTitle } from "@/server/sync/sync-tmdb-title";
-import { supabaseAdmin } from "@/server/supabase/admin";
 
 type MediaType = "movie" | "tv";
 
@@ -50,17 +50,20 @@ async function fetchPersistedState(
   mediaType: MediaType,
   tmdbId: number
 ): Promise<{ poster_path: string | null; backdrop_path: string | null } | null> {
-  const { data, error } = await supabaseAdmin
-    .from("poplog3_titles")
-    .select("poster_path,backdrop_path")
-    .eq("tmdb_id", tmdbId)
-    .eq("media_type", mediaType)
-    .maybeSingle();
+  const data = await db.poplog3Title.findUnique({
+    where: {
+      tmdbId_mediaType: { tmdbId, mediaType },
+    },
+    select: {
+      posterPath: true,
+      backdropPath: true,
+    },
+  });
 
-  if (error || !data) return null;
+  if (!data) return null;
   return {
-    poster_path: data.poster_path ?? null,
-    backdrop_path: data.backdrop_path ?? null,
+    poster_path: data.posterPath ?? null,
+    backdrop_path: data.backdropPath ?? null,
   };
 }
 
@@ -79,31 +82,32 @@ export async function POST(request: Request) {
   const onlyMissingImages =
     url.searchParams.get("onlyMissingImages") === "true";
 
-  const { data: userTitlesData, error } = await supabaseAdmin
-    .from("user_titles")
-    .select("tmdb_id, media_type");
+  const userTitlesData = await db.userTitle.findMany({
+    select: { tmdbId: true, mediaType: true },
+  });
 
-  if (error) {
-    return NextResponse.json(
-      { ok: false, error: error.message },
-      { status: 500 }
-    );
-  }
-
-  const userTitlesRaw = (userTitlesData ?? []) as Array<{ tmdb_id: number; media_type: string }>;
+  const userTitlesRaw = userTitlesData.map((row) => ({ tmdb_id: row.tmdbId, media_type: row.mediaType }));
   const tmdbIds = [...new Set(userTitlesRaw.map((r) => r.tmdb_id))];
   const mediaTypes = [...new Set(userTitlesRaw.map((r) => r.media_type))];
 
   const titleMetaMap = new Map<string, { title?: string | null; poster_path?: string | null; backdrop_path?: string | null }>();
   if (tmdbIds.length > 0) {
-    const { data: titlesData } = await supabaseAdmin
-      .from("poplog3_titles")
-      .select("tmdb_id, media_type, title, poster_path, backdrop_path")
-      .in("tmdb_id", tmdbIds)
-      .in("media_type", mediaTypes);
+    const titlesData = await db.poplog3Title.findMany({
+      where: {
+        tmdbId: { in: tmdbIds },
+        mediaType: { in: mediaTypes as MediaType[] },
+      },
+      select: {
+        tmdbId: true,
+        mediaType: true,
+        title: true,
+        posterPath: true,
+        backdropPath: true,
+      },
+    });
 
-    for (const t of (titlesData ?? []) as Array<{ tmdb_id: number; media_type: string; title: string | null; poster_path: string | null; backdrop_path: string | null }>) {
-      titleMetaMap.set(`${t.media_type}:${t.tmdb_id}`, { title: t.title, poster_path: t.poster_path, backdrop_path: t.backdrop_path });
+    for (const t of titlesData) {
+      titleMetaMap.set(`${t.mediaType}:${t.tmdbId}`, { title: t.title, poster_path: t.posterPath, backdrop_path: t.backdropPath });
     }
   }
 

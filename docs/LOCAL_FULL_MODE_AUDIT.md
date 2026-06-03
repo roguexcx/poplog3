@@ -2,6 +2,7 @@
 
 > Gerado em 2026-06-03 (Fase 9).
 > Mapeia todos os arquivos que ainda importam ou usam Supabase quando o modo local completo está ativo.
+> Atualizado na Fase 13C.2 para refletir as ultimas rotas/engines migradas para Prisma/local services.
 
 ## Legenda
 
@@ -51,6 +52,13 @@ Estes arquivos têm branch local; o caminho Supabase só é ativado quando a fla
 | `app/api/user/streaming-preferences/route.ts` | `user_streaming_preferences`, `streaming_providers` | `POPLOG_LOCAL_STREAMING_PREFERENCES_ENABLED` | Migrada |
 | `server/runtime/series-episode-runtimes.ts` | `poplog3_episodes` | `POPLOG_LOCAL_CACHE_ENABLED` | Migrada |
 | `server/streaming/availability-fallback-state.ts` | `poplog3_availability_fallback_state` | `POPLOG_LOCAL_AVAILABILITY_ENABLED` | Migrada |
+| `app/api/watchlist/live/route.ts` | `poplog3_titles`, `catalog_availability`, `user_title_state` | local DB direto | Migrada 13C.2 |
+| `app/api/library/watchlist-hydrate/route.ts` | `user_title_state`, `poplog3_titles`, `poplog3_episodes` | local DB direto | Migrada 13C.2 |
+| `server/agenda/agenda-engine.ts` | `user_titles`, `poplog3_titles`, `catalog_availability` | local DB direto | Migrada 13C.2 |
+| `server/sorteio/sorteio-engine.ts` | `user_title_state`, `user_title_feedback`, `poplog3_titles`, `catalog_availability`, `user_events` | local DB direto | Migrada 13C.2 |
+| `server/search/fuzzy-title-search.ts` | `poplog3_titles` | local DB direto | Migrada 13C.2 |
+| `server/streaming/batch-availability-refresh.ts` | `user_title_state`, availability local | local DB direto | Migrada 13C.2 |
+| `server/ratings/rating-aggregate-service.ts` | `rating_aggregates`, `user_ratings` | local DB direto | Migrada 13C.2 |
 | `app/api/poplog3/acompanhando/route.ts` | `user_titles`, `user_curadoria_state`, `user_watching` | `POPLOG_LOCAL_ACOMPANHANDO_ENABLED` | GET migrado; POST ainda usa Supabase |
 | `app/api/poplog3/continuity/hero/route.ts` | `hero_impressions`, `user_title_state`, `user_titles` | `POPLOG_LOCAL_HERO_ENABLED` | Migrada |
 | `server/continuity/hero-candidates.ts` | `poplog3_title_availability`, `user_title_state`, `user_titles`, `poplog3_titles` | `POPLOG_LOCAL_HERO_ENABLED` | Migrada |
@@ -70,19 +78,10 @@ Estes arquivos têm branch local; o caminho Supabase só é ativado quando a fla
 
 | Arquivo | Tabelas Supabase | Risco em local full | Próxima ação sugerida |
 |---|---|---|---|
-| `app/api/user/streaming-preferences/route.ts` | `streaming_providers`, `user_streaming_preferences` | Erro 500 se sem Supabase | Migrar `user_streaming_preferences` para Prisma |
-| `app/api/watchlist/live/route.ts` | `poplog3_titles`, `poplog3_title_availability` | Erro ou resultado vazio | Redirecionar para cache/Prisma local |
-| `app/api/user/genre-stats/route.ts` | `user_titles` | Erro ou lista vazia | Migrar para `user_title_state` local |
+| `app/api/user/genre-stats/route.ts` | `user_titles` | Caminho local existe; fallback Supabase permanece se flags OFF | Remover fallback na 13D |
 | `app/api/user/for-you/route.ts` | `user_title_feedback`, queries diversas | Degradação parcial | Migrar na Fase 10+ |
 | `app/api/trending/route.ts` | `poplog3_titles` + joins | Resultado vazio/erro | Migrar cache de trending para Prisma |
-| `server/agenda/agenda-engine.ts` | `user_titles`, `poplog3_titles`, `poplog3_title_availability` | Agenda pode retornar vazia | Substituir por helpers locais já existentes |
-| `server/sorteio/sorteio-engine.ts` | `user_titles`, diversos | Sorteio pode falhar | Migrar em fase futura |
-| `server/search/fuzzy-title-search.ts` | `poplog3_titles` | Busca falha | Migrar para Prisma |
-| `server/runtime/series-episode-runtimes.ts` | `poplog3_episodes` | Runtimes ausentes | Migrar para Prisma |
-| `server/streaming/availability-fallback-state.ts` | `poplog3_availability_fallback_state` | Estado de fallback ausente | Migrar para Prisma |
-| `server/streaming/batch-availability-refresh.ts` | `catalog_availability` | Refresh falha | Migrar para Prisma |
-| `server/ratings/rating-aggregate-service.ts` | `rating_aggregates` | Community ratings ausentes | Reimplementar no Prisma |
-| `app/api/poplog3/continuity/upcoming-episodes/route.ts` | `user_title_state`, `poplog3_episodes` | Upcoming retorna vazio | Migrar com flag própria |
+| `app/api/poplog3/continuity/upcoming-episodes/route.ts` | `user_title_state`, `poplog3_episodes` | Caminho local existe; fallback Supabase permanece | Remover fallback na 13D |
 | `app/api/poplog3/agenda/v2/route.ts` | idem agenda-engine | Agenda v2 pode falhar | Migrar com flag |
 | `server/continuity/continuity-state-cache.ts` | `user_title_state` | Não chamado quando flags locais ON (rotas fazem bypass) | Baixa prioridade — bypass já existe nas rotas |
 
@@ -115,11 +114,11 @@ Estes arquivos usam Supabase no cliente (browser). Não impactam o servidor loca
 | `app/api/debug/config/route.ts` | Exibe configuração de env | Referencia `NEXT_PUBLIC_SUPABASE_URL` |
 | `app/api/debug/supabase/route.ts` | Testa conexão Supabase | Deve falhar graciosamente se sem Supabase |
 | `app/api/debug/local-db/acompanhando-diff/route.ts` | Diff local vs Supabase | Requer ambos para funcionar |
-| `app/api/admin/backfill-title-state/route.ts` | Backfill admin | Requer Supabase |
-| `app/api/admin/hydrate-library/route.ts` | Hydrate admin | Requer Supabase |
-| `app/api/admin/hydrate-series-episodes/route.ts` | Hydrate admin | Requer Supabase |
-| `app/api/admin/radar-personal-debug/route.ts` | Debug radar | Requer auth |
-| `app/api/admin/radar-cache-flush/route.ts` | Flush cache radar | Requer Supabase |
+| `app/api/admin/backfill-title-state/route.ts` | Backfill admin | Migrado para Prisma na 13C.2 |
+| `app/api/admin/hydrate-library/route.ts` | Hydrate admin | Migrado para Prisma na 13C.2 |
+| `app/api/admin/hydrate-series-episodes/route.ts` | Hydrate admin | Migrado para Prisma na 13C.2 |
+| `app/api/admin/radar-personal-debug/route.ts` | Debug radar | Migrado para Prisma na 13C.2 |
+| `app/api/admin/radar-cache-flush/route.ts` | Flush cache radar | Migrado para Prisma na 13C.2 |
 
 ---
 
@@ -144,10 +143,7 @@ Estes arquivos usam Supabase no cliente (browser). Não impactam o servidor loca
 
 ## Próximos passos sugeridos (Fase 10+)
 
-1. Migrar `upcoming-episodes` com flag `POPLOG_LOCAL_UPCOMING_ENABLED`
-2. Migrar `continuity-state-cache.ts` para usar flag `POPLOG_LOCAL_USER_STATE_ENABLED` (sem circular dep)
-3. Migrar `agenda-engine.ts` — helpers locais já existem em `continuity-local.service.ts`
-4. Migrar `series-episode-runtimes.ts` — dados disponíveis em `poplog3_episodes`
-5. Migrar `rating-aggregate-service.ts` — reimplementar `rating_aggregates` no Prisma
-6. Migrar `streaming-preferences` — criar tabela `user_streaming_preferences` no Prisma
-7. Typecheck/build global (Fase 10): corrigir erros em `api-history`, `balloonerismm`, `tvdb`
+1. Remover/desativar fallbacks Supabase de Auth/UI após validar Auth.js em produção.
+2. Remover fallbacks Supabase de rotas já migradas quando as flags locais virarem obrigatórias.
+3. Migrar ou apagar scripts antigos de backfill/smoke Supabase.
+4. Remover wrappers, pacotes, envs, migrations e functions Supabase na 13D.

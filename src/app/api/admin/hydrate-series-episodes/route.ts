@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { supabaseAdmin } from "@/server/supabase/admin";
+import { db } from "@/server/db/client";
 import { syncTmdbSeason } from "@/server/sync/sync-tmdb-season";
 
 export const dynamic = "force-dynamic";
@@ -30,36 +30,6 @@ type HydrationResult = HydrationTarget & {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function fetchAllRows<T>(
-  table: string,
-  select: string,
-  pageSize = 1000
-): Promise<T[]> {
-  const rows: T[] = [];
-  let from = 0;
-
-  while (true) {
-    const to = from + pageSize - 1;
-
-    const { data, error } = await supabaseAdmin
-      .from(table)
-      .select(select)
-      .range(from, to);
-
-    if (error) {
-      throw new Error(error.message);
-    }
-
-    rows.push(...((data ?? []) as T[]));
-
-    if (!data || data.length < pageSize) break;
-
-    from += pageSize;
-  }
-
-  return rows;
-}
-
 export async function POST(request: Request) {
   const adminSecret = request.headers.get("x-admin-secret");
 
@@ -77,18 +47,32 @@ export async function POST(request: Request) {
   const limit = limitParam ? Number(limitParam) : null;
 
   try {
-    const userEpisodes = await fetchAllRows<UserEpisodeRow>(
-      "user_episodes",
-      "series_tmdb_id, season_number, episode_number"
-    );
+    const userEpisodes = (await db.userEpisode.findMany({
+      select: {
+        seriesTmdbId: true,
+        seasonNumber: true,
+        episodeNumber: true,
+      },
+    })).map((row) => ({
+      series_tmdb_id: row.seriesTmdbId,
+      season_number: row.seasonNumber,
+      episode_number: row.episodeNumber,
+    } satisfies UserEpisodeRow));
 
     let rows = userEpisodes;
 
     if (onlyMissing) {
-      const catalogEpisodes = await fetchAllRows<CatalogEpisodeRow>(
-        "poplog3_episodes",
-        "series_tmdb_id, season_number, episode_number"
-      );
+      const catalogEpisodes = (await db.poplog3Episode.findMany({
+        select: {
+          seriesTmdbId: true,
+          seasonNumber: true,
+          episodeNumber: true,
+        },
+      })).map((row) => ({
+        series_tmdb_id: row.seriesTmdbId,
+        season_number: row.seasonNumber,
+        episode_number: row.episodeNumber,
+      } satisfies CatalogEpisodeRow));
 
       const catalogKeys = new Set(
         catalogEpisodes.map(
@@ -124,27 +108,29 @@ export async function POST(request: Request) {
 
     for (const target of targets) {
       try {
-        const before = await supabaseAdmin
-          .from("poplog3_episodes")
-          .select("id", { count: "exact", head: true })
-          .eq("series_tmdb_id", target.series_tmdb_id)
-          .eq("season_number", target.season_number);
+        const beforeCount = await db.poplog3Episode.count({
+          where: {
+            seriesTmdbId: target.series_tmdb_id,
+            seasonNumber: target.season_number,
+          },
+        });
 
         await syncTmdbSeason(target.series_tmdb_id, target.season_number, {
           force,
         });
 
-        const after = await supabaseAdmin
-          .from("poplog3_episodes")
-          .select("id", { count: "exact", head: true })
-          .eq("series_tmdb_id", target.series_tmdb_id)
-          .eq("season_number", target.season_number);
+        const afterCount = await db.poplog3Episode.count({
+          where: {
+            seriesTmdbId: target.series_tmdb_id,
+            seasonNumber: target.season_number,
+          },
+        });
 
         results.push({
           ...target,
           ok: true,
-          episodes_before: before.count ?? 0,
-          episodes_after: after.count ?? 0,
+          episodes_before: beforeCount,
+          episodes_after: afterCount,
         });
       } catch (error) {
         results.push({

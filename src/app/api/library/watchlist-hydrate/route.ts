@@ -3,7 +3,7 @@
  *
  * Hidratação persistente para séries da watchlist sem dados de episódios/runtime.
  *
- * Fonte de verdade: poplog3_episodes (Supabase).
+ * Fonte de verdade: poplog3_episodes (Prisma/local DB).
  * Uma série é considerada "já hidratada" quando tem ao menos 1 episódio
  * em poplog3_episodes com season > 0, INDEPENDENTE do runtime (pode ser null/zero).
  *
@@ -24,8 +24,8 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentUser } from "@/server/auth/get-current-user";
+import { db } from "@/server/db/client";
 import { backfillDurationSortMinutesForUserTitles } from "@/server/state/user-title-state";
-import { supabaseAdmin } from "@/server/supabase/admin";
 import { syncTmdbSeason } from "@/server/sync/sync-tmdb-season";
 import { syncTmdbTitle } from "@/server/sync/sync-tmdb-title";
 
@@ -86,6 +86,12 @@ function formatDuration(minutes: number | null | undefined) {
   return typeof minutes === "number" && Number.isFinite(minutes) && minutes > 0
     ? `${minutes}min`
     : "sem duração";
+}
+
+function numericJsonArray(value: unknown): number[] | null {
+  if (!Array.isArray(value)) return null;
+  const numbers = value.filter((item): item is number => typeof item === "number" && Number.isFinite(item));
+  return numbers.length > 0 ? numbers : null;
 }
 
 function logWatchlistAnalysis(input: {
@@ -200,18 +206,26 @@ export async function POST() {
     }
 
     // ── 1. Séries TV na watchlist pura (não iniciadas, não marcadas como skipped) ──
-    const { data: stateRows, error: stateError } = await supabaseAdmin
-      .from("user_title_state")
-      .select("tmdb_id, duration_sort_minutes, duration_sort_unavailable")
-      .eq("user_id", user.id)
-      .eq("media_type", "tv")
-      .eq("status", "watchlist")
-      .eq("watched_episodes", 0)
-      .or("hydration_skipped.is.null,hydration_skipped.eq.false");
+    const stateRows = await db.userTitleState.findMany({
+      where: {
+        userId: user.id,
+        mediaType: "tv",
+        status: "watchlist",
+        watchedEpisodes: 0,
+        hydrationSkipped: false,
+      },
+      select: {
+        tmdbId: true,
+        durationSortMinutes: true,
+        durationSortUnavailable: true,
+      },
+    });
 
-    if (stateError) throw new Error(stateError.message);
-
-    const allRows = (stateRows ?? []) as WatchlistStateRow[];
+    const allRows: WatchlistStateRow[] = stateRows.map((row) => ({
+      tmdb_id: row.tmdbId,
+      duration_sort_minutes: row.durationSortMinutes,
+      duration_sort_unavailable: row.durationSortUnavailable,
+    }));
     const allTmdbIds = allRows.map((r) => r.tmdb_id);
 
     if (allTmdbIds.length === 0) {
@@ -223,25 +237,49 @@ export async function POST() {
     //
     // Critério: tem ao menos 1 episódio em poplog3_episodes (season > 0).
     // NÃO usamos runtime > 0 — TMDB tem séries com todos os runtimes null/zero.
-    const [{ data: hydratedEps }, { data: titleMetaRows }] = await Promise.all([
-      supabaseAdmin
-        .from("poplog3_episodes")
-        .select("series_tmdb_id, runtime")
-        .in("series_tmdb_id", allTmdbIds)
-        .gt("season_number", 0),
-      supabaseAdmin
-        .from("poplog3_titles")
-        .select("tmdb_id, title, number_of_seasons, number_of_episodes, runtime, episode_run_time")
-        .in("tmdb_id", allTmdbIds)
-        .eq("media_type", "tv"),
+    const [hydratedEps, titleMetaRows] = await Promise.all([
+      db.poplog3Episode.findMany({
+        where: {
+          seriesTmdbId: { in: allTmdbIds },
+          seasonNumber: { gt: 0 },
+        },
+        select: {
+          seriesTmdbId: true,
+          runtime: true,
+        },
+      }),
+      db.poplog3Title.findMany({
+        where: {
+          tmdbId: { in: allTmdbIds },
+          mediaType: "tv",
+        },
+        select: {
+          tmdbId: true,
+          title: true,
+          numberOfSeasons: true,
+          numberOfEpisodes: true,
+          runtime: true,
+          episodeRunTime: true,
+        },
+      }),
     ]);
 
     const titleMetaMap = new Map(
-      ((titleMetaRows ?? []) as WatchlistTitleMeta[]).map((row) => [row.tmdb_id, row]),
+      titleMetaRows.map((row) => [
+        row.tmdbId,
+        {
+          tmdb_id: row.tmdbId,
+          title: row.title,
+          number_of_seasons: row.numberOfSeasons,
+          number_of_episodes: row.numberOfEpisodes,
+          runtime: row.runtime,
+          episode_run_time: numericJsonArray(row.episodeRunTime),
+        } satisfies WatchlistTitleMeta,
+      ]),
     );
     const episodeStatsById = new Map<number, EpisodeStats>();
-    for (const row of (hydratedEps ?? []) as Array<{ series_tmdb_id: number; runtime: number | null }>) {
-      const stats = episodeStatsById.get(row.series_tmdb_id) ?? {
+    for (const row of hydratedEps) {
+      const stats = episodeStatsById.get(row.seriesTmdbId) ?? {
         episodeCount: 0,
         runtimeEpisodeCount: 0,
       };
@@ -249,7 +287,7 @@ export async function POST() {
       if (typeof row.runtime === "number" && row.runtime > 0) {
         stats.runtimeEpisodeCount++;
       }
-      episodeStatsById.set(row.series_tmdb_id, stats);
+      episodeStatsById.set(row.seriesTmdbId, stats);
     }
 
     const alreadyHydrated = new Set(episodeStatsById.keys());
@@ -307,17 +345,21 @@ export async function POST() {
     let durationBackfillResult: Awaited<ReturnType<typeof backfillDurationSortMinutesForUserTitles>> | null = null;
 
     // ── 3. Metadados atuais do banco ──────────────────────────────────────────────
-    const { data: titlesData } = batch.length > 0
-      ? await supabaseAdmin
-          .from("poplog3_titles")
-          .select("tmdb_id, number_of_seasons")
-          .in("tmdb_id", batch)
-          .eq("media_type", "tv")
-      : { data: [] };
+    const titlesData = batch.length > 0
+      ? await db.poplog3Title.findMany({
+          where: {
+            tmdbId: { in: batch },
+            mediaType: "tv",
+          },
+          select: {
+            tmdbId: true,
+            numberOfSeasons: true,
+          },
+        })
+      : [];
 
     const seasonMap = new Map<number, number | null>(
-      ((titlesData ?? []) as { tmdb_id: number; number_of_seasons: number | null }[])
-        .map((t) => [t.tmdb_id, t.number_of_seasons]),
+      titlesData.map((title) => [title.tmdbId, title.numberOfSeasons]),
     );
 
     // ── 4. Processa cada série do lote ────────────────────────────────────────────
@@ -362,13 +404,12 @@ export async function POST() {
         }
 
         // Conta episódios efetivamente inseridos após o sync
-        const { count: episodeCount } = await supabaseAdmin
-          .from("poplog3_episodes")
-          .select("episode_number", { count: "exact", head: true })
-          .eq("series_tmdb_id", tmdbId)
-          .gt("season_number", 0);
-
-        const episodesFound = episodeCount ?? 0;
+        const episodesFound = await db.poplog3Episode.count({
+          where: {
+            seriesTmdbId: tmdbId,
+            seasonNumber: { gt: 0 },
+          },
+        });
         logDebug("series hydrated", {
           tmdbId,
           title: getTitleLabel(tmdbId, titleMetaMap),
@@ -377,21 +418,24 @@ export async function POST() {
         });
 
         // Atualiza aired_episodes no state
-        const { count: airedCount } = await supabaseAdmin
-          .from("poplog3_episodes")
-          .select("episode_number", { count: "exact", head: true })
-          .eq("series_tmdb_id", tmdbId)
-          .gt("season_number", 0)
-          .lte("air_date", today);
+        const airedCount = await db.poplog3Episode.count({
+          where: {
+            seriesTmdbId: tmdbId,
+            seasonNumber: { gt: 0 },
+            airDate: { lte: new Date(`${today}T00:00:00.000Z`) },
+          },
+        });
 
-        if (typeof airedCount === "number") {
-          await supabaseAdmin
-            .from("user_title_state")
-            .update({ aired_episodes: airedCount })
-            .eq("user_id", user.id)
-            .eq("tmdb_id", tmdbId)
-            .eq("media_type", "tv");
-        }
+        await db.userTitleState.updateMany({
+          where: {
+            userId: user.id,
+            tmdbId,
+            mediaType: "tv",
+          },
+          data: {
+            airedEpisodes: airedCount,
+          },
+        });
 
         results.push({ tmdb_id: tmdbId, ok: episodesFound > 0, seasons_synced: seasonsSynced, episodes_found: episodesFound });
       } catch (err) {
@@ -418,16 +462,21 @@ export async function POST() {
     //
     // CRÍTICO: não confiar no resultado do sync — re-consultar o banco.
     // Séries que ainda não têm episódios após o sync são permanentemente skipped.
-    const { data: postBatchEps } = batch.length > 0
-      ? await supabaseAdmin
-          .from("poplog3_episodes")
-          .select("series_tmdb_id")
-          .in("series_tmdb_id", batch)
-          .gt("season_number", 0)
-      : { data: [] };
+    const postBatchEps = batch.length > 0
+      ? await db.poplog3Episode.findMany({
+          where: {
+            seriesTmdbId: { in: batch },
+            seasonNumber: { gt: 0 },
+          },
+          select: {
+            seriesTmdbId: true,
+          },
+          distinct: ["seriesTmdbId"],
+        })
+      : [];
 
     const hydratedAfterBatch = new Set(
-      ((postBatchEps ?? []) as { series_tmdb_id: number }[]).map((r) => r.series_tmdb_id),
+      postBatchEps.map((row) => row.seriesTmdbId),
     );
 
     // Séries processadas mas ainda sem episódios → marcar como skipped para não re-processar
@@ -435,24 +484,16 @@ export async function POST() {
     if (stillEmptyAfterSync.length > 0) {
       logDebug("marking hydration skipped", { tmdbIds: stillEmptyAfterSync });
 
-      // Tenta atualizar com hydration_skipped. Se a coluna não existir ainda,
-      // ignora silenciosamente — o maxBatches no cliente é o safety net.
-      try {
-        const { error: skipError } = await supabaseAdmin
-          .from("user_title_state")
-          .update({ hydration_skipped: true } as Record<string, unknown>)
-          .eq("user_id", user.id)
-          .eq("media_type", "tv")
-          .in("tmdb_id", stillEmptyAfterSync);
-        if (skipError) {
-          console.warn("[watchlist-hydrate] falha ao marcar skipped", {
-            tmdbIds: stillEmptyAfterSync,
-            error: skipError.message,
-          });
-        }
-      } catch {
-        // coluna ainda não existe no banco — ignorar
-      }
+      await db.userTitleState.updateMany({
+        where: {
+          userId: user.id,
+          mediaType: "tv",
+          tmdbId: { in: stillEmptyAfterSync },
+        },
+        data: {
+          hydrationSkipped: true,
+        },
+      });
     }
 
     // ── 6. Calcular remaining REAL pós-batch ──────────────────────────────────────
@@ -460,14 +501,19 @@ export async function POST() {
     // Re-consulta para contar séries que AINDA precisam de hidratação.
     // Isso garante que remaining diminua quando o batch for bem-sucedido
     // e NÃO diminua apenas por "tentamos processar" mas falhamos.
-    const { data: postBatchAllEps } = await supabaseAdmin
-      .from("poplog3_episodes")
-      .select("series_tmdb_id")
-      .in("series_tmdb_id", allTmdbIds)
-      .gt("season_number", 0);
+    const postBatchAllEps = await db.poplog3Episode.findMany({
+      where: {
+        seriesTmdbId: { in: allTmdbIds },
+        seasonNumber: { gt: 0 },
+      },
+      select: {
+        seriesTmdbId: true,
+      },
+      distinct: ["seriesTmdbId"],
+    });
 
     const hydratedAfterAll = new Set(
-      ((postBatchAllEps ?? []) as { series_tmdb_id: number }[]).map((r) => r.series_tmdb_id),
+      postBatchAllEps.map((row) => row.seriesTmdbId),
     );
 
     // Séries que ainda precisam hidratar = todas - hidratadas - skipped(stillEmpty)
@@ -475,20 +521,26 @@ export async function POST() {
       (id) => !hydratedAfterAll.has(id) && !stillEmptyAfterSync.includes(id),
     );
 
-    const { data: postStateRows } = await supabaseAdmin
-      .from("user_title_state")
-      .select("tmdb_id, duration_sort_minutes, duration_sort_unavailable")
-      .eq("user_id", user.id)
-      .eq("media_type", "tv")
-      .eq("status", "watchlist")
-      .eq("watched_episodes", 0)
-      .or("hydration_skipped.is.null,hydration_skipped.eq.false");
+    const postStateRows = await db.userTitleState.findMany({
+      where: {
+        userId: user.id,
+        mediaType: "tv",
+        status: "watchlist",
+        watchedEpisodes: 0,
+        hydrationSkipped: false,
+      },
+      select: {
+        tmdbId: true,
+        durationSortMinutes: true,
+        durationSortUnavailable: true,
+      },
+    });
 
-    const postRows = (postStateRows ?? []) as Array<{
-      tmdb_id: number;
-      duration_sort_minutes: number | null;
-      duration_sort_unavailable?: boolean | null;
-    }>;
+    const postRows: WatchlistStateRow[] = postStateRows.map((row) => ({
+      tmdb_id: row.tmdbId,
+      duration_sort_minutes: row.durationSortMinutes,
+      duration_sort_unavailable: row.durationSortUnavailable,
+    }));
     const stillNeedsDurationBackfill = postRows
       .filter((row) =>
         hydratedAfterAll.has(row.tmdb_id) &&
