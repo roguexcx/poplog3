@@ -88,9 +88,9 @@ export async function getAvailability(
   try {
     const local = await import("@/server/local-services/catalog-availability-local.service");
     const rows = await local.listAvailability({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       tmdbId: BigInt(tmdbId) as any,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       mediaType: mediaType as any,
       providerRegion: country,
     });
@@ -154,19 +154,19 @@ export async function replaceAvailability(
   const expiresAt = new Date(nowDate.getTime() + (ttlDays ?? 7) * 24 * 60 * 60 * 1000);
 
   const mappedRows = rows.map((r) => ({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     tmdbId: BigInt(tmdbId) as any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     mediaType: mediaType as any,
     providerName: r.providerName,
     providerRegion: country,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     providerType: availTypeToProviderType(r.availabilityType) as any,
     providerUrl: null,
     providerLogoUrl: null,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     source: source as any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     sourceConfidence: "medium" as any,
     checkedAt: nowDate,
     expiresAt,
@@ -174,11 +174,11 @@ export async function replaceAvailability(
   }));
 
   const ok = await local.replaceAvailability({
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     tmdbId: BigInt(tmdbId) as any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     mediaType: mediaType as any,
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+     
     source: source as any,
     providerRegion: country,
     rows: mappedRows,

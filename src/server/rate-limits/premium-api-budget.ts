@@ -55,7 +55,7 @@ async function countUsage(api: PremiumApi, period: "day" | "month", key: string)
   try {
     const local = await import("@/server/local-services/api-usage-local.service");
     const result = await local.countPremiumUsage({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       api: api as any,
       period,
       key,
@@ -126,13 +126,13 @@ export async function reservePremiumApiBudget(
   try {
     const local = await import("@/server/local-services/api-usage-local.service");
     const result = await local.reservePremiumUsage({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       api: api as any,
       periodDay: day,
       periodMonth: month,
       endpoint: origin.endpoint ?? null,
       tmdbId: origin.tmdbId ?? null,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       mediaType: (origin.mediaType ?? null) as any,
       region: origin.region ?? null,
       userId: origin.userId ?? null,
@@ -210,13 +210,13 @@ async function recordBlockedBudget(
   try {
     const local = await import("@/server/local-services/api-usage-local.service");
     await local.reservePremiumUsage({
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       api: api as any,
       periodDay: day,
       periodMonth: month,
       endpoint: origin.endpoint ?? null,
       tmdbId: origin.tmdbId ?? null,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       mediaType: (origin.mediaType ?? null) as any,
       region: origin.region ?? null,
       userId: origin.userId ?? null,
@@ -261,7 +261,7 @@ export async function completePremiumApiBudget(
     const local = await import("@/server/local-services/api-usage-local.service");
     await local.completePremiumUsage({
       id: reservation.id,
-      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+       
       status: status as any,
       error: error ?? null,
     });
