@@ -1,6 +1,6 @@
-import { supabaseAdmin } from "@/server/supabase/admin";
 import { upsertUserTitleStatus } from "@/server/library/library-service";
 import { upsertTitleState } from "@/server/state/user-title-state";
+import { isLocalEpisodeProgressEnabled } from "@/server/runtime/local-db-flags";
 import {
   filterValidAiredEpisodes,
   getValidSeasonNumbers,
@@ -52,6 +52,15 @@ function episodeKey(season: number, episode: number): EpisodeKey {
   return `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}` as EpisodeKey;
 }
 
+async function getLocalEpisodeProgressService() {
+  return import("@/server/local-services/episode-progress-local.service");
+}
+
+async function getSupabaseAdmin() {
+  const { supabaseAdmin } = await import("@/server/supabase/admin");
+  return supabaseAdmin;
+}
+
 /**
  * Garante que a série esteja como "watching" na biblioteca após marcar episódio.
  * Retorna o entry de biblioteca resultante para reutilizar no upsertTitleState.
@@ -68,8 +77,7 @@ async function syncLibraryStatusAfterEpisodeMark(
   userId: string,
   seriesTmdbId: number
 ): Promise<{ status: string; favorite: boolean; liked: boolean | null }> {
-  const { data, error } = await supabaseAdmin
-    .from("user_titles")
+  const { data, error } = await (await getSupabaseAdmin()).from("user_titles")
     .select("status, favorite, liked")
     .eq("user_id", userId)
     .eq("tmdb_id", seriesTmdbId)
@@ -105,9 +113,13 @@ async function syncLibraryStatusAfterEpisodeMark(
 export async function toggleEpisodeWatched(
   input: ToggleEpisodeInput
 ): Promise<UserSeriesProgress> {
+  if (isLocalEpisodeProgressEnabled()) {
+    const local = await getLocalEpisodeProgressService();
+    return local.toggleEpisodeWatched(input);
+  }
+
   if (input.watched) {
-    const { error } = await supabaseAdmin
-      .from("user_episodes")
+    const { error } = await (await getSupabaseAdmin()).from("user_episodes")
       .upsert(
         {
           user_id: input.userId,
@@ -142,8 +154,7 @@ export async function toggleEpisodeWatched(
 
     return progress;
   } else {
-    const { error } = await supabaseAdmin
-      .from("user_episodes")
+    const { error } = await (await getSupabaseAdmin()).from("user_episodes")
       .delete()
       .eq("user_id", input.userId)
       .eq("series_tmdb_id", input.seriesTmdbId)
@@ -184,6 +195,11 @@ export async function bulkMarkEpisodesWatched(input: {
   /** Hint para o event log — "season_marked" quando bulk de uma temporada inteira. */
   eventType?: "season_marked" | "episode_watched" | "series_completed";
 }): Promise<UserSeriesProgress> {
+  if (isLocalEpisodeProgressEnabled()) {
+    const local = await getLocalEpisodeProgressService();
+    return local.bulkMarkEpisodesWatched(input);
+  }
+
   if (input.episodes.length === 0) {
     return computeUserSeriesProgress(input.userId, input.seriesTmdbId);
   }
@@ -199,8 +215,7 @@ export async function bulkMarkEpisodesWatched(input: {
     updated_at: now,
   }));
 
-  const { error } = await supabaseAdmin
-    .from("user_episodes")
+  const { error } = await (await getSupabaseAdmin()).from("user_episodes")
     .upsert(payload, {
       onConflict: "user_id,series_tmdb_id,season_number,episode_number",
     });
@@ -232,10 +247,14 @@ export async function markSeasonWatched(
   seriesTmdbId: number,
   seasonNumber: number
 ): Promise<UserSeriesProgress> {
+  if (isLocalEpisodeProgressEnabled()) {
+    const local = await getLocalEpisodeProgressService();
+    return local.markSeasonWatched(userId, seriesTmdbId, seasonNumber);
+  }
+
   const today = new Date().toISOString().split("T")[0];
 
-  const { data: episodes, error } = await supabaseAdmin
-    .from("poplog3_episodes")
+  const { data: episodes, error } = await (await getSupabaseAdmin()).from("poplog3_episodes")
     .select("episode_number, runtime")
     .eq("series_tmdb_id", seriesTmdbId)
     .eq("season_number", seasonNumber)
@@ -271,8 +290,12 @@ export async function clearSeasonProgress(
   seriesTmdbId: number,
   seasonNumber: number
 ): Promise<UserSeriesProgress> {
-  const { error } = await supabaseAdmin
-    .from("user_episodes")
+  if (isLocalEpisodeProgressEnabled()) {
+    const local = await getLocalEpisodeProgressService();
+    return local.clearSeasonProgress(userId, seriesTmdbId, seasonNumber);
+  }
+
+  const { error } = await (await getSupabaseAdmin()).from("user_episodes")
     .delete()
     .eq("user_id", userId)
     .eq("series_tmdb_id", seriesTmdbId)
@@ -304,8 +327,12 @@ export async function clearSeriesProgress(
   userId: string,
   seriesTmdbId: number
 ): Promise<void> {
-  const { error } = await supabaseAdmin
-    .from("user_episodes")
+  if (isLocalEpisodeProgressEnabled()) {
+    const local = await getLocalEpisodeProgressService();
+    return local.clearSeriesProgress(userId, seriesTmdbId);
+  }
+
+  const { error } = await (await getSupabaseAdmin()).from("user_episodes")
     .delete()
     .eq("user_id", userId)
     .eq("series_tmdb_id", seriesTmdbId);
@@ -325,8 +352,12 @@ export async function getWatchedEpisodesForSeries(
   userId: string,
   seriesTmdbId: number
 ): Promise<UserEpisodeRow[]> {
-  const { data, error } = await supabaseAdmin
-    .from("user_episodes")
+  if (isLocalEpisodeProgressEnabled()) {
+    const local = await getLocalEpisodeProgressService();
+    return local.getWatchedEpisodesForSeries(userId, seriesTmdbId);
+  }
+
+  const { data, error } = await (await getSupabaseAdmin()).from("user_episodes")
     .select(
       "user_id, series_tmdb_id, season_number, episode_number, watched_at, runtime_minutes"
     )
@@ -352,16 +383,19 @@ export async function computeUserSeriesProgress(
   userId: string,
   seriesTmdbId: number
 ): Promise<UserSeriesProgress> {
+  if (isLocalEpisodeProgressEnabled()) {
+    const local = await getLocalEpisodeProgressService();
+    return local.computeUserSeriesProgress(userId, seriesTmdbId);
+  }
+
   const now = Date.now();
 
   const [watchedResult, episodesResult] = await Promise.all([
-    supabaseAdmin
-      .from("user_episodes")
+    (await getSupabaseAdmin()).from("user_episodes")
       .select("season_number, episode_number, watched_at, runtime_minutes")
       .eq("user_id", userId)
       .eq("series_tmdb_id", seriesTmdbId),
-    supabaseAdmin
-      .from("poplog3_episodes")
+    (await getSupabaseAdmin()).from("poplog3_episodes")
       .select("season_number, episode_number, air_date")
       .eq("series_tmdb_id", seriesTmdbId)
       .gt("season_number", 0)
@@ -453,11 +487,15 @@ export async function getUserWatchingSeries(
   userId: string,
   limit = 50
 ): Promise<UserWatchingSeriesRow[]> {
+  if (isLocalEpisodeProgressEnabled()) {
+    const local = await getLocalEpisodeProgressService();
+    return local.getUserWatchingSeries(userId, limit);
+  }
+
   const now = Date.now();
 
   // Query 1: todos os episódios assistidos do usuário (todas as séries, uma só query)
-  const { data: allWatched, error: watchedErr } = await supabaseAdmin
-    .from("user_episodes")
+  const { data: allWatched, error: watchedErr } = await (await getSupabaseAdmin()).from("user_episodes")
     .select("series_tmdb_id, season_number, episode_number, watched_at, runtime_minutes")
     .eq("user_id", userId)
     .order("watched_at", { ascending: false });
@@ -491,20 +529,17 @@ export async function getUserWatchingSeries(
 
   // Queries 2–4 em paralelo — tudo que precisamos para N séries
   const [titlesResult, userTitlesResult, catalogEpsResult] = await Promise.all([
-    supabaseAdmin
-      .from("poplog3_titles")
+    (await getSupabaseAdmin()).from("poplog3_titles")
       .select("tmdb_id, title, poster_path, backdrop_path, number_of_episodes, tmdb_payload")
       .eq("media_type", "tv")
       .in("tmdb_id", orderedIds),
-    supabaseAdmin
-      .from("user_titles")
+    (await getSupabaseAdmin()).from("user_titles")
       .select("tmdb_id, status")
       .eq("user_id", userId)
       .eq("media_type", "tv")
       .in("tmdb_id", orderedIds),
     // Todos os episódios do catálogo para as séries relevantes (filtrado em JS)
-    supabaseAdmin
-      .from("poplog3_episodes")
+    (await getSupabaseAdmin()).from("poplog3_episodes")
       .select("series_tmdb_id, season_number, episode_number, air_date")
       .in("series_tmdb_id", orderedIds)
       .gt("season_number", 0)
@@ -656,10 +691,14 @@ export async function markAllAiredEpisodes(
   userId: string,
   seriesTmdbId: number
 ): Promise<UserSeriesProgress> {
+  if (isLocalEpisodeProgressEnabled()) {
+    const local = await getLocalEpisodeProgressService();
+    return local.markAllAiredEpisodes(userId, seriesTmdbId);
+  }
+
   const now = Date.now();
 
-  const { data: episodes, error } = await supabaseAdmin
-    .from("poplog3_episodes")
+  const { data: episodes, error } = await (await getSupabaseAdmin()).from("poplog3_episodes")
     .select("season_number, episode_number, air_date, runtime")
     .eq("series_tmdb_id", seriesTmdbId)
     .order("season_number", { ascending: true })
@@ -699,10 +738,14 @@ export async function markEpisodesUntil(input: {
   seasonNumber: number;
   episodeNumber: number;
 }): Promise<UserSeriesProgress> {
+  if (isLocalEpisodeProgressEnabled()) {
+    const local = await getLocalEpisodeProgressService();
+    return local.markEpisodesUntil(input);
+  }
+
   const now = Date.now();
 
-  const { data: episodes, error } = await supabaseAdmin
-    .from("poplog3_episodes")
+  const { data: episodes, error } = await (await getSupabaseAdmin()).from("poplog3_episodes")
     .select("season_number, episode_number, air_date, runtime")
     .eq("series_tmdb_id", input.seriesTmdbId)
     .gt("season_number", 0)
@@ -750,3 +793,4 @@ export async function markEpisodesUntil(input: {
     eventType: "episode_watched",
   });
 }
+

@@ -74,10 +74,8 @@ export async function deleteWatchedEpisode(input: {
   episodeNumber: number;
 }): Promise<RepositoryVoidResult> {
   try {
-    await db.userEpisode.delete({
-      where: {
-        userId_seriesTmdbId_seasonNumber_episodeNumber: input,
-      },
+    await db.userEpisode.deleteMany({
+      where: input,
     });
     return { ok: true, data: null };
   } catch (error) {

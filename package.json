@@ -17,6 +17,7 @@
     "db:smoke:budget": "tsx -r tsconfig-paths/register scripts/smoke-test-premium-budget.ts",
     "db:smoke:availability": "tsx -r tsconfig-paths/register scripts/smoke-test-availability.ts",
     "db:smoke:library-state": "tsx -r tsconfig-paths/register scripts/smoke-test-library-state-flags.ts",
+    "db:smoke:episode-progress": "tsx -r tsconfig-paths/register scripts/smoke-test-episode-progress.ts",
     "db:reset": "prisma migrate reset",
     "db:studio": "prisma studio",
     "check:feedback-engine": "npx tsx scripts/check-feedback-engine.ts",

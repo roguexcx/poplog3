@@ -31,6 +31,10 @@ export function isLocalUserStateEnabled(): boolean {
   return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_USER_STATE_ENABLED");
 }
 
+export function isLocalEpisodeProgressEnabled(): boolean {
+  return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_EPISODE_PROGRESS_ENABLED");
+}
+
 export function getLocalDbFlagState() {
   return {
     localDb: isLocalDbEnabled(),
@@ -40,5 +44,6 @@ export function getLocalDbFlagState() {
     availability: isLocalAvailabilityEnabled(),
     library: isLocalLibraryEnabled(),
     userState: isLocalUserStateEnabled(),
+    episodeProgress: isLocalEpisodeProgressEnabled(),
   };
 }
