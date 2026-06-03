@@ -13,6 +13,7 @@ import { deleteTitleState } from "@/server/state/user-title-state";
 import { invalidateContinuitySectionCache } from "@/server/continuity/continuity-section-cache";
 import { applyTitleFeedback } from "@/server/personalization/title-feedback-engine";
 import { isLocalFeedbackEnabled } from "@/server/runtime/local-db-flags";
+import { getCurrentUser } from "@/server/auth/get-current-user";
 import {
   deactivateUserTitleFeedback,
   getTitleFeedbackRows,
@@ -109,12 +110,8 @@ function dbErrorResponse(action: "save" | "delete" | "read", error: DbError) {
 }
 
 async function getSessionUser() {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  return { supabase, user };
+  const user = await getCurrentUser();
+  return { user };
 }
 
 async function resolveConflictBeforeNegativeFeedback(
@@ -300,7 +297,7 @@ async function deleteLocalFeedback(
 }
 
 export async function GET(request: Request) {
-  const { supabase, user } = await getSessionUser();
+  const { user } = await getSessionUser();
   if (!user) return NextResponse.json({ titleState: { userFeedback: { notInterested: false } } });
 
   const params = new URL(request.url).searchParams;
@@ -314,22 +311,23 @@ export async function GET(request: Request) {
 
   const state = isLocalFeedbackEnabled()
     ? await readLocalTitleState(user.id, parsed.tmdbId, parsed.mediaType)
-    : await readTitleState(supabase, user.id, parsed.tmdbId, parsed.mediaType);
+    : await readTitleState(await createSupabaseServerClient(), user.id, parsed.tmdbId, parsed.mediaType);
   return NextResponse.json({ titleState: { userFeedback: state, feedbackConflict: null } });
 }
 
 export async function POST(request: Request) {
-  const { supabase, user } = await getSessionUser();
+  const { user } = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Sessao obrigatoria." }, { status: 401 });
 
   const parsed = parsePayload(await request.json().catch(() => ({})));
   if ("error" in parsed) return NextResponse.json({ error: parsed.error }, { status: 400 });
 
+  const supabase = isLocalFeedbackEnabled() ? null : await createSupabaseServerClient();
   const conflict =
     parsed.feedbackType === "not_interested"
       ? isLocalFeedbackEnabled()
         ? await resolveLocalConflictBeforeNegativeFeedback(user.id, parsed.tmdbId, parsed.mediaType)
-        : await resolveConflictBeforeNegativeFeedback(supabase, user.id, parsed.tmdbId, parsed.mediaType)
+        : await resolveConflictBeforeNegativeFeedback(supabase!, user.id, parsed.tmdbId, parsed.mediaType)
       : { canSaveNegative: true, conflict: null, error: null };
 
   if (conflict.error) {
@@ -342,7 +340,7 @@ export async function POST(request: Request) {
   if (parsed.feedbackType === "not_interested" && !conflict.canSaveNegative) {
     const state = isLocalFeedbackEnabled()
       ? await readLocalTitleState(user.id, parsed.tmdbId, parsed.mediaType)
-      : await readTitleState(supabase, user.id, parsed.tmdbId, parsed.mediaType);
+      : await readTitleState(supabase!, user.id, parsed.tmdbId, parsed.mediaType);
     return NextResponse.json({
       titleState: {
         userFeedback: state,
@@ -375,7 +373,7 @@ export async function POST(request: Request) {
   // Quando salvar liked ou disliked, remover o tipo oposto para evitar conflito
   if (parsed.feedbackType === "liked" || parsed.feedbackType === "disliked") {
     const conflictingType = parsed.feedbackType === "liked" ? "disliked" : "liked";
-    await supabase
+    await supabase!
       .from("user_title_feedback")
       .update({ active: false })
       .eq("user_id", user.id)
@@ -384,7 +382,7 @@ export async function POST(request: Request) {
       .eq("feedback_type", conflictingType);
   }
 
-  const error = await saveFeedback(supabase, {
+  const error = await saveFeedback(supabase!, {
     userId: user.id,
     tmdbId: parsed.tmdbId,
     mediaType: parsed.mediaType,
@@ -399,7 +397,7 @@ export async function POST(request: Request) {
   // Sincroniza user_title_state.liked para que a leitura no carregamento da
   // página (get-title-page-data) reflita o estado correto após F5.
   if (parsed.feedbackType === "liked" || parsed.feedbackType === "disliked") {
-    await supabase
+    await supabase!
       .from("user_title_state")
       .upsert(
         {
@@ -413,7 +411,7 @@ export async function POST(request: Request) {
       );
   }
 
-  const state = await readTitleState(supabase, user.id, parsed.tmdbId, parsed.mediaType);
+  const state = await readTitleState(supabase!, user.id, parsed.tmdbId, parsed.mediaType);
   invalidateContinuitySectionCache(user.id);
   return NextResponse.json({
     titleState: {
@@ -424,7 +422,7 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const { supabase, user } = await getSessionUser();
+  const { user } = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Sessao obrigatoria." }, { status: 401 });
 
   const parsed = parsePayload(await request.json().catch(() => ({})));
@@ -442,6 +440,7 @@ export async function DELETE(request: Request) {
     });
   }
 
+  const supabase = await createSupabaseServerClient();
   const { error } = await supabase
     .from("user_title_feedback")
     .delete()

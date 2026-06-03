@@ -114,6 +114,7 @@ async function clearAll(): Promise<void> {
     await tx.account.deleteMany();
     await tx.verificationToken.deleteMany();
     await tx.heroSpotlightSession.deleteMany();
+    await tx.userStreamingPreference.deleteMany();
     await tx.userCuradoriaSignal.deleteMany();
     await tx.userCuradoriaState.deleteMany();
     await tx.userCuradoriaPreference.deleteMany();
@@ -230,6 +231,13 @@ async function main() {
       prisma.verificationToken.createMany({ data: data as Parameters<typeof prisma.verificationToken.createMany>[0]["data"], skipDuplicates: true }),
   );
 
+  results.streaming_providers = await importTable(
+    "streaming_providers",
+    tables.streaming_providers ?? [],
+    (data) =>
+      prisma.streamingProvider.createMany({ data: data as Parameters<typeof prisma.streamingProvider.createMany>[0]["data"], skipDuplicates: true }),
+  );
+
   results.user_titles = await importTable("user_titles", tables.user_titles ?? [], (data) =>
     prisma.userTitle.createMany({ data: data as Parameters<typeof prisma.userTitle.createMany>[0]["data"], skipDuplicates: true }),
   );
@@ -283,6 +291,13 @@ async function main() {
     tables.user_curadoria_state ?? [],
     (data) =>
       prisma.userCuradoriaState.createMany({ data: data as Parameters<typeof prisma.userCuradoriaState.createMany>[0]["data"], skipDuplicates: true }),
+  );
+
+  results.user_streaming_preferences = await importTable(
+    "user_streaming_preferences",
+    tables.user_streaming_preferences ?? [],
+    (data) =>
+      prisma.userStreamingPreference.createMany({ data: data as Parameters<typeof prisma.userStreamingPreference.createMany>[0]["data"], skipDuplicates: true }),
   );
 
   results.hero_spotlight_sessions = await importTable(

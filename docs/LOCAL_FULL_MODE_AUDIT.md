@@ -47,7 +47,10 @@ Estes arquivos têm branch local; o caminho Supabase só é ativado quando a fla
 | `server/state/user-title-state.ts` | `user_title_state` | `POPLOG_LOCAL_USER_STATE_ENABLED` | Migrada |
 | `server/episodes/episode-progress-service.ts` | `user_episodes`, `user_title_state`, `user_titles` | `POPLOG_LOCAL_EPISODE_PROGRESS_ENABLED` | Migrada |
 | `server/ratings/user-rating-service.ts` | `user_ratings` | `POPLOG_LOCAL_USER_RATINGS_ENABLED` | Migrada |
-| `server/streaming/user-provider-preferences.ts` | `user_curadoria_preferences` | `POPLOG_LOCAL_USER_PREFERENCES_ENABLED` | Migrada |
+| `server/streaming/user-provider-preferences.ts` | `user_streaming_preferences`, `streaming_providers` | `POPLOG_LOCAL_STREAMING_PREFERENCES_ENABLED` | Migrada |
+| `app/api/user/streaming-preferences/route.ts` | `user_streaming_preferences`, `streaming_providers` | `POPLOG_LOCAL_STREAMING_PREFERENCES_ENABLED` | Migrada |
+| `server/runtime/series-episode-runtimes.ts` | `poplog3_episodes` | `POPLOG_LOCAL_CACHE_ENABLED` | Migrada |
+| `server/streaming/availability-fallback-state.ts` | `poplog3_availability_fallback_state` | `POPLOG_LOCAL_AVAILABILITY_ENABLED` | Migrada |
 | `app/api/poplog3/acompanhando/route.ts` | `user_titles`, `user_curadoria_state`, `user_watching` | `POPLOG_LOCAL_ACOMPANHANDO_ENABLED` | GET migrado; POST ainda usa Supabase |
 | `app/api/poplog3/continuity/hero/route.ts` | `hero_impressions`, `user_title_state`, `user_titles` | `POPLOG_LOCAL_HERO_ENABLED` | Migrada |
 | `server/continuity/hero-candidates.ts` | `poplog3_title_availability`, `user_title_state`, `user_titles`, `poplog3_titles` | `POPLOG_LOCAL_HERO_ENABLED` | Migrada |

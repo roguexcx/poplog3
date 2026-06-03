@@ -5,8 +5,7 @@ import {
   getTitleFeedbackState,
   isMediaType,
 } from "@/lib/personalization/feedback";
-import { createSupabaseServerClient } from "@/server/supabase/server";
-import { isLocalFeedbackEnabled } from "@/server/runtime/local-db-flags";
+import { getCurrentUser } from "@/server/auth/get-current-user";
 import type { MediaType } from "@/types/user";
 
 const MAX_ITEMS = 60;
@@ -66,9 +65,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ results: {} });
   }
 
-  const supabase = await createSupabaseServerClient();
   const { user, timedOut } = await withTimeout(
-    supabase.auth.getUser().then(({ data }) => ({ user: data.user, timedOut: false })),
+    getCurrentUser().then((user) => ({ user, timedOut: false })),
     AUTH_TIMEOUT_MS,
     { user: null, timedOut: true },
   );
@@ -79,10 +77,7 @@ export async function POST(request: Request) {
   }
 
   // Uma única query carrega todos os feedbacks ativos do usuário
-  const feedbackMap = await getUserFeedbackMap(
-    user.id,
-    isLocalFeedbackEnabled() ? undefined : supabase,
-  );
+  const feedbackMap = await getUserFeedbackMap(user.id);
 
   const results: Record<string, ReturnType<typeof getTitleFeedbackState>> = {};
   for (const { tmdbId, mediaType } of items) {

@@ -47,6 +47,10 @@ export function isLocalUserPreferencesEnabled(): boolean {
   return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_USER_PREFERENCES_ENABLED");
 }
 
+export function isLocalStreamingPreferencesEnabled(): boolean {
+  return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_STREAMING_PREFERENCES_ENABLED");
+}
+
 export function isLocalCuradoriaEnabled(): boolean {
   return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_CURADORIA_ENABLED");
 }
@@ -105,6 +109,7 @@ export function getLocalDbFlagState() {
     userRatings: isLocalUserRatingsEnabled(),
     feedback: isLocalFeedbackEnabled(),
     userPreferences: isLocalUserPreferencesEnabled(),
+    streamingPreferences: isLocalStreamingPreferencesEnabled(),
     curadoria: isLocalCuradoriaEnabled(),
     curadoriaState: isLocalCuradoriaStateEnabled(),
     acompanhando: isLocalAcompanhandoEnabled(),

@@ -1,16 +1,16 @@
 # Supabase Removal Audit
 
-Status: Fase 13B. Auth.js/NextAuth + Prisma foi adicionado como caminho real de auth. Supabase permanece instalado e funcional como fallback/legado.
+Status: Fase 13C. Auth.js/NextAuth + Prisma segue como caminho real de auth. Rotas simples de feedback, streaming preferences e alguns helpers de engine agora usam Prisma/local por flag. Supabase permanece instalado e funcional como fallback/legado.
 
 ## Resumo
 
 | Grupo | Status | Acao |
 | --- | --- | --- |
 | Auth | Parcialmente migrado | Auth.js ativo; Supabase Auth fallback temporario |
-| Rotas de usuario | Parcial | `for-you` auth migrado; `streaming-preferences`, `feedback`, `not-interested`, `watchlist/live` ficam para 13C |
+| Rotas de usuario | Parcial | `for-you`, `feedback`, `not-interested`, `streaming-preferences` e auth de `watchlist/live` migrados; dados de `watchlist/live` ficam para 13C.2 |
 | Rotas publicas | Parcial | `discover`, `search`, `trending` autenticam via `getCurrentUser()` |
 | Admin/debug/backfill | Manter temporario | Migrar/remover em 13C/13D |
-| Engines/background jobs | Parcial | `sorteio`, `agenda-engine`, caches e `rating_aggregates` ficam para 13C |
+| Engines/background jobs | Parcial | Runtime de episodios e fallback-state migrados; `sorteio`, `agenda-engine`, fuzzy search, batch refresh e `rating_aggregates` ficam para 13C.2 |
 | Fallback removivel | 13D | Remover deps, wrappers, envs e functions/migrations Supabase legadas |
 
 ## Migrado na 13A
@@ -46,16 +46,28 @@ Status: Fase 13B. Auth.js/NextAuth + Prisma foi adicionado como caminho real de 
 | `src/app/api/trending/route.ts` | route auth | Usa `getCurrentUser()`; cache/dados Supabase ainda ficam | Medio |
 | `src/app/api/user/for-you/route.ts` | route auth | Usa `getCurrentUser()`; dados Supabase ainda ficam | Medio |
 
+## Migrado na 13C
+
+| Arquivo | Tipo | Status | Risco |
+| --- | --- | --- | --- |
+| `prisma/schema.prisma` | modelos dados | `UserStreamingPreference` e campos compatíveis em `StreamingProvider` | Baixo |
+| `prisma/migrations/00000000000002_streaming_preferences/migration.sql` | migration | Tabela `user_streaming_preferences` e metadados de provider | Baixo |
+| `src/server/local-services/streaming-preferences-local.service.ts` | local service | Lista providers, replace de preferencias e resolve TMDB provider IDs | Baixo |
+| `src/app/api/user/streaming-preferences/route.ts` | route usuario | Auth via `getCurrentUser()`; Prisma quando `POPLOG_LOCAL_STREAMING_PREFERENCES_ENABLED`/full mode; Supabase fallback | Medio |
+| `src/server/streaming/user-provider-preferences.ts` | engine helper | Prisma/local para providers favoritos; Supabase fallback | Baixo |
+| `src/app/api/user/feedback/route.ts` | route usuario | Auth via `getCurrentUser()`; Supabase só no fallback de dados quando feedback local OFF | Baixo |
+| `src/app/api/user/feedback/batch/route.ts` | route usuario | Auth via `getCurrentUser()`; feedback local/fallback pelo helper existente | Baixo |
+| `src/app/api/user/not-interested/route.ts` | route usuario | Auth via `getCurrentUser()`; fallback Supabase admin apenas com feedback local OFF | Baixo |
+| `src/app/api/watchlist/live/route.ts` | route usuario | Auth via `getCurrentUser()`; leituras de catálogo Supabase ainda pendentes | Medio |
+| `src/server/runtime/series-episode-runtimes.ts` | engine helper | Lê `poplog3_episodes` via Prisma quando cache/local DB ON | Baixo |
+| `src/server/streaming/availability-fallback-state.ts` | engine helper | Lê/grava `poplog3_availability_fallback_state` via Prisma quando availability local ON | Baixo |
+| `scripts/db/export-local-data.ts`, `scripts/db/import-local-data.ts` | backup/export | Inclui `streaming_providers` e `user_streaming_preferences` | Baixo |
+| `scripts/smoke-test-streaming-preferences.ts` | smoke | Cobre service local de preferencias de streaming | Baixo |
+
 ## Ainda depende de Supabase Auth
 
 | Arquivo | Motivo | Fase |
 | --- | --- | --- |
-| `src/app/api/user/streaming-preferences/route.ts` | Auth + tabelas `streaming_providers`/`user_streaming_preferences` Supabase | 13C |
-| `src/server/streaming/user-provider-preferences.ts` | Auth + preferencias streaming Supabase | 13C |
-| `src/app/api/user/feedback/route.ts` | Auth + writes fallback Supabase | 13C |
-| `src/app/api/user/feedback/batch/route.ts` | Auth + feedback fallback Supabase | 13C |
-| `src/app/api/user/not-interested/route.ts` | Auth + feedback/title cache Supabase | 13C |
-| `src/app/api/watchlist/live/route.ts` | Auth + watchlist/hydrate Supabase | 13C |
 | `src/lib/personalization/feedback.ts` | Cria client Supabase quando feedback local esta OFF | 13D |
 | `src/components/auth/LoginDrawer.tsx` | Formulario Supabase fallback | 13D |
 | `src/components/layout/Sidebar.tsx` | Sign-out Supabase fallback | 13D |
@@ -67,14 +79,15 @@ Status: Fase 13B. Auth.js/NextAuth + Prisma foi adicionado como caminho real de 
 | --- | --- | --- |
 | Admin/debug/backfill/hydrate | `admin/backfill-title-state`, `hydrate-library`, `hydrate-series-episodes`, `watchlist-hydrate`, `debug/supabase` | 13C/13D |
 | Continuidade fallback | `continue`, `recently-watched`, `new-episodes`, `watchlist-picks`, `acompanhando` fallback | 13D apos paridade |
-| Engines | `sorteio-engine`, `agenda-engine`, `rating-aggregate-service`, `fuzzy-title-search`, runtime/caches | 13C |
+| Watchlist live dados | `src/app/api/watchlist/live/route.ts` ainda usa `supabaseAdmin` para `poplog3_titles` e availability | 13C.2 |
+| Engines | `sorteio-engine`, `agenda-engine`, `rating-aggregate-service`, `fuzzy-title-search`, `batch-availability-refresh` | 13C.2 |
 | Wrappers | `src/server/supabase/*`, `src/lib/supabase/*` | 13D |
 | Pacotes/envs | `@supabase/supabase-js`, `@supabase/ssr`, envs Supabase | 13D |
 | Supabase legado | `supabase/migrations/*`, `supabase/functions/*` | 13D |
 
 ## Prisma migrations
 
-`00000000000000_init` continua como baseline. `00000000000001_authjs` adiciona Auth.js. Como o banco local historico foi mantido por `db push`, validar ambiente real com:
+`00000000000000_init` continua como baseline. `00000000000001_authjs` adiciona Auth.js. `00000000000002_streaming_preferences` adiciona as preferencias de streaming locais. Como o banco local historico foi mantido por `db push`, validar ambiente real com:
 
 1. banco vazio: `prisma migrate deploy`;
 2. banco existente equivalente: diff limpo antes de `migrate resolve`;
@@ -84,5 +97,5 @@ Status: Fase 13B. Auth.js/NextAuth + Prisma foi adicionado como caminho real de 
 
 | Fase | Objetivo |
 | --- | --- |
-| 13C | Migrar ultimas rotas/engines: streaming preferences, feedback, watchlist live, sorteio, agenda, rating aggregates |
+| 13C.2 | Migrar ultimas rotas/engines: watchlist live dados, sorteio, agenda, fuzzy search, batch refresh, rating aggregates |
 | 13D | Remover Supabase Auth/deps/wrappers/envs/functions/migrations legadas |

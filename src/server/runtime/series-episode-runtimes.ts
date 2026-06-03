@@ -1,5 +1,7 @@
 import type { EpisodeRuntimeInput } from "@/lib/runtime";
+import { db } from "@/server/db/client";
 import { formatError, rateLimitedWarn } from "@/server/logging/log-control";
+import { isLocalCacheEnabled } from "@/server/runtime/local-db-flags";
 import { supabaseAdmin } from "@/server/supabase/admin";
 
 type EpisodeRuntimeRow = {
@@ -32,6 +34,38 @@ export async function getSeriesEpisodeRuntimesMap(
   const map = new Map<number, EpisodeRuntimeInput[]>();
 
   if (ids.length === 0) return map;
+
+  if (isLocalCacheEnabled()) {
+    const rows = await db.poplog3Episode.findMany({
+      where: {
+        seriesTmdbId: { in: ids },
+        runtime: { not: null },
+      },
+      select: {
+        seriesTmdbId: true,
+        seasonNumber: true,
+        episodeNumber: true,
+        runtime: true,
+        airDate: true,
+      },
+    });
+
+    for (const row of rows) {
+      const list = map.get(row.seriesTmdbId) ?? [];
+
+      list.push({
+        seasonNumber: row.seasonNumber,
+        episodeNumber: row.episodeNumber,
+        runtimeMinutes: row.runtime,
+        aired: options?.includeUnaired ? true : undefined,
+        airDate: row.airDate?.toISOString().slice(0, 10) ?? null,
+      });
+
+      map.set(row.seriesTmdbId, list);
+    }
+
+    return map;
+  }
 
   const { data, error } = await supabaseAdmin
     .from("poplog3_episodes")

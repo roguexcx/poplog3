@@ -8,16 +8,17 @@
  *                user_episodes, user_ratings, user_title_feedback,
  *                user_events, user_curadoria_preferences,
  *                user_curadoria_signals, user_curadoria_state,
- *                hero_spotlight_sessions
+ *                user_streaming_preferences, hero_spotlight_sessions
  *   Auth.js    : accounts, sessions, verification_tokens
  *   Catálogo   : poplog3_titles, poplog3_episodes, title_seasons,
- *                title_external_ids, title_ratings, catalog_availability
+ *                title_external_ids, title_ratings, streaming_providers,
+ *                catalog_availability
  *   Caches     : continuity_section_cache, ics_agenda_cache
  *
  * Tabelas omitidas (podem ser re-populadas / são apenas logs):
  *   engine_api_call_logs, api_usage_daily, poplog3_premium_api_usage,
  *   poplog3_title_availability, poplog3_availability_fallback_state,
- *   streaming_providers, rating_aggregates
+ *   rating_aggregates
  *
  * Não exporta variáveis de ambiente, segredos ou .env.
  */
@@ -77,12 +78,14 @@ async function main() {
     userCuradoriaPreferences,
     userCuradoriaSignals,
     userCuradoriaState,
+    userStreamingPreferences,
     heroSpotlightSessions,
     poplog3Titles,
     poplog3Episodes,
     titleSeasons,
     titleExternalIds,
     titleRatings,
+    streamingProviders,
     catalogAvailability,
     continuitySectionCache,
     icsAgendaCache,
@@ -101,12 +104,14 @@ async function main() {
     prisma.userCuradoriaPreference.findMany(),
     prisma.userCuradoriaSignal.findMany(),
     prisma.userCuradoriaState.findMany(),
+    prisma.userStreamingPreference.findMany(),
     prisma.heroSpotlightSession.findMany(),
     prisma.poplog3Title.findMany(),
     prisma.poplog3Episode.findMany(),
     prisma.titleSeason.findMany(),
     prisma.titleExternalId.findMany(),
     prisma.titleRating.findMany(),
+    prisma.streamingProvider.findMany(),
     prisma.catalogAvailability.findMany(),
     prisma.continuitySectionCache.findMany(),
     prisma.icsAgendaCache.findMany(),
@@ -127,12 +132,14 @@ async function main() {
     user_curadoria_preferences: userCuradoriaPreferences,
     user_curadoria_signals: userCuradoriaSignals,
     user_curadoria_state: userCuradoriaState,
+    user_streaming_preferences: userStreamingPreferences,
     hero_spotlight_sessions: heroSpotlightSessions,
     poplog3_titles: poplog3Titles,
     poplog3_episodes: poplog3Episodes,
     title_seasons: titleSeasons,
     title_external_ids: titleExternalIds,
     title_ratings: titleRatings,
+    streaming_providers: streamingProviders,
     catalog_availability: catalogAvailability,
     continuity_section_cache: continuitySectionCache,
     ics_agenda_cache: icsAgendaCache,

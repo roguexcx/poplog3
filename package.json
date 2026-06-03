@@ -28,6 +28,7 @@
     "db:smoke:radar-agenda": "tsx -r tsconfig-paths/register scripts/smoke-test-radar-agenda.ts",
     "db:smoke:local-auth": "tsx -r tsconfig-paths/register scripts/smoke-test-local-auth.ts",
     "db:smoke:auth": "tsx -r tsconfig-paths/register scripts/smoke-test-auth.ts",
+    "db:smoke:streaming-preferences": "tsx -r tsconfig-paths/register scripts/smoke-test-streaming-preferences.ts",
     "db:smoke:local-full": "tsx -r tsconfig-paths/register scripts/smoke-test-local-full.ts",
     "db:reset": "prisma migrate reset",
     "db:studio": "prisma studio",

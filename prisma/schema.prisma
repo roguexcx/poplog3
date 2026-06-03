@@ -199,6 +199,7 @@ model User {
   userCuradoriaStates        UserCuradoriaState[]
   heroSpotlightSessions      HeroSpotlightSession[]
   userEpisodes               UserEpisode[]
+  userStreamingPreferences   UserStreamingPreference[]
   continuitySectionCaches    ContinuitySectionCache[]
   availabilityFallbackStates Poplog3AvailabilityFallbackState[]
   premiumApiUsages           Poplog3PremiumApiUsage[]
@@ -697,11 +698,32 @@ model StreamingProvider {
   name                       String                     @db.VarChar(191)
   tmdbProviderId             Int?                       @unique @map("tmdb_provider_id")
   logoPath                   String?                    @map("logo_path") @db.VarChar(512)
+  providerSlug               String?                    @map("provider_slug") @db.VarChar(191)
+  country                    String                     @default("BR") @db.VarChar(8)
+  isActive                   Boolean                    @default(true) @map("is_active")
   createdAt                  DateTime                   @default(now()) @map("created_at")
   updatedAt                  DateTime                   @updatedAt @map("updated_at")
   poplog3TitleAvailabilities Poplog3TitleAvailability[]
+  userStreamingPreferences   UserStreamingPreference[]
 
   @@map("streaming_providers")
+}
+
+model UserStreamingPreference {
+  id            String            @id @default(cuid()) @db.VarChar(191)
+  userId        String            @map("user_id") @db.VarChar(191)
+  providerId    String            @map("provider_id") @db.VarChar(191)
+  country       String            @default("BR") @db.VarChar(8)
+  isEnabled     Boolean           @default(true) @map("is_enabled")
+  priorityOrder Int               @default(999) @map("priority_order")
+  createdAt     DateTime          @default(now()) @map("created_at")
+  updatedAt     DateTime          @updatedAt @map("updated_at")
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider      StreamingProvider @relation(fields: [providerId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, providerId, country])
+  @@index([providerId])
+  @@map("user_streaming_preferences")
 }
 
 model Poplog3TitleAvailability {

@@ -1,3 +1,6 @@
+import { getCurrentUser } from "@/server/auth/get-current-user";
+import { getFavoriteTmdbProviderIds } from "@/server/local-services/streaming-preferences-local.service";
+import { isLocalStreamingPreferencesEnabled } from "@/server/runtime/local-db-flags";
 import { createSupabaseServerClient } from "@/server/supabase/server";
 
 import type { ProviderPreferenceInput } from "./provider-preferences";
@@ -21,16 +24,21 @@ const FALLBACK: ProviderPreferenceInput = {
 };
 
 export async function getUserProviderPreferences(): Promise<ProviderPreferenceInput> {
-  const supabase = await createSupabaseServerClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   if (!user) {
     return FALLBACK;
   }
 
+  if (isLocalStreamingPreferencesEnabled()) {
+    const favoriteProviderIds = await getFavoriteTmdbProviderIds({ userId: user.id });
+    return {
+      ...FALLBACK,
+      favoriteProviderIds: favoriteProviderIds.map((id) => String(id)),
+    };
+  }
+
+  const supabase = await createSupabaseServerClient();
   const { data: preferenceRows, error: preferencesError } = await supabase
     .from("user_streaming_preferences")
     .select("provider_id, priority_order, country")

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { createSupabaseServerClient } from "@/server/supabase/server";
+import { getCurrentUser } from "@/server/auth/get-current-user";
 import { isLocalFeedbackEnabled } from "@/server/runtime/local-db-flags";
 import { getCachedTitleRow, getUserActiveFeedbackMap } from "@/server/repositories";
 import type { MediaType } from "@/types/user";
@@ -72,10 +72,7 @@ async function readLocalNotInterestedItems(userId: string) {
 }
 
 export async function GET() {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   if (!user) return NextResponse.json({ ok: false, error: "Sessao obrigatoria." }, { status: 401 });
 
@@ -89,6 +86,7 @@ export async function GET() {
     }
   }
 
+  const supabase = await getSupabaseAdmin();
   const { data: feedbackRows, error } = await supabase
     .from("user_title_feedback")
     .select("tmdb_id, media_type, source, reason, updated_at, created_at")
@@ -107,7 +105,7 @@ export async function GET() {
   const titleMap = new Map<string, TitleRow>();
 
   if (tmdbIds.length > 0) {
-    const { data: titles, error: titleError } = await (await getSupabaseAdmin())
+    const { data: titles, error: titleError } = await supabase
       .from("poplog3_titles")
       .select("tmdb_id, media_type, title, original_title, release_date, first_air_date")
       .in("tmdb_id", tmdbIds);

@@ -6,13 +6,12 @@ import {
   translateGenreName,
 } from "@/lib/domain-labels";
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
-import { createSupabaseServerClient } from "@/server/supabase/server";
+import { getCurrentUser } from "@/server/auth/get-current-user";
 import { supabaseAdmin } from "@/server/supabase/admin";
 import {
   readContinuitySectionCache,
   writeContinuitySectionCache,
 } from "@/server/continuity/continuity-section-cache";
-import type { User } from "@supabase/supabase-js";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -82,6 +81,8 @@ type WatchlistLiveCachePayload = {
   titles: EnrichedTitle[];
   generatedAt: string;
 };
+
+type CurrentUser = NonNullable<Awaited<ReturnType<typeof getCurrentUser>>>;
 
 const WATCHLIST_LIVE_CACHE_TTL_MS = 30 * 60_000;
 const AUTH_TIMEOUT_MS = 900;
@@ -183,7 +184,7 @@ async function withTimeout<T>(
 }
 
 async function resolveCurrentUserWithPerf(): Promise<{
-  user: User | null;
+  user: CurrentUser | null;
   timedOut: boolean;
   perf: Record<string, number>;
 }> {
@@ -191,31 +192,24 @@ async function resolveCurrentUserWithPerf(): Promise<{
   const stageRef = { value: Date.now() };
 
   const authPromise = (async () => {
-    const supabase = await createSupabaseServerClient();
-    markLocalStage(perf, stageRef, "create_client");
+    const user = await getCurrentUser();
+    markLocalStage(perf, stageRef, "resolve_user");
     perf.read_cookies = 0;
 
-    const {
-      data: { session },
-    } = await supabase.auth.getSession();
-    markLocalStage(perf, stageRef, "get_session");
-
-    if (!session?.user) {
+    if (!user) {
+      perf.get_session = 0;
       perf.get_user = 0;
       perf.profile_lookup = 0;
       perf.fallback_user_resolution = 0;
       return { user: null, timedOut: false, perf };
     }
 
-    const {
-      data: { user },
-      error,
-    } = await supabase.auth.getUser();
-    markLocalStage(perf, stageRef, "get_user");
+    perf.get_session = 0;
+    perf.get_user = 0;
     perf.profile_lookup = 0;
     perf.fallback_user_resolution = 0;
 
-    return { user: error ? null : user, timedOut: false, perf };
+    return { user, timedOut: false, perf };
   })();
 
   return withTimeout(authPromise, AUTH_TIMEOUT_MS, {

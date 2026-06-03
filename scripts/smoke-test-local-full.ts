@@ -20,6 +20,7 @@ process.env.POPLOG_LOCAL_EPISODE_PROGRESS_ENABLED = "true";
 process.env.POPLOG_LOCAL_USER_RATINGS_ENABLED = "true";
 process.env.POPLOG_LOCAL_FEEDBACK_ENABLED = "true";
 process.env.POPLOG_LOCAL_USER_PREFERENCES_ENABLED = "true";
+process.env.POPLOG_LOCAL_STREAMING_PREFERENCES_ENABLED = "true";
 process.env.POPLOG_LOCAL_CURADORIA_ENABLED = "true";
 process.env.POPLOG_LOCAL_CURADORIA_STATE_ENABLED = "true";
 process.env.POPLOG_LOCAL_ACOMPANHANDO_ENABLED = "true";
@@ -126,7 +127,7 @@ async function testAllFlagsEnabled() {
   const expected: (keyof ReturnType<typeof getLocalDbFlagState>)[] = [
     "localDb", "logs", "cache", "apiUsage", "availability", "library",
     "userState", "episodeProgress", "userRatings", "feedback",
-    "userPreferences", "curadoria", "curadoriaState", "acompanhando",
+    "userPreferences", "streamingPreferences", "curadoria", "curadoriaState", "acompanhando",
     "hero", "continueWatching", "recentlyWatched", "newEpisodes",
     "watchlistPicks", "radar", "agenda",
   ];

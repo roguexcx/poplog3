@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { getCurrentUser } from "@/server/auth/get-current-user";
 import { createSupabaseServerClient } from "@/server/supabase/server";
 import { refreshAllUserTitleAvailability } from "@/server/streaming/batch-availability-refresh";
 import {
@@ -7,6 +8,12 @@ import {
   readContinuitySectionCache,
   writeContinuitySectionCache,
 } from "@/server/continuity/continuity-section-cache";
+import { isLocalStreamingPreferencesEnabled } from "@/server/runtime/local-db-flags";
+import {
+  listActiveStreamingProviders,
+  listUserStreamingPreferences,
+  replaceUserStreamingPreferences,
+} from "@/server/local-services/streaming-preferences-local.service";
 
 type PreferencePayload = {
   providerIds?: string[];
@@ -30,11 +37,8 @@ export async function GET() {
   const totalStartedAt = Date.now();
   const perf: Record<string, number> = {};
   const stageRef = { value: totalStartedAt };
-  const supabase = await createSupabaseServerClient();
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
   markStage(perf, stageRef, "auth");
 
   if (!user) {
@@ -60,6 +64,42 @@ export async function GET() {
     return NextResponse.json({ ...cached.payload, cacheStatus: "persistent_hit" });
   }
 
+  if (isLocalStreamingPreferencesEnabled()) {
+    const [providers, preferences] = await Promise.all([
+      listActiveStreamingProviders("BR"),
+      listUserStreamingPreferences(user.id, "BR"),
+    ]);
+    markStage(perf, stageRef, "local_read");
+
+    const payload = {
+      ok: true,
+      providers,
+      preferences,
+    } satisfies StreamingPreferencesPayload;
+
+    await writeContinuitySectionCache({
+      sectionKey: "profile_streaming_preferences",
+      userId: user.id,
+      region: "BR",
+      language: "pt-BR",
+      ttlMs: STREAMING_PREFS_CACHE_TTL_MS,
+      payload,
+    });
+    markStage(perf, stageRef, "cache_write");
+
+    console.log("[profile/streaming-preferences/perf]", {
+      cacheStatus: cached?.status === "stale" ? "persistent_stale_rebuilt" : "persistent_miss",
+      providers: payload.providers.length,
+      preferences: payload.preferences.length,
+      source: "local",
+      ...perf,
+      total: Date.now() - totalStartedAt,
+    });
+
+    return NextResponse.json({ ...payload, cacheStatus: "persistent_miss" });
+  }
+
+  const supabase = await createSupabaseServerClient();
   const { data: providers, error: providersError } = await supabase
     .from("streaming_providers")
     .select("id, provider_name, provider_slug, logo_url, tmdb_provider_id, country, is_active")
@@ -119,11 +159,7 @@ export async function GET() {
 }
 
 export async function PUT(request: Request) {
-  const supabase = await createSupabaseServerClient();
-
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   if (!user) {
     return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
@@ -133,6 +169,19 @@ export async function PUT(request: Request) {
   const country = body.country ?? "BR";
   const providerIds = body.providerIds ?? [];
 
+  if (isLocalStreamingPreferencesEnabled()) {
+    await replaceUserStreamingPreferences({
+      userId: user.id,
+      country,
+      providerIds,
+    });
+
+    invalidateContinuitySectionCache(user.id);
+
+    return NextResponse.json({ ok: true });
+  }
+
+  const supabase = await createSupabaseServerClient();
   const { error: disableError } = await supabase
     .from("user_streaming_preferences")
     .update({

@@ -11,6 +11,7 @@ export * as icsAgendaCacheLocalService from "./ics-agenda-cache-local.service";
 export * as libraryLocalService from "./library-local.service";
 export * as ratingsCacheLocalService from "./ratings-cache-local.service";
 export * as seasonCacheLocalService from "./season-cache-local.service";
+export * as streamingPreferencesLocalService from "./streaming-preferences-local.service";
 export * as titleCacheLocalService from "./title-cache-local.service";
 export * as userPreferencesLocalService from "./user-preferences-local.service";
 export * as userRatingsLocalService from "./user-ratings-local.service";
