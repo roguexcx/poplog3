@@ -33,7 +33,12 @@
     "check:feedback-engine": "npx tsx scripts/check-feedback-engine.ts",
     "backfill:state": "npx tsx scripts/backfill-user-title-state.ts",
     "backfill:state:dry": "npx tsx scripts/backfill-user-title-state.ts --dry-run",
-    "backfill:movie-duration": "npx tsx scripts/backfill-movie-duration.ts"
+    "backfill:movie-duration": "npx tsx scripts/backfill-movie-duration.ts",
+    "db:export": "tsx scripts/db/export-local-data.ts",
+    "db:import": "tsx scripts/db/import-local-data.ts",
+    "db:backup": "tsx scripts/db/backup-mysql.ts",
+    "db:restore": "tsx scripts/db/restore-mysql.ts",
+    "db:smoke:export-import": "tsx scripts/db/smoke-export-import.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.19.3",
