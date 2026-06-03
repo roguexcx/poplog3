@@ -2,6 +2,8 @@ import { NextResponse } from "next/server";
 
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { supabaseAdmin } from "@/server/supabase/admin";
+import { db } from "@/server/db/client";
+import { isLocalDbEnabled } from "@/server/runtime/local-db-flags";
 import {
   readContinuitySectionCache,
   writeContinuitySectionCache,
@@ -15,6 +17,60 @@ const GENRE_STATS_CACHE_TTL_MS = 10 * 60_000;
 function markStage(perf: Record<string, number>, stageRef: { value: number }, stage: string) {
   perf[stage] = Date.now() - stageRef.value;
   stageRef.value = Date.now();
+}
+
+function genreName(genre: unknown): string | null {
+  if (!genre || typeof genre !== "object") return null;
+  const name = (genre as { name?: unknown }).name;
+  return typeof name === "string" && name.trim() ? name : null;
+}
+
+async function buildLocalGenreStats(userId: string) {
+  const userTitles = await db.userTitle.findMany({
+    where: { userId },
+    select: { tmdbId: true, mediaType: true },
+  });
+
+  if (userTitles.length === 0) return { ok: true, genres: [] } satisfies GenreStatsPayload;
+
+  const titleData = await db.poplog3Title.findMany({
+    where: {
+      OR: userTitles.map((title) => ({
+        tmdbId: title.tmdbId,
+        mediaType: title.mediaType,
+      })),
+    },
+    select: { tmdbId: true, mediaType: true, genres: true },
+  });
+
+  const titleMap = new Map(
+    titleData
+      .filter((title) => Array.isArray(title.genres))
+      .map((title) => [`${title.tmdbId}_${title.mediaType}`, title.genres as unknown[]]),
+  );
+  const genreCount: Record<string, number> = {};
+
+  for (const userTitle of userTitles) {
+    const genres = titleMap.get(`${userTitle.tmdbId}_${userTitle.mediaType}`);
+    if (!genres) continue;
+    for (const genre of genres) {
+      const name = genreName(genre);
+      if (name) genreCount[name] = (genreCount[name] ?? 0) + 1;
+    }
+  }
+
+  const sorted = Object.entries(genreCount)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 8);
+  const maxCount = sorted[0]?.[1] ?? 1;
+  return {
+    ok: true,
+    genres: sorted.map(([name, count]) => ({
+      name,
+      count,
+      pct: Math.round((count / maxCount) * 100),
+    })),
+  } satisfies GenreStatsPayload;
 }
 
 export async function GET() {
@@ -43,6 +99,30 @@ export async function GET() {
         total: Date.now() - totalStartedAt,
       });
       return NextResponse.json({ ...cached.payload, cacheStatus: "persistent_hit" });
+    }
+
+    if (isLocalDbEnabled()) {
+      const payload = await buildLocalGenreStats(user.id);
+      markStage(perf, stageRef, "local_read");
+      await writeContinuitySectionCache({
+        sectionKey: "profile_genre_stats",
+        userId: user.id,
+        region: "BR",
+        language: "pt-BR",
+        ttlMs: GENRE_STATS_CACHE_TTL_MS,
+        payload,
+      });
+      markStage(perf, stageRef, "cache_write");
+
+      console.log("[profile/genre-stats/perf]", {
+        cacheStatus: cached?.status === "stale" ? "persistent_stale_rebuilt" : "persistent_miss",
+        genres: payload.genres.length,
+        source: "prisma",
+        ...perf,
+        total: Date.now() - totalStartedAt,
+      });
+
+      return NextResponse.json({ ...payload, cacheStatus: "persistent_miss" });
     }
 
     // Busca os tmdb_ids e media_types do usuário

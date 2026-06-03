@@ -167,3 +167,11 @@ Valida: export funciona, JSON tem formato correto, dry-run funciona, import segu
 ## Pasta `exports/`
 
 A pasta `exports/` está no `.gitignore` — os arquivos não são versionados. Faça backup manual dos exports importantes em local seguro.
+
+---
+
+## Ver também
+
+- [BACKUP_RESTORE.md](./BACKUP_RESTORE.md) — backup/restore SQL completo (timestamps preservados)
+- [DEPLOY_HOSTINGER.md](./DEPLOY_HOSTINGER.md) — como usar export/import para migrar para Hostinger
+- [HOSTINGER_CHECKLIST.md](./HOSTINGER_CHECKLIST.md) — checklist pré-deploy

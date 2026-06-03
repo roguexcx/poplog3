@@ -112,7 +112,7 @@ async function main() {
     process.exit(1);
   }
 
-  const container = (process.env.MYSQL_DOCKER_CONTAINER ?? "poplog-mysql").trim();
+  const container = (process.env.MYSQL_DOCKER_CONTAINER ?? "poplog-v3-mysql").trim();
 
   // Verificar se Docker está disponível
   const dockerCheck = spawnSync("docker", ["info"], { encoding: "utf-8" });

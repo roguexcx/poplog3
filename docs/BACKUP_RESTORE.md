@@ -31,8 +31,8 @@
 # URL do banco (usado para extrair credenciais)
 DATABASE_URL=mysql://poplog:poplog_local_password@localhost:3306/poplog_v3
 
-# Nome do container Docker (padrão: poplog-mysql)
-MYSQL_DOCKER_CONTAINER=poplog-mysql
+# Nome do container Docker (padrão: poplog-v3-mysql — conforme docker-compose.yml)
+MYSQL_DOCKER_CONTAINER=poplog-v3-mysql
 ```
 
 ---
@@ -54,7 +54,7 @@ O script:
 ### Exemplo de saída
 
 ```
-[db:backup] Container : poplog-mysql
+[db:backup] Container : poplog-v3-mysql
 [db:backup] Banco     : poplog_v3
 [db:backup] Destino   : D:\projects\poplog-v3\backups\poplog-mysql-backup-2026-06-03-10-00.sql
 [db:backup] Executando mysqldump...
@@ -140,13 +140,13 @@ docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
 Se o `npx tsx` não estiver disponível, execute o dump manualmente:
 
 ```bash
-# Backup manual
-docker exec poplog-mysql \
+# Backup manual (container default: poplog-v3-mysql)
+docker exec poplog-v3-mysql \
   mysqldump --single-transaction -upoplog -ppoplog_local_password poplog_v3 \
   > backups/backup-manual.sql
 
 # Restore manual
-docker exec -i poplog-mysql \
+docker exec -i poplog-v3-mysql \
   mysql -upoplog -ppoplog_local_password poplog_v3 \
   < backups/backup-manual.sql
 ```
@@ -165,3 +165,11 @@ docker exec -i poplog-mysql \
 ## Pasta `backups/`
 
 A pasta `backups/` está no `.gitignore` — os arquivos não são versionados. Copie backups importantes para local seguro (HD externo, cloud storage) antes de operações destrutivas.
+
+---
+
+## Ver também
+
+- [DATABASE_EXPORT_IMPORT.md](./DATABASE_EXPORT_IMPORT.md) — export/import JSON app-level
+- [DEPLOY_HOSTINGER.md](./DEPLOY_HOSTINGER.md) — guia de deploy e migração de dados para Hostinger
+- [HOSTINGER_CHECKLIST.md](./HOSTINGER_CHECKLIST.md) — checklist pré-deploy
