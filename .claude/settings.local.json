@@ -100,7 +100,11 @@
       "PowerShell(Set-Location \"I:\\\\poplog-v3\"; npx tsc --noEmit 2>&1 | Out-File \"_tsc_final.txt\"; $lines = Get-Content \"_tsc_final.txt\"; $migrationFiles = $lines | Where-Object { $_ -match \"local-services|repositories/\\(catalog|user|curadoria|engine|episode|ratings|season|title\\)\" }; Write-Host \"Migration errors remaining: $\\($migrationFiles.Count\\)\"; if \\($migrationFiles.Count -gt 0\\) { $migrationFiles } else { Write-Host \"NONE\" }; Remove-Item \"_tsc_final.txt\")",
       "PowerShell(Set-Location \"I:\\\\poplog-v3\"; npx tsx -e \"import { db } from './src/server/db/client'; db.$queryRaw\\\\`SHOW COLUMNS FROM catalog_availability WHERE Field = 'source'\\\\`.then\\(r => console.log\\(JSON.stringify\\(r, null, 2\\)\\)\\).catch\\(console.error\\).finally\\(\\(\\) => process.exit\\(\\)\\)\")",
       "Bash(npx tsx -r tsconfig-paths/register -e ' *)",
-      "Bash(npx prisma *)"
+      "Bash(npx prisma *)",
+      "Bash(dir /s /b \"I:\\\\poplog-v3\\\\middleware.ts\")",
+      "Bash(dir \"I:\\\\poplog-v3\\\\src\\\\middleware*\")",
+      "Bash(dir \"I:\\\\poplog-v3\\\\middleware*\")",
+      "Bash(Get-ChildItem -Path \"I:\\\\poplog-v3\" -Filter \"middleware*\" -Recurse -ErrorAction SilentlyContinue)"
     ]
   }
 }

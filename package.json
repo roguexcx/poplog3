@@ -26,6 +26,7 @@
     "db:smoke:hero": "tsx -r tsconfig-paths/register scripts/smoke-test-hero.ts",
     "db:smoke:continuity": "tsx -r tsconfig-paths/register scripts/smoke-test-continuity.ts",
     "db:smoke:radar-agenda": "tsx -r tsconfig-paths/register scripts/smoke-test-radar-agenda.ts",
+    "db:smoke:local-auth": "tsx -r tsconfig-paths/register scripts/smoke-test-local-auth.ts",
     "db:reset": "prisma migrate reset",
     "db:studio": "prisma studio",
     "check:feedback-engine": "npx tsx scripts/check-feedback-engine.ts",

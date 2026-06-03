@@ -87,6 +87,11 @@ export function isLocalAgendaEnabled(): boolean {
   return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_AGENDA_ENABLED");
 }
 
+// Auth local — modo dev apenas. Não herda de isLocalDbEnabled() para exigir opt-in explícito.
+export function isLocalAuthEnabled(): boolean {
+  return readBooleanFlag("POPLOG_LOCAL_AUTH_ENABLED");
+}
+
 export function getLocalDbFlagState() {
   return {
     localDb: isLocalDbEnabled(),
