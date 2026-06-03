@@ -193,6 +193,7 @@ model User {
   userTitleFeedback          UserTitleFeedback[]
   userCuradoriaSignals       UserCuradoriaSignal[]
   userCuradoriaPreference    UserCuradoriaPreference?
+  userCuradoriaStates        UserCuradoriaState[]
   heroSpotlightSessions      HeroSpotlightSession[]
   userEpisodes               UserEpisode[]
   continuitySectionCaches    ContinuitySectionCache[]
@@ -283,6 +284,50 @@ model UserWatching {
   @@index([userId, priorityScore])
   @@index([userId, lastWatchedAt])
   @@map("user_watching")
+}
+
+model UserCuradoriaState {
+  id                       String              @id @default(cuid()) @db.VarChar(191)
+  userId                   String              @map("user_id") @db.VarChar(191)
+  contentId                String              @map("content_id") @db.VarChar(191)
+  contentType              WatchingContentType @map("content_type")
+  title                    String              @db.VarChar(512)
+  posterPath               String?             @map("poster_path") @db.VarChar(512)
+  backdropPath             String?             @map("backdrop_path") @db.VarChar(512)
+  status                   WatchingStatus      @default(watching)
+  runtime                  Int?
+  tmdbRating               Decimal?            @map("tmdb_rating") @db.Decimal(3, 1)
+  userRating               Int?                @map("user_rating")
+  addedToWatchlistAt       DateTime?           @map("added_to_watchlist_at")
+  startedAt                DateTime?           @map("started_at")
+  finishedAt               DateTime?           @map("finished_at")
+  genres                   Json?
+  year                     Int?
+  priorityScore            Decimal             @default(0) @map("priority_score") @db.Decimal(8, 4)
+  priorityLastCalculatedAt DateTime?           @map("priority_last_calculated_at")
+  snoozedUntil             DateTime?           @map("snoozed_until")
+  snoozeCount              Int                 @default(0) @map("snooze_count")
+  heroShownCount           Int                 @default(0) @map("hero_shown_count")
+  heroLastShownAt          DateTime?           @map("hero_last_shown_at")
+  dominantColor            String?             @map("dominant_color") @db.VarChar(64)
+  rediscoveryEligible      Boolean             @default(false) @map("rediscovery_eligible")
+  newEpisodeAvailable      Boolean             @default(false) @map("new_episode_available")
+  newEpisodeAvailableSince DateTime?           @map("new_episode_available_since")
+  streamingPlatform        String?             @map("streaming_platform") @db.VarChar(191)
+  streamingAvailableSince  DateTime?           @map("streaming_available_since")
+  availableOnVod           Boolean             @default(false) @map("available_on_vod")
+  vodAvailableSince        DateTime?           @map("vod_available_since")
+  createdAt                DateTime            @default(now()) @map("created_at")
+  updatedAt                DateTime            @updatedAt @map("updated_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, contentId])
+  @@index([userId])
+  @@index([userId, status])
+  @@index([userId, priorityScore])
+  @@index([userId, snoozedUntil])
+  @@map("user_curadoria_state")
 }
 
 model UserEvent {

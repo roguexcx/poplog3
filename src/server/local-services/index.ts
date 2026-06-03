@@ -1,6 +1,7 @@
 export * as apiUsageLocalService from "./api-usage-local.service";
 export * as catalogAvailabilityLocalService from "./catalog-availability-local.service";
 export * as continuitySectionCacheLocalService from "./continuity-section-cache-local.service";
+export * as curadoriaStateLocalService from "./curadoria-state-local.service";
 export * as curadoriaLocalService from "./curadoria-local.service";
 export * as engineLoggerLocalService from "./engine-logger-local.service";
 export * as episodeProgressLocalService from "./episode-progress-local.service";

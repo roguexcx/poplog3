@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/server/supabase/admin";
+import { isLocalHeroEnabled } from "@/server/runtime/local-db-flags";
 import {
   getUserWatchingSeries,
   type UserWatchingSeriesRow,
@@ -1308,6 +1309,244 @@ async function getTvUserTitles(userId: string, limit: number) {
   return (data ?? []) as UserTitleRow[];
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// LOCAL PATH: funções Prisma que substituem as queries Supabase
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function getLocalUserLibraryFromState(
+  userId: string,
+  limit: number,
+  region: "BR" | "US",
+): Promise<{
+  watchingSeries: UserWatchingSeriesRow[];
+  movieUserTitles: UserTitleRow[];
+  tvUserTitles: UserTitleRow[];
+  availabilityByTitle: Map<number, ContinuityAvailability | null>;
+} | null> {
+  const { db } = await import("@/server/db/client");
+
+  const rows = await db.userTitleState.findMany({
+    where: { userId, status: { in: ["watching", "watchlist"] } },
+    orderBy: { lastEventAt: "desc" },
+    take: limit,
+    select: {
+      tmdbId: true,
+      mediaType: true,
+      status: true,
+      favorite: true,
+      liked: true,
+      watchedEpisodes: true,
+      airedEpisodes: true,
+      totalEpisodes: true,
+      nextSeason: true,
+      nextEpisode: true,
+      nextEpisodeAirDate: true,
+      lastWatchedAt: true,
+      lastEventAt: true,
+      createdAt: true,
+      bestProviderName: true,
+      bestProviderType: true,
+      bestProviderLogo: true,
+    },
+  });
+
+  if (rows.length === 0) return null;
+
+  const watchingSeries: UserWatchingSeriesRow[] = [];
+  const tvUserTitles: UserTitleRow[] = [];
+  const movieUserTitles: UserTitleRow[] = [];
+  const availabilityByTitle = new Map<number, ContinuityAvailability | null>();
+
+  for (const row of rows) {
+    const avail: ContinuityAvailability | null = row.bestProviderName
+      ? {
+          region,
+          providerName: row.bestProviderName,
+          providerLogoPath: logoPathFromUrl(row.bestProviderLogo),
+          providerId: null,
+          type: (row.bestProviderType as ContinuityAvailability["type"]) ?? null,
+          confidence: "tmdb_only",
+          isPreferred: false,
+        }
+      : null;
+
+    availabilityByTitle.set(row.tmdbId, avail);
+
+    const createdAt = row.createdAt.toISOString();
+    const lastEventAt = row.lastEventAt.toISOString();
+    const lastWatchedAt = row.lastWatchedAt ? row.lastWatchedAt.toISOString() : null;
+    const nextAirDate = row.nextEpisodeAirDate
+      ? row.nextEpisodeAirDate.toISOString().slice(0, 10)
+      : null;
+
+    if (row.mediaType === "tv") {
+      if (row.watchedEpisodes > 0) {
+        watchingSeries.push({
+          seriesTmdbId: row.tmdbId,
+          watchedCount: row.watchedEpisodes,
+          totalEpisodes: row.totalEpisodes,
+          airedEpisodes: row.airedEpisodes,
+          lastWatchedAt,
+          watchedKeys: [] as EpisodeKey[],
+          nextEpisode:
+            row.nextSeason !== null && row.nextEpisode !== null
+              ? {
+                  seasonNumber: row.nextSeason,
+                  episodeNumber: row.nextEpisode,
+                  airDate: nextAirDate,
+                }
+              : null,
+          title: null,
+          posterPath: null,
+          backdropPath: null,
+          mediaStatus: null,
+          inLibraryStatus: row.status ?? null,
+        });
+      }
+
+      tvUserTitles.push({
+        tmdb_id: row.tmdbId,
+        media_type: "tv",
+        status: row.status ?? null,
+        favorite: row.favorite,
+        liked: row.liked,
+        created_at: createdAt,
+        watched_at: lastEventAt,
+      });
+    } else {
+      movieUserTitles.push({
+        tmdb_id: row.tmdbId,
+        media_type: "movie",
+        status: row.status ?? null,
+        favorite: row.favorite,
+        liked: row.liked,
+        created_at: createdAt,
+        watched_at: lastEventAt,
+      });
+    }
+  }
+
+  return { watchingSeries, movieUserTitles, tvUserTitles, availabilityByTitle };
+}
+
+async function getLocalTitleMap(mediaType: MediaType, tmdbIds: number[]) {
+  const map = new Map<number, TitleRow>();
+  if (tmdbIds.length === 0) return map;
+
+  const { db } = await import("@/server/db/client");
+
+  const rows = await db.poplog3Title.findMany({
+    where: { mediaType, tmdbId: { in: tmdbIds } },
+    select: {
+      tmdbId: true,
+      title: true,
+      overview: true,
+      posterPath: true,
+      backdropPath: true,
+      releaseDate: true,
+      firstAirDate: true,
+      runtime: true,
+      numberOfEpisodes: true,
+      genres: true,
+      tmdbPayload: true,
+    },
+  });
+
+  for (const row of rows) {
+    const rawPayload =
+      row.tmdbPayload &&
+      typeof row.tmdbPayload === "object" &&
+      !Array.isArray(row.tmdbPayload)
+        ? (row.tmdbPayload as unknown as TmdbPayload)
+        : null;
+
+    const genres: { id: number; name: string }[] = Array.isArray(row.genres)
+      ? (row.genres as unknown[]).filter(
+          (g): g is { id: number; name: string } =>
+            typeof g === "object" && g !== null && "name" in (g as object),
+        )
+      : [];
+
+    map.set(row.tmdbId, {
+      tmdb_id: row.tmdbId,
+      media_type: mediaType,
+      title: row.title,
+      overview: row.overview,
+      poster_path: row.posterPath,
+      backdrop_path: row.backdropPath,
+      release_date: row.releaseDate ? row.releaseDate.toISOString().slice(0, 10) : null,
+      first_air_date: row.firstAirDate ? row.firstAirDate.toISOString().slice(0, 10) : null,
+      runtime: row.runtime,
+      status: null, // falls back to tmdb_payload.status via getTitleStatus()
+      number_of_episodes: row.numberOfEpisodes,
+      genres,
+      tmdb_payload: rawPayload,
+    });
+  }
+
+  return map;
+}
+
+async function getLocalAvailabilityMap(input: {
+  tmdbIds: number[];
+  mediaType: MediaType;
+  region: "BR" | "US";
+  favoriteProviderIds: string[];
+}) {
+  const map = new Map<number, ContinuityAvailability | null>();
+  if (input.tmdbIds.length === 0) return map;
+
+  const { db } = await import("@/server/db/client");
+
+  const rows = await db.catalogAvailability.findMany({
+    where: {
+      tmdbId: { in: input.tmdbIds.map((id) => BigInt(id)) },
+      mediaType: input.mediaType,
+      providerRegion: input.region,
+    },
+    select: {
+      tmdbId: true,
+      providerName: true,
+      providerType: true,
+      providerRegion: true,
+      providerLogoUrl: true,
+      source: true,
+    },
+  });
+
+  const grouped = new Map<number, AvailabilityRow[]>();
+  for (const row of rows) {
+    if (!row.tmdbId) continue;
+    const tmdbIdNum = Number(row.tmdbId);
+    const list = grouped.get(tmdbIdNum) ?? [];
+    list.push({
+      tmdb_id: tmdbIdNum,
+      media_type: input.mediaType,
+      provider_id: null,
+      provider_name: row.providerName,
+      logo_path: logoPathFromUrl(row.providerLogoUrl),
+      availability_type: row.providerType as string,
+      country: row.providerRegion,
+      source: row.source as string,
+    });
+    grouped.set(tmdbIdNum, list);
+  }
+
+  for (const tmdbId of input.tmdbIds) {
+    map.set(
+      tmdbId,
+      chooseBestAvailability(
+        grouped.get(tmdbId) ?? [],
+        input.favoriteProviderIds,
+        input.region,
+        tmdbId,
+      ),
+    );
+  }
+
+  return map;
+}
+
 export async function getHeroCandidates(
   userId: string,
   options: HeroCandidatesOptions = {},
@@ -1320,10 +1559,12 @@ export async function getHeroCandidates(
   const region = options.region ?? preferences.region;
 
   // Phase 1: fetch user library data + editorial feedbackMap in parallel.
-  // Fast path: 1 query in user_title_state (materialized state).
+  // Fast path: 1 query in user_title_state (materialized state) — local or Supabase.
   // Fallback: classic batch of 3 functions for users without state yet.
   const [stateData, feedbackMap] = await Promise.all([
-    getUserLibraryFromState(userId, 150, region),
+    isLocalHeroEnabled()
+      ? getLocalUserLibraryFromState(userId, 150, region)
+      : getUserLibraryFromState(userId, 150, region),
     getUserFeedbackMap(userId).catch(() => new Map()),
   ]);
 
@@ -1428,6 +1669,7 @@ export async function getHeroCandidates(
   // Fase 2: metadata + availability.
   // Fast path: availability já vem do user_title_state (0 queries extras).
   // Fallback: 2 queries adicionais em poplog3_title_availability.
+  // Local path: usa Prisma para títulos e availability.
   let seriesAvailabilityMap: Map<number, ContinuityAvailability | null>;
   let movieAvailabilityMap: Map<number, ContinuityAvailability | null>;
   let seriesTitleMap: Map<number, TitleRow>;
@@ -1435,11 +1677,33 @@ export async function getHeroCandidates(
 
   if (stateData) {
     [seriesTitleMap, movieTitleMap] = await Promise.all([
-      getTitleMap("tv", seriesIds),
-      getTitleMap("movie", movieIds),
+      isLocalHeroEnabled() ? getLocalTitleMap("tv", seriesIds) : getTitleMap("tv", seriesIds),
+      isLocalHeroEnabled() ? getLocalTitleMap("movie", movieIds) : getTitleMap("movie", movieIds),
     ]);
     seriesAvailabilityMap = stateData.availabilityByTitle;
     movieAvailabilityMap = stateData.availabilityByTitle;
+  } else if (isLocalHeroEnabled()) {
+    [
+      seriesAvailabilityMap,
+      movieAvailabilityMap,
+      seriesTitleMap,
+      movieTitleMap,
+    ] = await Promise.all([
+      getLocalAvailabilityMap({
+        tmdbIds: seriesIds,
+        mediaType: "tv",
+        region,
+        favoriteProviderIds: preferences.favoriteProviderIds,
+      }),
+      getLocalAvailabilityMap({
+        tmdbIds: movieIds,
+        mediaType: "movie",
+        region,
+        favoriteProviderIds: preferences.favoriteProviderIds,
+      }),
+      getLocalTitleMap("tv", seriesIds),
+      getLocalTitleMap("movie", movieIds),
+    ]);
   } else {
     [
       seriesAvailabilityMap,

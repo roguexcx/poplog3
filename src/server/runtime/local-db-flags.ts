@@ -51,6 +51,18 @@ export function isLocalCuradoriaEnabled(): boolean {
   return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_CURADORIA_ENABLED");
 }
 
+export function isLocalCuradoriaStateEnabled(): boolean {
+  return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_CURADORIA_STATE_ENABLED");
+}
+
+export function isLocalAcompanhandoEnabled(): boolean {
+  return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_ACOMPANHANDO_ENABLED");
+}
+
+export function isLocalHeroEnabled(): boolean {
+  return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_HERO_ENABLED");
+}
+
 export function getLocalDbFlagState() {
   return {
     localDb: isLocalDbEnabled(),
@@ -65,5 +77,8 @@ export function getLocalDbFlagState() {
     feedback: isLocalFeedbackEnabled(),
     userPreferences: isLocalUserPreferencesEnabled(),
     curadoria: isLocalCuradoriaEnabled(),
+    curadoriaState: isLocalCuradoriaStateEnabled(),
+    acompanhando: isLocalAcompanhandoEnabled(),
+    hero: isLocalHeroEnabled(),
   };
 }

@@ -4,7 +4,9 @@ import { supabaseAdmin } from "@/server/supabase/admin";
 import { getUserTitleStatus, upsertUserTitleStatus } from "@/server/library/library-service";
 import { isValidSeason, mapSeriesStatus } from "@/lib/series";
 import {
+  isLocalAcompanhandoEnabled,
   isLocalCuradoriaEnabled,
+  isLocalCuradoriaStateEnabled,
   isLocalUserPreferencesEnabled,
 } from "@/server/runtime/local-db-flags";
 import type {
@@ -196,6 +198,14 @@ async function getLocalCuradoriaService() {
   return import("@/server/local-services/curadoria-local.service");
 }
 
+async function getLocalCuradoriaStateService() {
+  return import("@/server/local-services/curadoria-state-local.service");
+}
+
+async function getLocalTitleCacheService() {
+  return import("@/server/local-services/title-cache-local.service");
+}
+
 function extractCollection(
   meta: DbTitleMeta
 ): { id: number; name: string; poster_path: string | null } | null {
@@ -373,11 +383,91 @@ async function getOverlayBase(userId: string, parsed: ParsedContentId) {
   };
 }
 
+async function getLocalOverlayBase(userId: string, parsed: ParsedContentId) {
+  const [userTitle, titleCache] = await Promise.all([
+    getUserTitleStatus(userId, parsed.tmdbId, parsed.mediaType),
+    getLocalTitleCacheService().then((service) =>
+      service.getCachedTitle(parsed.mediaType, parsed.tmdbId),
+    ),
+  ]);
+
+  if (!userTitle || !titleCache) {
+    throw new Error("Título não encontrado na biblioteca.");
+  }
+
+  const titleRecord = titleCache as Record<string, unknown>;
+  const title = typeof titleRecord.title === "string"
+    ? titleRecord.title
+    : typeof titleRecord.name === "string"
+      ? titleRecord.name
+      : null;
+  const genres = "genres" in titleCache ? titleCache.genres : null;
+  const year = "year" in titleCache
+    ? titleCache.year
+    : (titleCache.release_date ?? titleCache.first_air_date)?.split("-")[0];
+
+  return {
+    userId,
+    contentId: parsed.contentId,
+    contentType: parsed.contentType,
+    title: title ?? "Sem título",
+    posterPath: titleCache.poster_path ?? null,
+    backdropPath: titleCache.backdrop_path ?? null,
+    status: LIBRARY_TO_WATCH_STATUS[userTitle.status] ?? "watching",
+    runtime: "runtime" in titleCache ? titleCache.runtime ?? null : null,
+    tmdbRating: titleCache.vote_average ?? null,
+    userRating: userTitle.rating ?? null,
+    addedToWatchlistAt: userTitle.created_at ?? null,
+    startedAt: userTitle.started_at ?? null,
+    finishedAt: userTitle.finished_at ?? null,
+    genres,
+    year: typeof year === "number" ? year : year ? Number(year) : null,
+  };
+}
+
+function toLocalOverlayPatch(patch: Record<string, unknown>) {
+  return {
+    priorityScore: typeof patch.priority_score === "number" ? patch.priority_score : undefined,
+    priorityLastCalculatedAt: typeof patch.priority_last_calculated_at === "string"
+      ? patch.priority_last_calculated_at
+      : undefined,
+    snoozedUntil: typeof patch.snoozed_until === "string" ? patch.snoozed_until : undefined,
+    snoozeCount: typeof patch.snooze_count === "number" ? patch.snooze_count : undefined,
+    heroShownCount: typeof patch.hero_shown_count === "number" ? patch.hero_shown_count : undefined,
+    heroLastShownAt: typeof patch.hero_last_shown_at === "string" ? patch.hero_last_shown_at : undefined,
+    dominantColor: typeof patch.dominant_color === "string" ? patch.dominant_color : undefined,
+    rediscoveryEligible: typeof patch.rediscovery_eligible === "boolean"
+      ? patch.rediscovery_eligible
+      : undefined,
+    newEpisodeAvailable: typeof patch.new_episode_available === "boolean"
+      ? patch.new_episode_available
+      : undefined,
+    newEpisodeAvailableSince: typeof patch.new_episode_available_since === "string"
+      ? patch.new_episode_available_since
+      : undefined,
+    streamingPlatform: typeof patch.streaming_platform === "string" ? patch.streaming_platform : undefined,
+    streamingAvailableSince: typeof patch.streaming_available_since === "string"
+      ? patch.streaming_available_since
+      : undefined,
+    availableOnVod: typeof patch.available_on_vod === "boolean" ? patch.available_on_vod : undefined,
+    vodAvailableSince: typeof patch.vod_available_since === "string" ? patch.vod_available_since : undefined,
+  };
+}
+
 async function upsertCuradoriaOverlay(
   userId: string,
   parsed: ParsedContentId,
   patch: Record<string, unknown>
 ) {
+  if (isLocalCuradoriaStateEnabled()) {
+    const local = await getLocalCuradoriaStateService();
+    await local.upsertCuradoriaState({
+      ...(await getLocalOverlayBase(userId, parsed)),
+      ...toLocalOverlayPatch(patch),
+    });
+    return;
+  }
+
   const base = await getOverlayBase(userId, parsed);
 
   const { error } = await supabaseAdmin.from("user_curadoria_state").upsert(
@@ -443,6 +533,52 @@ async function readCuradoriaPreference(userId: string): Promise<CuradoriaPrefere
   };
 }
 
+async function readCuradoriaOverlays(userId: string, contentIds: string[]) {
+  if (contentIds.length === 0) return { data: [], error: null };
+
+  if (isLocalCuradoriaStateEnabled()) {
+    try {
+      const local = await getLocalCuradoriaStateService();
+      return {
+        data: await local.getCuradoriaStates({ userId, contentIds, limit: contentIds.length }),
+        error: null,
+      };
+    } catch (error) {
+      return {
+        data: [],
+        error: { message: error instanceof Error ? error.message : String(error) },
+      };
+    }
+  }
+
+  const result = await supabaseAdmin
+    .from("user_curadoria_state")
+    .select(
+      `
+      content_id,
+      snoozed_until,
+      snooze_count,
+      hero_shown_count,
+      hero_last_shown_at,
+      dominant_color,
+      rediscovery_eligible,
+      new_episode_available,
+      new_episode_available_since,
+      streaming_platform,
+      streaming_available_since,
+      available_on_vod,
+      vod_available_since
+    `
+    )
+    .eq("user_id", userId)
+    .in("content_id", contentIds);
+
+  return {
+    data: result.data ?? [],
+    error: result.error ? { message: result.error.message } : null,
+  };
+}
+
 async function logLocalCuradoriaAction(input: {
   userId: string;
   parsed: ParsedContentId;
@@ -473,6 +609,312 @@ async function logLocalCuradoriaAction(input: {
   });
 }
 
+function toJsonRecord(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function readPrismaNumberArray(value: unknown): number[] | null {
+  if (!Array.isArray(value)) return null;
+  if (value.every((item) => typeof item === "number")) return value as number[];
+  return null;
+}
+
+async function getLocalAcompanhandoResponse(userId: string): Promise<NextResponse> {
+  const { db } = await import("@/server/db/client");
+
+  const userTitleRows = await db.userTitle.findMany({
+    where: {
+      userId,
+      status: { in: ["watching", "watchlist", "abandoned", "fridge"] },
+    },
+    orderBy: { createdAt: "desc" },
+    take: 120,
+  });
+
+  if (userTitleRows.length === 0) {
+    const preferencesResult = await readCuradoriaPreference(userId);
+    if (preferencesResult.error) {
+      console.error("[acompanhando:local] preferences error:", preferencesResult.error);
+    }
+    return NextResponse.json({ ok: true, items: [], preferences: preferencesResult.data ?? null });
+  }
+
+  const uniqueTmdbIds = [...new Set(userTitleRows.map((r) => r.tmdbId))];
+  const seriesIds = [...new Set(userTitleRows.filter((r) => r.mediaType === "tv").map((r) => r.tmdbId))];
+  const mediaTypes = [...new Set(userTitleRows.map((r) => r.mediaType))];
+  const contentIds = userTitleRows.map((r) => toContentId(r.mediaType, r.tmdbId));
+
+  const titleRows = await db.poplog3Title.findMany({
+    where: { tmdbId: { in: uniqueTmdbIds } },
+    select: {
+      tmdbId: true,
+      mediaType: true,
+      title: true,
+      originalTitle: true,
+      posterPath: true,
+      backdropPath: true,
+      year: true,
+      runtime: true,
+      episodeRunTime: true,
+      voteAverage: true,
+      genres: true,
+      numberOfSeasons: true,
+      numberOfEpisodes: true,
+      tmdbPayload: true,
+    },
+  });
+
+  const titleMetaMap = new Map<string, (typeof titleRows)[0]>();
+  for (const row of titleRows) {
+    titleMetaMap.set(`${row.tmdbId}:${row.mediaType}`, row);
+  }
+
+  const [
+    preferencesResult,
+    watchedEpisodeRows,
+    episodeCatalogRows,
+    overlayResult,
+    availabilityRows,
+  ] = await Promise.all([
+    readCuradoriaPreference(userId),
+
+    db.userEpisode.findMany({
+      where: { userId, seriesTmdbId: { in: seriesIds } },
+      select: {
+        seriesTmdbId: true,
+        seasonNumber: true,
+        episodeNumber: true,
+        watchedAt: true,
+        runtimeMinutes: true,
+      },
+    }),
+
+    db.poplog3Episode.findMany({
+      where: { seriesTmdbId: { in: seriesIds } },
+      select: {
+        seriesTmdbId: true,
+        seasonNumber: true,
+        episodeNumber: true,
+        name: true,
+        airDate: true,
+        runtime: true,
+        stillPath: true,
+      },
+    }),
+
+    readCuradoriaOverlays(userId, contentIds),
+
+    db.catalogAvailability.findMany({
+      where: {
+        tmdbId: { in: uniqueTmdbIds.map((id) => BigInt(id)) },
+        mediaType: { in: mediaTypes },
+        providerRegion: { in: ["BR", "US"] },
+      },
+      select: {
+        tmdbId: true,
+        mediaType: true,
+        providerName: true,
+        providerType: true,
+        providerRegion: true,
+        checkedAt: true,
+      },
+    }),
+  ]);
+
+  if (preferencesResult.error) {
+    console.error("[acompanhando:local] preferences error:", preferencesResult.error);
+  }
+  if (overlayResult.error) {
+    console.error("[acompanhando:local] overlays error:", overlayResult.error);
+  }
+
+  const watchedBySeries = new Map<number, DbUserEpisode[]>();
+  for (const row of watchedEpisodeRows) {
+    const list = watchedBySeries.get(row.seriesTmdbId) ?? [];
+    list.push({
+      series_tmdb_id: row.seriesTmdbId,
+      season_number: row.seasonNumber,
+      episode_number: row.episodeNumber,
+      watched_at: row.watchedAt.toISOString(),
+      runtime_minutes: row.runtimeMinutes,
+    });
+    watchedBySeries.set(row.seriesTmdbId, list);
+  }
+
+  const episodesBySeries = new Map<number, DbEpisode[]>();
+  for (const row of episodeCatalogRows) {
+    const list = episodesBySeries.get(row.seriesTmdbId) ?? [];
+    list.push({
+      series_tmdb_id: row.seriesTmdbId,
+      season_number: row.seasonNumber,
+      episode_number: row.episodeNumber,
+      name: row.name,
+      air_date: row.airDate ? row.airDate.toISOString().slice(0, 10) : null,
+      runtime: row.runtime,
+      still_path: row.stillPath,
+    });
+    episodesBySeries.set(row.seriesTmdbId, list);
+  }
+
+  const overlayByContentId = new Map<string, DbCuradoriaOverlay>();
+  for (const ov of (overlayResult.data ?? []) as DbCuradoriaOverlay[]) {
+    overlayByContentId.set(ov.content_id, ov);
+  }
+
+  const availabilityByContentId = new Map<string, AvailabilityOverlay>();
+  for (const row of availabilityRows) {
+    if (!row.tmdbId) continue;
+    const tmdbIdNum = Number(row.tmdbId);
+    const contentId = toContentId(row.mediaType, tmdbIdNum);
+    const current = availabilityByContentId.get(contentId) ?? {
+      streaming_platform: null,
+      streaming_available_since: null,
+      available_on_vod: false,
+      vod_available_since: null,
+    };
+    const isSubscription =
+      row.providerRegion === "BR" &&
+      (["subscription", "free", "ads"] as string[]).includes(row.providerType);
+    const isVod =
+      (["rent", "buy"] as string[]).includes(row.providerType) &&
+      (row.providerRegion === "BR" || row.providerRegion === "US");
+
+    availabilityByContentId.set(contentId, {
+      streaming_platform: current.streaming_platform ?? (isSubscription ? row.providerName : null),
+      streaming_available_since:
+        current.streaming_available_since ?? (isSubscription ? row.checkedAt.toISOString() : null),
+      available_on_vod: current.available_on_vod || isVod,
+      vod_available_since:
+        current.vod_available_since ?? (isVod ? row.checkedAt.toISOString() : null),
+    });
+  }
+
+  const items: UserWatching[] = [];
+
+  for (const ut of userTitleRows) {
+    const watchStatus = LIBRARY_TO_WATCH_STATUS[ut.status];
+    if (!watchStatus) continue;
+
+    const titleRow = titleMetaMap.get(`${ut.tmdbId}:${ut.mediaType}`);
+    if (!titleRow) continue;
+
+    const meta: DbTitleMeta = {
+      tmdb_id: ut.tmdbId,
+      media_type: ut.mediaType,
+      title: titleRow.title,
+      original_title: titleRow.originalTitle,
+      poster_path: titleRow.posterPath,
+      backdrop_path: titleRow.backdropPath,
+      year: titleRow.year,
+      runtime: titleRow.runtime,
+      episode_run_time: readPrismaNumberArray(titleRow.episodeRunTime),
+      vote_average: titleRow.voteAverage === null ? null : Number(titleRow.voteAverage),
+      genres: titleRow.genres,
+      number_of_seasons: titleRow.numberOfSeasons,
+      number_of_episodes: titleRow.numberOfEpisodes,
+      tmdb_payload: toJsonRecord(titleRow.tmdbPayload),
+    };
+
+    const contentId = toContentId(ut.mediaType, ut.tmdbId);
+    const contentType: ContentType = ut.mediaType === "tv" ? "serie" : "filme";
+    const overlay = overlayByContentId.get(contentId);
+    const availabilityOverlay = availabilityByContentId.get(contentId);
+
+    const watchedEpisodes = watchedBySeries.get(ut.tmdbId) ?? [];
+    const episodeRows = episodesBySeries.get(ut.tmdbId) ?? [];
+
+    const episodeContext =
+      ut.mediaType === "tv"
+        ? getEpisodeContext({ meta, watchedEpisodes, episodeRows, overlay })
+        : null;
+
+    const sortedWatched = sortEpisodes(watchedEpisodes);
+    const lastWatchedEpisode = sortedWatched.at(-1) ?? null;
+
+    const rawSeriesStatus =
+      typeof meta.tmdb_payload?.status === "string" ? meta.tmdb_payload.status : null;
+
+    items.push({
+      id: ut.id,
+      user_id: ut.userId,
+      content_id: contentId,
+      content_type: contentType,
+
+      title: meta.title ?? "Sem título",
+      original_title: meta.original_title ?? null,
+      poster_path: meta.poster_path ?? null,
+      backdrop_path: meta.backdrop_path ?? null,
+      dominant_color: overlay?.dominant_color ?? null,
+
+      status: watchStatus,
+
+      current_season: episodeContext?.currentSeason ?? null,
+      current_episode: episodeContext?.currentEpisode ?? null,
+      total_seasons: meta.number_of_seasons ?? null,
+      total_episodes_season: episodeContext?.totalEpisodesSeason ?? null,
+      episodes_watched: episodeContext?.episodesWatched ?? null,
+      next_episode_name: episodeContext?.nextEpisodeName ?? null,
+      next_episode_duration: episodeContext?.nextEpisodeDuration ?? null,
+      next_episode_air_date: episodeContext?.nextEpisodeAirDate ?? null,
+      next_episode_still_path: episodeContext?.nextEpisodeStillPath ?? null,
+      series_status: mapSeriesStatus(rawSeriesStatus),
+      new_episode_available: episodeContext?.newEpisodeAvailable ?? false,
+      new_episode_available_since: episodeContext?.newEpisodeAvailableSince ?? null,
+
+      runtime: meta.runtime ?? null,
+      watch_progress_minutes: null,
+
+      streaming_platform:
+        availabilityOverlay?.streaming_platform ?? overlay?.streaming_platform ?? null,
+      streaming_available_since:
+        availabilityOverlay?.streaming_available_since ??
+        overlay?.streaming_available_since ??
+        null,
+      available_on_vod:
+        availabilityOverlay?.available_on_vod ?? overlay?.available_on_vod ?? false,
+      vod_available_since:
+        availabilityOverlay?.vod_available_since ?? overlay?.vod_available_since ?? null,
+
+      tmdb_rating: meta.vote_average ?? null,
+      user_rating: ut.rating ? Math.round(ut.rating) : null,
+
+      last_watched_at: lastWatchedEpisode?.watched_at ?? ut.updatedAt.toISOString(),
+
+      last_session_duration: null,
+      sessions_last_7_days: 0,
+      sessions_last_30_days: 0,
+      average_session_gap_days: null,
+      is_marathon: false,
+
+      priority_score: 0,
+      priority_last_calculated_at: null,
+      snoozed_until: overlay?.snoozed_until ?? null,
+      snooze_count: overlay?.snooze_count ?? 0,
+      hero_shown_count: overlay?.hero_shown_count ?? 0,
+      hero_last_shown_at: overlay?.hero_last_shown_at ?? null,
+      rediscovery_eligible: overlay?.rediscovery_eligible ?? false,
+
+      added_to_watchlist_at: ut.createdAt.toISOString(),
+      started_at: ut.startedAt ? ut.startedAt.toISOString() : null,
+      finished_at: ut.finishedAt ? ut.finishedAt.toISOString() : null,
+      genres: normalizeGenres(meta.genres),
+      year: meta.year ?? null,
+
+      belongs_to_collection: extractCollection(meta),
+
+      created_at: ut.createdAt.toISOString(),
+      updated_at: ut.updatedAt.toISOString(),
+    });
+  }
+
+  return NextResponse.json({
+    ok: true,
+    items,
+    preferences: preferencesResult.data ?? null,
+  });
+}
+
 export async function GET() {
   const user = await getCurrentUser();
 
@@ -481,6 +923,10 @@ export async function GET() {
       { ok: false, error: "Unauthorized" },
       { status: 401 }
     );
+  }
+
+  if (isLocalAcompanhandoEnabled()) {
+    return getLocalAcompanhandoResponse(user.id);
   }
 
   const { data: rawUserTitles, error } = await supabaseAdmin
@@ -573,29 +1019,7 @@ export async function GET() {
           .in("series_tmdb_id", seriesIds)
       : Promise.resolve({ data: [], error: null }),
 
-    contentIds.length > 0
-      ? supabaseAdmin
-          .from("user_curadoria_state")
-          .select(
-            `
-            content_id,
-            snoozed_until,
-            snooze_count,
-            hero_shown_count,
-            hero_last_shown_at,
-            dominant_color,
-            rediscovery_eligible,
-            new_episode_available,
-            new_episode_available_since,
-            streaming_platform,
-            streaming_available_since,
-            available_on_vod,
-            vod_available_since
-          `
-          )
-          .eq("user_id", user.id)
-          .in("content_id", contentIds)
-      : Promise.resolve({ data: [], error: null }),
+    readCuradoriaOverlays(user.id, contentIds),
   ]);
 
   if (preferencesResult.error) {
@@ -856,6 +1280,13 @@ export async function POST(request: NextRequest) {
       ).toISOString();
 
       if (isLocalCuradoriaEnabled()) {
+        if (isLocalCuradoriaStateEnabled()) {
+          await upsertCuradoriaOverlay(user.id, parsed, {
+            snoozed_until: snoozedUntil,
+            snooze_count: 1,
+          });
+        }
+
         await logLocalCuradoriaAction({
           userId: user.id,
           parsed,
@@ -891,6 +1322,12 @@ export async function POST(request: NextRequest) {
 
     if (body.action === "log_signal") {
       if (isLocalCuradoriaEnabled()) {
+        if (isLocalCuradoriaStateEnabled() && body.signal === "clicked_hero") {
+          await upsertCuradoriaOverlay(user.id, parsed, {
+            hero_last_shown_at: new Date().toISOString(),
+          });
+        }
+
         await logLocalCuradoriaAction({
           userId: user.id,
           parsed,

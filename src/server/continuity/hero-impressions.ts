@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/server/supabase/admin";
+import { isLocalHeroEnabled } from "@/server/runtime/local-db-flags";
 import type { HeroCandidate } from "./types";
 
 type MediaType = "movie" | "tv";
@@ -198,10 +199,72 @@ const daysSinceLastWatch =
   };
 }
 
+async function getLocalHeroImpressionStats(
+  userId: string,
+  candidates: HeroCandidate[],
+): Promise<Map<string, HeroImpressionStats>> {
+  const statsMap = new Map<string, HeroImpressionStats>();
+  if (candidates.length === 0) return statsMap;
+
+  const { db } = await import("@/server/db/client");
+  const since = new Date(Date.now() - MAX_LOOKBACK_DAYS * 86_400_000);
+  const contentIds = Array.from(
+    new Set(candidates.map((c) => getCandidateKey(c.mediaType, c.tmdbId))),
+  );
+
+  const rows = await db.heroSpotlightSession.findMany({
+    where: { userId, contentId: { in: contentIds }, shownAt: { gte: since } },
+    select: { contentId: true, shownAt: true },
+    orderBy: { shownAt: "desc" },
+  });
+
+  const now = Date.now();
+  for (const row of rows) {
+    const key = row.contentId;
+    const seenTime = row.shownAt.getTime();
+    if (!Number.isFinite(seenTime)) continue;
+    const ageHours = Math.max(0, (now - seenTime) / 3_600_000);
+    const current = statsMap.get(key) ?? {
+      lastSeenAt: null,
+      timesSeenLast24h: 0,
+      timesSeenLast7d: 0,
+      timesSeenLast30d: 0,
+    };
+    if (!current.lastSeenAt) current.lastSeenAt = row.shownAt.toISOString();
+    if (ageHours <= 24) current.timesSeenLast24h += 1;
+    if (ageHours <= 168) current.timesSeenLast7d += 1;
+    if (ageHours <= 720) current.timesSeenLast30d += 1;
+    statsMap.set(key, current);
+  }
+  return statsMap;
+}
+
+async function recordLocalHeroImpressions(input: {
+  userId: string;
+  candidates: HeroCandidate[];
+  sessionId?: string | null;
+}): Promise<void> {
+  if (input.candidates.length === 0) return;
+  const { db } = await import("@/server/db/client");
+  await db.heroSpotlightSession.createMany({
+    data: input.candidates.map((c, i) => ({
+      userId: input.userId,
+      contentId: getCandidateKey(c.mediaType, c.tmdbId),
+      shownAt: new Date(),
+      position: i + 1,
+      scoreAtTime: c.score,
+    })),
+  });
+}
+
 export async function getHeroImpressionStats(
   userId: string,
   candidates: HeroCandidate[],
 ): Promise<Map<string, HeroImpressionStats>> {
+  if (isLocalHeroEnabled()) {
+    return getLocalHeroImpressionStats(userId, candidates);
+  }
+
   const statsMap = new Map<string, HeroImpressionStats>();
   if (candidates.length === 0) return statsMap;
 
@@ -283,6 +346,10 @@ export async function recordHeroImpressions(input: {
   candidates: HeroCandidate[];
   sessionId?: string | null;
 }): Promise<void> {
+  if (isLocalHeroEnabled()) {
+    return recordLocalHeroImpressions(input);
+  }
+
   if (input.candidates.length === 0) return;
 
   const rows = input.candidates.map((candidate) => ({

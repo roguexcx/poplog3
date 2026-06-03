@@ -13,6 +13,7 @@ export * from "./season-cache.repository";
 export * from "./title-cache.repository";
 export * from "./user-events.repository";
 export * from "./user-feedback.repository";
+export * from "./user-curadoria-state.repository";
 export * from "./user-preferences.repository";
 export * from "./user-ratings.repository";
 export * from "./user-title-state.repository";

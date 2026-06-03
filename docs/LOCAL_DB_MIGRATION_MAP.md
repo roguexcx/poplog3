@@ -1,7 +1,7 @@
 # POPLOG v3 Local DB Migration Map
 
 Este mapa acompanha a troca gradual dos serviços Supabase por adapters Prisma/MySQL.
-O codigo atual ainda preserva os serviços antigos. A partir da Fase 7A, os modulos de baixo risco abaixo podem escolher o adapter local quando as flags `POPLOG_LOCAL_DB_ENABLED`, `POPLOG_LOCAL_LOGS_ENABLED`, `POPLOG_LOCAL_CACHE_ENABLED`, `POPLOG_LOCAL_API_USAGE_ENABLED`, `POPLOG_LOCAL_AVAILABILITY_ENABLED`, `POPLOG_LOCAL_LIBRARY_ENABLED`, `POPLOG_LOCAL_USER_STATE_ENABLED`, `POPLOG_LOCAL_EPISODE_PROGRESS_ENABLED`, `POPLOG_LOCAL_USER_RATINGS_ENABLED`, `POPLOG_LOCAL_FEEDBACK_ENABLED`, `POPLOG_LOCAL_USER_PREFERENCES_ENABLED` ou `POPLOG_LOCAL_CURADORIA_ENABLED` estiverem ligadas.
+O codigo atual ainda preserva os serviços antigos. A partir da Fase 7A, os modulos de baixo risco abaixo podem escolher o adapter local quando as flags `POPLOG_LOCAL_DB_ENABLED`, `POPLOG_LOCAL_LOGS_ENABLED`, `POPLOG_LOCAL_CACHE_ENABLED`, `POPLOG_LOCAL_API_USAGE_ENABLED`, `POPLOG_LOCAL_AVAILABILITY_ENABLED`, `POPLOG_LOCAL_LIBRARY_ENABLED`, `POPLOG_LOCAL_USER_STATE_ENABLED`, `POPLOG_LOCAL_EPISODE_PROGRESS_ENABLED`, `POPLOG_LOCAL_USER_RATINGS_ENABLED`, `POPLOG_LOCAL_FEEDBACK_ENABLED`, `POPLOG_LOCAL_USER_PREFERENCES_ENABLED`, `POPLOG_LOCAL_CURADORIA_ENABLED`, `POPLOG_LOCAL_CURADORIA_STATE_ENABLED`, `POPLOG_LOCAL_ACOMPANHANDO_ENABLED` ou `POPLOG_LOCAL_HERO_ENABLED` estiverem ligadas.
 
 | Modulo | Servico Supabase atual | Adapter Prisma local | Repository usado | Status | Observacoes de risco |
 | --- | --- | --- | --- | --- | --- |
@@ -22,16 +22,21 @@ O codigo atual ainda preserva os serviços antigos. A partir da Fase 7A, os modu
 | Preferencias de usuario | `user_curadoria_preferences` em rotas/servicos atuais | `src/server/local-services/user-preferences-local.service.ts` | `user-preferences.repository.ts` | Plugado parcialmente por flag | Controlado por `POPLOG_LOCAL_DB_ENABLED` ou `POPLOG_LOCAL_USER_PREFERENCES_ENABLED`. `GET /api/poplog3/acompanhando` pode ler preferencias pelo adapter local, preservando o restante do payload no Supabase enquanto Acompanhando completo nao migra. Contrato local retorna snake_case para compatibilidade. |
 | Feedback/personalizacao | `src/server/personalization/title-feedback-engine.ts`, `src/lib/personalization/feedback.ts`, `src/app/api/user/feedback/*`, `src/app/api/user/not-interested/route.ts` | `src/server/local-services/feedback-local.service.ts` | `user-feedback.repository.ts`, `library.repository.ts`, `user-title-state.repository.ts`, `user-events.repository.ts` | Plugado por flag | Controlado por `POPLOG_LOCAL_DB_ENABLED` ou `POPLOG_LOCAL_FEEDBACK_ENABLED`. Cobre liked, disliked, not_interested, hidden, dismissed/dismissed_from_section, favorite/unfavorite e clear_like. Materializa flags basicas em `user_title_state` e registra `user_events`. Curadoria/overlay seguem fora desta fase. |
 | Eventos de usuario | `user_events` via `state/user-title-state.ts`, feedback, curadoria e sorteio | `src/server/local-services/user-title-state-local.service.ts`, `curadoria-local.service.ts`, `feedback-local.service.ts` | `user-events.repository.ts` | Plugado parcialmente por flag | Eventos de feedback e curadoria basica usam Prisma quando as flags respectivas estao ligadas. Eventos sao fire-and-forget onde o servico antigo tambem nao bloqueia fluxo. |
-| Sinais de curadoria | `src/app/api/poplog3/acompanhando/route.ts` | `src/server/local-services/curadoria-local.service.ts` | `curadoria-signals.repository.ts`, `user-events.repository.ts` | Plugado parcialmente por flag | Controlado por `POPLOG_LOCAL_DB_ENABLED` ou `POPLOG_LOCAL_CURADORIA_ENABLED`. O POST de Acompanhando grava sinais/eventos locais para `log_signal`, `snooze` e `mark_watched`. O overlay `user_curadoria_state`, Hero Spotlight e GET completo de Acompanhando seguem no caminho Supabase/fora da fase. |
+| Sinais de curadoria | `src/app/api/poplog3/acompanhando/route.ts` | `src/server/local-services/curadoria-local.service.ts` | `curadoria-signals.repository.ts`, `user-events.repository.ts` | Plugado parcialmente por flag | Controlado por `POPLOG_LOCAL_DB_ENABLED` ou `POPLOG_LOCAL_CURADORIA_ENABLED`. O POST de Acompanhando grava sinais/eventos locais para `log_signal`, `snooze` e `mark_watched`. Overlay local fica separado em `POPLOG_LOCAL_CURADORIA_STATE_ENABLED`; Hero Spotlight e GET completo de Acompanhando seguem pendentes. |
+| Curadoria state/overlay | `user_curadoria_state` em `src/app/api/poplog3/acompanhando/route.ts` | `src/server/local-services/curadoria-state-local.service.ts` | `user-curadoria-state.repository.ts` | Plugado parcialmente por flag | Controlado por `POPLOG_LOCAL_DB_ENABLED` ou `POPLOG_LOCAL_CURADORIA_STATE_ENABLED`. Prisma modela `user_curadoria_state` com campos base e overlay usados pelo Acompanhando. `GET /api/poplog3/acompanhando` pode ler overlays locais; `POST` atualiza overlay local para `snooze` e `clicked_hero` quando a flag esta ligada. Hero Spotlight e Acompanhando completo seguem pendentes. |
+| GET completo de Acompanhando | `src/app/api/poplog3/acompanhando/route.ts` (GET handler Supabase) | `getLocalAcompanhandoResponse` no mesmo route.ts | `db.userTitle`, `db.poplog3Title`, `db.userEpisode`, `db.poplog3Episode`, `db.catalogAvailability`, `user-curadoria-state.repository.ts`, `user-preferences.repository.ts` | Plugado por flag | Controlado por `POPLOG_LOCAL_DB_ENABLED` ou `POPLOG_LOCAL_ACOMPANHANDO_ENABLED`. GET monta items completos com metadados, progresso de episodios, availability e overlays de curadoria a partir do banco local. Contexto de episodios reutiliza `getEpisodeContext`/`getValidSeasonNumbers` existentes. Preferencias e overlays delegam para `readCuradoriaPreference`/`readCuradoriaOverlays` que ja sao flag-aware. POST e Hero Spotlight permanecem fora desta fase. |
+| Diff diagnóstico Acompanhando | `src/app/api/poplog3/acompanhando/route.ts` (caminho Supabase) | `src/app/api/debug/local-db/acompanhando-diff/route.ts` | `db.userTitle`, `db.poplog3Title`, `db.userEpisode`, `db.userCuradoriaState` vs Supabase direto | Endpoint de debug | GET `/api/debug/local-db/acompanhando-diff` executa os dois caminhos em paralelo e retorna diff estruturado (count, only_in_local, only_in_supabase, fields por item). Requer autenticação. Não altera dados. |
+| Hero Spotlight | `src/server/continuity/hero-candidates.ts`, `hero-impressions.ts` (Supabase) | `getLocalUserLibraryFromState`, `getLocalTitleMap`, `getLocalAvailabilityMap` no mesmo `hero-candidates.ts`; `getLocalHeroImpressionStats`, `recordLocalHeroImpressions` no mesmo `hero-impressions.ts` | `db.userTitleState`, `db.poplog3Title`, `db.catalogAvailability`, `db.heroSpotlightSession` | Plugado por flag | Controlado por `POPLOG_LOCAL_DB_ENABLED` ou `POPLOG_LOCAL_HERO_ENABLED`. Lê biblioteca de `user_title_state` Prisma (fast path com availabiliy embutida), busca metadados de `poplog3Title`, availability de `catalogAvailability`. Impressoes/cooldown usam `hero_spotlight_sessions` Prisma (substitui `hero_impressions` Supabase). `continuity-section-cache` e `getCachedEpisode` ja sao flag-aware via `POPLOG_LOCAL_CACHE_ENABLED`. Feedback ja e flag-aware via `POPLOG_LOCAL_FEEDBACK_ENABLED`. Contrato publico do endpoint Hero preservado. |
 
-## Fora da Fase 7H/7I parcial
+## Fora das Fases 7H–7M
 
 - Troca de imports em endpoints, hooks ou componentes.
 - Remocao de Supabase ou dependencias Supabase.
-- Hero Spotlight completo.
-- `/api/poplog3/acompanhando` completo.
-- Continuidade personalizada completa.
-- `user_curadoria_state` local.
+- POST de Acompanhando usando caminho totalmente local (POST continua usando flags individuais de curadoria/curadoria-state).
+- Secoes de continuidade alem do Hero (continue, recently-watched, new-episodes, watchlist-picks, upcoming).
+- Radar e Agenda completos.
+- Continuidade personalizada de ponta a ponta.
+- Remocao do fallback Supabase no Hero.
 
 ## Riscos conhecidos pos-Fase 7B
 
@@ -42,7 +47,7 @@ O codigo atual ainda preserva os serviços antigos. A partir da Fase 7A, os modu
 
 - Availability/TMDB sync colateral ainda fica nos servicos Supabase atuais.
 - `rating_aggregates` ainda precisa de repository/adapter proprio; ratings pessoais locais nao recalculam agregados publicos.
-- `user_curadoria_state` aparece no fluxo de Acompanhando, mas ainda nao existe na camada Prisma local.
+- `user_curadoria_state` agora existe localmente, mas ainda nao substitui a montagem completa de Acompanhando/Hero.
 - A engine editorial completa deve continuar no servico atual ate a troca ser feita por flag e com comparacao de payload.
 - O adapter local de biblioteca retorna metadados basicos enriquecidos pelo cache local; labels avancados de runtime materializado continuam mais completos no caminho Supabase ate a proxima rodada de paridade.
 - O progresso local promove a serie para `watching` quando necessario e preserva `watched` quando ja existente; comparacoes de UX devem validar casos de series completadas manualmente antes de remover fallback Supabase.
