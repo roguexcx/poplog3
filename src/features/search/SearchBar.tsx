@@ -83,6 +83,7 @@ export default function SearchBar() {
           type="text"
           role="combobox"
           aria-expanded={showDropdown}
+          aria-controls="search-listbox"
           aria-autocomplete="list"
           aria-label="Buscar filmes e séries"
           placeholder="Buscar filmes, séries e universos..."
@@ -96,6 +97,7 @@ export default function SearchBar() {
 
       {showDropdown && (
         <div
+          id="search-listbox"
           role="listbox"
           className="absolute left-0 right-0 top-[calc(100%+10px)] z-[90] overflow-hidden rounded-[14px] border border-white/[0.09] bg-[#0d1120]/95 shadow-[0_24px_60px_rgba(0,0,0,0.55)] backdrop-blur-2xl"
         >

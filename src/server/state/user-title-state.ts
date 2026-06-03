@@ -12,7 +12,6 @@ import type { UserSeriesProgress } from "@/server/episodes/episode-progress-serv
 import { formatError, rateLimitedWarn } from "@/server/logging/log-control";
 import { syncTmdbSeason } from "@/server/sync/sync-tmdb-season";
 import { syncTmdbTitle } from "@/server/sync/sync-tmdb-title";
-import { invalidateContinuitySectionCache } from "@/server/continuity/continuity-section-cache";
 
 // ── Tipos públicos ────────────────────────────────────────────────────────────
 

@@ -135,10 +135,6 @@ const ASIAN_DRAMA_LANGUAGES = new Set([
   "fa", // Persa/Farsi
 ]);
 
-// Linguas e paises anglofonos -- series aqui ficam em "Series", nao "Dorama"
-const ANGLOPHONE_COUNTRIES = new Set(["US", "GB", "AU", "CA", "IE", "NZ"]);
-const ANGLOPHONE_LANGUAGES = new Set(["en"]);
-
 // Padroes de titulo para reality (fallback quando genre/tmdbType nao chegaram)
 const REALITY_TITLE_PATTERNS: RegExp[] = [
   /\bdrag race\b/i,

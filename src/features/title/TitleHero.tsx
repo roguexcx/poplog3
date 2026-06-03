@@ -45,7 +45,6 @@ function pad2(n: number) {
 
 export default function TitleHero({
   title,
-  onOpenMovieSocial,
 }: TitleHeroProps) {
   const runtime =
     title.mediaType === "tv"

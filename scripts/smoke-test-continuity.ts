@@ -41,7 +41,6 @@ const BASE_ID = process.env.LOCAL_USER_ID?.trim() || "local-user";
 const SMOKE_USER = `${BASE_ID}-continuity-smoke`;
 const FAKE_TV_ID = 987770001;
 const FAKE_MOVIE_ID = 987770002;
-const TODAY = new Date().toISOString().slice(0, 10);
 const RECENT = new Date(Date.now() - 5 * 86_400_000).toISOString().slice(0, 10);
 
 async function seed() {

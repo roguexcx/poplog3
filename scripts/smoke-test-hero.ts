@@ -193,7 +193,7 @@ async function main() {
     }).catch(() => { /* may exist */ });
 
     // --- Test 1: getLocalUserLibraryFromState ---
-    const { getLocalDbFlagState: _f, isLocalHeroEnabled } = await import("@/server/runtime/local-db-flags");
+    const { isLocalHeroEnabled } = await import("@/server/runtime/local-db-flags");
     await assertEqual("hero flag active", isLocalHeroEnabled(), true);
 
     // Simulate getLocalUserLibraryFromState query

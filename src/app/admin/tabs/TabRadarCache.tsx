@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2, Clock, RefreshCw, Trash2, TrendingUp, Zap } from "lucide-react";
+import { AlertTriangle, Clock, RefreshCw, Trash2, TrendingUp, Zap } from "lucide-react";
 import { AdminCard, AdminRow, AdminFeedback, AdminActionButton } from "../_components";
 
 // ─── types ────────────────────────────────────────────────────────────────────

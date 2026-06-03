@@ -1,5 +1,4 @@
 import type {
-  PoplogEpisode,
   PoplogSeason,
 } from "@/server/types/season";
 

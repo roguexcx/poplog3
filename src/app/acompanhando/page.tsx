@@ -195,7 +195,7 @@ export default function AcompanhandoPage() {
 
   const [heroItems, setHeroItems] = useState<ScoredItem[]>([]);
   const [isHeroLoading, setIsHeroLoading] = useState(true);
-  const [heroError, setHeroError] = useState<string | null>(null);
+  const [, setHeroError] = useState<string | null>(null);
 
   const [newEpisodeItems, setNewEpisodeItems] = useState<NewEpisodeItem[]>([]);
   const [isNewEpisodesLoading, setIsNewEpisodesLoading] = useState(true);

@@ -36,18 +36,6 @@ function serializeError(err: unknown): string {
   return parts.length > 0 ? parts.join(" | ") : JSON.stringify(err);
 }
 
-/**
- * Códigos Postgres que indicam tabela inexistente (migration não aplicada).
- * Silencia o erro — a página renderiza sem dados de rating.
- */
-function isTableMissingError(err: unknown): boolean {
-  const e = err as Record<string, unknown> | null;
-  if (!e) return false;
-  if (e["code"] === "42P01") return true;
-  const msg = String(e["message"] ?? "").toLowerCase();
-  return msg.includes("does not exist") || msg.includes("relation");
-}
-
 type AggregateInput = {
   mediaType: RatingMediaType;
   tmdbId: number;

@@ -40,10 +40,6 @@ export type ToggleEpisodeInput = {
   runtimeMinutes?: number | null;
 };
 
-function episodeKey(season: number, episode: number): EpisodeKey {
-  return `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}` as EpisodeKey;
-}
-
 async function getLocalEpisodeProgressService() {
   return import("@/server/local-services/episode-progress-local.service");
 }

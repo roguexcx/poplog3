@@ -77,16 +77,6 @@ type TmdbPage<T> = {
   results: T[];
 };
 
-type LibraryRow = {
-  tmdb_id: number;
-  media_type: MediaType;
-  status: string | null;
-  computed_state: string | null;
-  best_provider_name: string | null;
-  best_provider_type: string | null;
-  best_provider_logo: string | null;
-};
-
 type AvailabilityRow = {
   tmdb_id: number;
   media_type: MediaType;
@@ -94,12 +84,6 @@ type AvailabilityRow = {
   provider_logo_path: string | null;
   availability_type: string | null;
   tmdb_provider_id: number | null;
-};
-
-type RecentDrawRow = {
-  tmdb_id: number;
-  media_type: MediaType;
-  created_at: string;
 };
 
 const INTENSE_GENRES = new Set([18, 80, 53, 27, 9648, 10752]);
@@ -178,10 +162,6 @@ function normalizeProviderType(type?: string | null) {
 
 function dateOnly(value: Date | null | undefined): string | null {
   return value ? value.toISOString().slice(0, 10) : null;
-}
-
-function numericJsonArray(value: unknown): number[] {
-  return Array.isArray(value) ? value.filter((item): item is number => typeof item === "number") : [];
 }
 
 function availabilityScore(row: AvailabilityRow, favoriteProviderIds: Set<string>) {

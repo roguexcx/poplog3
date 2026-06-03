@@ -176,7 +176,6 @@ function WatchlistCard({
   const mainProvider     = flatrateProvider ?? rentProvider ?? buyProvider ?? null;
   const providerTypeLabel = flatrateProvider ? null : rentProvider ? "Alugar" : buyProvider ? "Comprar" : null;
   const badge        = STATUS_BADGE[item.stream_status];
-  const context      = pickRandom(item.context_pool);
   const isMovie      = item.media_type === "movie";
   const THIS_YEAR    = String(new Date().getFullYear());
   const showYear     = item.year && item.year !== THIS_YEAR;

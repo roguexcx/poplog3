@@ -218,18 +218,6 @@ const RELIGIOUS_PREMIUM_KEYWORDS = new Set<string>([
   "supernatural", "faith", "spirituality",
 ]);
 
-const LOCAL_FACTUAL_KEYWORDS = new Set<string>([
-  "home renovation", "home improvement", "house hunting", "real estate",
-  "property", "interior design", "fixer upper", "home makeover",
-  "cabin restoration", "house flipping", "regional cuisine", "local food",
-  "cooking show", "food travel", "restaurant", "street food",
-  "chef competition", "travel", "railway", "train journey", "road trip",
-  "local tourism", "countryside", "rural life", "village",
-  "storm chasing", "extreme weather", "tornado", "weather",
-  "wildlife", "fishing", "hunting", "outdoor", "lifestyle",
-  "gardening", "crafts", "sewing", "baking", "slow television", "wellness",
-]);
-
 const KIDS_KEYWORDS = new Set<string>([
   "preschool", "children", "kids", "toddler", "animated series for children",
   "educational children", "children's animation", "puppet show",
@@ -285,18 +273,6 @@ function hasGlobalNetwork(networks: Network[] | null | undefined): boolean {
 // Usado nos blocos de reality e documentary — broadcast (NBC, BBC, CBS…) não basta.
 function hasStreamingGlobal(networks: Network[] | null | undefined): boolean {
   return networkIds(networks).some((id) => STREAMING_GLOBAL_IDS.has(id));
-}
-
-// Escudo forte excluindo serviços freemium/AVOD.
-// Usado no bloco de reality — Amazon Freevee (Tribunal Justice) não deve escudar reality.
-// Uma série com Prime Video (1024) + Amazon Freevee (5865) passa normalmente porque
-// tem o serviço-pai. Uma com APENAS Freevee não passa.
-function hasStreamingGlobalNonFreemium(networks: Network[] | null | undefined): boolean {
-  const ids = networkIds(networks);
-  const streamingIds = ids.filter((id) => STREAMING_GLOBAL_IDS.has(id));
-  if (streamingIds.length === 0) return false;
-  // Todos os streaming IDs presentes são apenas freemium addons → não conta
-  return streamingIds.some((id) => !FREEMIUM_ADDON_IDS.has(id));
 }
 
 function hasLocalNicheNetwork(networks: Network[] | null | undefined): boolean {

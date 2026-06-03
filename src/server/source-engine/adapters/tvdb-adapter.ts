@@ -14,7 +14,6 @@
 import { tvdbGet } from "@/server/api-clients/tvdb/client";
 import type {
   TvdbSeriesExtended,
-  TvdbSeasonExtended,
   TvdbEpisode,
   TvdbCharacter,
   TvdbSeason,
@@ -97,12 +96,6 @@ function mapTvdbStatus(status?: TvdbSeriesExtended["status"]): string | undefine
     "Pilot Ordered": "pilot",
   };
   return map[status.name] ?? status.name.toLowerCase();
-}
-
-function resolveShowId(params: GetTitleParams | GetSeasonsParams | GetEpisodesParams): string | null {
-  if ("tvdbId" in params && params.tvdbId) return String(params.tvdbId);
-  if ("imdbId" in params && params.imdbId) return `remoteId:${params.imdbId}`;
-  return null;
 }
 
 // ─── Adapter ──────────────────────────────────────────────────────────────────

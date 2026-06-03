@@ -104,15 +104,6 @@ const AGENDA_REPEAT_PENALTY = 0.50;
 /** Limite de itens de um mesmo provider antes de penalizar. */
 const PROVIDER_DIVERSITY_THRESHOLD = 3;
 
-/** Limite de itens de um mesmo gênero antes de penalizar. */
-const GENRE_DIVERSITY_THRESHOLD = 4;
-
-/** Limite de itens de um mesmo idioma antes de penalizar. */
-const LANGUAGE_DIVERSITY_THRESHOLD = 5;
-
-/** Limite de itens de uma mesma franquia antes de penalizar. */
-const FRANCHISE_DIVERSITY_THRESHOLD = 2;
-
 /** Fator de penalidade de diversidade por excedente. */
 const DIVERSITY_PENALTY_FACTOR = 0.15;
 

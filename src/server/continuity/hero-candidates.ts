@@ -98,7 +98,6 @@ const HERO_CONTINUITY_RATIO = 0.7;
 const HERO_DISCOVERY_RATIO = 0.2;
 const HERO_SURPRISE_RATIO = 0.1;
 
-const ACTIVE_LIBRARY_STATUSES = ["watching", "watchlist", "paused"];
 const BLOCKED_LIBRARY_STATUSES = [
   "watched",
   "finished",
@@ -157,10 +156,6 @@ function resolveRecentActivityBoost(
     activityAt,
     daysSinceActivity,
   };
-}
-
-function isWatchlistLike(status?: string | null): boolean {
-  return status === "watchlist" || status === "paused";
 }
 
 function isContinuityContext(context: ContinuityContext): boolean {
@@ -384,7 +379,6 @@ function chooseBestAvailability(
   rows: AvailabilityRow[],
   favoriteProviderIds: string[],
   region: "BR" | "US",
-  tmdbId: number,
 ): ContinuityAvailability | null {
 
   const favoriteSet = new Set(
@@ -1278,7 +1272,6 @@ async function getLocalAvailabilityMap(input: {
         grouped.get(tmdbId) ?? [],
         input.favoriteProviderIds,
         input.region,
-        tmdbId,
       ),
     );
   }

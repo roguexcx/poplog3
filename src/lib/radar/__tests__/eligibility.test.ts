@@ -10,8 +10,6 @@
 import { classifyRadarEligibility } from "../eligibility";
 import type { EligibilityInput } from "../eligibility";
 
-type MinimalInput = Partial<EligibilityInput> & { title: string; category: EligibilityInput["category"] };
-
 // ---------------------------------------------------------------------------
 // Shared metadata profiles
 // ---------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useState } from "react";
-import { Archive, BarChart2, RefreshCw, TrendingDown, TrendingUp, Zap } from "lucide-react";
+import { Archive, RefreshCw, TrendingDown, TrendingUp, Zap } from "lucide-react";
 import { AdminCard, AdminFeedback } from "../_components";
 
 // ─── Types ────────────────────────────────────────────────────────────────────

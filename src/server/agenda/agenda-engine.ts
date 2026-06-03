@@ -1,4 +1,3 @@
-import type { LeavingItem } from "@/app/api/poplog3/agenda/leaving-soon/route";
 import type { NewEpisodeItem } from "@/app/api/poplog3/continuity/new-episodes/route";
 import type { UpcomingEpisodeItem } from "@/app/api/poplog3/continuity/upcoming-episodes/route";
 import { tmdbFetch } from "@/server/api-clients/tmdb/client";
@@ -23,7 +22,6 @@ import type {
   AgendaEvent,
   AgendaEventType,
   AgendaV2CompatResponse,
-  DateRange,
   LegacyAgendaMovie,
   LegacyAgendaTv,
 } from "@/server/agenda/types";
@@ -59,13 +57,6 @@ type AgendaEngineOptions = {
 
 const DAY_MS = 86_400_000;
 const WITHOUT_TALK = "10767,10763";
-
-const PROVIDERS = [
-  { id: 8, name: "Netflix", logo: null, type: "flatrate" },
-  { id: 119, name: "Prime Video", logo: null, type: "flatrate" },
-  { id: 337, name: "Disney+", logo: null, type: "flatrate" },
-  { id: 1899, name: "Max", logo: null, type: "flatrate" },
-];
 
 function dateAdd(days: number, base = new Date()): string {
   return new Date(base.getTime() + days * DAY_MS).toISOString().slice(0, 10);
@@ -151,56 +142,6 @@ function eventFromLegacyMovie(
         ? "hero"
         : popularityToVisualWeight(movie.popularity, "movie"),
     score: baseScore + normalizeTmdbPopularity(movie.popularity) * 40 + movie.vote_average,
-  };
-}
-
-function eventFromLegacyTv(
-  tv: LegacyAgendaTv,
-  type: AgendaEventType,
-  baseScore: number,
-): AgendaEvent {
-  const airDate = tv.first_air_date || null;
-  return {
-    id: `${type}-tv-${tv.id}`,
-    type,
-    tmdbId: tv.id,
-    mediaType: "tv",
-    title: tv.title,
-    posterPath: tv.poster_path,
-    backdropPath: tv.backdrop_path,
-    layer: classifyAirDate(airDate),
-    airDate,
-    daysUntil: airDate ? daysBetweenDates(airDate) : null,
-    visualWeight: popularityToVisualWeight(tv.popularity, "tv"),
-    score: baseScore + normalizeTmdbPopularity(tv.popularity) * 40 + tv.vote_average,
-  };
-}
-
-function eventFromDiscover(
-  item: DiscoverMediaItem,
-  mediaType: "movie" | "tv",
-  type: AgendaEventType,
-  baseScore: number,
-  provider?: AgendaEvent["provider"],
-): AgendaEvent {
-  const title = mediaType === "movie" ? item.title : item.name;
-  const airDate =
-    mediaType === "movie" ? item.release_date ?? null : item.first_air_date ?? null;
-
-  return {
-    id: `${type}-${mediaType}-${item.id}${provider ? `-${provider.name}` : ""}`,
-    type,
-    tmdbId: item.id,
-    mediaType,
-    title: title ?? `Título ${item.id}`,
-    posterPath: item.poster_path,
-    backdropPath: item.backdrop_path,
-    layer: classifyAirDate(airDate),
-    airDate,
-    daysUntil: airDate ? daysBetweenDates(airDate) : null,
-    provider,
-    visualWeight: popularityToVisualWeight(item.popularity, mediaType),
-    score: baseScore + normalizeTmdbPopularity(item.popularity) * 40 + item.vote_average,
   };
 }
 
@@ -722,9 +663,8 @@ export class AgendaEngine {
     userId: string | null,
     options: AgendaEngineOptions = {},
   ): Promise<AgendaV2CompatResponse> {
-    const region = options.region ?? "BR";
+    const region = (options.region ?? "BR") as "BR" | "US";
     const now = new Date();
-    const weekRange: DateRange = { start: dateAdd(0, now), end: dateAdd(7, now) };
 
     const [
       legacy,
@@ -738,7 +678,7 @@ export class AgendaEngine {
     ] = await Promise.all([
       fetchLegacyAgenda(),
       fetchAvailabilityAgendaEvents({
-        country: "BR",
+        country: region,
         availabilityTypes: ["streaming", "subscription", "free", "ads"],
         eventType: "movie_streaming",
         baseScore: 70,

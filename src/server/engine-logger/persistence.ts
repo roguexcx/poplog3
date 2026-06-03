@@ -1,7 +1,5 @@
-import type { ApiName, EngineLogEntry, EngineStats } from "./types";
+import type { EngineLogEntry, EngineStats } from "./types";
 
-const API_NAMES: ApiName[] = ["tmdb", "omdb", "watchmode", "motn", "balloonerismm", "tvdb"];
-const PERSISTENCE_WINDOW_HOURS = 24;
 let persistWarningMutedUntil = 0;
 
 type PersistentSnapshot = {

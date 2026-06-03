@@ -1,4 +1,4 @@
-import { formatError, logOnce } from "@/server/logging/log-control";
+import { logOnce } from "@/server/logging/log-control";
 
 type MediaType = "movie" | "tv";
 
