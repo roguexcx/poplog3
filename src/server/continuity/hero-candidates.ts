@@ -1,5 +1,3 @@
-import { supabaseAdmin } from "@/server/supabase/admin";
-import { isLocalHeroEnabled } from "@/server/runtime/local-db-flags";
 import {
   getUserWatchingSeries,
   type UserWatchingSeriesRow,
@@ -1040,95 +1038,8 @@ function applyHeroDiversity(
   });
 }
 
-async function getAvailabilityMap(input: {
-  tmdbIds: number[];
-  mediaType: MediaType;
-  region: "BR" | "US";
-  favoriteProviderIds: string[];
-}) {
-  const map = new Map<number, ContinuityAvailability | null>();
-  if (input.tmdbIds.length === 0) return map;
-
-  const { data, error } = await supabaseAdmin
-    .from("poplog3_title_availability")
-    .select("*")
-    .eq("media_type", input.mediaType)
-    .eq("country", input.region)
-    .in("tmdb_id", input.tmdbIds);
-
-  if (error) {
-    console.error(
-      "[continuity/hero-candidates] availability query failed",
-      error,
-    );
-    return map;
-  }
-
-  const grouped = new Map<number, AvailabilityRow[]>();
-  for (const row of (data ?? []) as AvailabilityRow[]) {
-    const current = grouped.get(row.tmdb_id) ?? [];
-    current.push(row);
-    grouped.set(row.tmdb_id, current);
-  }
-
-  for (const tmdbId of input.tmdbIds) {
-    map.set(
-      tmdbId,
-      chooseBestAvailability(
-        grouped.get(tmdbId) ?? [],
-        input.favoriteProviderIds,
-        input.region,
-        tmdbId,
-      ),
-    );
-  }
-
-  return map;
-}
-
-async function getTitleMap(mediaType: MediaType, tmdbIds: number[]) {
-  const map = new Map<number, TitleRow>();
-  if (tmdbIds.length === 0) return map;
-
-  const { data, error } = await supabaseAdmin
-    .from("poplog3_titles")
-    .select(
-      [
-        "tmdb_id",
-        "media_type",
-        "title",
-        "overview",
-        "poster_path",
-        "backdrop_path",
-        "release_date",
-        "first_air_date",
-        "runtime",
-        "number_of_episodes",
-        "genres",
-        "tmdb_payload",
-      ].join(", "),
-    )
-    .eq("media_type", mediaType)
-    .in("tmdb_id", tmdbIds);
-
-  if (error) {
-    console.error("[continuity/hero-candidates] titles query failed", error);
-    return map;
-  }
-
-  for (const row of (data ?? []) as unknown as TitleRow[]) {
-    if (row.media_type === mediaType || !map.has(row.tmdb_id)) {
-      map.set(row.tmdb_id, row);
-    }
-  }
-
-  return map;
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // FAST PATH: lê da tabela materializada user_title_state (1 query).
-// Retorna null se o usuário não tiver estado materializado ainda — o caller
-// faz fallback para as queries clássicas (getUserWatchingSeries + userTitles).
 // ─────────────────────────────────────────────────────────────────────────────
 function logoPathFromUrl(url: string | null | undefined): string | null {
   if (!url) return null;
@@ -1137,180 +1048,8 @@ function logoPathFromUrl(url: string | null | undefined): string | null {
   return match?.[1] ?? null;
 }
 
-async function getUserLibraryFromState(
-  userId: string,
-  limit: number,
-  region: "BR" | "US",
-): Promise<{
-  watchingSeries: UserWatchingSeriesRow[];
-  movieUserTitles: UserTitleRow[];
-  tvUserTitles: UserTitleRow[];
-  availabilityByTitle: Map<number, ContinuityAvailability | null>;
-} | null> {
-  const { data, error } = await supabaseAdmin
-    .from("user_title_state")
-    .select(
-      [
-        "tmdb_id",
-        "media_type",
-        "status",
-        "favorite",
-        "liked",
-        "watched_episodes",
-        "aired_episodes",
-        "total_episodes",
-        "next_season",
-        "next_episode",
-        "next_episode_air_date",
-        "last_watched_at",
-        "last_event_at",
-        "created_at",
-        "best_provider_name",
-        "best_provider_type",
-        "best_provider_logo",
-      ].join(", "),
-    )
-    .eq("user_id", userId)
-    .in("status", ["watching", "watchlist"])
-    .order("last_event_at", { ascending: false })
-    .limit(limit);
-
-  if (error || !data || data.length === 0) return null;
-
-  const watchingSeries: UserWatchingSeriesRow[] = [];
-  const tvUserTitles: UserTitleRow[] = [];
-  const movieUserTitles: UserTitleRow[] = [];
-  const availabilityByTitle = new Map<number, ContinuityAvailability | null>();
-
-  for (const row of (data as unknown) as Array<{
-    tmdb_id: number;
-    media_type: string;
-    status: string | null;
-    favorite: boolean | null;
-    liked: boolean | null;
-    watched_episodes: number;
-    aired_episodes: number;
-    total_episodes: number | null;
-    next_season: number | null;
-    next_episode: number | null;
-    next_episode_air_date: string | null;
-    last_watched_at: string | null;
-    last_event_at: string;
-    created_at: string;
-    best_provider_name: string | null;
-    best_provider_type: string | null;
-    best_provider_logo: string | null;
-  }>) {
-    // Reconstrói ContinuityAvailability a partir do estado materializado.
-    // isPreferred = false porque não armazenamos o TMDB provider ID no state —
-    // o scoring de tipo (subscription > free > rent) ainda se aplica corretamente.
-    const avail: ContinuityAvailability | null = row.best_provider_name
-      ? {
-          region,
-          providerName: row.best_provider_name,
-          providerLogoPath: logoPathFromUrl(row.best_provider_logo),
-          providerId: null,
-          type: (row.best_provider_type as ContinuityAvailability["type"]) ?? null,
-          confidence: "tmdb_only",
-          isPreferred: false,
-        }
-      : null;
-
-    availabilityByTitle.set(row.tmdb_id, avail);
-
-    if (row.media_type === "tv") {
-      if (row.watched_episodes > 0) {
-        watchingSeries.push({
-          seriesTmdbId: row.tmdb_id,
-          watchedCount: row.watched_episodes,
-          totalEpisodes: row.total_episodes,
-          airedEpisodes: row.aired_episodes,
-          lastWatchedAt: row.last_watched_at,
-          watchedKeys: [] as EpisodeKey[],
-          nextEpisode:
-            row.next_season !== null && row.next_episode !== null
-              ? {
-                  seasonNumber: row.next_season,
-                  episodeNumber: row.next_episode,
-                  airDate: row.next_episode_air_date,
-                }
-              : null,
-          title: null,
-          posterPath: null,
-          backdropPath: null,
-          mediaStatus: null,
-          inLibraryStatus: row.status,
-        });
-      }
-
-      tvUserTitles.push({
-        tmdb_id: row.tmdb_id,
-        media_type: "tv",
-        status: row.status,
-        favorite: row.favorite,
-        liked: row.liked,
-        created_at: row.created_at,
-        watched_at: row.last_event_at,
-      });
-    } else {
-      movieUserTitles.push({
-        tmdb_id: row.tmdb_id,
-        media_type: "movie",
-        status: row.status,
-        favorite: row.favorite,
-        liked: row.liked,
-        created_at: row.created_at,
-        watched_at: row.last_event_at,
-      });
-    }
-  }
-
-  return { watchingSeries, movieUserTitles, tvUserTitles, availabilityByTitle };
-}
-
-async function getMovieUserTitles(userId: string, limit: number) {
-  const { data, error } = await supabaseAdmin
-    .from("user_titles")
-    .select(
-      "tmdb_id, media_type, status, favorite, liked, created_at, watched_at",
-    )
-    .eq("user_id", userId)
-    .eq("media_type", "movie")
-    .in("status", ACTIVE_LIBRARY_STATUSES)
-    .order("watched_at", { ascending: false })
-    .limit(limit);
-
-  if (error) {
-    console.error("[continuity/hero-candidates] movies query failed", error);
-    return [];
-  }
-  return (data ?? []) as UserTitleRow[];
-}
-
-async function getTvUserTitles(userId: string, limit: number) {
-  const { data, error } = await supabaseAdmin
-    .from("user_titles")
-    .select(
-      "tmdb_id, media_type, status, favorite, liked, created_at, watched_at",
-    )
-    .eq("user_id", userId)
-    .eq("media_type", "tv")
-    .in("status", ACTIVE_LIBRARY_STATUSES)
-    .order("watched_at", { ascending: false })
-    .limit(limit);
-
-  if (error) {
-    console.error(
-      "[continuity/hero-candidates] tv user titles query failed",
-      error,
-    );
-    return [];
-  }
-  return (data ?? []) as UserTitleRow[];
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// LOCAL PATH: funções Prisma que substituem as queries Supabase
+// LOCAL PATH: funções Prisma
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function getLocalUserLibraryFromState(
@@ -1559,12 +1298,9 @@ export async function getHeroCandidates(
   const region = options.region ?? preferences.region;
 
   // Phase 1: fetch user library data + editorial feedbackMap in parallel.
-  // Fast path: 1 query in user_title_state (materialized state) — local or Supabase.
-  // Fallback: classic batch of 3 functions for users without state yet.
+  // Fast path: 1 query in user_title_state (materialized state).
   const [stateData, feedbackMap] = await Promise.all([
-    isLocalHeroEnabled()
-      ? getLocalUserLibraryFromState(userId, 150, region)
-      : getUserLibraryFromState(userId, 150, region),
+    getLocalUserLibraryFromState(userId, 150, region),
     getUserFeedbackMap(userId).catch(() => new Map()),
   ]);
 
@@ -1577,10 +1313,11 @@ export async function getHeroCandidates(
     movieUserTitles = stateData.movieUserTitles;
     tvUserTitles = stateData.tvUserTitles;
   } else {
+    // No materialized state yet — load via episode progress service
     [watchingSeries, movieUserTitles, tvUserTitles] = await Promise.all([
       getUserWatchingSeries(userId, 30),
-      getMovieUserTitles(userId, 60),
-      getTvUserTitles(userId, 60),
+      Promise.resolve([] as UserTitleRow[]),
+      Promise.resolve([] as UserTitleRow[]),
     ]);
   }
 
@@ -1668,8 +1405,7 @@ export async function getHeroCandidates(
 
   // Fase 2: metadata + availability.
   // Fast path: availability já vem do user_title_state (0 queries extras).
-  // Fallback: 2 queries adicionais em poplog3_title_availability.
-  // Local path: usa Prisma para títulos e availability.
+  // Fallback: usa Prisma para títulos e availability.
   let seriesAvailabilityMap: Map<number, ContinuityAvailability | null>;
   let movieAvailabilityMap: Map<number, ContinuityAvailability | null>;
   let seriesTitleMap: Map<number, TitleRow>;
@@ -1677,12 +1413,12 @@ export async function getHeroCandidates(
 
   if (stateData) {
     [seriesTitleMap, movieTitleMap] = await Promise.all([
-      isLocalHeroEnabled() ? getLocalTitleMap("tv", seriesIds) : getTitleMap("tv", seriesIds),
-      isLocalHeroEnabled() ? getLocalTitleMap("movie", movieIds) : getTitleMap("movie", movieIds),
+      getLocalTitleMap("tv", seriesIds),
+      getLocalTitleMap("movie", movieIds),
     ]);
     seriesAvailabilityMap = stateData.availabilityByTitle;
     movieAvailabilityMap = stateData.availabilityByTitle;
-  } else if (isLocalHeroEnabled()) {
+  } else {
     [
       seriesAvailabilityMap,
       movieAvailabilityMap,
@@ -1703,28 +1439,6 @@ export async function getHeroCandidates(
       }),
       getLocalTitleMap("tv", seriesIds),
       getLocalTitleMap("movie", movieIds),
-    ]);
-  } else {
-    [
-      seriesAvailabilityMap,
-      movieAvailabilityMap,
-      seriesTitleMap,
-      movieTitleMap,
-    ] = await Promise.all([
-      getAvailabilityMap({
-        tmdbIds: seriesIds,
-        mediaType: "tv",
-        region,
-        favoriteProviderIds: preferences.favoriteProviderIds,
-      }),
-      getAvailabilityMap({
-        tmdbIds: movieIds,
-        mediaType: "movie",
-        region,
-        favoriteProviderIds: preferences.favoriteProviderIds,
-      }),
-      getTitleMap("tv", seriesIds),
-      getTitleMap("movie", movieIds),
     ]);
   }
 

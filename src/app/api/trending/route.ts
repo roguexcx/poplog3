@@ -8,7 +8,6 @@ import {
   formatRuntimeLabel,
 } from "@/lib/domain-labels";
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
-import { supabaseAdmin } from "@/server/supabase/admin";
 import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { getUserFeedbackMap } from "@/lib/personalization/feedback";
@@ -139,18 +138,8 @@ export async function GET() {
     );
     markStage(perf, stageRef, "normalization");
 
-    const tmdbIds = titles.map((title) => title.tmdb_id);
-    const { data: cachedRows } = await withTimeout(
-      (async (): Promise<{ data: unknown[] | null }> => {
-        if (tmdbIds.length === 0) return { data: [] };
-        return supabaseAdmin
-          .from("poplog3_titles")
-          .select("tmdb_id, media_type, runtime, episode_run_time")
-          .in("tmdb_id", tmdbIds);
-      })(),
-      TRENDING_DB_TIMEOUT_MS,
-      { data: [] },
-    );
+    // Runtime data from DB — not yet migrated to Prisma, skip gracefully
+    const cachedRows: unknown[] = [];
 
     type CachedRuntimeRow = {
       tmdb_id: number;
@@ -160,7 +149,7 @@ export async function GET() {
     };
 
     const runtimeMap = new Map(
-      ((cachedRows ?? []) as CachedRuntimeRow[]).map((row) => [
+      (cachedRows as CachedRuntimeRow[]).map((row) => [
         `${row.media_type}-${row.tmdb_id}`,
         row,
       ])

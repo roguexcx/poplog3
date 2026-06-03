@@ -22,7 +22,6 @@ import {
 } from "@/lib/ics-engine";
 import type { IcsSeriesGroup, IcsEngineStats, MovieGroup, CinemaReleaseGroup } from "@/lib/ics-engine";
 import { enrichSeriesGroups } from "@/lib/ics-enricher";
-import { isLocalCacheEnabled } from "@/server/runtime/local-db-flags";
 import { refineCategoryFromTmdb } from "@/lib/radar/categories";
 import { classifyRealityBySignals } from "@/lib/radar/reality-classifier";
 import { applyRetrofill } from "@/lib/radar/tmdb-retrofill";
@@ -116,11 +115,6 @@ function radarDebugTitle(data: {
 function radarFilterLog(title: string, reason: string) {
   if (!DEBUG_RADAR && !shouldDebugTitle(title)) return;
   console.log(`[radar-filter] blocked title="${title}" reason="${reason}"`);
-}
-
-async function getSupabaseAdmin() {
-  const { supabaseAdmin } = await import("@/server/supabase/admin");
-  return supabaseAdmin;
 }
 
 export interface RadarSections {
@@ -385,64 +379,24 @@ async function readCache(): Promise<{ payload: IcsAgendaResponse; cachedAt: stri
       };
     }
 
-    if (isLocalCacheEnabled()) {
-      try {
-        const local = await import("@/server/local-services/ics-agenda-cache-local.service");
-        const cached = await local.readCache<IcsAgendaResponse>({
-          id: CACHE_ID,
-          ttlHours: CACHE_TTL_H,
-          cacheVersion: CACHE_SCHEMA_VERSION,
-        });
+    const local = await import("@/server/local-services/ics-agenda-cache-local.service");
+    const cached = await local.readCache<IcsAgendaResponse>({
+      id: CACHE_ID,
+      ttlHours: CACHE_TTL_H,
+      cacheVersion: CACHE_SCHEMA_VERSION,
+    });
 
-        if (cached) {
-          console.log("[ICS Agenda] local cache hit");
-          memoryCache = {
-            payload: cached.payload,
-            cachedAt: cached.cachedAt,
-            expiresAt: Date.now() + MEMORY_CACHE_TTL_MS,
-          };
-          return cached;
-        }
-
-        return null;
-      } catch (err) {
-        console.warn("[ICS Agenda] erro ao ler cache local, tentando Supabase:", err);
-      }
+    if (cached) {
+      console.log("[ICS Agenda] local cache hit");
+      memoryCache = {
+        payload: cached.payload,
+        cachedAt: cached.cachedAt,
+        expiresAt: Date.now() + MEMORY_CACHE_TTL_MS,
+      };
+      return cached;
     }
 
-    const supabaseAdmin = await getSupabaseAdmin();
-    const { data, error } = await supabaseAdmin
-      .from("ics_agenda_cache")
-      .select("payload, cached_at")
-      .eq("id", CACHE_ID)
-      .single();
-
-    if (error || !data) return null;
-
-    const cachedAt = new Date(data.cached_at as string);
-    const ageHours = (Date.now() - cachedAt.getTime()) / 3_600_000;
-    const payload = data.payload as unknown as IcsAgendaResponse;
-
-    if (payload.cacheVersion !== CACHE_SCHEMA_VERSION) {
-      console.log("[ICS Agenda] cache schema antigo — reconstruindo");
-      return null;
-    }
-
-    if (ageHours >= CACHE_TTL_H) {
-      console.log(`[ICS Agenda] cache stale (${ageHours.toFixed(1)}h) — reconstruindo`);
-      return null;
-    }
-
-    console.log(`[ICS Agenda] cache hit (${ageHours.toFixed(1)}h atras)`);
-    memoryCache = {
-      payload,
-      cachedAt: cachedAt.toISOString(),
-      expiresAt: Date.now() + MEMORY_CACHE_TTL_MS,
-    };
-    return {
-      payload,
-      cachedAt: cachedAt.toISOString(),
-    };
+    return null;
   } catch (err) {
     console.warn("[ICS Agenda] erro ao ler cache:", err);
     return null;
@@ -452,45 +406,21 @@ async function readCache(): Promise<{ payload: IcsAgendaResponse; cachedAt: stri
 async function writeCache(payload: IcsAgendaResponse): Promise<void> {
   try {
     const cachedAt = new Date().toISOString();
-    if (isLocalCacheEnabled()) {
-      try {
-        const local = await import("@/server/local-services/ics-agenda-cache-local.service");
-        const ok = await local.writeCache(payload, {
-          id: CACHE_ID,
-          cachedAt: new Date(cachedAt),
-        });
+    const local = await import("@/server/local-services/ics-agenda-cache-local.service");
+    const ok = await local.writeCache(payload, {
+      id: CACHE_ID,
+      cachedAt: new Date(cachedAt),
+    });
 
-        if (ok) {
-          memoryCache = {
-            payload,
-            cachedAt,
-            expiresAt: Date.now() + MEMORY_CACHE_TTL_MS,
-          };
-          console.log("[ICS Agenda] cache salvo no MySQL local");
-          return;
-        }
-
-        console.warn("[ICS Agenda] cache local recusou gravacao; tentando Supabase");
-      } catch (err) {
-        console.warn("[ICS Agenda] erro ao salvar cache local, tentando Supabase:", err);
-      }
-    }
-
-    const supabaseAdmin = await getSupabaseAdmin();
-    const { error } = await supabaseAdmin
-      .from("ics_agenda_cache")
-      .upsert(
-        { id: CACHE_ID, payload: payload as unknown as Record<string, unknown>, cached_at: cachedAt },
-        { onConflict: "id" },
-      );
-    if (error) console.warn("[ICS Agenda] erro ao salvar cache:", error.message);
-    else {
+    if (ok) {
       memoryCache = {
         payload,
         cachedAt,
         expiresAt: Date.now() + MEMORY_CACHE_TTL_MS,
       };
-      console.log("[ICS Agenda] cache salvo no Supabase");
+      console.log("[ICS Agenda] cache salvo no MySQL local");
+    } else {
+      console.warn("[ICS Agenda] cache local recusou gravacao");
     }
   } catch (err) {
     console.warn("[ICS Agenda] erro ao salvar cache:", err);

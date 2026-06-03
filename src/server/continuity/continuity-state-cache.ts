@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "@/server/supabase/admin";
+import { listUserTitleStates } from "@/server/repositories";
 
 export type ContinuityStateRow = {
   tmdb_id: number;
@@ -49,43 +49,40 @@ export async function getContinuityStateRows(
   pruneStateCache();
 
   const promise = (async () => {
-    const { data, error } = await supabaseAdmin
-      .from("user_title_state")
-      .select(
-        [
-          "tmdb_id",
-          "media_type",
-          "status",
-          "computed_state",
-          "watched_episodes",
-          "aired_episodes",
-          "total_episodes",
-          "progress_pct",
-          "next_season",
-          "next_episode",
-          "next_episode_air_date",
-          "last_watched_at",
-          "watched_keys",
-          "best_provider_name",
-          "best_provider_type",
-          "best_provider_logo",
-          "last_event_at",
-        ].join(", "),
-      )
-      .eq("user_id", userId)
-      .order("last_event_at", { ascending: false })
-      .limit(500);
+    const result = await listUserTitleStates({ userId, limit: 500 });
 
-      if (error) {
-        console.error("[continuity-state-cache] user_title_state query failed", {
-          message: error.message,
-          code: error.code,
-          details: error.details,
-        });
-        return [];
-      }
+    if (!result.ok) {
+      console.error("[continuity-state-cache] user_title_state query failed", {
+        message: result.error,
+      });
+      return [];
+    }
 
-      return (data ?? []) as unknown as ContinuityStateRow[];
+    return result.data.map((row) => ({
+      tmdb_id: row.tmdbId,
+      media_type: row.mediaType as "tv" | "movie",
+      status: row.status ?? null,
+      computed_state: row.computedState ?? null,
+      watched_episodes: row.watchedEpisodes,
+      aired_episodes: row.airedEpisodes,
+      total_episodes: row.totalEpisodes ?? null,
+      progress_pct: row.progressPct,
+      next_season: row.nextSeason ?? null,
+      next_episode: row.nextEpisode ?? null,
+      next_episode_air_date: row.nextEpisodeAirDate instanceof Date
+        ? row.nextEpisodeAirDate.toISOString().slice(0, 10)
+        : row.nextEpisodeAirDate ?? null,
+      last_watched_at: row.lastWatchedAt instanceof Date
+        ? row.lastWatchedAt.toISOString()
+        : row.lastWatchedAt ?? null,
+      watched_keys: Array.isArray(row.watchedKeys) ? row.watchedKeys as string[] : null,
+      best_provider_name: row.bestProviderName ?? null,
+      best_provider_type: row.bestProviderType ?? null,
+      best_provider_logo: row.bestProviderLogo ?? null,
+      last_event_at: row.lastEventAt instanceof Date
+        ? row.lastEventAt.toISOString()
+        : new Date().toISOString(),
+    })) as ContinuityStateRow[];
   })();
 
   stateCache.set(userId, {

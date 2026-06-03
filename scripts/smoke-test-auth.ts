@@ -39,8 +39,6 @@ async function main() {
     authSecret: process.env.AUTH_SECRET,
     googleId: process.env.AUTH_GOOGLE_ID,
     googleSecret: process.env.AUTH_GOOGLE_SECRET,
-    supabaseUrl: process.env.NEXT_PUBLIC_SUPABASE_URL,
-    supabaseAnon: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
   };
 
   setEnv("POPLOG_LOCAL_AUTH_ENABLED", "true");
@@ -66,20 +64,14 @@ async function main() {
   setEnv("AUTH_SECRET", original.authSecret ?? "auth-smoke-secret-auth-smoke-secret");
   setEnv("AUTH_GOOGLE_ID", original.googleId ?? "auth-smoke-google-id");
   setEnv("AUTH_GOOGLE_SECRET", original.googleSecret ?? "auth-smoke-google-secret");
-  setEnv("NEXT_PUBLIC_SUPABASE_URL", "");
-  setEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", "");
 
   assert("Auth.js helper identifica configuracao quando envs existem", isAuthJsConfigured());
 
   const currentWithoutSession = await getCurrentUser();
   assert(
-    "getCurrentUser() lida com Auth.js sem request/sessao e retorna null sem Supabase",
+    "getCurrentUser() retorna null sem session Auth.js ativa (Supabase removido)",
     currentWithoutSession === null,
   );
-
-  setEnv("NEXT_PUBLIC_SUPABASE_URL", original.supabaseUrl);
-  setEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", original.supabaseAnon);
-  assert("fallback Supabase permanece configuravel por env", true);
 
   await db.user.deleteMany({ where: { id: "local-user-auth-smoke" } });
   await db.$disconnect();
@@ -89,8 +81,6 @@ async function main() {
   setEnv("AUTH_SECRET", original.authSecret);
   setEnv("AUTH_GOOGLE_ID", original.googleId);
   setEnv("AUTH_GOOGLE_SECRET", original.googleSecret);
-  setEnv("NEXT_PUBLIC_SUPABASE_URL", original.supabaseUrl);
-  setEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY", original.supabaseAnon);
 
   console.log(`\n[smoke:auth] Resultado: ${result.passed} passed, ${result.failed} failed\n`);
   if (result.failed > 0) process.exit(1);

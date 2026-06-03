@@ -8,15 +8,14 @@ export async function GET(request: Request) {
     ok: true,
     service: "poplog3",
     env: {
-  tmdb: Boolean(process.env.TMDB_ACCESS_TOKEN),
-  omdb: Boolean(process.env.OMDB_API_KEY),
-  watchmode: Boolean(process.env.WATCHMODE_API_KEY),
-  movieofthenight: Boolean(process.env.MOVIEOFTHENIGHT_API_KEY),
-  supabaseUrl: Boolean(process.env.NEXT_PUBLIC_SUPABASE_URL),
-  supabaseAnonKey: Boolean(process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY),
-  supabaseServiceRole: Boolean(
-    process.env.SUPABASE_SERVICE_ROLE_KEY
-  ),
-},
+      tmdb: Boolean(process.env.TMDB_ACCESS_TOKEN),
+      omdb: Boolean(process.env.OMDB_API_KEY),
+      watchmode: Boolean(process.env.WATCHMODE_API_KEY),
+      movieofthenight: Boolean(process.env.MOVIEOFTHENIGHT_API_KEY),
+      databaseUrl: Boolean(process.env.DATABASE_URL),
+      authSecret: Boolean(process.env.AUTH_SECRET),
+      authGoogleId: Boolean(process.env.AUTH_GOOGLE_ID),
+      localAuthEnabled: process.env.POPLOG_LOCAL_AUTH_ENABLED === "true",
+    },
   });
 }

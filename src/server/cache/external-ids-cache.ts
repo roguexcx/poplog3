@@ -1,5 +1,3 @@
-import { isLocalCacheEnabled } from "@/server/runtime/local-db-flags";
-
 type MediaType = "movie" | "tv";
 
 export type ExternalIdsRow = {
@@ -12,38 +10,12 @@ export type ExternalIdsRow = {
   motn_id: string | null;
 };
 
-async function getSupabaseAdmin() {
-  const { supabaseAdmin } = await import("@/server/supabase/admin");
-  return supabaseAdmin;
-}
-
 export async function getExternalIds(
   mediaType: MediaType,
   tmdbId: number
 ): Promise<ExternalIdsRow | null> {
-  if (isLocalCacheEnabled()) {
-    try {
-      const local = await import("@/server/local-services/external-ids-cache-local.service");
-      return await local.getExternalIds(mediaType, tmdbId);
-    } catch (err) {
-      console.warn("[external-ids-cache/get] local cache failed, falling back to Supabase:", err);
-    }
-  }
-
-  const supabaseAdmin = await getSupabaseAdmin();
-  const { data, error } = await supabaseAdmin
-    .from("title_external_ids")
-    .select("tmdb_id, media_type, imdb_id, tvdb_id, trakt_id, watchmode_id, motn_id")
-    .eq("media_type", mediaType)
-    .eq("tmdb_id", tmdbId)
-    .maybeSingle();
-
-  if (error) {
-    console.error("[external-ids-cache/get]", error);
-    return null;
-  }
-
-  return data as ExternalIdsRow | null;
+  const local = await import("@/server/local-services/external-ids-cache-local.service");
+  return await local.getExternalIds(mediaType, tmdbId);
 }
 
 export type UpsertExternalIdsInput = {
@@ -62,35 +34,6 @@ export type UpsertExternalIdsInput = {
 export async function upsertExternalIds(
   input: UpsertExternalIdsInput
 ): Promise<void> {
-  if (isLocalCacheEnabled()) {
-    try {
-      const local = await import("@/server/local-services/external-ids-cache-local.service");
-      await local.upsertExternalIds(input);
-      return;
-    } catch (err) {
-      console.warn("[external-ids-cache/upsert] local cache failed, falling back to Supabase:", err);
-    }
-  }
-
-  const existing = await getExternalIds(input.mediaType, input.tmdbId);
-
-  const merged = {
-    tmdb_id: input.tmdbId,
-    media_type: input.mediaType,
-    imdb_id: input.imdbId ?? existing?.imdb_id ?? null,
-    tvdb_id: input.tvdbId ?? existing?.tvdb_id ?? null,
-    trakt_id: input.traktId ?? existing?.trakt_id ?? null,
-    watchmode_id: input.watchmodeId ?? existing?.watchmode_id ?? null,
-    motn_id: input.motnId ?? existing?.motn_id ?? null,
-    updated_at: new Date().toISOString(),
-  };
-
-  const supabaseAdmin = await getSupabaseAdmin();
-  const { error } = await supabaseAdmin
-    .from("title_external_ids")
-    .upsert(merged, { onConflict: "tmdb_id,media_type" });
-
-  if (error) {
-    console.error("[external-ids-cache/upsert]", error);
-  }
+  const local = await import("@/server/local-services/external-ids-cache-local.service");
+  await local.upsertExternalIds(input);
 }

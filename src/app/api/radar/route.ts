@@ -10,7 +10,6 @@
 // ──────────────────────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from "next/server";
-import { supabaseAdmin } from "@/server/supabase/admin";
 import type { IcsAgendaResponse, RadarSections } from "@/app/api/ics/agenda/route";
 import type { IcsSeriesGroup } from "@/lib/ics-engine";
 import { getCurrentUser } from "@/server/auth/get-current-user";
@@ -18,7 +17,6 @@ import {
   readContinuitySectionCache,
   writeContinuitySectionCache,
 } from "@/server/continuity/continuity-section-cache";
-import { isLocalRadarEnabled } from "@/server/runtime/local-db-flags";
 import { getLocalUserLibraryTmdbIds } from "@/server/local-services/continuity-local.service";
 
 // Nao usar cache do Next.js -- gerenciamos o cache manualmente no Supabase
@@ -57,8 +55,6 @@ export interface RadarResponse {
   };
 }
 
-const CACHE_ID = "main";
-const CACHE_TTL_H = 24;
 const CACHE_SCHEMA_VERSION = 10; // deve ser igual ao de agenda/route.ts
 const RADAR_CACHE_TTL_MS = 10 * 60_000;
 const DEFAULT_REGION = "BR";
@@ -67,7 +63,6 @@ const RADAR_MEMORY_CACHE_TTL_MS = 5 * 60_000;
 
 // Statuses que definem "esta na minha biblioteca"
 // "fridge" excluido — itens pausados nao aparecem no Personalizado
-const LIBRARY_STATUSES = ["watching", "watchlist", "watched"] as const;
 const refreshes = new Map<string, Promise<void>>();
 const generalMemoryCache = new Map<string, { payload: RadarResponse; expiresAt: number }>();
 
@@ -76,37 +71,9 @@ function markStage(perf: Record<string, number>, stageRef: { value: number }, st
   stageRef.value = Date.now();
 }
 
-// ── Le cache Supabase do pipeline ICS ────────────────────────────────────────
-
-async function readIcsCache(): Promise<IcsAgendaResponse | null> {
-  try {
-    const { data, error } = await supabaseAdmin
-      .from("ics_agenda_cache")
-      .select("payload, cached_at")
-      .eq("id", CACHE_ID)
-      .single();
-
-    if (error || !data) return null;
-
-    const cachedAt = new Date(data.cached_at as string);
-    const ageHours = (Date.now() - cachedAt.getTime()) / 3_600_000;
-    if (ageHours >= CACHE_TTL_H) return null;
-
-    const payload = data.payload as unknown as IcsAgendaResponse;
-    if (payload.cacheVersion !== CACHE_SCHEMA_VERSION) return null;
-
-    return payload;
-  } catch {
-    return null;
-  }
-}
-
 // ── Modo Geral: cache ICS ou rebuild ─────────────────────────────────────────
 
 async function buildGeneralPayload(): Promise<IcsAgendaResponse> {
-  const cached = await readIcsCache();
-  if (cached) return { ...cached, fromCache: true };
-
   const origin = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
   const res = await fetch(`${origin}/api/ics/agenda`, {
     cache: "no-store",
@@ -117,58 +84,6 @@ async function buildGeneralPayload(): Promise<IcsAgendaResponse> {
 
   const fresh = await res.json() as IcsAgendaResponse;
   return { ...fresh, fromCache: false };
-}
-
-// ── Busca os tmdb_ids da biblioteca do usuario ────────────────────────────────
-
-interface LibraryIds {
-  tvIds: Set<number>;
-  movieIds: Set<number>;
-}
-
-async function fetchUserLibraryTmdbIds(userId: string): Promise<LibraryIds> {
-  // user_title_state é a fonte primária (materializada, sempre atualizada)
-  const { data: stateData, error: stateError } = await supabaseAdmin
-    .from("user_title_state")
-    .select("tmdb_id, media_type")
-    .eq("user_id", userId)
-    .in("status", LIBRARY_STATUSES);
-
-  if (stateError) {
-    console.error(`[radar/personal] user_title_state error for userId=${userId}:`, stateError);
-  }
-
-  const tvIds = new Set<number>();
-  const movieIds = new Set<number>();
-
-  if (stateData && stateData.length > 0) {
-    for (const row of stateData as Array<{ tmdb_id: number; media_type: string }>) {
-      if (row.media_type === "tv") tvIds.add(row.tmdb_id);
-      else if (row.media_type === "movie") movieIds.add(row.tmdb_id);
-    }
-    console.log(`[radar/personal] library via user_title_state: ${tvIds.size} series, ${movieIds.size} movies (userId=${userId})`);
-    return { tvIds, movieIds };
-  }
-
-  console.log(`[radar/personal] user_title_state vazia/erro para userId=${userId}, tentando user_titles`);
-
-  // Fallback: user_titles
-  const { data: legacyData, error: legacyError } = await supabaseAdmin
-    .from("user_titles")
-    .select("tmdb_id, media_type")
-    .eq("user_id", userId)
-    .in("status", LIBRARY_STATUSES);
-
-  if (legacyError) {
-    console.error(`[radar/personal] user_titles error for userId=${userId}:`, legacyError);
-  }
-
-  for (const row of (legacyData ?? []) as Array<{ tmdb_id: number; media_type: string }>) {
-    if (row.media_type === "tv") tvIds.add(row.tmdb_id);
-    else if (row.media_type === "movie") movieIds.add(row.tmdb_id);
-  }
-  console.log(`[radar/personal] library via user_titles (fallback): ${tvIds.size} series, ${movieIds.size} movies (userId=${userId})`);
-  return { tvIds, movieIds };
 }
 
 // ── Filtra um payload ICS pelos tmdb_ids da biblioteca ───────────────────────
@@ -273,11 +188,9 @@ async function buildPersonalFilteredPayload(userId: string | null): Promise<{
     matchCount: number;
   };
 }> {
-  const libraryFetcher = isLocalRadarEnabled() ? getLocalUserLibraryTmdbIds : fetchUserLibraryTmdbIds;
-
   const [general, library] = await Promise.all([
     buildGeneralPayload(),
-    userId ? libraryFetcher(userId) : Promise.resolve({ tvIds: new Set<number>(), movieIds: new Set<number>() }),
+    userId ? getLocalUserLibraryTmdbIds(userId) : Promise.resolve({ tvIds: new Set<number>(), movieIds: new Set<number>() }),
   ]);
 
   const { tvIds, movieIds } = library;

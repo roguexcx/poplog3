@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentUser } from "@/server/auth/get-current-user";
-import { supabaseAdmin } from "@/server/supabase/admin";
 import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import { applyLegacyBrazilianBonus } from "@/server/agenda/editorial-regional-bonus";
 import { normalizeTmdbPopularity } from "@/lib/score/tmdb-popularity";
 import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
-import { isLocalAgendaEnabled } from "@/server/runtime/local-db-flags";
 import {
   getLocalUserLibraryIds,
   getLocalTitleAvailabilityBatch,
@@ -199,7 +197,7 @@ function normalizeProviderType(type?: string | null) {
   return type;
 }
 
-async function enrichAgendaItemsLocal(input: {
+async function enrichAgendaItems(input: {
   userId: string | null;
   items: EnrichableAgendaItem[];
 }) {
@@ -257,115 +255,6 @@ async function enrichAgendaItemsLocal(input: {
     item.best_provider_logo = providerLogo;
     item.is_preferred_provider = isPreferred;
     item.availability_scope = isPreferred ? "preferred" : isStreaming ? "streaming" : providerName ? "digital" : "none";
-  }
-}
-
-async function enrichAgendaItems(input: {
-  userId: string | null;
-  items: EnrichableAgendaItem[];
-}) {
-  const { userId, items } = input;
-  if (items.length === 0) return;
-
-  const movieIds = Array.from(new Set(items.filter((item) => item.media_type === "movie").map((item) => item.id)));
-  const tvIds = Array.from(new Set(items.filter((item) => item.media_type === "tv").map((item) => item.id)));
-  const preferences = await getUserProviderPreferences();
-  const favoriteProviderIds = new Set(preferences.favoriteProviderIds ?? []);
-  const region = preferences.region ?? "BR";
-
-  const availabilityQueries = [
-    movieIds.length
-      ? supabaseAdmin
-          .from("poplog3_title_availability")
-          .select("tmdb_id, media_type, provider_name, provider_logo_path, availability_type, tmdb_provider_id")
-          .eq("media_type", "movie")
-          .eq("country", region)
-          .in("tmdb_id", movieIds)
-      : Promise.resolve({ data: [], error: null }),
-    tvIds.length
-      ? supabaseAdmin
-          .from("poplog3_title_availability")
-          .select("tmdb_id, media_type, provider_name, provider_logo_path, availability_type, tmdb_provider_id")
-          .eq("media_type", "tv")
-          .eq("country", region)
-          .in("tmdb_id", tvIds)
-      : Promise.resolve({ data: [], error: null }),
-  ] as const;
-
-  const stateQueries = userId
-    ? ([
-        movieIds.length
-          ? supabaseAdmin
-              .from("user_title_state")
-              .select("tmdb_id, media_type, status, computed_state, best_provider_name, best_provider_type, best_provider_logo")
-              .eq("user_id", userId)
-              .eq("media_type", "movie")
-              .in("tmdb_id", movieIds)
-          : Promise.resolve({ data: [], error: null }),
-        tvIds.length
-          ? supabaseAdmin
-              .from("user_title_state")
-              .select("tmdb_id, media_type, status, computed_state, best_provider_name, best_provider_type, best_provider_logo")
-              .eq("user_id", userId)
-              .eq("media_type", "tv")
-              .in("tmdb_id", tvIds)
-          : Promise.resolve({ data: [], error: null }),
-      ] as const)
-    : ([Promise.resolve({ data: [], error: null }), Promise.resolve({ data: [], error: null })] as const);
-
-  const [movieAvailability, tvAvailability, movieStates, tvStates] = await Promise.all([
-    availabilityQueries[0],
-    availabilityQueries[1],
-    stateQueries[0],
-    stateQueries[1],
-  ]);
-
-  const availabilityMap = new Map<string, AvailabilityRow>();
-  for (const row of [
-    ...((movieAvailability.data ?? []) as AvailabilityRow[]),
-    ...((tvAvailability.data ?? []) as AvailabilityRow[]),
-  ]) {
-    const key = `${row.media_type}-${row.tmdb_id}`;
-    const current = availabilityMap.get(key);
-    if (!current || availabilityScore(row, favoriteProviderIds) > availabilityScore(current, favoriteProviderIds)) {
-      availabilityMap.set(key, row);
-    }
-  }
-
-  const stateMap = new Map<string, StateRow>();
-  for (const row of [
-    ...((movieStates.data ?? []) as StateRow[]),
-    ...((tvStates.data ?? []) as StateRow[]),
-  ]) {
-    stateMap.set(`${row.media_type}-${row.tmdb_id}`, row);
-  }
-
-  for (const item of items) {
-    const key = `${item.media_type}-${item.id}`;
-    const state = stateMap.get(key);
-    const availability = availabilityMap.get(key);
-    const providerName = state?.best_provider_name ?? availability?.provider_name ?? null;
-    const providerType = normalizeProviderType(state?.best_provider_type ?? availability?.availability_type ?? null);
-    const providerLogo = state?.best_provider_logo ?? availability?.provider_logo_path ?? null;
-    const isPreferred =
-      availability?.tmdb_provider_id !== null &&
-      availability?.tmdb_provider_id !== undefined &&
-      favoriteProviderIds.has(String(availability.tmdb_provider_id));
-    const isStreaming = STREAMING_TYPES.has(providerType ?? "");
-
-    item.user_status = state?.status ?? null;
-    item.user_computed_state = state?.computed_state ?? null;
-    item.best_provider_name = providerName;
-    item.best_provider_type = providerType;
-    item.best_provider_logo = providerLogo;
-    item.is_preferred_provider = isPreferred;
-    item.availability_scope = isPreferred
-      ? "preferred"
-      : isStreaming
-        ? "streaming"
-        : providerName
-          ? "digital"
-          : "none";
   }
 }
 
@@ -536,28 +425,14 @@ export async function GET() {
       const user = await getCurrentUser();
       if (user) {
         userId = user.id;
-        if (isLocalAgendaEnabled()) {
-          Object.assign(userLibraryIds, await getLocalUserLibraryIds(user.id));
-        } else {
-          const { data } = await supabaseAdmin
-            .from("user_titles")
-            .select("tmdb_id, media_type, status")
-            .eq("user_id", user.id);
-          if (data) {
-            for (const row of data) {
-              userLibraryIds[`${row.media_type}-${row.tmdb_id}`] = row.status;
-            }
-          }
-        }
+        Object.assign(userLibraryIds, await getLocalUserLibraryIds(user.id));
       }
     } catch {
       // auth failure e nao-fatal
     }
 
-    const enrichFn = isLocalAgendaEnabled() ? enrichAgendaItemsLocal : enrichAgendaItems;
-
     try {
-      await enrichFn({
+      await enrichAgendaItems({
         userId,
         items: [
           ...nowPlaying,

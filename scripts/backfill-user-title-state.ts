@@ -1,8 +1,8 @@
 /**
- * Backfill: sincroniza user_title_state a partir de user_titles
+ * Backfill: sincroniza user_title_state a partir de user_titles (Prisma/MySQL)
  *
- * Lê todos os registros de user_titles, compara com user_title_state e
- * chama upsertTitleState() para entradas ausentes ou divergentes.
+ * Lê todos os registros de userTitle, compara com userTitleState e
+ * chama a rota admin para entradas ausentes ou divergentes.
  * Totalmente idempotente — pode ser executado múltiplas vezes sem efeitos colaterais.
  *
  * Uso:
@@ -11,77 +11,47 @@
  *   npx tsx scripts/backfill-user-title-state.ts --limit 100
  *   npx tsx scripts/backfill-user-title-state.ts --user-id abc123
  *
- * Requer: NEXT_PUBLIC_SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY no ambiente.
- * Carrega .env.local automaticamente se existir.
+ * Requer: DATABASE_URL no .env (ou .env.local)
  */
 
-import { createClient } from "@supabase/supabase-js";
-import { readFileSync, existsSync } from "fs";
-import { resolve } from "path";
+import { config } from "dotenv";
 
-// ── Carrega .env.local se existir ──────────────────────────────────────────────
-function loadEnvLocal() {
-  const envPath = resolve(process.cwd(), ".env.local");
-  if (!existsSync(envPath)) return;
-
-  const lines = readFileSync(envPath, "utf-8").split("\n");
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (!trimmed || trimmed.startsWith("#")) continue;
-    const eqIdx = trimmed.indexOf("=");
-    if (eqIdx < 0) continue;
-    const key = trimmed.slice(0, eqIdx).trim();
-    const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, "");
-    if (!process.env[key]) process.env[key] = val;
-  }
-}
-
-loadEnvLocal();
+config({ path: ".env.local" });
+config({ path: ".env" });
 
 // ── CLI args ───────────────────────────────────────────────────────────────────
 const args = process.argv.slice(2);
-const DRY_RUN   = args.includes("--dry-run");
-const LIMIT_ARG = args.find((a) => a.startsWith("--limit="));
-const USER_ARG  = args.find((a) => a.startsWith("--user-id="));
-const LIMIT     = LIMIT_ARG ? parseInt(LIMIT_ARG.split("=")[1], 10) : Infinity;
-const FILTER_USER = USER_ARG ? USER_ARG.split("=")[1] : null;
+const DRY_RUN     = args.includes("--dry-run");
+const LIMIT_ARG   = args.find((a) => a.startsWith("--limit="));
+const USER_ARG    = args.find((a) => a.startsWith("--user-id="));
+const limitIdx    = args.indexOf("--limit");
+const userIdx     = args.indexOf("--user-id");
+const MAX_SYNC    = LIMIT_ARG
+  ? parseInt(LIMIT_ARG.split("=")[1], 10)
+  : limitIdx >= 0
+  ? parseInt(args[limitIdx + 1], 10)
+  : Infinity;
+const TARGET_USER = USER_ARG
+  ? USER_ARG.split("=")[1]
+  : userIdx >= 0
+  ? args[userIdx + 1]
+  : null;
 
-// Alternativa sem "=" para --limit 100 e --user-id abc
-const limitIdx = args.indexOf("--limit");
-const MAX_SYNC  = limitIdx >= 0 ? parseInt(args[limitIdx + 1], 10) : (isFinite(LIMIT) ? LIMIT : Infinity);
-const userIdx   = args.indexOf("--user-id");
-const TARGET_USER = FILTER_USER ?? (userIdx >= 0 ? args[userIdx + 1] : null);
+const CONCURRENCY = 5;
 
-const CONCURRENCY = 5;  // chamadas simultâneas a upsertTitleState
-const PAGE_SIZE   = 500; // linhas por página ao ler user_titles
-
-// ── Supabase Admin ─────────────────────────────────────────────────────────────
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const serviceKey  = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-if (!supabaseUrl || !serviceKey) {
-  console.error("[backfill] ERRO: NEXT_PUBLIC_SUPABASE_URL e SUPABASE_SERVICE_ROLE_KEY são obrigatórios.");
-  process.exit(1);
-}
-
-const supabase = createClient(supabaseUrl, serviceKey, {
-  auth: { persistSession: false, autoRefreshToken: false },
-});
-
-// ── Tipos mínimos ──────────────────────────────────────────────────────────────
 type MediaType = "movie" | "tv";
 
 type TitleRow = {
-  user_id: string;
-  tmdb_id: number;
-  media_type: MediaType;
+  userId: string;
+  tmdbId: number;
+  mediaType: MediaType;
   status: string | null;
 };
 
 type StateRow = {
-  user_id: string;
-  tmdb_id: number;
-  media_type: MediaType;
+  userId: string;
+  tmdbId: number;
+  mediaType: MediaType;
   status: string | null;
 };
 
@@ -96,87 +66,58 @@ type SyncEntry = {
   expectedStatus: string | null;
 };
 
-// ── Helpers ────────────────────────────────────────────────────────────────────
 function key(userId: string, mediaType: string, tmdbId: number) {
   return `${userId}:${mediaType}:${tmdbId}`;
 }
 
-async function fetchCanonicalTitles(filterUserId: string | null): Promise<Map<string, TitleRow>> {
+async function fetchCanonicalTitles(
+  db: Awaited<typeof import("@/server/db/client")>["db"],
+  filterUserId: string | null,
+): Promise<Map<string, TitleRow>> {
+  console.log("[backfill] Lendo user_titles (Prisma)...");
+
+  const rows = await db.userTitle.findMany({
+    where: filterUserId ? { userId: filterUserId } : undefined,
+    select: { userId: true, tmdbId: true, mediaType: true, status: true },
+    orderBy: { createdAt: "desc" },
+  });
+
   const canonical = new Map<string, TitleRow>();
-  let offset = 0;
-  let totalFetched = 0;
-
-  console.log("[backfill] Lendo user_titles...");
-
-  while (true) {
-    let query = supabase
-      .from("user_titles")
-      .select("user_id, tmdb_id, media_type, status")
-      .order("created_at", { ascending: false })
-      .range(offset, offset + PAGE_SIZE - 1);
-
-    if (filterUserId) {
-      query = query.eq("user_id", filterUserId);
+  for (const row of rows) {
+    const k = key(row.userId, row.mediaType, row.tmdbId);
+    if (!canonical.has(k)) {
+      canonical.set(k, {
+        userId: row.userId,
+        tmdbId: row.tmdbId,
+        mediaType: row.mediaType as MediaType,
+        status: row.status,
+      });
     }
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.error("[backfill] Erro ao ler user_titles:", error.message);
-      break;
-    }
-
-    if (!data || data.length === 0) break;
-
-    for (const row of data as TitleRow[]) {
-      const k = key(row.user_id, row.media_type, row.tmdb_id);
-      if (!canonical.has(k)) {
-        // Primeira entrada = mais recente (ordem DESC por created_at)
-        canonical.set(k, row);
-      }
-    }
-
-    totalFetched += data.length;
-    offset += PAGE_SIZE;
-
-    if (data.length < PAGE_SIZE) break;
   }
 
-  console.log(`[backfill] user_titles: ${totalFetched} linhas lidas, ${canonical.size} títulos únicos.`);
+  console.log(`[backfill] user_titles: ${rows.length} linhas lidas, ${canonical.size} títulos únicos.`);
   return canonical;
 }
 
-async function fetchExistingStates(filterUserId: string | null): Promise<Map<string, StateRow>> {
+async function fetchExistingStates(
+  db: Awaited<typeof import("@/server/db/client")>["db"],
+  filterUserId: string | null,
+): Promise<Map<string, StateRow>> {
+  console.log("[backfill] Lendo user_title_state (Prisma)...");
+
+  const rows = await db.userTitleState.findMany({
+    where: filterUserId ? { userId: filterUserId } : undefined,
+    select: { userId: true, tmdbId: true, mediaType: true, status: true },
+  });
+
   const stateMap = new Map<string, StateRow>();
-  let offset = 0;
-
-  console.log("[backfill] Lendo user_title_state...");
-
-  while (true) {
-    let query = supabase
-      .from("user_title_state")
-      .select("user_id, tmdb_id, media_type, status")
-      .range(offset, offset + PAGE_SIZE - 1);
-
-    if (filterUserId) {
-      query = query.eq("user_id", filterUserId);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.error("[backfill] Erro ao ler user_title_state:", error.message);
-      break;
-    }
-
-    if (!data || data.length === 0) break;
-
-    for (const row of data as StateRow[]) {
-      stateMap.set(key(row.user_id, row.media_type, row.tmdb_id), row);
-    }
-
-    offset += PAGE_SIZE;
-    if (data.length < PAGE_SIZE) break;
+  for (const row of rows) {
+    stateMap.set(key(row.userId, row.mediaType, row.tmdbId), {
+      userId: row.userId,
+      tmdbId: row.tmdbId,
+      mediaType: row.mediaType as MediaType,
+      status: row.status,
+    });
   }
 
   console.log(`[backfill] user_title_state: ${stateMap.size} entradas encontradas.`);
@@ -197,20 +138,20 @@ function buildSyncList(
 
     if (!existing) {
       toSync.push({
-        userId:        row.user_id,
-        tmdbId:        row.tmdb_id,
-        mediaType:     row.media_type,
-        reason:        "missing",
-        currentState:  null,
+        userId: row.userId,
+        tmdbId: row.tmdbId,
+        mediaType: row.mediaType,
+        reason: "missing",
+        currentState: null,
         expectedStatus: row.status,
       });
     } else if (existing.status !== row.status) {
       toSync.push({
-        userId:         row.user_id,
-        tmdbId:         row.tmdb_id,
-        mediaType:      row.media_type,
-        reason:         "divergent_status",
-        currentState:   existing.status,
+        userId: row.userId,
+        tmdbId: row.tmdbId,
+        mediaType: row.mediaType,
+        reason: "divergent_status",
+        currentState: existing.status,
         expectedStatus: row.status,
       });
     }
@@ -220,97 +161,29 @@ function buildSyncList(
 }
 
 async function upsertOne(entry: SyncEntry): Promise<"ok" | "error"> {
-  // upsertTitleState usa supabaseAdmin internamente — chamamos a API via fetch
-  // para reutilizar a mesma lógica sem importar dependências Next.js no script.
-  //
-  // Alternativamente, recriamos a lógica mínima aqui usando o cliente admin.
-  // Optamos pela forma inline para evitar dependências de bundle do Next.js.
-
-  const now = new Date().toISOString();
-
-  // Lê o status canônico atual de user_titles (mesma lógica de fetchLibraryEntry)
-  const { data: libEntry } = await supabase
-    .from("user_titles")
-    .select("status, favorite, liked")
-    .eq("user_id", entry.userId)
-    .eq("tmdb_id", entry.tmdbId)
-    .eq("media_type", entry.mediaType)
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  const status   = (libEntry as Record<string,unknown> | null)?.status as string | null ?? null;
-  const favorite = Boolean((libEntry as Record<string,unknown> | null)?.favorite);
-  const liked    = (libEntry as Record<string,unknown> | null)?.liked as boolean | null ?? null;
-
-  // Computed state simplificado para filmes (TV requer cálculo de episódios — upsertTitleState faz isso)
-  // Para o script, passamos apenas os campos básicos; upsertTitleState calcula o resto.
-  // Chamamos via HTTP se BASE_URL estiver definida, senão usamos escrita direta de fallback.
-
   const BASE_URL = process.env.NEXT_PUBLIC_APP_URL ?? process.env.VERCEL_URL;
 
-  if (BASE_URL) {
-    // Modo HTTP: delega toda a lógica para a rota de backfill admin
-    const url = `${BASE_URL.replace(/\/$/, "")}/api/admin/backfill-title-state`;
-    const res = await fetch(url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/json",
-        "x-admin-secret": process.env.ADMIN_SECRET ?? "",
-      },
-      body: JSON.stringify({
-        userId:    entry.userId,
-        tmdbId:    entry.tmdbId,
-        mediaType: entry.mediaType,
-      }),
-    });
-    return res.ok ? "ok" : "error";
-  }
-
-  // Modo direto: upsert mínimo em user_title_state sem computar progresso de TV.
-  // Para séries TV, o upsertTitleState real é necessário — log um aviso.
-  if (entry.mediaType === "tv") {
-    console.warn(
-      `[backfill] WARN: ${entry.userId}:tv:${entry.tmdbId} — progresso de TV requer ` +
-      `NEXT_PUBLIC_APP_URL ou ADMIN_SECRET para cálculo completo. Atualizando apenas status.`
-    );
-  }
-
-  const movieComputedState = (() => {
-    if (!status) return null;
-    if (status === "watchlist") return "watchlist";
-    if (status === "watching")  return "in_progress";
-    if (status === "watched")   return "watched";
-    if (status === "abandoned") return "abandoned";
-    if (status === "fridge")    return "fridge";
-    return null;
-  })();
-
-  const row: Record<string, unknown> = {
-    user_id:        entry.userId,
-    tmdb_id:        entry.tmdbId,
-    media_type:     entry.mediaType,
-    status,
-    favorite,
-    liked,
-    computed_state: entry.mediaType === "movie" ? movieComputedState : null,
-    last_event_at:  now,
-    updated_at:     now,
-  };
-
-  const { error } = await supabase
-    .from("user_title_state")
-    .upsert(row, { onConflict: "user_id,tmdb_id,media_type" });
-
-  if (error) {
-    console.error(`[backfill] Erro ao upsert ${entry.userId}:${entry.mediaType}:${entry.tmdbId}:`, error.message);
+  if (!BASE_URL) {
+    console.error("[backfill] ERRO: NEXT_PUBLIC_APP_URL não definida. Este script requer o app rodando.");
     return "error";
   }
 
-  return "ok";
+  const url = `${BASE_URL.replace(/\/$/, "")}/api/admin/backfill-title-state`;
+  const res = await fetch(url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-admin-secret": process.env.ADMIN_SECRET ?? "",
+    },
+    body: JSON.stringify({
+      userId: entry.userId,
+      tmdbId: entry.tmdbId,
+      mediaType: entry.mediaType,
+    }),
+  });
+  return res.ok ? "ok" : "error";
 }
 
-// ── Processador em lotes ───────────────────────────────────────────────────────
 async function processBatch(entries: SyncEntry[]): Promise<{ ok: number; errors: number }> {
   let ok = 0;
   let errors = 0;
@@ -325,25 +198,23 @@ async function processBatch(entries: SyncEntry[]): Promise<{ ok: number; errors:
   return { ok, errors };
 }
 
-// ── Main ───────────────────────────────────────────────────────────────────────
 async function main() {
+  const { db } = await import("@/server/db/client");
   const startedAt = Date.now();
 
   console.log("═══════════════════════════════════════════════════════════");
-  console.log("  BACKFILL: user_title_state ← user_titles");
+  console.log("  BACKFILL: user_title_state ← user_titles (Prisma/MySQL)");
   console.log("═══════════════════════════════════════════════════════════");
   if (DRY_RUN)     console.log("  MODO: dry-run (nenhuma escrita será feita)");
   if (TARGET_USER) console.log(`  FILTRO: user_id = ${TARGET_USER}`);
   if (isFinite(MAX_SYNC)) console.log(`  LIMITE: ${MAX_SYNC} entradas`);
   console.log();
 
-  // 1. Lê dados
   const [canonical, states] = await Promise.all([
-    fetchCanonicalTitles(TARGET_USER),
-    fetchExistingStates(TARGET_USER),
+    fetchCanonicalTitles(db, TARGET_USER),
+    fetchExistingStates(db, TARGET_USER),
   ]);
 
-  // 2. Determina o que precisa ser sincronizado
   const toSync = buildSyncList(canonical, states, isFinite(MAX_SYNC) ? MAX_SYNC : Infinity);
 
   const missing   = toSync.filter((e) => e.reason === "missing").length;
@@ -360,10 +231,10 @@ async function main() {
 
   if (toSync.length === 0) {
     console.log("\n  Tudo sincronizado. Nenhuma ação necessária.");
+    await db.$disconnect();
     return;
   }
 
-  // 3. Exibe amostra do que seria feito
   const sample = toSync.slice(0, 10);
   console.log("\n  Amostra (primeiras 10 entradas):");
   for (const e of sample) {
@@ -379,10 +250,10 @@ async function main() {
 
   if (DRY_RUN) {
     console.log("\n  [dry-run] Nenhuma escrita realizada. Remova --dry-run para executar.");
+    await db.$disconnect();
     return;
   }
 
-  // 4. Executa sincronização
   console.log(`\n  Sincronizando ${toSync.length} entradas (concorrência: ${CONCURRENCY})...`);
   const { ok, errors } = await processBatch(toSync);
 
@@ -395,6 +266,7 @@ async function main() {
   console.log(`  Erros                     : ${errors}`);
   console.log("═══════════════════════════════════════════════════════════");
 
+  await db.$disconnect();
   if (errors > 0) process.exit(1);
 }
 

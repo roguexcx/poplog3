@@ -142,3 +142,19 @@ Status: Fase 13C.2. Auth.js/NextAuth + Prisma segue como caminho real de auth. A
 | Fase | Objetivo |
 | --- | --- |
 | 13D | Remover Supabase Auth/deps/wrappers/envs/functions/migrations legadas; apagar/desativar scripts e diagnosticos Supabase |
+
+## Status Final
+
+Remoção concluída em 2026-06-03 na branch `codex/loca-db` (Fases 13D e 13E).
+
+Todos os itens listados como pendentes nas fases anteriores foram executados:
+
+- Pacotes `@supabase/supabase-js` e `@supabase/ssr` desinstalados.
+- Wrappers `src/server/supabase/*` e `src/lib/supabase/*` substituídos por stubs que lançam erro.
+- Variáveis de ambiente `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` e `SUPABASE_SERVICE_ROLE_KEY` removidas.
+- Fallbacks Supabase Auth removidos de `get-current-user.ts`, `proxy.ts`, `LoginDrawer.tsx`, `Sidebar.tsx` e `ProfilePageClient.tsx`.
+- Rotas `/api/debug/supabase` e `/api/debug/local-db/acompanhando-diff` desativadas com status 410.
+- Scripts legados de backfill e smokes Supabase removidos.
+- 14 smokes passando. `npx tsc --noEmit` e `npm run build` (69 páginas) passando sem erros.
+
+Ver `docs/SUPABASE_REMOVAL_FINAL_REPORT.md` para o relatório completo com tabelas de dependências, arquivos e resultados de validação.

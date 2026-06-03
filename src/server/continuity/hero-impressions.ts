@@ -1,17 +1,6 @@
-import { supabaseAdmin } from "@/server/supabase/admin";
-import { isLocalHeroEnabled } from "@/server/runtime/local-db-flags";
 import type { HeroCandidate } from "./types";
 
 type MediaType = "movie" | "tv";
-
-type HeroImpressionRow = {
-  tmdb_id: number;
-  media_type: MediaType;
-  context: string;
-  score_at_time: number | null;
-  session_id: string | null;
-  seen_at: string;
-};
 
 type HeroImpressionStats = {
   lastSeenAt: string | null;
@@ -87,13 +76,12 @@ function calculateTemporalScore(
 
   let relevanceShieldApplied = false;
   let shieldType: string | null = null;
-  let shieldFactor = 1.0; 
+  let shieldFactor = 1.0;
 
   // Mapeamento correto lendo as propriedades reais da árvore de progress
   const watched = candidate.progress?.watchedEpisodes ?? 0;
   const total = candidate.progress?.totalEpisodes ?? null;
   const remaining = total !== null ? Math.max(total - watched, 0) : null;
-  const progressPercent = candidate.progress?.percentage ?? 0;
 
  const lastWatchedAtStr = candidate.progress?.lastWatchedAt;
 const hoursSinceLastWatch = lastWatchedAtStr ? hoursSince(lastWatchedAtStr) : null;
@@ -107,12 +95,12 @@ const daysSinceLastWatch =
     relevanceShieldApplied = true;
     shieldType = "ultra_hot_release";
     shieldFactor = 0.15; // 85% de proteção
-  } 
+  }
   else if (candidate.context === "finish_season" && remaining !== null && remaining <= 2) {
     relevanceShieldApplied = true;
     shieldType = "quase_em_dia_guard";
     shieldFactor = 0.25; // 75% de proteção
-  } 
+  }
   else if (remaining !== null && remaining >= 3 && remaining <= 6 && daysSinceLastWatch !== null && daysSinceLastWatch <= 4) {
     relevanceShieldApplied = true;
     shieldType = "maratona_curta_viavel";
@@ -158,7 +146,7 @@ const daysSinceLastWatch =
   if (seenHoursAgo !== null && seenHoursAgo < cooldownHours) {
     const proximityRatio = 1 - seenHoursAgo / cooldownHours;
     const basePenalty = 70 * proximityRatio;
-    
+
     breakdown.temporalPenalty = -Math.round(basePenalty * shieldFactor);
     score += breakdown.temporalPenalty;
   }
@@ -188,7 +176,7 @@ const daysSinceLastWatch =
   const isLongSeries = remaining !== null && remaining >= 26;
   const minimumFloorPercent = relevanceShieldApplied ? 0.25 : (isLongSeries ? 0.08 : 0.12);
   const floorLimit = Math.round(originalScore * minimumFloorPercent);
-  
+
   if (score < floorLimit) {
     score = floorLimit;
   }
@@ -261,57 +249,7 @@ export async function getHeroImpressionStats(
   userId: string,
   candidates: HeroCandidate[],
 ): Promise<Map<string, HeroImpressionStats>> {
-  if (isLocalHeroEnabled()) {
-    return getLocalHeroImpressionStats(userId, candidates);
-  }
-
-  const statsMap = new Map<string, HeroImpressionStats>();
-  if (candidates.length === 0) return statsMap;
-
-  const since = new Date(Date.now() - MAX_LOOKBACK_DAYS * 86_400_000).toISOString();
-  const tmdbIds = Array.from(new Set(candidates.map((candidate) => candidate.tmdbId)));
-
-  const { data, error } = await supabaseAdmin
-    .from("hero_impressions")
-    .select("tmdb_id, media_type, context, score_at_time, session_id, seen_at")
-    .eq("user_id", userId)
-    .in("tmdb_id", tmdbIds)
-    .gte("seen_at", since)
-    .order("seen_at", { ascending: false });
-
-  if (error) {
-    console.error("[continuity/hero-impressions] failed to fetch impressions from Supabase", error);
-    return statsMap;
-  }
-
-  const now = Date.now();
-
-  for (const row of (data ?? []) as HeroImpressionRow[]) {
-    const key = getCandidateKey(row.media_type, row.tmdb_id);
-    const seenTime = new Date(row.seen_at).getTime();
-
-    if (!Number.isFinite(seenTime)) continue;
-
-    const ageHours = Math.max(0, (now - seenTime) / 3_600_000);
-    const current = statsMap.get(key) ?? {
-      lastSeenAt: null,
-      timesSeenLast24h: 0,
-      timesSeenLast7d: 0,
-      timesSeenLast30d: 0,
-    };
-
-    if (!current.lastSeenAt) {
-      current.lastSeenAt = row.seen_at;
-    }
-
-    if (ageHours <= 24) current.timesSeenLast24h += 1;
-    if (ageHours <= 168) current.timesSeenLast7d += 1;
-    if (ageHours <= 720) current.timesSeenLast30d += 1;
-
-    statsMap.set(key, current);
-  }
-
-  return statsMap;
+  return getLocalHeroImpressionStats(userId, candidates);
 }
 
 export async function applyHeroTemporalCooldown(
@@ -346,27 +284,5 @@ export async function recordHeroImpressions(input: {
   candidates: HeroCandidate[];
   sessionId?: string | null;
 }): Promise<void> {
-  if (isLocalHeroEnabled()) {
-    return recordLocalHeroImpressions(input);
-  }
-
-  if (input.candidates.length === 0) return;
-
-  const rows = input.candidates.map((candidate) => ({
-    user_id: input.userId,
-    tmdb_id: candidate.tmdbId,
-    media_type: candidate.mediaType,
-    context: candidate.context,
-    score_at_time: candidate.score,
-    session_id: input.sessionId ?? null,
-    seen_at: new Date().toISOString(),
-  }));
-
-  const { error } = await supabaseAdmin
-    .from("hero_impressions")
-    .insert(rows);
-
-  if (error) {
-    console.error("[continuity/hero-impressions] failed to record impressions", error);
-  }
+  return recordLocalHeroImpressions(input);
 }

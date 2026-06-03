@@ -104,7 +104,8 @@
       "Bash(dir /s /b \"I:\\\\poplog-v3\\\\middleware.ts\")",
       "Bash(dir \"I:\\\\poplog-v3\\\\src\\\\middleware*\")",
       "Bash(dir \"I:\\\\poplog-v3\\\\middleware*\")",
-      "Bash(Get-ChildItem -Path \"I:\\\\poplog-v3\" -Filter \"middleware*\" -Recurse -ErrorAction SilentlyContinue)"
+      "Bash(Get-ChildItem -Path \"I:\\\\poplog-v3\" -Filter \"middleware*\" -Recurse -ErrorAction SilentlyContinue)",
+      "Bash(cd /I/poplog-v3 && grep -n \"export.*listUserTitleStates\\\\|export { listUserTitleStates\" src/server/repositories/index.ts src/server/repositories/user-title-state.repository.ts 2>/dev/null | head -20)"
     ]
   }
 }

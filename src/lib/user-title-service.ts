@@ -1,4 +1,3 @@
-import { createClient } from "@/lib/supabase/client";
 import type { MediaType, UserTitle } from "@/types/user";
 
 export type { MediaType, UserTitle };
@@ -11,49 +10,16 @@ type TitleInput = {
   releaseYear?: number | null;
 };
 
-function getSupabase() {
-  return createClient();
-}
-
-export async function getUserTitles(userId: string): Promise<UserTitle[]> {
-  const supabase = getSupabase();
-
-  const { data, error } = await supabase
-    .from("user_titles")
-    .select("*")
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
-
-  if (error) {
-    console.error("Erro ao buscar títulos:", error);
-    return [];
-  }
-
-  return data as UserTitle[];
+export async function getUserTitles(_userId: string): Promise<UserTitle[]> {
+  throw new Error("Requires MySQL/Prisma — not yet implemented");
 }
 
 export async function isTitleInWatchlist(
-  userId: string,
-  tmdbId: number,
-  mediaType: MediaType
+  _userId: string,
+  _tmdbId: number,
+  _mediaType: MediaType
 ): Promise<boolean> {
-  const supabase = getSupabase();
-
-  const { data, error } = await supabase
-    .from("user_titles")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("tmdb_id", tmdbId)
-    .eq("media_type", mediaType)
-    .eq("status", "watchlist")
-    .maybeSingle();
-
-  if (error) {
-    console.error("Erro ao verificar watchlist:", error);
-    return false;
-  }
-
-  return Boolean(data);
+  throw new Error("Requires MySQL/Prisma — not yet implemented");
 }
 
 export async function toggleWatchlist({
@@ -83,27 +49,11 @@ export async function toggleWatchlist({
 }
 
 export async function isTitleWatched(
-  userId: string,
-  tmdbId: number,
-  mediaType: MediaType
+  _userId: string,
+  _tmdbId: number,
+  _mediaType: MediaType
 ): Promise<boolean> {
-  const supabase = getSupabase();
-
-  const { data, error } = await supabase
-    .from("user_titles")
-    .select("id")
-    .eq("user_id", userId)
-    .eq("tmdb_id", tmdbId)
-    .eq("media_type", mediaType)
-    .eq("status", "watched")
-    .maybeSingle();
-
-  if (error) {
-    console.error("Erro ao verificar assistido:", error);
-    return false;
-  }
-
-  return Boolean(data);
+  throw new Error("Requires MySQL/Prisma — not yet implemented");
 }
 
 export async function toggleWatched({

@@ -1359,10 +1359,6 @@ export default function ProfilePageClient() {
 
   async function handleSignOut() {
     await signOutAuthJs({ redirect: false });
-    if (user?.authProvider === "supabase") {
-      const { createClient } = await import("@/server/supabase/client");
-      await createClient().auth.signOut();
-    }
     await refreshAuth();
     router.push("/");
     router.refresh();

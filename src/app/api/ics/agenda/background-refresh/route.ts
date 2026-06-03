@@ -7,7 +7,6 @@
 // ──────────────────────────────────────────────────────────────────────────────
 
 import { NextResponse } from "next/server";
-import { isLocalCacheEnabled } from "@/server/runtime/local-db-flags";
 
 export const revalidate = 0;
 
@@ -15,33 +14,10 @@ const CACHE_ID             = "main";
 const REFRESH_THRESHOLD_H  = 6;    // proactively refresh when cache is 6h+ old
 const CACHE_CHECK_TIMEOUT_MS = 400;
 
-async function getSupabaseAdmin() {
-  const { supabaseAdmin } = await import("@/server/supabase/admin");
-  return supabaseAdmin;
-}
-
 async function getCacheAgeHours(): Promise<number | null> {
   try {
-    if (isLocalCacheEnabled()) {
-      try {
-        const local = await import("@/server/local-services/ics-agenda-cache-local.service");
-        return await local.getCacheAgeHours(CACHE_ID);
-      } catch {
-        // fallback para o cache Supabase legado abaixo
-      }
-    }
-
-    const supabaseAdmin = await getSupabaseAdmin();
-    const { data, error } = await supabaseAdmin
-      .from("ics_agenda_cache")
-      .select("cached_at")
-      .eq("id", CACHE_ID)
-      .single();
-
-    if (error || !data) return null;
-
-    const cachedAt = new Date(data.cached_at as string);
-    return (Date.now() - cachedAt.getTime()) / 3_600_000;
+    const local = await import("@/server/local-services/ics-agenda-cache-local.service");
+    return await local.getCacheAgeHours(CACHE_ID);
   } catch {
     return null;
   }

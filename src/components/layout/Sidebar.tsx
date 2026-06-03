@@ -95,10 +95,6 @@ export default function Sidebar() {
 
   async function handleLogout() {
     await signOutAuthJs({ redirect: false });
-    if (user?.authProvider === "supabase") {
-      const { createClient } = await import("@/server/supabase/client");
-      await createClient().auth.signOut();
-    }
     await refreshAuth();
     setMobileMenuOpen(false);
     router.refresh();

@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import TmdbImage from "@/components/images/TmdbImage";
 import { ScrollRowArrows } from "@/components/ScrollRowArrows";
-import { createClient } from "@/lib/supabase/client";
 import { useUserData } from "@/context/UserDataContext";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import { CardActionButton } from "@/components/ui/CardActionButton";
@@ -377,22 +376,6 @@ export default function WatchlistVivaSection() {
 
         const json = await res.json();
         const enriched: WatchlistTitle[] = json.titles ?? [];
-
-        const updated = enriched.filter((t) => t.stream_status_updated);
-        if (updated.length > 0) {
-          const supabase = createClient();
-          await Promise.all(
-            updated.map((t) =>
-              supabase
-                .from("user_titles")
-                .update({
-                  stream_status: t.stream_status,
-                  stream_status_checked_at: new Date().toISOString(),
-                })
-                .eq("id", t.id),
-            ),
-          );
-        }
 
         setAllTitles(enriched);
         setVisible(selectFive(enriched));

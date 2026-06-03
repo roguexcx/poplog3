@@ -1,111 +1,100 @@
+/**
+ * Backfill: preenche duration_sort_minutes para filmes em user_title_state
+ *
+ * Lê filmes sem duration_sort_minutes da tabela local (Prisma),
+ * faz sync TMDB para obter runtime, e chama upsertTitleState para atualizar.
+ *
+ * Uso:
+ *   npx tsx scripts/backfill-movie-duration.ts
+ *
+ * Requer: DATABASE_URL no .env (ou .env.local)
+ */
+
 import { config } from "dotenv";
 
 config({ path: ".env.local" });
+config({ path: ".env" });
 
 const MOVIE_STATUSES = ["watchlist", "watching", "watched", "abandoned", "fridge"];
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-type MovieStateRow = {
-  user_id: string;
-  tmdb_id: number;
-  status: string | null;
-  favorite: boolean | null;
-  liked: boolean | null;
-};
-
-type SupabaseAdmin = typeof import("@/server/supabase/admin")["supabaseAdmin"];
-
-async function getMovieDurationSummary(supabaseAdmin: SupabaseAdmin) {
-  const { data: stateRows, error: stateError } = await supabaseAdmin
-    .from("user_title_state")
-    .select("tmdb_id, duration_sort_minutes")
-    .eq("media_type", "movie")
-    .in("status", MOVIE_STATUSES);
-
-  if (stateError) throw new Error(stateError.message);
-
-  const tmdbIds = Array.from(
-    new Set(((stateRows ?? []) as Array<{ tmdb_id: number }>).map((row) => row.tmdb_id)),
-  );
-
-  const { data: titleRows, error: titleError } = await supabaseAdmin
-    .from("poplog3_titles")
-    .select("tmdb_id, runtime, tmdb_payload")
-    .eq("media_type", "movie")
-    .in("tmdb_id", tmdbIds);
-
-  if (titleError) throw new Error(titleError.message);
-
-  const runtimeById = new Map(
-    ((titleRows ?? []) as Array<{
-      tmdb_id: number;
-      runtime: number | null;
-      tmdb_payload: Record<string, unknown> | null;
-    }>).map((row) => [
-      row.tmdb_id,
-      readPositiveNumber(row.runtime) ?? readPositiveNumber(row.tmdb_payload?.runtime),
-    ]),
-  );
-
-  const states = (stateRows ?? []) as Array<{
-    tmdb_id: number;
-    duration_sort_minutes: number | null;
-  }>;
-
-  return {
-    total_movies: states.length,
-    with_runtime: states.filter((row) => runtimeById.get(row.tmdb_id)).length,
-    with_duration_sort: states.filter((row) => readPositiveNumber(row.duration_sort_minutes)).length,
-    pending_backfill: states.filter(
-      (row) => runtimeById.get(row.tmdb_id) && !readPositiveNumber(row.duration_sort_minutes),
-    ).length,
-    unavailable: states.filter(
-      (row) => !runtimeById.get(row.tmdb_id) && !readPositiveNumber(row.duration_sort_minutes),
-    ).length,
-  };
-}
 
 function readPositiveNumber(value: unknown) {
   if (typeof value !== "number" || !Number.isFinite(value)) return null;
   return value > 0 ? Math.round(value) : null;
 }
 
+async function getMovieDurationSummary(db: Awaited<typeof import("@/server/db/client")>["db"]) {
+  const stateRows = await db.userTitleState.findMany({
+    where: { mediaType: "movie", status: { in: MOVIE_STATUSES } },
+    select: { tmdbId: true, durationSortMinutes: true },
+  });
+
+  const tmdbIds = [...new Set(stateRows.map((r) => r.tmdbId))];
+
+  const titleRows = await db.poplog3Title.findMany({
+    where: { tmdbId: { in: tmdbIds }, mediaType: "movie" },
+    select: { tmdbId: true, runtime: true, tmdbPayload: true },
+  });
+
+  const runtimeById = new Map(
+    titleRows.map((row) => {
+      const payloadRuntime =
+        row.tmdbPayload &&
+        typeof row.tmdbPayload === "object" &&
+        "runtime" in row.tmdbPayload
+          ? readPositiveNumber((row.tmdbPayload as Record<string, unknown>)["runtime"])
+          : null;
+      return [row.tmdbId, readPositiveNumber(row.runtime) ?? payloadRuntime];
+    }),
+  );
+
+  return {
+    total_movies: stateRows.length,
+    with_runtime: stateRows.filter((r) => runtimeById.get(r.tmdbId)).length,
+    with_duration_sort: stateRows.filter((r) => readPositiveNumber(r.durationSortMinutes)).length,
+    pending_backfill: stateRows.filter(
+      (r) => runtimeById.get(r.tmdbId) && !readPositiveNumber(r.durationSortMinutes),
+    ).length,
+    unavailable: stateRows.filter(
+      (r) => !runtimeById.get(r.tmdbId) && !readPositiveNumber(r.durationSortMinutes),
+    ).length,
+  };
+}
+
 async function main() {
-  const [{ supabaseAdmin }, { syncTmdbTitle }, { upsertTitleState }] = await Promise.all([
-    import("@/server/supabase/admin"),
+  const [{ db }, { syncTmdbTitle }, { upsertTitleState }] = await Promise.all([
+    import("@/server/db/client"),
     import("@/server/sync/sync-tmdb-title"),
     import("@/server/state/user-title-state"),
   ]);
 
-  const before = await getMovieDurationSummary(supabaseAdmin);
-  if (before) {
-    console.log(
-      [
-        "[duration-movies] MOVIE DURATION ANALYSIS",
-        `- Total filmes na biblioteca/watchlist: ${before.total_movies ?? 0}`,
-        `- Com runtime válido: ${before.with_runtime ?? 0}`,
-        `- Com duration_sort_minutes preenchido: ${before.with_duration_sort ?? 0}`,
-        `- Pendentes de backfill: ${before.pending_backfill ?? 0}`,
-        `- Duração indisponível real: ${before.unavailable ?? 0}`,
-      ].join("\n"),
-    );
-  }
+  const before = await getMovieDurationSummary(db);
+  console.log(
+    [
+      "[duration-movies] MOVIE DURATION ANALYSIS",
+      `- Total filmes na biblioteca/watchlist: ${before.total_movies}`,
+      `- Com runtime válido: ${before.with_runtime}`,
+      `- Com duration_sort_minutes preenchido: ${before.with_duration_sort}`,
+      `- Pendentes de backfill: ${before.pending_backfill}`,
+      `- Duração indisponível real: ${before.unavailable}`,
+    ].join("\n"),
+  );
 
-  const { data: rows, error } = await supabaseAdmin
-    .from("user_title_state")
-    .select("user_id, tmdb_id, status, favorite, liked")
-    .eq("media_type", "movie")
-    .in("status", MOVIE_STATUSES)
-    .is("duration_sort_minutes", null);
+  const pendingRows = await db.userTitleState.findMany({
+    where: {
+      mediaType: "movie",
+      status: { in: MOVIE_STATUSES },
+      durationSortMinutes: null,
+    },
+    select: { userId: true, tmdbId: true, status: true, favorite: true, liked: true },
+  });
 
-  if (error) throw new Error(error.message);
-
-  const usersByMovie = new Map<number, MovieStateRow[]>();
-  for (const row of (rows ?? []) as MovieStateRow[]) {
-    const list = usersByMovie.get(row.tmdb_id) ?? [];
+  const usersByMovie = new Map<number, typeof pendingRows>();
+  for (const row of pendingRows) {
+    const list = usersByMovie.get(row.tmdbId) ?? [];
     list.push(row);
-    usersByMovie.set(row.tmdb_id, list);
+    usersByMovie.set(row.tmdbId, list);
   }
 
   let synced = 0;
@@ -127,7 +116,7 @@ async function main() {
 
       for (const stateRow of stateRows) {
         await upsertTitleState({
-          userId: stateRow.user_id,
+          userId: stateRow.userId,
           tmdbId,
           mediaType: "movie",
           libraryEntry: {
@@ -154,7 +143,7 @@ async function main() {
     await sleep(120);
   }
 
-  const after = await getMovieDurationSummary(supabaseAdmin);
+  const after = await getMovieDurationSummary(db);
   console.log(
     [
       "[duration-movies] FINAL STATUS",
@@ -162,11 +151,13 @@ async function main() {
       `✓ Runtime recuperado: ${withRuntime}`,
       unavailable > 0 ? `⚠ Filmes sem duração: ${unavailable}` : "✓ Nenhum filme sem duração",
       failed > 0 ? `✗ Falhas: ${failed}` : "✓ Sem falhas",
-      `✓ Filmes ordenáveis: ${after?.with_duration_sort ?? withRuntime}`,
+      `✓ Filmes ordenáveis: ${after.with_duration_sort}`,
       "✓ Séries não alteradas",
       "✓ Ordenação unificada preservada",
     ].join("\n"),
   );
+
+  await db.$disconnect();
 }
 
 main().catch((err) => {

@@ -206,20 +206,18 @@ async function testLocalAgendaStateBatch() {
 }
 
 async function testLocalFullModeNoSupabaseRequired() {
-  // Verificar que getCurrentUser não depende de Supabase quando flag ON
-  const origUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  process.env.NEXT_PUBLIC_SUPABASE_URL = "";
+  // Supabase foi removido — getCurrentUser usa apenas local auth ou Auth.js
+  const origLocalUser = process.env.LOCAL_USER_ID;
   process.env.LOCAL_USER_ID = SMOKE_USER;
 
   try {
     const user = await getCurrentUser();
-    assert("getCurrentUser() funciona sem SUPABASE_URL quando local auth ON", user !== null);
+    assert("getCurrentUser() funciona sem Supabase (local auth ON)", user !== null);
     assert("id retornado sem Supabase", user?.id === SMOKE_USER, `got: ${user?.id}`);
   } catch (err) {
     assert("getCurrentUser() sem Supabase não lança exceção", false, String(err));
   } finally {
-    process.env.NEXT_PUBLIC_SUPABASE_URL = origUrl ?? "";
-    process.env.LOCAL_USER_ID = BASE_ID;
+    process.env.LOCAL_USER_ID = origLocalUser ?? BASE_ID;
   }
 }
 
