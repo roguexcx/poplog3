@@ -6,6 +6,12 @@ import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import { applyLegacyBrazilianBonus } from "@/server/agenda/editorial-regional-bonus";
 import { normalizeTmdbPopularity } from "@/lib/score/tmdb-popularity";
 import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
+import { isLocalAgendaEnabled } from "@/server/runtime/local-db-flags";
+import {
+  getLocalUserLibraryIds,
+  getLocalTitleAvailabilityBatch,
+  getLocalAgendaStateBatch,
+} from "@/server/local-services/continuity-local.service";
 
 // ── TMDB response shapes ──────────────────────────────────────────────────────
 
@@ -191,6 +197,67 @@ function normalizeProviderType(type?: string | null) {
   if (!type) return null;
   if (type === "flatrate" || type === "subscription") return "streaming";
   return type;
+}
+
+async function enrichAgendaItemsLocal(input: {
+  userId: string | null;
+  items: EnrichableAgendaItem[];
+}) {
+  const { userId, items } = input;
+  if (items.length === 0) return;
+
+  const movieIds = Array.from(new Set(items.filter((i) => i.media_type === "movie").map((i) => i.id)));
+  const tvIds = Array.from(new Set(items.filter((i) => i.media_type === "tv").map((i) => i.id)));
+  const preferences = await getUserProviderPreferences();
+  const favoriteProviderIds = new Set(preferences.favoriteProviderIds ?? []);
+  const region = preferences.region ?? "BR";
+
+  const availabilityRows = await getLocalTitleAvailabilityBatch(movieIds, tvIds, region);
+
+  const availabilityMap = new Map<string, AvailabilityRow>();
+  for (const row of availabilityRows) {
+    const key = `${row.media_type}-${row.tmdb_id}`;
+    const current = availabilityMap.get(key);
+    const candidate: AvailabilityRow = {
+      tmdb_id: row.tmdb_id,
+      media_type: row.media_type,
+      provider_name: row.provider_name,
+      provider_logo_path: row.provider_logo_path,
+      availability_type: row.availability_type,
+      tmdb_provider_id: row.tmdb_provider_id,
+    };
+    if (!current || availabilityScore(candidate, favoriteProviderIds) > availabilityScore(current, favoriteProviderIds)) {
+      availabilityMap.set(key, candidate);
+    }
+  }
+
+  const stateRows = userId ? await getLocalAgendaStateBatch(userId, movieIds, tvIds) : [];
+  const stateMap = new Map<string, StateRow>();
+  for (const row of stateRows) {
+    stateMap.set(`${row.media_type}-${row.tmdb_id}`, row as StateRow);
+  }
+
+  for (const item of items) {
+    const key = `${item.media_type}-${item.id}`;
+    const state = stateMap.get(key);
+    const availability = availabilityMap.get(key);
+    const providerName = state?.best_provider_name ?? availability?.provider_name ?? null;
+    const providerType = normalizeProviderType(state?.best_provider_type ?? availability?.availability_type ?? null);
+    const providerLogo = state?.best_provider_logo ?? availability?.provider_logo_path ?? null;
+    const isPreferred =
+      availability?.tmdb_provider_id !== null &&
+      availability?.tmdb_provider_id !== undefined &&
+      favoriteProviderIds.has(String(availability.tmdb_provider_id));
+    const isStreaming = STREAMING_TYPES.has(providerType ?? "");
+
+    item.user_status = state?.status ?? null;
+    item.user_computed_state = state?.computed_state ?? null;
+    item.best_provider_name = providerName;
+    item.best_provider_type = providerType;
+    item.best_provider_logo = providerLogo;
+    item.is_preferred_provider = isPreferred;
+    item.availability_scope = isPreferred ? "preferred" : isStreaming ? "streaming" : providerName ? "digital" : "none";
+  }
 }
 
 async function enrichAgendaItems(input: {
@@ -469,13 +536,17 @@ export async function GET() {
       const user = await getCurrentUser();
       if (user) {
         userId = user.id;
-        const { data } = await supabaseAdmin
-          .from("user_titles")
-          .select("tmdb_id, media_type, status")
-          .eq("user_id", user.id);
-        if (data) {
-          for (const row of data) {
-            userLibraryIds[`${row.media_type}-${row.tmdb_id}`] = row.status;
+        if (isLocalAgendaEnabled()) {
+          Object.assign(userLibraryIds, await getLocalUserLibraryIds(user.id));
+        } else {
+          const { data } = await supabaseAdmin
+            .from("user_titles")
+            .select("tmdb_id, media_type, status")
+            .eq("user_id", user.id);
+          if (data) {
+            for (const row of data) {
+              userLibraryIds[`${row.media_type}-${row.tmdb_id}`] = row.status;
+            }
           }
         }
       }
@@ -483,8 +554,10 @@ export async function GET() {
       // auth failure e nao-fatal
     }
 
+    const enrichFn = isLocalAgendaEnabled() ? enrichAgendaItemsLocal : enrichAgendaItems;
+
     try {
-      await enrichAgendaItems({
+      await enrichFn({
         userId,
         items: [
           ...nowPlaying,

@@ -24,6 +24,8 @@
     "db:smoke:curadoria-state": "tsx -r tsconfig-paths/register scripts/smoke-test-curadoria-state.ts",
     "db:smoke:acompanhando": "tsx -r tsconfig-paths/register scripts/smoke-test-acompanhando.ts",
     "db:smoke:hero": "tsx -r tsconfig-paths/register scripts/smoke-test-hero.ts",
+    "db:smoke:continuity": "tsx -r tsconfig-paths/register scripts/smoke-test-continuity.ts",
+    "db:smoke:radar-agenda": "tsx -r tsconfig-paths/register scripts/smoke-test-radar-agenda.ts",
     "db:reset": "prisma migrate reset",
     "db:studio": "prisma studio",
     "check:feedback-engine": "npx tsx scripts/check-feedback-engine.ts",

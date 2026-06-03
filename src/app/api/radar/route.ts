@@ -18,6 +18,8 @@ import {
   readContinuitySectionCache,
   writeContinuitySectionCache,
 } from "@/server/continuity/continuity-section-cache";
+import { isLocalRadarEnabled } from "@/server/runtime/local-db-flags";
+import { getLocalUserLibraryTmdbIds } from "@/server/local-services/continuity-local.service";
 
 // Nao usar cache do Next.js -- gerenciamos o cache manualmente no Supabase
 export const revalidate = 0;
@@ -271,9 +273,11 @@ async function buildPersonalFilteredPayload(userId: string | null): Promise<{
     matchCount: number;
   };
 }> {
+  const libraryFetcher = isLocalRadarEnabled() ? getLocalUserLibraryTmdbIds : fetchUserLibraryTmdbIds;
+
   const [general, library] = await Promise.all([
     buildGeneralPayload(),
-    userId ? fetchUserLibraryTmdbIds(userId) : Promise.resolve({ tvIds: new Set<number>(), movieIds: new Set<number>() }),
+    userId ? libraryFetcher(userId) : Promise.resolve({ tvIds: new Set<number>(), movieIds: new Set<number>() }),
   ]);
 
   const { tvIds, movieIds } = library;

@@ -63,6 +63,30 @@ export function isLocalHeroEnabled(): boolean {
   return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_HERO_ENABLED");
 }
 
+export function isLocalContinueWatchingEnabled(): boolean {
+  return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_CONTINUE_WATCHING_ENABLED");
+}
+
+export function isLocalRecentlyWatchedEnabled(): boolean {
+  return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_RECENTLY_WATCHED_ENABLED");
+}
+
+export function isLocalNewEpisodesEnabled(): boolean {
+  return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_NEW_EPISODES_ENABLED");
+}
+
+export function isLocalWatchlistPicksEnabled(): boolean {
+  return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_WATCHLIST_PICKS_ENABLED");
+}
+
+export function isLocalRadarEnabled(): boolean {
+  return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_RADAR_ENABLED");
+}
+
+export function isLocalAgendaEnabled(): boolean {
+  return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_AGENDA_ENABLED");
+}
+
 export function getLocalDbFlagState() {
   return {
     localDb: isLocalDbEnabled(),
@@ -80,5 +104,11 @@ export function getLocalDbFlagState() {
     curadoriaState: isLocalCuradoriaStateEnabled(),
     acompanhando: isLocalAcompanhandoEnabled(),
     hero: isLocalHeroEnabled(),
+    continueWatching: isLocalContinueWatchingEnabled(),
+    recentlyWatched: isLocalRecentlyWatchedEnabled(),
+    newEpisodes: isLocalNewEpisodesEnabled(),
+    watchlistPicks: isLocalWatchlistPicksEnabled(),
+    radar: isLocalRadarEnabled(),
+    agenda: isLocalAgendaEnabled(),
   };
 }

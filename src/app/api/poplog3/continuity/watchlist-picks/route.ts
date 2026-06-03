@@ -15,6 +15,13 @@ import {
   readContinuitySectionCache,
   writeContinuitySectionCache,
 } from "@/server/continuity/continuity-section-cache";
+import { isLocalWatchlistPicksEnabled } from "@/server/runtime/local-db-flags";
+import {
+  getLocalContinuityStateRows,
+  getLocalTitlesBatch,
+  getLocalEpisodeRuntimesMap,
+  getLocalTitleRatingsBatch,
+} from "@/server/local-services/continuity-local.service";
 
 /**
  * Janela mínima (dias) após release_date sem provider confirmado →
@@ -449,6 +456,234 @@ function weightedSample<T>(items: T[], weights: number[], n: number): T[] {
   return result;
 }
 
+// ── Local handler ─────────────────────────────────────────────────────────────
+
+async function buildLocalWatchlistPicks(
+  userId: string,
+  request: NextRequest,
+): Promise<NextResponse> {
+  const totalStartedAt = Date.now();
+  const perf: Record<string, number> = {};
+  let stageStartedAt = totalStartedAt;
+  const markStage = (stage: string) => {
+    perf[stage] = Date.now() - stageStartedAt;
+    stageStartedAt = Date.now();
+  };
+
+  try {
+    const { searchParams } = new URL(request.url);
+    const excludeParam = searchParams.get("exclude") ?? "";
+    const excludeSet = new Set(excludeParam.split(",").filter(Boolean));
+    const seriesStartOnly = searchParams.get("seriesStart") === "1";
+    const refreshCache = searchParams.get("refresh") === "1";
+    const maxPicks = seriesStartOnly ? MAX_SERIES_START_PICKS : MAX_PICKS;
+    const sectionKey = seriesStartOnly ? "watchlist_picks_series_start" : "watchlist_picks_general";
+
+    const cached = !refreshCache
+      ? await readContinuitySectionCache<WatchlistPicksCachePayload>(sectionKey, { userId, language: "pt-BR" })
+      : null;
+    markStage("persistent_cache_read");
+
+    if (cached) {
+      const cachedItems = takeCachedWatchlistItems(cached.payload, excludeSet, maxPicks);
+      if (cached.status === "hit" && cachedItems.length > 0) {
+        console.log("[watchlist-picks/local/perf]", { sectionKey, cacheStatus: "persistent_hit", returned: cachedItems.length, ...perf, total: Date.now() - totalStartedAt });
+        return NextResponse.json({ items: cachedItems });
+      }
+      if (cached.status === "stale" && cachedItems.length > 0) {
+        const refreshUrl = new URL(request.url);
+        refreshUrl.searchParams.set("refresh", "1");
+        void fetch(refreshUrl.toString(), { cache: "no-store", headers: { cookie: request.headers.get("cookie") ?? "" } }).catch(() => undefined);
+        console.log("[watchlist-picks/local/perf]", { sectionKey, cacheStatus: "persistent_stale", returned: cachedItems.length, ...perf, total: Date.now() - totalStartedAt });
+        return NextResponse.json({ items: cachedItems });
+      }
+    }
+
+    const statesRaw = (await getLocalContinuityStateRows(userId)).filter(
+      (state) =>
+        state.status === "watchlist" &&
+        (!seriesStartOnly || (state.media_type === "tv" && state.computed_state === "watchlist")),
+    );
+    markStage("states_read");
+
+    if (statesRaw.length === 0) {
+      return NextResponse.json({ items: [] });
+    }
+
+    const states = statesRaw as StateRow[];
+    const eligible = states.filter(
+      (s) =>
+        (seriesStartOnly ? s.media_type === "tv" : true) &&
+        (s.media_type === "movie" || s.watched_episodes === 0),
+    );
+    markStage("prefilter");
+
+    if (eligible.length === 0) {
+      return NextResponse.json({ items: [] });
+    }
+
+    const now = Date.now();
+    const lightScored = eligible
+      .map((state) => ({
+        state,
+        score: scoreStateLight(state, Math.floor((now - new Date(state.last_event_at).getTime()) / 86_400_000), excludeSet, { seriesStartOnly }),
+      }))
+      .sort((a, b) => b.score - a.score)
+      .slice(0, Math.max(WATCHLIST_LIGHT_POOL_SIZE, maxPicks * 4));
+    const enrichable = lightScored.map((entry) => entry.state);
+    markStage("light_scoring");
+
+    const tmdbIds = enrichable.map((s) => s.tmdb_id);
+    const tvIds = enrichable.filter((s) => s.media_type === "tv").map((s) => s.tmdb_id);
+    const episodeRuntimesBySeries = tvIds.length > 0 ? await getLocalEpisodeRuntimesMap(tvIds) : new Map();
+    markStage("runtime_read");
+
+    const titlesRaw = await getLocalTitlesBatch(tmdbIds);
+    const titleMap = new Map<string, TitleRow>(
+      titlesRaw.map((t) => [`${t.media_type}-${t.tmdb_id}`, t as unknown as TitleRow]),
+    );
+    markStage("titles_read");
+
+    type ScoredEntry = { state: StateRow; title: TitleRow; score: number };
+    const scored: ScoredEntry[] = [];
+
+    for (const state of enrichable) {
+      const key = `${state.media_type}-${state.tmdb_id}`;
+      const title = titleMap.get(key);
+      if (!title) continue;
+      if (state.media_type === "movie") {
+        if (!title.release_date || new Date(title.release_date).getTime() > now) continue;
+        if (isInTheaterWindow(title.release_date, state.best_provider_name)) continue;
+      }
+      if (state.media_type === "tv") {
+        if (title.first_air_date && new Date(title.first_air_date).getTime() > now) continue;
+        if (seriesStartOnly && !hasValidSeriesShape(title)) continue;
+      }
+      const daysOnWatchlist = Math.floor((now - new Date(state.last_event_at).getTime()) / 86_400_000);
+      const runtime = resolveRuntimeByMediaType({
+        mediaType: state.media_type,
+        runtimeMinutes: title.runtime,
+        episodeRunTime: title.episode_run_time,
+        episodes: episodeRuntimesBySeries.get(state.tmdb_id) ?? null,
+      }).minutes;
+      scored.push({
+        state,
+        title,
+        score: scoreItem(state, daysOnWatchlist, title.vote_average, title.number_of_episodes, runtime, excludeSet, { seriesStartOnly, status: readSeriesStatus(title) }),
+      });
+    }
+    markStage("scoring");
+
+    if (scored.length === 0) {
+      return NextResponse.json({ items: [] });
+    }
+
+    const weights = scored.map((x) => x.score);
+    const selected = weightedSample(scored, weights, Math.min(WATCHLIST_CACHE_POOL_SIZE, Math.max(maxPicks, scored.length)));
+
+    const hasNoProvider = selected.some((x) => !x.state.best_provider_name);
+    if (!hasNoProvider) {
+      const noProviderPool = scored.filter((x) => !x.state.best_provider_name && !selected.includes(x));
+      if (noProviderPool.length > 0 && selected.length >= maxPicks) {
+        const pick = weightedSample(noProviderPool, noProviderPool.map((x) => x.score), 1);
+        if (pick.length > 0) selected[selected.length - 1] = pick[0];
+      }
+    }
+
+    const selectedIds = selected.map((entry) => entry.state.tmdb_id);
+    const ratingsRaw = await getLocalTitleRatingsBatch(selectedIds);
+    const ratingMap = new Map<number, RatingRow>(
+      ratingsRaw.map((rating) => [rating.tmdb_id, rating as unknown as RatingRow]),
+    );
+    markStage("ratings_read");
+
+    const items: WatchlistPickItem[] = selected.map(({ state, title }) => {
+      const daysOnWatchlist = Math.floor((now - new Date(state.last_event_at).getTime()) / 86_400_000);
+      const rawDate = title.release_date ?? title.first_air_date ?? null;
+      const releaseYear = rawDate ? new Date(rawDate).getFullYear() : null;
+      const runtimeResolution = resolveRuntimeByMediaType({
+        mediaType: state.media_type,
+        runtimeMinutes: title.runtime,
+        episodeRunTime: title.episode_run_time,
+        episodes: episodeRuntimesBySeries.get(state.tmdb_id) ?? null,
+      });
+      const episodeCount = state.media_type === "tv" ? title.number_of_episodes ?? null : null;
+      const totalRuntimeMinutes =
+        state.media_type === "tv" && runtimeResolution.minutes != null && episodeCount != null && episodeCount > 0
+          ? runtimeResolution.minutes * episodeCount : null;
+      const totalRuntimeLabel = formatRuntimeLabel(totalRuntimeMinutes, { estimated: runtimeResolution.estimated });
+      const runtimeLabel =
+        state.media_type === "tv"
+          ? formatEpisodeRuntimeLabel(runtimeResolution.minutes, { estimated: runtimeResolution.estimated })
+          : formatRuntimeLabel(runtimeResolution.minutes, { estimated: runtimeResolution.estimated });
+      const genres = normalizeGenres(title);
+      const contextualBadges = buildContextualBadges({ state, title, runtime: runtimeResolution.minutes, totalRuntimeMinutes, daysOnWatchlist });
+      const awardBadges = buildAwardBadges(ratingMap.get(state.tmdb_id));
+
+      return {
+        content_id: `${state.media_type}-${state.tmdb_id}`,
+        tmdb_id: state.tmdb_id,
+        media_type: state.media_type,
+        title: title.title ?? `Título ${state.tmdb_id}`,
+        original_title: title.original_title ?? null,
+        poster_path: title.poster_path ?? null,
+        backdrop_path: title.backdrop_path ?? null,
+        vote_average: title.vote_average ?? null,
+        release_year: releaseYear,
+        number_of_episodes: title.number_of_episodes ?? null,
+        number_of_seasons: title.number_of_seasons ?? null,
+        runtime: runtimeResolution.minutes,
+        runtime_label: runtimeLabel,
+        total_runtime_label: totalRuntimeLabel,
+        best_provider_name: state.best_provider_name,
+        best_provider_type: state.best_provider_type,
+        best_provider_logo: state.best_provider_logo,
+        days_on_watchlist: daysOnWatchlist,
+        overview: compactOverview(title.overview),
+        genres,
+        series_status: state.media_type === "tv" ? buildSeriesStatusLabel(title) : null,
+        editorial_reason:
+          state.media_type === "tv"
+            ? buildEditorialReason({ state, title, runtime: runtimeResolution.minutes, totalRuntimeLabel, genres })
+            : null,
+        contextual_badges: contextualBadges,
+        award_badges: awardBadges,
+      };
+    });
+    markStage("response_build");
+
+    scheduleContinuityTitleRefresh({
+      context: seriesStartOnly ? "watchlist-picks-series-start" : "watchlist-picks",
+      targets: enrichable.map((state) => ({
+        mediaType: state.media_type,
+        tmdbId: state.tmdb_id,
+        lastSyncedAt: titleMap.get(`${state.media_type}-${state.tmdb_id}`)?.last_synced_at ?? null,
+      })),
+    });
+
+    await writeContinuitySectionCache({
+      userId,
+      sectionKey,
+      language: "pt-BR",
+      ttlMs: WATCHLIST_CACHE_TTL_MS,
+      payload: { items, generatedAt: new Date().toISOString() } satisfies WatchlistPicksCachePayload,
+    });
+    markStage("persistent_cache_write");
+
+    const responseItems = takeCachedWatchlistItems({ items, generatedAt: "" }, excludeSet, maxPicks);
+    console.log("[watchlist-picks/local/perf]", {
+      sectionKey, cacheStatus: cached ? "persistent_stale_empty" : "persistent_miss",
+      states: states.length, eligible: eligible.length, enriched: enrichable.length,
+      scored: scored.length, titles: titleMap.size, returned: responseItems.length, seriesStartOnly,
+      ...perf, total: Date.now() - totalStartedAt,
+    });
+    return NextResponse.json({ items: responseItems });
+  } catch (err) {
+    console.error("[watchlist-picks/local] unhandled error", err);
+    return NextResponse.json({ items: [] });
+  }
+}
+
 // ── Handler ───────────────────────────────────────────────────────────────────
 
 export async function GET(request: NextRequest) {
@@ -465,6 +700,11 @@ export async function GET(request: NextRequest) {
     if (!user) {
       return NextResponse.json({ error: "Não autenticado" }, { status: 401 });
     }
+
+    if (isLocalWatchlistPicksEnabled()) {
+      return buildLocalWatchlistPicks(user.id, request);
+    }
+
     markStage("auth");
 
     // IDs recentemente exibidos (para cooldown de refresh)
