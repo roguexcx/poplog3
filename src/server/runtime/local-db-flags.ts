@@ -35,6 +35,14 @@ export function isLocalEpisodeProgressEnabled(): boolean {
   return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_EPISODE_PROGRESS_ENABLED");
 }
 
+export function isLocalUserRatingsEnabled(): boolean {
+  return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_USER_RATINGS_ENABLED");
+}
+
+export function isLocalFeedbackEnabled(): boolean {
+  return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_FEEDBACK_ENABLED");
+}
+
 export function getLocalDbFlagState() {
   return {
     localDb: isLocalDbEnabled(),
@@ -45,5 +53,7 @@ export function getLocalDbFlagState() {
     library: isLocalLibraryEnabled(),
     userState: isLocalUserStateEnabled(),
     episodeProgress: isLocalEpisodeProgressEnabled(),
+    userRatings: isLocalUserRatingsEnabled(),
+    feedback: isLocalFeedbackEnabled(),
   };
 }

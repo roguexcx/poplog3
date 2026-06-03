@@ -8,13 +8,31 @@
  * para manter os agregados publicos em sincronia antes da resposta da API.
  */
 
-import { supabaseAdmin } from "@/server/supabase/admin";
-import { recalculateAggregate } from "./rating-aggregate-service";
+import { isLocalUserRatingsEnabled } from "@/server/runtime/local-db-flags";
 import type { RatingMediaType, RatingSource, UserRatingData } from "@/types/user";
 
 export type { RatingMediaType, RatingSource, UserRatingData };
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
+
+async function getLocalUserRatingsService() {
+  return import("@/server/local-services/user-ratings-local.service");
+}
+
+async function getSupabaseAdmin() {
+  const { supabaseAdmin } = await import("@/server/supabase/admin");
+  return supabaseAdmin;
+}
+
+async function recalculateAggregateFor(input: {
+  mediaType: RatingMediaType;
+  tmdbId: number;
+  seasonNumber?: number | null;
+  episodeNumber?: number | null;
+}) {
+  const { recalculateAggregate } = await import("./rating-aggregate-service");
+  return recalculateAggregate(input);
+}
 
 function serializeError(err: unknown): string {
   if (!err) return String(err);
@@ -75,8 +93,7 @@ async function syncSeriesRatingFromEpisodes(
 ): Promise<void> {
   const seriesItemKey = buildItemKey("tv", tmdbId, null, null);
 
-  const { data: existingSeriesRating, error: existingError } = await supabaseAdmin
-    .from("user_ratings")
+  const { data: existingSeriesRating, error: existingError } = await (await getSupabaseAdmin()).from("user_ratings")
     .select("rating_source")
     .eq("user_id", userId)
     .eq("item_key", seriesItemKey)
@@ -97,12 +114,11 @@ async function syncSeriesRatingFromEpisodes(
     | undefined;
 
   if (existingSource && directRatingSources.has(existingSource)) {
-    await recalculateAggregate({ mediaType: "tv", tmdbId });
+    await recalculateAggregateFor({ mediaType: "tv", tmdbId });
     return;
   }
 
-  const { data: episodeRatings, error: episodeError } = await supabaseAdmin
-    .from("user_ratings")
+  const { data: episodeRatings, error: episodeError } = await (await getSupabaseAdmin()).from("user_ratings")
     .select("rating")
     .eq("user_id", userId)
     .eq("media_type", "episode")
@@ -122,8 +138,7 @@ async function syncSeriesRatingFromEpisodes(
 
   if (!episodeRatings || episodeRatings.length === 0) {
     if (existingSource) {
-      const { error: deleteError } = await supabaseAdmin
-        .from("user_ratings")
+      const { error: deleteError } = await (await getSupabaseAdmin()).from("user_ratings")
         .delete()
         .eq("user_id", userId)
         .eq("item_key", seriesItemKey);
@@ -137,7 +152,7 @@ async function syncSeriesRatingFromEpisodes(
       }
     }
 
-    await recalculateAggregate({ mediaType: "tv", tmdbId });
+    await recalculateAggregateFor({ mediaType: "tv", tmdbId });
     return;
   }
 
@@ -147,8 +162,7 @@ async function syncSeriesRatingFromEpisodes(
   );
   const now = new Date().toISOString();
 
-  const { error: upsertError } = await supabaseAdmin
-    .from("user_ratings")
+  const { error: upsertError } = await (await getSupabaseAdmin()).from("user_ratings")
     .upsert(
       {
         user_id: userId,
@@ -175,7 +189,7 @@ async function syncSeriesRatingFromEpisodes(
     return;
   }
 
-  await recalculateAggregate({ mediaType: "tv", tmdbId });
+  await recalculateAggregateFor({ mediaType: "tv", tmdbId });
 }
 
 // ── Leitura individual ────────────────────────────────────────────────────────
@@ -191,10 +205,14 @@ export async function getUserRating(
   seasonNumber?: number | null,
   episodeNumber?: number | null
 ): Promise<UserRatingData | null> {
+  if (isLocalUserRatingsEnabled()) {
+    const local = await getLocalUserRatingsService();
+    return local.getUserRating(userId, mediaType, tmdbId, seasonNumber, episodeNumber);
+  }
+
   const itemKey = buildItemKey(mediaType, tmdbId, seasonNumber, episodeNumber);
 
-  const { data, error } = await supabaseAdmin
-    .from("user_ratings")
+  const { data, error } = await (await getSupabaseAdmin()).from("user_ratings")
     .select("rating, rating_source, created_at, updated_at")
     .eq("user_id", userId)
     .eq("item_key", itemKey)
@@ -232,14 +250,18 @@ export async function getUserRatingsBatch(
   userId: string,
   items: BatchRatingItem[]
 ): Promise<BatchRatingResult> {
+  if (isLocalUserRatingsEnabled()) {
+    const local = await getLocalUserRatingsService();
+    return local.getUserRatingsBatch(userId, items);
+  }
+
   if (items.length === 0) return new Map();
 
   const keys = items.map((i) =>
     buildItemKey(i.mediaType, i.tmdbId, i.seasonNumber, i.episodeNumber)
   );
 
-  const { data, error } = await supabaseAdmin
-    .from("user_ratings")
+  const { data, error } = await (await getSupabaseAdmin()).from("user_ratings")
     .select("item_key, rating, rating_source, created_at, updated_at")
     .eq("user_id", userId)
     .in("item_key", keys);
@@ -284,6 +306,11 @@ export type UpsertRatingInput = {
 export async function upsertUserRating(
   input: UpsertRatingInput
 ): Promise<UserRatingData> {
+  if (isLocalUserRatingsEnabled()) {
+    const local = await getLocalUserRatingsService();
+    return local.upsertUserRating(input);
+  }
+
   const {
     userId,
     mediaType,
@@ -297,8 +324,7 @@ export async function upsertUserRating(
   const rating = clampRating(input.rating);
   const now = new Date().toISOString();
 
-  const { data, error } = await supabaseAdmin
-    .from("user_ratings")
+  const { data, error } = await (await getSupabaseAdmin()).from("user_ratings")
     .upsert(
       {
         user_id: userId,
@@ -326,7 +352,7 @@ export async function upsertUserRating(
     );
   }
 
-  await recalculateAggregate({ mediaType, tmdbId, seasonNumber, episodeNumber });
+  await recalculateAggregateFor({ mediaType, tmdbId, seasonNumber, episodeNumber });
   if (mediaType === "episode") {
     await syncSeriesRatingFromEpisodes(userId, tmdbId);
   }
@@ -349,6 +375,11 @@ export type DeleteRatingInput = {
 export async function deleteUserRating(
   input: DeleteRatingInput
 ): Promise<void> {
+  if (isLocalUserRatingsEnabled()) {
+    const local = await getLocalUserRatingsService();
+    return local.deleteUserRating(input);
+  }
+
   const {
     userId,
     mediaType,
@@ -359,8 +390,7 @@ export async function deleteUserRating(
 
   const itemKey = buildItemKey(mediaType, tmdbId, seasonNumber, episodeNumber);
 
-  const { error } = await supabaseAdmin
-    .from("user_ratings")
+  const { error } = await (await getSupabaseAdmin()).from("user_ratings")
     .delete()
     .eq("user_id", userId)
     .eq("item_key", itemKey);
@@ -372,10 +402,12 @@ export async function deleteUserRating(
     );
   }
 
-  await recalculateAggregate({ mediaType, tmdbId, seasonNumber, episodeNumber });
+  await recalculateAggregateFor({ mediaType, tmdbId, seasonNumber, episodeNumber });
   if (mediaType === "episode") {
     await syncSeriesRatingFromEpisodes(userId, tmdbId);
   } else if (mediaType === "tv" && seasonNumber === null && episodeNumber === null) {
     await syncSeriesRatingFromEpisodes(userId, tmdbId);
   }
 }
+
+

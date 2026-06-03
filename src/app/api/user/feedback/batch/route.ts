@@ -6,6 +6,7 @@ import {
   isMediaType,
 } from "@/lib/personalization/feedback";
 import { createSupabaseServerClient } from "@/server/supabase/server";
+import { isLocalFeedbackEnabled } from "@/server/runtime/local-db-flags";
 import type { MediaType } from "@/types/user";
 
 const MAX_ITEMS = 60;
@@ -78,7 +79,10 @@ export async function POST(request: Request) {
   }
 
   // Uma única query carrega todos os feedbacks ativos do usuário
-  const feedbackMap = await getUserFeedbackMap(user.id, supabase);
+  const feedbackMap = await getUserFeedbackMap(
+    user.id,
+    isLocalFeedbackEnabled() ? undefined : supabase,
+  );
 
   const results: Record<string, ReturnType<typeof getTitleFeedbackState>> = {};
   for (const { tmdbId, mediaType } of items) {

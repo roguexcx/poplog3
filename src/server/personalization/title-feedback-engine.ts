@@ -11,6 +11,7 @@ import {
   type EditorialPolicyResult,
   type LegacyTitleSignals,
 } from "@/lib/personalization/editorial-policy";
+import { isLocalFeedbackEnabled } from "@/server/runtime/local-db-flags";
 import type { MediaType } from "@/types/user";
 
 export type TitleFeedbackCommand =
@@ -109,6 +110,10 @@ type StateRow = {
 async function getSupabaseAdmin() {
   const { supabaseAdmin } = await import("@/server/supabase/admin");
   return supabaseAdmin as unknown as FeedbackEngineDbClient;
+}
+
+async function getLocalFeedbackService() {
+  return import("@/server/local-services/feedback-local.service");
 }
 
 function isPersistedFeedbackCommand(command: TitleFeedbackCommand): command is FeedbackType {
@@ -421,6 +426,11 @@ async function logFeedbackEvent(
 export async function applyTitleFeedback(
   input: ApplyTitleFeedbackInput,
 ): Promise<ApplyTitleFeedbackResult> {
+  if (isLocalFeedbackEnabled() && !input.db) {
+    const local = await getLocalFeedbackService();
+    return local.applyTitleFeedback(input as Parameters<typeof local.applyTitleFeedback>[0]) as Promise<ApplyTitleFeedbackResult>;
+  }
+
   const effects: ApplyTitleFeedbackEffect[] = [];
   const warnings: ApplyTitleFeedbackWarning[] = [];
   const db = input.db ?? await getSupabaseAdmin();

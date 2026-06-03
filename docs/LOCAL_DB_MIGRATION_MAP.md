@@ -1,7 +1,7 @@
 # POPLOG v3 Local DB Migration Map
 
 Este mapa acompanha a troca gradual dos serviços Supabase por adapters Prisma/MySQL.
-O codigo atual ainda preserva os serviços antigos. A partir da Fase 7A, os modulos de baixo risco abaixo podem escolher o adapter local quando as flags `POPLOG_LOCAL_DB_ENABLED`, `POPLOG_LOCAL_LOGS_ENABLED`, `POPLOG_LOCAL_CACHE_ENABLED`, `POPLOG_LOCAL_API_USAGE_ENABLED`, `POPLOG_LOCAL_AVAILABILITY_ENABLED`, `POPLOG_LOCAL_LIBRARY_ENABLED`, `POPLOG_LOCAL_USER_STATE_ENABLED` ou `POPLOG_LOCAL_EPISODE_PROGRESS_ENABLED` estiverem ligadas.
+O codigo atual ainda preserva os serviços antigos. A partir da Fase 7A, os modulos de baixo risco abaixo podem escolher o adapter local quando as flags `POPLOG_LOCAL_DB_ENABLED`, `POPLOG_LOCAL_LOGS_ENABLED`, `POPLOG_LOCAL_CACHE_ENABLED`, `POPLOG_LOCAL_API_USAGE_ENABLED`, `POPLOG_LOCAL_AVAILABILITY_ENABLED`, `POPLOG_LOCAL_LIBRARY_ENABLED`, `POPLOG_LOCAL_USER_STATE_ENABLED`, `POPLOG_LOCAL_EPISODE_PROGRESS_ENABLED`, `POPLOG_LOCAL_USER_RATINGS_ENABLED` ou `POPLOG_LOCAL_FEEDBACK_ENABLED` estiverem ligadas.
 
 | Modulo | Servico Supabase atual | Adapter Prisma local | Repository usado | Status | Observacoes de risco |
 | --- | --- | --- | --- | --- | --- |
@@ -18,9 +18,9 @@ O codigo atual ainda preserva os serviços antigos. A partir da Fase 7A, os modu
 | Biblioteca do usuario | `src/server/library/library-service.ts` | `src/server/local-services/library-local.service.ts` | `library.repository.ts`, `title-cache.repository.ts`, `user-title-state.repository.ts`, `user-events.repository.ts` | Plugado por flag | Controlado por `POPLOG_LOCAL_DB_ENABLED` ou `POPLOG_LOCAL_LIBRARY_ENABLED`. Preserva exports e formato snake_case dos endpoints `/api/library` e `/api/library/title`. Escritas locais atualizam `user_titles` e materializam `user_title_state` local; fallback Supabase preservado com a flag desligada. Nao migra feedback, progresso de episodios, ratings pessoais ou curadoria. |
 | User title state | `src/server/state/user-title-state.ts` | `src/server/local-services/user-title-state-local.service.ts` | `user-title-state.repository.ts`, `user-events.repository.ts` | Plugado por flag | Controlado por `POPLOG_LOCAL_DB_ENABLED` ou `POPLOG_LOCAL_USER_STATE_ENABLED`. Leituras (`readTitleState`, `getUserTitleStates`, `getUserKnownTitleIds`), upsert/delete, eventos e refresh de availability usam Prisma quando a flag esta ligada. O sync TV local reutiliza o estado ja materializado e nao faz refresh Supabase/TMDB. Backfills completos de runtime/franquia seguem fora desta fase. |
 | Progresso de episodios | `src/server/episodes/episode-progress-service.ts` | `src/server/local-services/episode-progress-local.service.ts` | `episode-progress.repository.ts`, `library.repository.ts`, `user-title-state.repository.ts`, `user-events.repository.ts` | Plugado por flag | Controlado por `POPLOG_LOCAL_DB_ENABLED` ou `POPLOG_LOCAL_EPISODE_PROGRESS_ENABLED`. Cobre toggle, leitura, calculo, bulk mark, mark season, mark all aired, mark until, clear season, clear series e `getUserWatchingSeries`. Escritas locais nao caem para Supabase; falhas do repository viram erro explicito. Sincroniza `user_titles`, `user_title_state` e `user_events` no banco local. |
-| Ratings pessoais | `src/server/ratings/user-rating-service.ts` | `src/server/local-services/user-ratings-local.service.ts` | `user-ratings.repository.ts` | Criado e testado | CRUD pessoal preservado. Recalculo de `rating_aggregates` ainda nao foi reimplementado em MySQL local. |
+| Ratings pessoais | `src/server/ratings/user-rating-service.ts` | `src/server/local-services/user-ratings-local.service.ts` | `user-ratings.repository.ts` | Plugado por flag | Controlado por `POPLOG_LOCAL_DB_ENABLED` ou `POPLOG_LOCAL_USER_RATINGS_ENABLED`. CRUD pessoal preservado para movie/tv/season/episode. Escritas locais nao recalculam `rating_aggregates`; o servico Supabase antigo preserva esse recalc quando a flag esta desligada. |
 | Preferencias de usuario | `user_curadoria_preferences` em rotas/servicos atuais | `src/server/local-services/user-preferences-local.service.ts` | `user-preferences.repository.ts` | Criado e testado | Contrato local retorna snake_case para facilitar compatibilidade com rotas atuais. |
-| Feedback/personalizacao | `src/server/personalization/title-feedback-engine.ts`, `src/lib/personalization/feedback.ts`, `src/app/api/user/feedback/*` | `src/server/local-services/feedback-local.service.ts` | `user-feedback.repository.ts`, `library.repository.ts`, `user-title-state.repository.ts`, `user-events.repository.ts` | Criado e testado | Persiste feedback e sincroniza flags editoriais principais. Nao substitui toda a engine editorial nem conflitos de feedback negativo antes da troca real. |
+| Feedback/personalizacao | `src/server/personalization/title-feedback-engine.ts`, `src/lib/personalization/feedback.ts`, `src/app/api/user/feedback/*`, `src/app/api/user/not-interested/route.ts` | `src/server/local-services/feedback-local.service.ts` | `user-feedback.repository.ts`, `library.repository.ts`, `user-title-state.repository.ts`, `user-events.repository.ts` | Plugado por flag | Controlado por `POPLOG_LOCAL_DB_ENABLED` ou `POPLOG_LOCAL_FEEDBACK_ENABLED`. Cobre liked, disliked, not_interested, hidden, dismissed/dismissed_from_section, favorite/unfavorite e clear_like. Materializa flags basicas em `user_title_state` e registra `user_events`. Curadoria/overlay seguem fora desta fase. |
 | Eventos de usuario | `user_events` via `state/user-title-state.ts`, feedback e sorteio | `src/server/local-services/user-title-state-local.service.ts`, `curadoria-local.service.ts`, `feedback-local.service.ts` | `user-events.repository.ts` | Criado e testado | Eventos sao fire-and-forget onde o servico antigo tambem nao bloqueia fluxo. |
 | Sinais de curadoria | `src/app/api/poplog3/acompanhando/route.ts` | `src/server/local-services/curadoria-local.service.ts` | `curadoria-signals.repository.ts`, `user-events.repository.ts` | Criado e testado | Cobre logs de sinais. Overlay `user_curadoria_state` ainda nao foi modelado no Prisma e segue fora da ponte local. |
 
@@ -28,7 +28,7 @@ O codigo atual ainda preserva os serviços antigos. A partir da Fase 7A, os modu
 
 - Troca de imports em endpoints, hooks ou componentes.
 - Remocao de Supabase ou dependencias Supabase.
-- Plug de feedback, ratings pessoais e curadoria em endpoints reais.
+- Plug de curadoria em endpoints reais.
 
 ## Riscos conhecidos pos-Fase 7B
 
@@ -38,7 +38,7 @@ O codigo atual ainda preserva os serviços antigos. A partir da Fase 7A, os modu
 ## Diferencas conhecidas antes de plugar endpoints
 
 - Availability/TMDB sync colateral ainda fica nos servicos Supabase atuais.
-- `rating_aggregates` ainda precisa de repository/adapter proprio se o fluxo de rating for migrado.
+- `rating_aggregates` ainda precisa de repository/adapter proprio; ratings pessoais locais nao recalculam agregados publicos.
 - `user_curadoria_state` aparece no fluxo de Acompanhando, mas ainda nao existe na camada Prisma local.
 - A engine editorial completa deve continuar no servico atual ate a troca ser feita por flag e com comparacao de payload.
 - O adapter local de biblioteca retorna metadados basicos enriquecidos pelo cache local; labels avancados de runtime materializado continuam mais completos no caminho Supabase ate a proxima rodada de paridade.

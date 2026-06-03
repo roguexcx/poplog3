@@ -44,14 +44,19 @@ export type ApplyTitleFeedbackInput = {
 
 export type ApplyTitleFeedbackEffect =
   | "feedback_persisted"
+  | "feedback_persisted_with_legacy_columns"
   | "state_synced"
+  | "state_synced_with_legacy_columns"
   | "event_logged"
   | "legacy_library_sync_deferred";
 
 export type ApplyTitleFeedbackWarning =
   | "favorite_legacy_write_deferred_until_trigger_migration"
   | "legacy_liked_write_deferred_until_trigger_migration"
-  | "feedback_command_without_feedback_row";
+  | "state_row_missing"
+  | "feedback_command_without_feedback_row"
+  | "feedback_context_fields_missing"
+  | "editorial_state_fields_missing";
 
 export type ApplyTitleFeedbackResult = {
   ok: boolean;
@@ -157,6 +162,19 @@ export async function applyTitleFeedback(
   const legacy = await readLegacy(input.userId, input.tmdbId, input.mediaType);
   const liked = likedValueForCommand(input.command);
   const favorite = favoriteValueForCommand(input.command);
+
+  if (input.command === "clear_like") {
+    await Promise.all(
+      (["liked", "disliked"] as const).map((feedbackType) =>
+        deactivateUserTitleFeedback({
+          userId: input.userId,
+          tmdbId: input.tmdbId,
+          mediaType: input.mediaType,
+          feedbackType,
+        }),
+      ),
+    );
+  }
 
   if (isPersistedFeedbackCommand(input.command)) {
     const feedbackType = input.command === "dismissed" ? "dismissed_from_section" : input.command;

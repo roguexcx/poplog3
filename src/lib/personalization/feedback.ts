@@ -1,4 +1,4 @@
-import { createSupabaseServerClient } from "@/server/supabase/server";
+import { isLocalFeedbackEnabled } from "@/server/runtime/local-db-flags";
 import type { MediaType } from "@/types/user";
 
 export const FEEDBACK_TYPES = [
@@ -42,7 +42,18 @@ export type TitleFeedbackState = {
   latestFeedback?: UserTitleFeedback;
 };
 
-type SupabaseLike = Awaited<ReturnType<typeof createSupabaseServerClient>>;
+type SupabaseLike = {
+  from(table: string): any;
+};
+
+async function createSupabaseClient() {
+  const { createSupabaseServerClient } = await import("@/server/supabase/server");
+  return createSupabaseServerClient();
+}
+
+async function getLocalFeedbackService() {
+  return import("@/server/local-services/feedback-local.service");
+}
 
 export function feedbackKey(tmdbId: number, mediaType: MediaType): string {
   return `${mediaType}:${tmdbId}`;
@@ -87,8 +98,12 @@ export async function getUserFeedbackMap(
 ): Promise<UserFeedbackMap> {
   const map: UserFeedbackMap = new Map();
   if (!userId) return map;
+  if (isLocalFeedbackEnabled() && !supabase) {
+    const local = await getLocalFeedbackService();
+    return local.getUserFeedbackMap(userId);
+  }
 
-  const client = supabase ?? await createSupabaseServerClient();
+  const client = supabase ?? await createSupabaseClient();
   const { data, error } = await client
     .from("user_title_feedback")
     .select("*")
@@ -117,9 +132,14 @@ export async function removeNegativeFeedbackForTitle(
   mediaType: MediaType,
   supabase?: SupabaseLike,
 ) {
+  if (isLocalFeedbackEnabled() && !supabase) {
+    const local = await getLocalFeedbackService();
+    return local.removeNegativeFeedbackForTitle(userId, tmdbId, mediaType);
+  }
+
   // Soft-delete: mark active=false to preserve raw feedback history.
   // Physical deletes are never used in the feedback engine.
-  const client = supabase ?? await createSupabaseServerClient();
+  const client = supabase ?? await createSupabaseClient();
   await client
     .from("user_title_feedback")
     .update({ active: false })
@@ -135,7 +155,12 @@ export async function getTitleFeedbackMap(
   mediaType: MediaType,
   supabase?: SupabaseLike,
 ): Promise<UserFeedbackMap> {
-  const client = supabase ?? await createSupabaseServerClient();
+  if (isLocalFeedbackEnabled() && !supabase) {
+    const local = await getLocalFeedbackService();
+    return local.getTitleFeedbackMap(userId, tmdbId, mediaType);
+  }
+
+  const client = supabase ?? await createSupabaseClient();
   const { data } = await client
     .from("user_title_feedback")
     .select("*")
