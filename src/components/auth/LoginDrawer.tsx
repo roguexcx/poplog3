@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { signIn } from "next-auth/react";
 import { createClient } from "@/server/supabase/client";
 
 type LoginDrawerProps = {
@@ -23,6 +24,7 @@ export default function LoginDrawer({
   const [password, setPassword] = useState("");
 
   const [loading, setLoading] = useState(false);
+  const [oauthLoading, setOauthLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
 
@@ -51,6 +53,27 @@ export default function LoginDrawer({
       window.removeEventListener("keydown", handleKeyDown);
     };
   }, [open, onClose]);
+
+  async function handleGoogleSignIn() {
+    setOauthLoading(true);
+    setError(null);
+    setSuccess(null);
+
+    try {
+      await signIn("google", {
+        callbackUrl: window.location.href,
+        redirect: true,
+      });
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error
+          ? translateError(err.message)
+          : "Ocorreu um erro inesperado.";
+
+      setError(message);
+      setOauthLoading(false);
+    }
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -187,6 +210,31 @@ export default function LoginDrawer({
                   ? "Sua biblioteca cinematográfica começa aqui."
                   : "Vamos enviar um link de recuperação para o seu e-mail."}
             </p>
+          </div>
+
+          <button
+            type="button"
+            onClick={handleGoogleSignIn}
+            disabled={oauthLoading || loading}
+            className="
+              mb-4 flex w-full items-center justify-center rounded-xl
+              border border-white/[0.08]
+              bg-white/[0.96] px-4 py-3
+              text-sm font-semibold text-zinc-950
+              transition hover:bg-white
+              disabled:opacity-50
+              active:scale-[0.98]
+            "
+          >
+            {oauthLoading ? "Redirecionando..." : "Continuar com Google"}
+          </button>
+
+          <div className="mb-4 flex items-center gap-3">
+            <span className="h-px flex-1 bg-white/[0.08]" />
+            <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-zinc-600">
+              fallback temporário
+            </span>
+            <span className="h-px flex-1 bg-white/[0.08]" />
           </div>
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-4" suppressHydrationWarning>

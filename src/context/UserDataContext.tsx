@@ -8,7 +8,6 @@ import {
   useReducer,
 } from "react";
 
-import { createClient } from "@/lib/supabase/client";
 import type { UserTitle } from "@/types/user";
 
 type State = {
@@ -56,21 +55,16 @@ export function UserDataProvider({ userId, children }: ProviderProps) {
   const [state, dispatch] = useReducer(reducer, { titles: [], loading: true });
 
   const load = useCallback(async () => {
-    const supabase = createClient();
+    const response = await fetch("/api/library", { cache: "no-store" });
 
-    const { data, error } = await supabase
-      .from("user_titles")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false });
-
-    if (error) {
-      console.error("UserDataContext: erro ao carregar títulos:", error);
+    if (!response.ok) {
+      console.error("UserDataContext: erro ao carregar títulos:", response.status);
       dispatch({ type: "CLEAR" });
       return;
     }
 
-    dispatch({ type: "LOADED", titles: (data ?? []) as UserTitle[] });
+    const json = (await response.json()) as { data?: UserTitle[] };
+    dispatch({ type: "LOADED", titles: json.data ?? [] });
   }, [userId]);
 
   useEffect(() => {

@@ -1,37 +1,55 @@
 # Auth Migration Decision
 
-Status: Fase 13A concluida como decisao tecnica, sem implementacao de Auth.js.
+Status: Fase 13B implementada com Auth.js/NextAuth + Prisma. Supabase Auth permanece como fallback temporario ate a remocao final.
 
-## Contexto
+## Decisao
 
-O POPLOG v3 ja opera em modo local com MySQL/Prisma por flags. A autenticacao real de producao ainda depende de Supabase Auth, enquanto `POPLOG_LOCAL_AUTH_ENABLED=true` existe como modo local/dev para resolver `LOCAL_USER_ID` via Prisma.
+Provider inicial de producao: Google OAuth via Auth.js.
+
+Motivo: e o caminho mais seguro e simples para esta fase. Evita login proprio com senha, hashing, reset de senha e protecoes anti-abuso dentro do POPLOG. O provedor assume credenciais, recuperacao e controles adicionais. `local-user` continua apenas para dev/smokes.
 
 ## Opcoes avaliadas
 
-| Opcao | Prós | Contras | Decisao |
-| --- | --- | --- | --- |
-| Manter Supabase Auth temporariamente | Menor risco imediato; login real atual continua funcionando; permite concluir migracoes de dados primeiro | Mantem envs/deps Supabase e componentes client-side acoplados | Manter ate 13B |
-| Local-user apenas | Ja existe e valida smokes locais; remove dependencia de sessao externa em dev | Nao e auth real de producao; sem senha, sessao, reset, OAuth ou seguranca operacional | Usar apenas para dev/smoke |
-| Auth.js/NextAuth | Caminho maduro para producao Next.js; pode usar Prisma adapter; desacopla Supabase Auth | Exige schema/sessoes, troca de UI/hooks/middleware e revisao de cookies | Recomendado para producao |
-| Login proprio simples | Controle total e pouco pacote externo | Alto risco de seguranca; precisa hash, reset, protecao brute force, sessao, rotacao | Nao recomendado |
+| Opcao | Resultado |
+| --- | --- |
+| Manter Supabase Auth | Mantido apenas como fallback temporario |
+| Local-user apenas | Mantido apenas para desenvolvimento e smokes |
+| Auth.js/NextAuth + Prisma | Implementado na 13B |
+| Login proprio simples | Nao recomendado nesta etapa |
 
-## Recomendacao
+## Fluxos atuais
 
-Implementar Auth.js/NextAuth na Fase 13B, com Prisma como fonte de usuarios/sessoes. Supabase Auth deve permanecer temporariamente ate que:
+| Fluxo | Comportamento |
+| --- | --- |
+| `POPLOG_LOCAL_AUTH_ENABLED=true` | `getCurrentUser()` retorna `LOCAL_USER_ID` via Prisma e ignora Auth.js/Supabase |
+| Auth.js com sessao | `getCurrentUser()` usa `auth()` e retorna `authProvider: "authjs"` |
+| Sem sessao Auth.js e Supabase env presente | fallback temporario via Supabase Auth |
+| Sem sessao Auth.js e sem Supabase env | usuario anonimo (`null`) |
 
-1. `useAuth`, `LoginDrawer`, `Sidebar`, `proxy.ts` e `HomePage` deixem de depender do client Supabase.
-2. `getCurrentUser()` tenha caminho real via Auth.js e mantenha o caminho `local-user` para smokes.
-3. Endpoints que usam `createSupabaseServerClient().auth.getUser()` passem a usar `getCurrentUser()`.
-4. Seja criado um plano de migracao/sync de usuarios Supabase existentes para `users` local.
+## Implementado em 13B
 
-## Plano sugerido para 13B
+- Pacotes `next-auth@beta` e `@auth/prisma-adapter`.
+- Modelos Prisma `Account`, `Session`, `VerificationToken` e campo `User.image`.
+- Config Auth.js em `src/server/auth/auth-options.ts`.
+- Rota Auth.js em `src/app/api/auth/[...nextauth]/route.ts`.
+- Endpoint comum de sessao client em `src/app/api/auth/current/route.ts`.
+- `getCurrentUser()` com ordem: local auth -> Auth.js -> Supabase fallback.
+- `proxy.ts` com bypass local, Auth.js e fallback Supabase.
+- `useAuth`, `LoginDrawer`, `Sidebar`, Profile e Home adaptados.
+- Auth de `discover`, `search`, `trending` e `for-you` migrado para `getCurrentUser()`.
 
-1. Adicionar Auth.js com Prisma adapter e modelos necessarios ao schema.
-2. Criar provider inicial seguro para producao (email/senha apenas se houver hashing e reset; caso contrario OAuth/email magic link).
-3. Trocar `getCurrentUser()` para priorizar Auth.js quando `POPLOG_LOCAL_AUTH_ENABLED=false`.
-4. Adaptar UI de login/logout sem mudar UX visual alem do necessario.
-5. Migrar rotas Auth-bound: `streaming-preferences`, `for-you`, `feedback`, `feedback/batch`, `not-interested`, `discover`, `search`, `trending`, `watchlist/live`.
+## Sync de usuarios Supabase
 
-## Decisao de producao
+Plano sem execucao destrutiva:
 
-Nao usar `local-user` em producao. Para go-live sem Supabase, usar Auth.js/NextAuth com Prisma. Ate la, manter Supabase Auth temporariamente e documentado.
+1. Exportar usuarios Supabase Auth com `id`, `email`, `created_at`, metadata e providers.
+2. Fazer dry-run comparando usuarios Supabase com `users` local por `id` e `email`.
+3. Preservar `id` Supabase quando esse `id` ja referencia dados locais.
+4. Criar/upsert em `users` com email verificado quando existir.
+5. Para Google OAuth, vincular por email verificado e registrar `accounts` Auth.js.
+6. Reportar conflitos antes de qualquer escrita: email duplicado, usuario sem email, id divergente, dados locais sem usuario.
+7. So remover fallback Supabase depois do sync validado.
+
+## Producao
+
+Nao usar `local-user` em producao. Para go-live sem Supabase, usar Auth.js/NextAuth com Prisma e Google OAuth inicialmente. A remocao total do fallback Supabase fica para 13D.

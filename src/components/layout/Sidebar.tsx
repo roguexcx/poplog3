@@ -1,8 +1,7 @@
 "use client";
 
 import LoginDrawer from "@/components/auth/LoginDrawer";
-import { createClient } from "@/server/supabase/client";
-import type { User } from "@supabase/supabase-js";
+import { useAuth } from "@/hooks/useAuth";
 import {
   Dice5,
   Film,
@@ -19,8 +18,9 @@ import {
   X,
 } from "lucide-react";
 import Link from "next/link";
+import { signOut as signOutAuthJs } from "next-auth/react";
 import { usePathname, useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 
 type NavLink = {
   href: string;
@@ -91,50 +91,21 @@ export default function Sidebar() {
   const [isHovered, setIsHovered] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [user, setUser] = useState<User | null>(null);
-  const [authLoading, setAuthLoading] = useState(true);
-
-  useEffect(() => {
-    const supabase = createClient();
-
-    supabase.auth.getSession().then(({ data }) => {
-      setUser(data.session?.user ?? null);
-      setAuthLoading(false);
-    });
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      setUser(session?.user ?? null);
-      setAuthLoading(false);
-
-      if (
-        event === "SIGNED_IN" ||
-        event === "SIGNED_OUT" ||
-        event === "TOKEN_REFRESHED"
-      ) {
-        router.refresh();
-      }
-    });
-
-    return () => {
-      subscription.unsubscribe();
-    };
-  }, []);
+  const { user, loading: authLoading, refresh: refreshAuth } = useAuth();
 
   async function handleLogout() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
-    setUser(null);
+    await signOutAuthJs({ redirect: false });
+    if (user?.authProvider === "supabase") {
+      const { createClient } = await import("@/server/supabase/client");
+      await createClient().auth.signOut();
+    }
+    await refreshAuth();
     setMobileMenuOpen(false);
     router.refresh();
   }
 
   function refreshUser() {
-    const supabase = createClient();
-    supabase.auth.getSession().then(({ data }) => {
-      setUser(data.session?.user ?? null);
-    });
+    void refreshAuth().then(() => router.refresh());
   }
 
   function isActive(href: string) {

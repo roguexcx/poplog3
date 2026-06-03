@@ -1,14 +1,18 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import type { Session, User } from "@supabase/supabase-js";
-import { createClient } from "@/lib/supabase/client";
+import type { AuthUser } from "@/server/auth/types";
+
+type Session = {
+  user: AuthUser;
+} | null;
 
 type AuthState = {
-  user: User | null;
+  user: AuthUser | null;
   session: Session | null;
   loading: boolean;
   isLoggedIn: boolean;
+  refresh: () => Promise<void>;
 };
 
 export function useAuth(): AuthState {
@@ -17,23 +21,42 @@ export function useAuth(): AuthState {
     session: null,
     loading: true,
     isLoggedIn: false,
+    refresh: async () => {},
   });
 
   useEffect(() => {
-    const supabase = createClient();
+    let cancelled = false;
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    async function load() {
+      const response = await fetch("/api/auth/current", { cache: "no-store" });
+      const json = (await response.json()) as { user: AuthUser | null };
+      if (cancelled) return;
+      const user = json.user ?? null;
       setState({
-        user: session?.user ?? null,
-        session,
+        user,
+        session: user ? { user } : null,
         loading: false,
-        isLoggedIn: !!session?.user,
+        isLoggedIn: !!user,
+        refresh: load,
       });
+    }
+
+    setState((current) => ({ ...current, refresh: load }));
+    load().catch(() => {
+      if (!cancelled) {
+        setState((current) => ({
+          ...current,
+          user: null,
+          session: null,
+          loading: false,
+          isLoggedIn: false,
+        }));
+      }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   return state;

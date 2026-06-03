@@ -110,6 +110,9 @@ async function clearAll(): Promise<void> {
   // Ordem: tabelas dependentes antes das tabelas-pai (FK constraints)
   await prisma.$transaction(async (tx) => {
     await tx.continuitySectionCache.deleteMany();
+    await tx.session.deleteMany();
+    await tx.account.deleteMany();
+    await tx.verificationToken.deleteMany();
     await tx.heroSpotlightSession.deleteMany();
     await tx.userCuradoriaSignal.deleteMany();
     await tx.userCuradoriaState.deleteMany();
@@ -210,6 +213,21 @@ async function main() {
 
   results.users = await importTable("users", tables.users ?? [], (data) =>
     prisma.user.createMany({ data: data as Parameters<typeof prisma.user.createMany>[0]["data"], skipDuplicates: true }),
+  );
+
+  results.accounts = await importTable("accounts", tables.accounts ?? [], (data) =>
+    prisma.account.createMany({ data: data as Parameters<typeof prisma.account.createMany>[0]["data"], skipDuplicates: true }),
+  );
+
+  results.sessions = await importTable("sessions", tables.sessions ?? [], (data) =>
+    prisma.session.createMany({ data: data as Parameters<typeof prisma.session.createMany>[0]["data"], skipDuplicates: true }),
+  );
+
+  results.verification_tokens = await importTable(
+    "verification_tokens",
+    tables.verification_tokens ?? [],
+    (data) =>
+      prisma.verificationToken.createMany({ data: data as Parameters<typeof prisma.verificationToken.createMany>[0]["data"], skipDuplicates: true }),
   );
 
   results.user_titles = await importTable("user_titles", tables.user_titles ?? [], (data) =>

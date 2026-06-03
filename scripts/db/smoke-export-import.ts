@@ -115,6 +115,9 @@ function testExportFormat(filePath: string): void {
   // Tabelas obrigatórias
   const required = [
     "users",
+    "accounts",
+    "sessions",
+    "verification_tokens",
     "user_titles",
     "user_title_state",
     "user_episodes",

@@ -1,5 +1,6 @@
 import { createServerClient } from "@supabase/ssr";
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@/server/auth/next-auth";
 
 const PROTECTED_ROUTES = [
   "/acompanhando",
@@ -26,9 +27,25 @@ export async function proxy(request: NextRequest) {
     request,
   });
 
+  const pathname = request.nextUrl.pathname;
+  const isProtectedRoute = PROTECTED_ROUTES.some((route) =>
+    pathname.startsWith(route),
+  );
+
+  const session = await auth();
+  if (!isProtectedRoute || session?.user?.id) {
+    return response;
+  }
+
+  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!supabaseUrl || !supabaseAnonKey) {
+    return NextResponse.redirect(new URL("/", request.url));
+  }
+
   const supabase = createServerClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    supabaseUrl,
+    supabaseAnonKey,
     {
       cookies: {
         getAll() {
@@ -55,12 +72,6 @@ export async function proxy(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  const pathname = request.nextUrl.pathname;
-
-  const isProtectedRoute = PROTECTED_ROUTES.some((route) =>
-    pathname.startsWith(route),
-  );
 
   if (isProtectedRoute && !user) {
     return NextResponse.redirect(new URL("/", request.url));

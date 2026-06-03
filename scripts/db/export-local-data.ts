@@ -9,6 +9,7 @@
  *                user_events, user_curadoria_preferences,
  *                user_curadoria_signals, user_curadoria_state,
  *                hero_spotlight_sessions
+ *   Auth.js    : accounts, sessions, verification_tokens
  *   Catálogo   : poplog3_titles, poplog3_episodes, title_seasons,
  *                title_external_ids, title_ratings, catalog_availability
  *   Caches     : continuity_section_cache, ics_agenda_cache
@@ -63,6 +64,9 @@ async function main() {
 
   const [
     users,
+    accounts,
+    sessions,
+    verificationTokens,
     userTitles,
     userTitleState,
     userWatching,
@@ -84,6 +88,9 @@ async function main() {
     icsAgendaCache,
   ] = await Promise.all([
     prisma.user.findMany(),
+    prisma.account.findMany(),
+    prisma.session.findMany(),
+    prisma.verificationToken.findMany(),
     prisma.userTitle.findMany(),
     prisma.userTitleState.findMany(),
     prisma.userWatching.findMany(),
@@ -107,6 +114,9 @@ async function main() {
 
   const tables = {
     users,
+    accounts,
+    sessions,
+    verification_tokens: verificationTokens,
     user_titles: userTitles,
     user_title_state: userTitleState,
     user_watching: userWatching,

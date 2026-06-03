@@ -9,17 +9,14 @@ import {
   translateGenres,
 } from "@/features/home/home-utils";
 
-import { createSupabaseServerClient } from "@/server/supabase/server";
+import { getCurrentUser } from "@/server/auth/get-current-user";
 import { buildTmdbUrl } from "@/lib/images";
 import { getMediaType, getTitle } from "@/lib/tmdb-utils";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
-  const supabase = await createSupabaseServerClient();
-  const {
-    data: { user: initialUser },
-  } = await supabase.auth.getUser();
+  const initialUser = await getCurrentUser();
 
   const trendingItems = await getTrending();
 

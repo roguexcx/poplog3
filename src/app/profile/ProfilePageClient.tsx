@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Reorder, useDragControls } from "framer-motion";
-import { createClient } from "@/server/supabase/client";
+import { signOut as signOutAuthJs } from "next-auth/react";
 import {
   getStoredTitleLanguagePreference,
   setStoredTitleLanguagePreference,
   type TitleLanguagePreference,
 } from "@/lib/title-language-preference";
-import type { User } from "@supabase/supabase-js";
+import type { AuthUser } from "@/server/auth/types";
+import { useAuth } from "@/hooks/useAuth";
 import {
   GripVertical, X, Search, ChevronRight,
   LogOut, Mail, Lock, Check,
@@ -66,6 +67,15 @@ type StreamingPreferencesResponse = {
 type NotInterestedResponse = {
   ok: boolean;
   items: NotInterestedTitle[];
+};
+type LibraryItemForStats = {
+  status: string | null;
+  media_type: "movie" | "tv";
+  favorite?: boolean | null;
+};
+type LibraryResponseForStats = {
+  success: boolean;
+  data: LibraryItemForStats[];
 };
 
 const PROFILE_CLIENT_CACHE_TTL_MS = 5 * 60_000;
@@ -237,16 +247,17 @@ function getLogoUrl(logoUrl: string | null | undefined): string | null {
 // UTILITIES
 // ─────────────────────────────────────────────────────────────────────────────
 
-function getInitials(user: User): string {
+function getInitials(user: AuthUser): string {
   const name = user.user_metadata?.full_name ?? user.user_metadata?.name;
-  if (name) return name.split(" ").slice(0, 2).map((w: string) => w[0]).join("").toUpperCase();
+  if (typeof name === "string") return name.split(" ").slice(0, 2).map((w: string) => w[0]).join("").toUpperCase();
   return (user.email?.[0] ?? "U").toUpperCase();
 }
 
-function getDisplayName(user: User): string {
+function getDisplayName(user: AuthUser): string {
   return (
-    user.user_metadata?.full_name ??
-    user.user_metadata?.name ??
+    (typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null) ??
+    (typeof user.user_metadata?.name === "string" ? user.user_metadata.name : null) ??
+    user.name ??
     user.email?.split("@")[0] ??
     "Usuário"
   );
@@ -323,12 +334,12 @@ function StatPill({ value, label, accent = false }: { value: string | number; la
 function ProfileHeader({
   user, stats, onSignOut,
 }: {
-  user: User; stats: LibraryStats; onSignOut: () => void;
+  user: AuthUser; stats: LibraryStats; onSignOut: () => void;
 }) {
   const initials = getInitials(user);
   const name     = getDisplayName(user);
   const gradBg   = avatarGradient(user.email ?? "u");
-  const joinDate = formatJoinDate(user.created_at);
+  const joinDate = formatJoinDate(user.created_at ?? new Date().toISOString());
   const hours    = estimateHours(stats);
 
   return (
@@ -346,7 +357,7 @@ function ProfileHeader({
           <div
             className={`w-[72px] h-[72px] sm:w-20 sm:h-20 rounded-[20px] bg-gradient-to-br ${gradBg} flex items-center justify-center border-2 border-white/[0.12] shadow-xl flex-shrink-0`}
           >
-            {user.user_metadata?.avatar_url ? (
+            {typeof user.user_metadata?.avatar_url === "string" ? (
               <img src={user.user_metadata.avatar_url} alt={name} className="w-full h-full rounded-[18px] object-cover" />
             ) : (
               <span className="text-xl sm:text-2xl font-black text-white/90 tracking-tight">{initials}</span>
@@ -1179,7 +1190,7 @@ function TabNotInterested({
 // TAB: CONTA
 // ─────────────────────────────────────────────────────────────────────────────
 
-function TabAccount({ user, onSignOut }: { user: User; onSignOut: () => void }) {
+function TabAccount({ user, onSignOut }: { user: AuthUser; onSignOut: () => void }) {
   const hasProvider = (user.app_metadata?.providers as string[] | undefined)?.includes("email");
 
   return (
@@ -1268,9 +1279,8 @@ function TabAccount({ user, onSignOut }: { user: User; onSignOut: () => void }) 
 export default function ProfilePageClient() {
   const router       = useRouter();
   const searchParams = useSearchParams();
+  const { user, loading: authLoading, refresh: refreshAuth } = useAuth();
 
-  const [user,         setUser]         = useState<User | null>(null);
-  const [authLoading,  setAuthLoading]  = useState(true);
   const [stats,        setStats]        = useState<LibraryStats>({ watched: 0, watching: 0, watchlist: 0, abandoned: 0, favorites: 0, movies: 0, series: 0, total: 0 });
   const [genres,       setGenres]       = useState<GenreStat[]>([]);
   const [allProviders, setAllProviders] = useState<StreamingProvider[]>([]);
@@ -1287,31 +1297,15 @@ export default function ProfilePageClient() {
     router.replace(`/profile?tab=${t}`, { scroll: false });
   }
 
-  useEffect(() => {
-    const supabase = createClient();
-    supabase.auth.getSession().then(({ data }) => {
-      setUser(data.session?.user ?? null);
-      setAuthLoading(false);
-    });
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_, session) => {
-      setUser(session?.user ?? null);
-      setAuthLoading(false);
-    });
-    return () => subscription.unsubscribe();
-  }, []);
-
-  const loadData = useCallback(async (u: User) => {
+  const loadData = useCallback(async (_u: AuthUser) => {
     setDataLoading(true);
-    const supabase = createClient();
 
     // Stats
     try {
-      const { data: titles } = await supabase
-        .from("user_titles")
-        .select("status, media_type")
-        .eq("user_id", u.id);
-
-      if (titles) {
+      const response = await fetch("/api/library", { cache: "no-store" });
+      if (response.ok) {
+        const json = (await response.json()) as LibraryResponseForStats;
+        const titles = json.data ?? [];
         const s: LibraryStats = { watched: 0, watching: 0, watchlist: 0, abandoned: 0, favorites: 0, movies: 0, series: 0, total: titles.length };
         for (const t of titles) {
           if (t.status === "watched")   s.watched++;
@@ -1320,13 +1314,8 @@ export default function ProfilePageClient() {
           if (t.status === "abandoned") s.abandoned++;
           if (t.media_type === "movie") s.movies++;
           if (t.media_type === "tv")    s.series++;
+          if (t.favorite)               s.favorites++;
         }
-        const { count } = await supabase
-          .from("user_titles")
-          .select("*", { count: "exact", head: true })
-          .eq("user_id", u.id)
-          .eq("favorite", true);
-        s.favorites = count ?? 0;
         setStats(s);
       }
     } catch { /* silent */ }
@@ -1369,8 +1358,12 @@ export default function ProfilePageClient() {
   }, [user, loadData]);
 
   async function handleSignOut() {
-    const supabase = createClient();
-    await supabase.auth.signOut();
+    await signOutAuthJs({ redirect: false });
+    if (user?.authProvider === "supabase") {
+      const { createClient } = await import("@/server/supabase/client");
+      await createClient().auth.signOut();
+    }
+    await refreshAuth();
     router.push("/");
     router.refresh();
   }

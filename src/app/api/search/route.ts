@@ -9,7 +9,7 @@ import {
   shouldUseFuzzyFallback,
 } from "@/server/search/fuzzy-title-search";
 import type { TmdbTitleSummary } from "@/server/api-clients/tmdb/types";
-import { createSupabaseServerClient } from "@/server/supabase/server";
+import { getCurrentUser } from "@/server/auth/get-current-user";
 import { getUserFeedbackMap } from "@/lib/personalization/feedback";
 import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
 
@@ -56,11 +56,10 @@ export async function GET(request: NextRequest) {
     let userId: string | undefined;
     let feedbackMap: Awaited<ReturnType<typeof getUserFeedbackMap>> | undefined;
     try {
-      const supabase = await createSupabaseServerClient();
-      const { data: { user } } = await supabase.auth.getUser();
+      const user = await getCurrentUser();
       if (user) {
         userId = user.id;
-        feedbackMap = await getUserFeedbackMap(user.id, supabase);
+        feedbackMap = await getUserFeedbackMap(user.id);
       }
     } catch {
       // Unauthenticated -- proceed without personalization.

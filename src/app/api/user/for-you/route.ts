@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { createHash } from "node:crypto";
-import { createSupabaseServerClient } from "@/server/supabase/server";
 import { supabaseAdmin } from "@/server/supabase/admin";
+import { getCurrentUser } from "@/server/auth/get-current-user";
 import { getUserFeedbackMap, feedbackKey } from "@/lib/personalization/feedback";
 import { resolveEditorialPolicy } from "@/lib/personalization/editorial-policy";
 import {
@@ -411,8 +411,7 @@ export async function POST(request: Request) {
   const stageRef = { value: totalStartedAt };
 
   try {
-    const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getCurrentUser();
     markStage(perf, stageRef, "auth");
 
     const { titles } = await request.json();
@@ -428,7 +427,7 @@ export async function POST(request: Request) {
     const sectionKey = "home_for_you";
 
     const [feedbackMap, ratingSignals] = user
-      ? await Promise.all([getUserFeedbackMap(user.id, supabase), getUserRatingSignals(user.id)])
+      ? await Promise.all([getUserFeedbackMap(user.id), getUserRatingSignals(user.id)])
       : [undefined, [] as UserRatingSignal[]];
     const ratingMap = buildRatingSignalMap(ratingSignals);
     const legacySignalMap = buildLegacySignalMap(userTitles);

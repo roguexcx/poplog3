@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { User } from "@supabase/supabase-js";
+import type { AuthUser } from "@/server/auth/types";
 
 import ForYouSection from "@/features/home/ForYouSection";
 import WatchlistVivaSection from "@/features/home/components/WatchlistVivaSection";
@@ -133,7 +133,7 @@ function MemberContent() {
 // ─── Public export ────────────────────────────────────────────────────────────
 
 type Props = {
-  initialUser?: User | null;
+  initialUser?: AuthUser | null;
 };
 
 export default function HomeMemberSections({ initialUser }: Props) {

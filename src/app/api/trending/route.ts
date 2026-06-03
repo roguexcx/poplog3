@@ -10,7 +10,7 @@ import {
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
 import { supabaseAdmin } from "@/server/supabase/admin";
 import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
-import { createSupabaseServerClient } from "@/server/supabase/server";
+import { getCurrentUser } from "@/server/auth/get-current-user";
 import { getUserFeedbackMap } from "@/lib/personalization/feedback";
 import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
 import {
@@ -49,11 +49,10 @@ async function resolveUserFeedback() {
   let feedbackMap: Awaited<ReturnType<typeof getUserFeedbackMap>> | undefined;
 
   await withTimeout((async () => {
-    const supabase = await createSupabaseServerClient();
-    const { data: { user } } = await supabase.auth.getUser();
+    const user = await getCurrentUser();
     if (user) {
       userId = user.id;
-      feedbackMap = await getUserFeedbackMap(user.id, supabase);
+      feedbackMap = await getUserFeedbackMap(user.id);
     }
   })().catch(() => undefined), TRENDING_AUTH_TIMEOUT_MS, undefined);
 
