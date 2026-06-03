@@ -3,22 +3,29 @@ import {
   completePremiumApiUsage,
   clearSeriesProgress,
   computeUserSeriesProgress,
+  createCuradoriaSignal,
   createEngineLogEntry,
   createPremiumApiUsage,
+  createUserEvent,
   deleteCachedTitleRow,
+  deleteCuradoriaSignalsForContent,
   deleteEngineLogEntry,
   deleteExternalIdsCache,
   deleteIcsAgendaCache,
   deletePremiumApiUsage,
   deleteRatingsCache,
   deleteSeasonCache,
+  deleteUserEventsForTitle,
   deleteUserRating,
+  deleteUserTitleFeedbackRows,
   deleteUserTitleState,
+  buildTitleFeedbackState,
   getCachedEpisodeRow,
   getCachedSeasonRow,
   getCachedTitleRow,
   getExternalIdsCache,
   getCachedRatingsRow,
+  getTitleFeedbackRows,
   getUserCuradoriaPreference,
   getUserLibraryItems,
   getUserRating,
@@ -29,12 +36,16 @@ import {
   isSeasonCacheFresh,
   isTitleCacheFresh,
   listCatalogAvailability,
+  listCuradoriaSignals,
   listRecentEngineLogEntries,
+  listUserEvents,
   readUserTitleState,
   replaceCatalogAvailability,
   readContinuitySectionCache,
   readIcsAgendaCache,
   removeUserTitle,
+  saveUserTitleFeedback,
+  syncFeedbackFlagsToTitleState,
   upsertCachedTitleRow,
   upsertUserCuradoriaPreference,
   upsertExternalIdsCache,
@@ -461,6 +472,163 @@ async function main() {
     bingeTendencyScore: 0.75,
   }));
   await assertOk("user preferences read", await getUserCuradoriaPreference(smokeUserId));
+
+  const feedbackLikedId = 987654334;
+  const feedbackDislikedId = 987654335;
+  const feedbackNegativeId = 987654336;
+  const curadoriaContentId = `tmdb-tv-${libraryWatchingSeriesId}`;
+
+  await assertOk("feedback liked write", await saveUserTitleFeedback({
+    userId: smokeUserId,
+    tmdbId: feedbackLikedId,
+    mediaType: "movie",
+    feedbackType: "liked",
+    source: "repository-smoke",
+  }));
+  const likedRows = await assertOk("feedback liked read", await getTitleFeedbackRows({
+    userId: smokeUserId,
+    tmdbId: feedbackLikedId,
+    mediaType: "movie",
+    activeOnly: true,
+  }));
+  if (!buildTitleFeedbackState(likedRows).activeFeedbackTypes.includes("liked")) {
+    throw new Error("feedback liked state failed");
+  }
+
+  await assertOk("feedback disliked write", await saveUserTitleFeedback({
+    userId: smokeUserId,
+    tmdbId: feedbackDislikedId,
+    mediaType: "movie",
+    feedbackType: "disliked",
+    reason: "repository smoke disliked",
+    source: "repository-smoke",
+  }));
+  const dislikedRows = await assertOk("feedback disliked read", await getTitleFeedbackRows({
+    userId: smokeUserId,
+    tmdbId: feedbackDislikedId,
+    mediaType: "movie",
+    activeOnly: true,
+  }));
+  if (!buildTitleFeedbackState(dislikedRows).activeFeedbackTypes.includes("disliked")) {
+    throw new Error("feedback disliked state failed");
+  }
+
+  await assertOk("feedback not interested write", await saveUserTitleFeedback({
+    userId: smokeUserId,
+    tmdbId: feedbackNegativeId,
+    mediaType: "tv",
+    feedbackType: "not_interested",
+    reason: "repository smoke not interested",
+    source: "repository-smoke",
+  }));
+  await assertOk("feedback hidden write", await saveUserTitleFeedback({
+    userId: smokeUserId,
+    tmdbId: feedbackNegativeId,
+    mediaType: "tv",
+    feedbackType: "hidden",
+    source: "repository-smoke",
+  }));
+  await assertOk("feedback dismissed write", await saveUserTitleFeedback({
+    userId: smokeUserId,
+    tmdbId: feedbackNegativeId,
+    mediaType: "tv",
+    feedbackType: "dismissed",
+    surface: "acompanhando",
+    scope: "section",
+    sectionKey: "repository-smoke",
+    source: "repository-smoke",
+  }));
+  const negativeRows = await assertOk("feedback negative read", await getTitleFeedbackRows({
+    userId: smokeUserId,
+    tmdbId: feedbackNegativeId,
+    mediaType: "tv",
+    activeOnly: true,
+  }));
+  const negativeState = buildTitleFeedbackState(negativeRows);
+  if (
+    !negativeState.notInterested ||
+    !negativeState.activeFeedbackTypes.includes("hidden") ||
+    !negativeState.activeFeedbackTypes.includes("dismissed_from_section")
+  ) {
+    throw new Error("feedback negative state failed");
+  }
+
+  await assertOk("feedback state flags sync", await syncFeedbackFlagsToTitleState({
+    userId: smokeUserId,
+    tmdbId: feedbackNegativeId,
+    mediaType: "tv",
+    hasNegativeFeedback: true,
+    isHidden: true,
+    lastFeedbackType: "hidden",
+  }));
+  await assertOk("feedback state flags read", await readUserTitleState({
+    userId: smokeUserId,
+    tmdbId: feedbackNegativeId,
+    mediaType: "tv",
+  }));
+
+  const userEvent = await assertOk("user event write", await createUserEvent({
+    userId: smokeUserId,
+    tmdbId: feedbackNegativeId,
+    mediaType: "tv",
+    eventType: "feedback_applied",
+    payload: { source: "repository-smoke", command: "hidden" },
+  }));
+  const userEvents = await assertOk("user event read", await listUserEvents({
+    userId: smokeUserId,
+    tmdbId: feedbackNegativeId,
+    mediaType: "tv",
+    eventType: "feedback_applied",
+  }));
+  if (!userEvents.some((event) => event.id === userEvent.id)) {
+    throw new Error("user event read failed");
+  }
+
+  const curadoriaSignal = await assertOk("curadoria signal write", await createCuradoriaSignal({
+    userId: smokeUserId,
+    contentId: curadoriaContentId,
+    signalType: "clicked_hero",
+    signalValue: { source: "repository-smoke" },
+  }));
+  const curadoriaSignals = await assertOk("curadoria signal read", await listCuradoriaSignals({
+    userId: smokeUserId,
+    contentId: curadoriaContentId,
+    signalType: "clicked_hero",
+  }));
+  if (!curadoriaSignals.some((signal) => signal.id === curadoriaSignal.id)) {
+    throw new Error("curadoria signal read failed");
+  }
+
+  await assertOk("curadoria signals delete", await deleteCuradoriaSignalsForContent({
+    userId: smokeUserId,
+    contentId: curadoriaContentId,
+  }));
+  await assertOk("user events delete", await deleteUserEventsForTitle({
+    userId: smokeUserId,
+    tmdbId: feedbackNegativeId,
+    mediaType: "tv",
+    eventType: "feedback_applied",
+  }));
+  await assertOk("feedback liked delete", await deleteUserTitleFeedbackRows({
+    userId: smokeUserId,
+    tmdbId: feedbackLikedId,
+    mediaType: "movie",
+  }));
+  await assertOk("feedback disliked delete", await deleteUserTitleFeedbackRows({
+    userId: smokeUserId,
+    tmdbId: feedbackDislikedId,
+    mediaType: "movie",
+  }));
+  await assertOk("feedback negative delete", await deleteUserTitleFeedbackRows({
+    userId: smokeUserId,
+    tmdbId: feedbackNegativeId,
+    mediaType: "tv",
+  }));
+  await assertOk("feedback state flags delete", await deleteUserTitleState({
+    userId: smokeUserId,
+    tmdbId: feedbackNegativeId,
+    mediaType: "tv",
+  }));
 
   await assertOk("user rating delete", await deleteUserRating({
     userId: smokeUserId,

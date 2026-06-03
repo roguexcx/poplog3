@@ -1,0 +1,16 @@
+export * as apiUsageLocalService from "./api-usage-local.service";
+export * as catalogAvailabilityLocalService from "./catalog-availability-local.service";
+export * as continuitySectionCacheLocalService from "./continuity-section-cache-local.service";
+export * as curadoriaLocalService from "./curadoria-local.service";
+export * as engineLoggerLocalService from "./engine-logger-local.service";
+export * as episodeProgressLocalService from "./episode-progress-local.service";
+export * as externalIdsCacheLocalService from "./external-ids-cache-local.service";
+export * as feedbackLocalService from "./feedback-local.service";
+export * as icsAgendaCacheLocalService from "./ics-agenda-cache-local.service";
+export * as libraryLocalService from "./library-local.service";
+export * as ratingsCacheLocalService from "./ratings-cache-local.service";
+export * as seasonCacheLocalService from "./season-cache-local.service";
+export * as titleCacheLocalService from "./title-cache-local.service";
+export * as userPreferencesLocalService from "./user-preferences-local.service";
+export * as userRatingsLocalService from "./user-ratings-local.service";
+export * as userTitleStateLocalService from "./user-title-state-local.service";

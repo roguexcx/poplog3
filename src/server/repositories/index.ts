@@ -1,6 +1,7 @@
 export * from "./api-usage.repository";
 export * from "./catalog-availability.repository";
 export * from "./continuity-section-cache.repository";
+export * from "./curadoria-signals.repository";
 export * from "./engine-logs.repository";
 export * from "./external-ids-cache.repository";
 export * from "./ics-agenda-cache.repository";
@@ -10,6 +11,8 @@ export * from "./premium-api-usage.repository";
 export * from "./ratings-cache.repository";
 export * from "./season-cache.repository";
 export * from "./title-cache.repository";
+export * from "./user-events.repository";
+export * from "./user-feedback.repository";
 export * from "./user-preferences.repository";
 export * from "./user-ratings.repository";
 export * from "./user-title-state.repository";
