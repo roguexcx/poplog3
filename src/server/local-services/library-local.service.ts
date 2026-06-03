@@ -38,7 +38,7 @@ export type Poplog3UserLibraryItem = Poplog3UserTitle & {
     first_air_date: string | null;
     last_air_date: string | null;
     runtime: number | null;
-    episode_run_time: unknown;
+    episode_run_time: number[] | null;
     runtime_minutes: number | null;
     runtime_estimated: boolean;
     total_runtime_minutes: number | null;
@@ -56,6 +56,12 @@ function dateTime(value: Date | null | undefined): string | null {
 
 function dateOnly(value: Date | null | undefined): string | null {
   return value ? value.toISOString().slice(0, 10) : null;
+}
+
+function readNumberArray(value: unknown): number[] | null {
+  return Array.isArray(value) && value.every((item) => typeof item === "number")
+    ? value
+    : null;
 }
 
 function mapUserTitle(row: UserTitle): Poplog3UserTitle {
@@ -96,7 +102,7 @@ async function enrichLibraryItem(row: UserTitle): Promise<Poplog3UserLibraryItem
           first_air_date: dateOnly(title.firstAirDate),
           last_air_date: dateOnly(title.lastAirDate),
           runtime: title.runtime,
-          episode_run_time: title.episodeRunTime,
+          episode_run_time: readNumberArray(title.episodeRunTime),
           runtime_minutes: title.runtime,
           runtime_estimated: false,
           total_runtime_minutes: title.runtime,

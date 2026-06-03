@@ -23,6 +23,14 @@ export function isLocalAvailabilityEnabled(): boolean {
   return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_AVAILABILITY_ENABLED");
 }
 
+export function isLocalLibraryEnabled(): boolean {
+  return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_LIBRARY_ENABLED");
+}
+
+export function isLocalUserStateEnabled(): boolean {
+  return isLocalDbEnabled() || readBooleanFlag("POPLOG_LOCAL_USER_STATE_ENABLED");
+}
+
 export function getLocalDbFlagState() {
   return {
     localDb: isLocalDbEnabled(),
@@ -30,5 +38,7 @@ export function getLocalDbFlagState() {
     cache: isLocalCacheEnabled(),
     apiUsage: isLocalApiUsageEnabled(),
     availability: isLocalAvailabilityEnabled(),
+    library: isLocalLibraryEnabled(),
+    userState: isLocalUserStateEnabled(),
   };
 }

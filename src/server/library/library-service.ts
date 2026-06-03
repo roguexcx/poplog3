@@ -1,4 +1,7 @@
-import { supabaseAdmin } from "@/server/supabase/admin";
+import {
+  isLocalLibraryEnabled,
+  isLocalUserStateEnabled,
+} from "@/server/runtime/local-db-flags";
 import {
   upsertTitleState,
   deleteTitleState,
@@ -6,8 +9,6 @@ import {
 } from "@/server/state/user-title-state";
 import { formatEpisodeRuntimeLabel, formatRuntimeLabel } from "@/lib/domain-labels";
 import { resolveRuntimeByMediaType, type RuntimeResolution } from "@/lib/runtime";
-import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
-import { refreshAvailabilityForUserTitle } from "@/server/streaming/title-availability";
 import { formatError, isDebugEnabled, rateLimitedWarn } from "@/server/logging/log-control";
 
 import {
@@ -157,6 +158,15 @@ const LIBRARY_TITLE_SELECT = [
 const LIBRARY_BATCH_SIZE = 80;
 const LOG_TTL_MS = 5 * 60 * 1000;
 
+async function getLocalLibraryService() {
+  return import("@/server/local-services/library-local.service");
+}
+
+async function getSupabaseAdmin() {
+  const { supabaseAdmin } = await import("@/server/supabase/admin");
+  return supabaseAdmin;
+}
+
 function chunkArray<T>(items: T[], size: number) {
   const chunks: T[][] = [];
   for (let index = 0; index < items.length; index += size) {
@@ -173,8 +183,7 @@ function isTimeoutError(error: unknown) {
 }
 
 async function getLibraryStateRows(userId: string, statusFilter: string[]) {
-  const { data, error } = await supabaseAdmin
-    .from("user_title_state")
+  const { data, error } = await (await getSupabaseAdmin()).from("user_title_state")
     .select(LIBRARY_STATE_SELECT)
     .eq("user_id", userId)
     .in("status", statusFilter)
@@ -214,8 +223,7 @@ async function getLibraryTitleRows(input: {
     for (const batch of chunkArray(Array.from(idsByType[mediaType]), LIBRARY_BATCH_SIZE)) {
       if (batch.length === 0) continue;
 
-      const { data, error } = await supabaseAdmin
-        .from("poplog3_titles")
+      const { data, error } = await (await getSupabaseAdmin()).from("poplog3_titles")
         .select(LIBRARY_TITLE_SELECT)
         .eq("media_type", mediaType)
         .in("tmdb_id", batch);
@@ -297,8 +305,7 @@ async function getAiredEpisodeCountsMap(seriesTmdbIds: number[]) {
   if (ids.length === 0) return counts;
 
   const today = new Date().toISOString().slice(0, 10);
-  const { data, error } = await supabaseAdmin
-    .from("poplog3_episodes")
+  const { data, error } = await (await getSupabaseAdmin()).from("poplog3_episodes")
     .select("series_tmdb_id")
     .in("series_tmdb_id", ids)
     .gt("season_number", 0)
@@ -436,6 +443,11 @@ export async function getUserLibraryState(
   userId: string,
   status?: string,
 ): Promise<Poplog3UserLibraryItem[] | null> {
+  if (isLocalLibraryEnabled() || isLocalUserStateEnabled()) {
+    const local = await getLocalLibraryService();
+    return local.getUserLibraryState(userId, status);
+  }
+
   const totalStartedAt = Date.now();
   const perf: Record<string, number> = {};
   const stageRef = { value: totalStartedAt };
@@ -588,8 +600,12 @@ export async function getUserLibrary(
   userId: string,
   status?: string
 ): Promise<Poplog3UserLibraryItem[]> {
-  let query = supabaseAdmin
-    .from("user_titles")
+  if (isLocalLibraryEnabled()) {
+    const local = await getLocalLibraryService();
+    return local.getUserLibrary(userId, status);
+  }
+
+  let query = (await getSupabaseAdmin()).from("user_titles")
     .select("id, user_id, tmdb_id, media_type, status, liked, favorite, created_at, watched_at")
     .eq("user_id", userId)
     .order("created_at", { ascending: false });
@@ -610,8 +626,7 @@ export async function getUserLibrary(
     .filter((r) => r.media_type === "tv")
     .map((r) => r.tmdb_id as number);
 
-  const { data: titles } = await supabaseAdmin
-    .from("poplog3_titles")
+  const { data: titles } = await (await getSupabaseAdmin()).from("poplog3_titles")
     .select(
       "tmdb_id, media_type, title, original_title, poster_path, backdrop_path, year, release_date, first_air_date, last_air_date, runtime, episode_run_time, vote_average, popularity, number_of_episodes, number_of_seasons"
     )
@@ -626,7 +641,11 @@ export async function getUserLibrary(
   );
 
   const [episodeRuntimesBySeries, airedEpisodeCountsBySeries] = await Promise.all([
-    tvIds.length > 0 ? getSeriesEpisodeRuntimesMap(tvIds, { includeUnaired: true }) : Promise.resolve(new Map()),
+    tvIds.length > 0
+      ? import("@/server/runtime/series-episode-runtimes").then(({ getSeriesEpisodeRuntimesMap }) =>
+          getSeriesEpisodeRuntimesMap(tvIds, { includeUnaired: true }),
+        )
+      : Promise.resolve(new Map()),
     tvIds.length > 0 ? getAiredEpisodeCountsMap(tvIds)    : Promise.resolve(new Map()),
   ]);
 
@@ -720,8 +739,12 @@ export async function getUserTitleStatus(
   tmdbId: number,
   mediaType: "movie" | "tv"
 ): Promise<Poplog3UserTitle | null> {
-  const { data, error } = await supabaseAdmin
-    .from("user_titles")
+  if (isLocalLibraryEnabled()) {
+    const local = await getLocalLibraryService();
+    return local.getUserTitleStatus(userId, tmdbId, mediaType);
+  }
+
+  const { data, error } = await (await getSupabaseAdmin()).from("user_titles")
     .select("id, user_id, tmdb_id, media_type, status, liked, favorite, created_at, watched_at")
     .eq("user_id", userId)
     .eq("tmdb_id", tmdbId)
@@ -755,20 +778,23 @@ export async function getUserTitleStatus(
 export async function upsertUserTitleStatus(
   input: UpsertUserTitleInput
 ): Promise<Poplog3UserTitle> {
+  if (isLocalLibraryEnabled()) {
+    const local = await getLocalLibraryService();
+    return local.upsertUserTitleStatus(input);
+  }
+
   const now = new Date().toISOString();
 
   // Remove qualquer linha anterior para este título — user_titles não tem unique constraint
   // e pode ter múltiplas linhas de status diferentes (watchlist + watched).
   // Após uma mudança explícita de status, deixamos apenas uma linha.
-  await supabaseAdmin
-    .from("user_titles")
+  await (await getSupabaseAdmin()).from("user_titles")
     .delete()
     .eq("user_id", input.userId)
     .eq("tmdb_id", input.tmdbId)
     .eq("media_type", input.mediaType);
 
-  const { data, error } = await supabaseAdmin
-    .from("user_titles")
+  const { data, error } = await (await getSupabaseAdmin()).from("user_titles")
     .insert({
       user_id: input.userId,
       tmdb_id: input.tmdbId,
@@ -818,14 +844,17 @@ export async function upsertUserTitleStatus(
     },
   });
 
-  refreshAvailabilityForUserTitle({
-    userId: input.userId,
-    tmdbId: input.tmdbId,
-    mediaType: input.mediaType,
-    action: `library_status:${result.status}`,
-    endpoint: "/api/library/title",
-    contexts: ["library"],
-  })
+  import("@/server/streaming/title-availability")
+    .then(({ refreshAvailabilityForUserTitle }) =>
+      refreshAvailabilityForUserTitle({
+        userId: input.userId,
+        tmdbId: input.tmdbId,
+        mediaType: input.mediaType,
+        action: `library_status:${result.status}`,
+        endpoint: "/api/library/title",
+        contexts: ["library"],
+      }),
+    )
     .then((availabilityResult) => {
       const best = availabilityResult.availability.primaryProvider;
       const providerType: string | null =
@@ -858,8 +887,12 @@ export async function removeUserTitle(
   tmdbId: number,
   mediaType: "movie" | "tv"
 ): Promise<void> {
-  const { error } = await supabaseAdmin
-    .from("user_titles")
+  if (isLocalLibraryEnabled()) {
+    const local = await getLocalLibraryService();
+    return local.removeUserTitle(userId, tmdbId, mediaType);
+  }
+
+  const { error } = await (await getSupabaseAdmin()).from("user_titles")
     .delete()
     .eq("user_id", userId)
     .eq("tmdb_id", tmdbId)
@@ -869,3 +902,4 @@ export async function removeUserTitle(
 
   await deleteTitleState(userId, tmdbId, mediaType);
 }
+

@@ -8,13 +8,13 @@
  * Nunca calcule progresso dentro de um componente. Leia daqui.
  */
 
-import { supabaseAdmin } from "@/server/supabase/admin";
 import type { UserSeriesProgress } from "@/server/episodes/episode-progress-service";
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
 import { formatError, rateLimitedWarn } from "@/server/logging/log-control";
 import { syncTmdbSeason } from "@/server/sync/sync-tmdb-season";
 import { syncTmdbTitle } from "@/server/sync/sync-tmdb-title";
 import { invalidateContinuitySectionCache } from "@/server/continuity/continuity-section-cache";
+import { isLocalUserStateEnabled } from "@/server/runtime/local-db-flags";
 
 // ── Tipos públicos ────────────────────────────────────────────────────────────
 
@@ -155,6 +155,15 @@ const tvCatalogRefreshCache = new Map<number, TvCatalogRefreshState>();
 
 // ── Helpers internos ──────────────────────────────────────────────────────────
 
+async function getLocalUserTitleStateService() {
+  return import("@/server/local-services/user-title-state-local.service");
+}
+
+async function getSupabaseAdmin() {
+  const { supabaseAdmin } = await import("@/server/supabase/admin");
+  return supabaseAdmin;
+}
+
 function deriveSeriesComputedState(
   status: string | null,
   watched: number,
@@ -205,8 +214,7 @@ async function fetchLibraryEntry(
   tmdbId: number,
   mediaType: MediaType,
 ): Promise<{ status: string | null; favorite: boolean; liked: boolean | null } | null> {
-  const { data } = await supabaseAdmin
-    .from("user_titles")
+  const { data } = await (await getSupabaseAdmin()).from("user_titles")
     .select("status, favorite, liked")
     .eq("user_id", userId)
     .eq("tmdb_id", tmdbId)
@@ -232,8 +240,7 @@ async function fetchTitleMeta(
   runtimeMinutes: number | null;
   episodeRunTime: number[] | null;
 }> {
-  const { data } = await supabaseAdmin
-    .from("poplog3_titles")
+  const { data } = await (await getSupabaseAdmin()).from("poplog3_titles")
     .select("tmdb_payload, runtime, episode_run_time")
     .eq("media_type", mediaType)
     .eq("tmdb_id", tmdbId)
@@ -285,8 +292,7 @@ async function computeDurationSortMinutes(
   let episodes: Array<{ seasonNumber: number | null; episodeNumber: number | null; runtimeMinutes: number | null; airDate: string | null }> | null = null;
 
   if (mediaType === "tv") {
-    const { data: epRows } = await supabaseAdmin
-      .from("poplog3_episodes")
+    const { data: epRows } = await (await getSupabaseAdmin()).from("poplog3_episodes")
       .select("season_number, episode_number, runtime, air_date")
       .eq("series_tmdb_id", tmdbId)
       .gt("season_number", 0)
@@ -341,6 +347,7 @@ async function computeFranchiseProgress(
   userId: string,
   collectionId: number,
 ): Promise<{ total: number; watched: number }> {
+  const supabaseAdmin = await getSupabaseAdmin();
   const [allResult, watchedResult] = await Promise.all([
     supabaseAdmin
       .from("poplog3_titles")
@@ -454,6 +461,11 @@ async function refreshTvCatalogForStateSync(
 export async function upsertTitleState(
   input: UpsertTitleStateInput,
 ): Promise<void> {
+  if (isLocalUserStateEnabled()) {
+    const local = await getLocalUserTitleStateService();
+    return local.upsertTitleState(input);
+  }
+
   const { userId, tmdbId, mediaType } = input;
 
   // Busca o que não foi fornecido pelo caller
@@ -573,8 +585,7 @@ export async function upsertTitleState(
     };
   }
 
-  const { error } = await supabaseAdmin
-    .from("user_title_state")
+  const { error } = await (await getSupabaseAdmin()).from("user_title_state")
     .upsert(row, { onConflict: "user_id,tmdb_id,media_type" });
 
   if (error) {
@@ -619,8 +630,7 @@ export async function backfillDurationSortMinutesForUserTitles(input: {
   const unavailableTmdbIds: number[] = [];
   const failed: Array<{ tmdbId: number; error: string }> = [];
   const { data: stateRows } = tmdbIds.length > 0
-    ? await supabaseAdmin
-        .from("user_title_state")
+    ? await (await getSupabaseAdmin()).from("user_title_state")
         .select("tmdb_id, status, favorite, liked")
         .eq("user_id", input.userId)
         .eq("media_type", mediaType)
@@ -677,8 +687,12 @@ export async function deleteTitleState(
   tmdbId: number,
   mediaType: MediaType,
 ): Promise<void> {
-  const { error } = await supabaseAdmin
-    .from("user_title_state")
+  if (isLocalUserStateEnabled()) {
+    const local = await getLocalUserTitleStateService();
+    return local.deleteTitleState(userId, tmdbId, mediaType);
+  }
+
+  const { error } = await (await getSupabaseAdmin()).from("user_title_state")
     .delete()
     .eq("user_id", userId)
     .eq("tmdb_id", tmdbId)
@@ -710,20 +724,29 @@ export function logUserEvent(input: {
   eventType: UserEventType;
   payload?: Record<string, unknown>;
 }): void {
-  supabaseAdmin
-    .from("user_events")
-    .insert({
-      user_id: input.userId,
-      tmdb_id: input.tmdbId,
-      media_type: input.mediaType,
-      event_type: input.eventType,
-      payload: input.payload ?? {},
-    })
+  if (isLocalUserStateEnabled()) {
+    void getLocalUserTitleStateService()
+      .then((local) => local.logUserEvent(input))
+      .catch((error) => console.error("[user-events] local insert failed", error));
+    return;
+  }
+
+  void getSupabaseAdmin()
+    .then((supabaseAdmin) =>
+      supabaseAdmin.from("user_events").insert({
+        user_id: input.userId,
+        tmdb_id: input.tmdbId,
+        media_type: input.mediaType,
+        event_type: input.eventType,
+        payload: input.payload ?? {},
+      }),
+    )
     .then(({ error }) => {
       if (error) {
         console.error("[user-events] insert failed", { ...input, error });
       }
-    });
+    })
+    .catch((error) => console.error("[user-events] insert failed", { ...input, error }));
 }
 
 /**
@@ -735,8 +758,12 @@ export async function readTitleState(
   tmdbId: number,
   mediaType: MediaType,
 ): Promise<UserTitleState | null> {
-  const { data, error } = await supabaseAdmin
-    .from("user_title_state")
+  if (isLocalUserStateEnabled()) {
+    const local = await getLocalUserTitleStateService();
+    return local.readTitleState(userId, tmdbId, mediaType);
+  }
+
+  const { data, error } = await (await getSupabaseAdmin()).from("user_title_state")
     .select("*")
     .eq("user_id", userId)
     .eq("tmdb_id", tmdbId)
@@ -759,8 +786,15 @@ export async function getUserTitleStates(
   userId: string,
   opts?: GetUserTitleStatesOptions,
 ): Promise<UserTitleState[]> {
-  let query = supabaseAdmin
-    .from("user_title_state")
+  if (isLocalUserStateEnabled()) {
+    const local = await getLocalUserTitleStateService();
+    return local.getUserTitleStates(
+      userId,
+      opts as Parameters<typeof local.getUserTitleStates>[1],
+    );
+  }
+
+  let query = (await getSupabaseAdmin()).from("user_title_state")
     .select("*")
     .eq("user_id", userId)
     .order("last_event_at", { ascending: false });
@@ -810,11 +844,57 @@ export async function syncUserTvTitleStates(
   userId: string,
   opts?: SyncUserTvTitleStatesOptions,
 ): Promise<{ processed: number; failed: Array<{ tmdbId: number; error: string }> }> {
+  if (isLocalUserStateEnabled()) {
+    const local = await getLocalUserTitleStateService();
+    const states = await local.getUserTitleStates(userId, {
+      mediaType: "tv",
+      status: opts?.statuses as NonNullable<Parameters<typeof local.getUserTitleStates>[1]>["status"],
+      limit: opts?.limit ?? 250,
+    });
+    const failed: Array<{ tmdbId: number; error: string }> = [];
+
+    for (const state of states) {
+      try {
+        await local.upsertTitleState({
+          userId,
+          tmdbId: state.tmdb_id,
+          mediaType: "tv",
+          libraryEntry: {
+            status: state.status,
+            favorite: state.favorite,
+            liked: state.liked,
+          },
+          seriesProgress: {
+            watchedCount: state.watched_episodes,
+            airedEpisodes: state.aired_episodes,
+            totalEpisodes: state.total_episodes,
+            nextEpisode:
+              state.next_season !== null && state.next_episode !== null
+                ? {
+                    seasonNumber: state.next_season,
+                    episodeNumber: state.next_episode,
+                    airDate: state.next_episode_air_date,
+                  }
+                : null,
+            lastWatchedAt: state.last_watched_at,
+            watchedKeys: state.watched_keys,
+          },
+        });
+      } catch (err) {
+        failed.push({
+          tmdbId: state.tmdb_id,
+          error: err instanceof Error ? err.message : "unknown",
+        });
+      }
+    }
+
+    return { processed: states.length, failed };
+  }
+
   const statuses = opts?.statuses ?? ["watching", "watchlist"];
   const limit = opts?.limit ?? 250;
 
-  const { data, error } = await supabaseAdmin
-    .from("user_titles")
+  const { data, error } = await (await getSupabaseAdmin()).from("user_titles")
     .select("tmdb_id, status, favorite, liked, created_at")
     .eq("user_id", userId)
     .eq("media_type", "tv")
@@ -919,8 +999,12 @@ export async function refreshTitleStateAvailability(
     providerLogo: string | null;
   } | null,
 ): Promise<void> {
-  const { error } = await supabaseAdmin
-    .from("user_title_state")
+  if (isLocalUserStateEnabled()) {
+    const local = await getLocalUserTitleStateService();
+    return local.refreshTitleStateAvailability(userId, tmdbId, mediaType, availability);
+  }
+
+  const { error } = await (await getSupabaseAdmin()).from("user_title_state")
     .update({
       best_provider_name: availability?.providerName ?? null,
       best_provider_type: availability?.providerType ?? null,
@@ -946,8 +1030,12 @@ export async function refreshTitleStateAvailability(
 export async function getUserKnownTitleIds(
   userId: string,
 ): Promise<Set<string>> {
-  const { data, error } = await supabaseAdmin
-    .from("user_title_state")
+  if (isLocalUserStateEnabled()) {
+    const local = await getLocalUserTitleStateService();
+    return local.getUserKnownTitleIds(userId);
+  }
+
+  const { data, error } = await (await getSupabaseAdmin()).from("user_title_state")
     .select("tmdb_id, media_type")
     .eq("user_id", userId);
 
@@ -962,3 +1050,4 @@ export async function getUserKnownTitleIds(
   }
   return keys;
 }
+

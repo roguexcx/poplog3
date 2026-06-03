@@ -30,7 +30,7 @@ export type UserTitleState = {
   status: string | null;
   favorite: boolean;
   liked: boolean | null;
-  computed_state: string | null;
+  computed_state: ComputedState | null;
   watched_episodes: number;
   aired_episodes: number;
   total_episodes: number | null;
@@ -198,6 +198,11 @@ export async function getUserTitleStates(
   });
   if (!result.ok) throw new Error(result.error);
   return result.data.map(mapState);
+}
+
+export async function getUserKnownTitleIds(userId: string): Promise<Set<string>> {
+  const states = await getUserTitleStates(userId);
+  return new Set(states.map((state) => `${state.tmdb_id}:${state.media_type}`));
 }
 
 export async function deleteTitleState(
