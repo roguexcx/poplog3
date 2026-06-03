@@ -674,7 +674,7 @@ model Poplog3AvailabilityFallbackState {
 model Poplog3PremiumApiUsage {
   id           String     @id @default(cuid()) @db.VarChar(191)
   api          PremiumApi
-  periodDay    DateTime   @default(now()) @map("period_day") @db.Date
+  periodDay    DateTime   @map("period_day") @db.Date
   periodMonth  String     @map("period_month") @db.VarChar(7)
   usedAt       DateTime   @default(now()) @map("used_at")
   endpoint     String?    @db.VarChar(191)
