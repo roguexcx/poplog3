@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "@/server/supabase/admin";
+import { isLocalCacheEnabled } from "@/server/runtime/local-db-flags";
 import type {
   PoplogEpisode,
   PoplogSeason,
@@ -30,6 +30,11 @@ export type UpsertSeasonInput = {
   }>;
 };
 
+async function getSupabaseAdmin() {
+  const { supabaseAdmin } = await import("@/server/supabase/admin");
+  return supabaseAdmin;
+}
+
 export async function getCachedEpisode(
   seriesTmdbId: number,
   seasonNumber: number,
@@ -40,6 +45,16 @@ export async function getCachedEpisode(
   air_date: string | null;
   runtime: number | null;
 } | null> {
+  if (isLocalCacheEnabled()) {
+    try {
+      const local = await import("@/server/local-services/season-cache-local.service");
+      return await local.getCachedEpisode(seriesTmdbId, seasonNumber, episodeNumber);
+    } catch (err) {
+      console.warn("[season-cache/get-episode] local cache failed, falling back to Supabase:", err);
+    }
+  }
+
+  const supabaseAdmin = await getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
     .from("poplog3_episodes")
     .select("name, still_path, air_date, runtime")
@@ -59,6 +74,16 @@ export async function getCachedSeason(
   seriesTmdbId: number,
   seasonNumber: number
 ): Promise<PoplogSeason | null> {
+  if (isLocalCacheEnabled()) {
+    try {
+      const local = await import("@/server/local-services/season-cache-local.service");
+      return await local.getCachedSeason(seriesTmdbId, seasonNumber);
+    } catch (err) {
+      console.warn("[season-cache/get] local cache failed, falling back to Supabase:", err);
+    }
+  }
+
+  const supabaseAdmin = await getSupabaseAdmin();
   const { data: season, error: sErr } = await supabaseAdmin
     .from("title_seasons")
     .select(
@@ -106,7 +131,18 @@ export function isSeasonCacheFresh(
 }
 
 export async function upsertSeason(input: UpsertSeasonInput): Promise<void> {
+  if (isLocalCacheEnabled()) {
+    try {
+      const local = await import("@/server/local-services/season-cache-local.service");
+      await local.upsertSeason(input);
+      return;
+    } catch (err) {
+      console.warn("[season-cache/upsert] local cache failed, falling back to Supabase:", err);
+    }
+  }
+
   const now = new Date().toISOString();
+  const supabaseAdmin = await getSupabaseAdmin();
 
   const { error: sErr } = await supabaseAdmin
     .from("title_seasons")

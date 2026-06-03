@@ -1,4 +1,5 @@
 import type { ApiName, EngineLogEntry, EngineStats } from "./types";
+import { isLocalLogsEnabled } from "@/server/runtime/local-db-flags";
 
 const API_NAMES: ApiName[] = ["tmdb", "omdb", "watchmode", "motn"];
 const PERSISTENCE_WINDOW_HOURS = 24;
@@ -39,6 +40,16 @@ type PersistentSnapshot = {
 };
 
 export async function persistEngineLogEntry(entry: EngineLogEntry): Promise<void> {
+  if (isLocalLogsEnabled()) {
+    try {
+      const local = await import("@/server/local-services/engine-logger-local.service");
+      await local.persistEngineLogEntry(entry);
+      return;
+    } catch (err) {
+      warnPersistOnce("[engine-logger] Local persistence failed, falling back to Supabase:", err);
+    }
+  }
+
   try {
     const { supabaseAdmin } = await import("@/server/supabase/admin");
     const { error } = await supabaseAdmin.from("engine_api_call_logs").insert({
@@ -76,6 +87,16 @@ function warnPersistOnce(message: string, detail: unknown): void {
 }
 
 export async function getPersistentSnapshot(limit: number): Promise<PersistentSnapshot | null> {
+  if (isLocalLogsEnabled()) {
+    try {
+      const local = await import("@/server/local-services/engine-logger-local.service");
+      const snapshot = await local.getPersistentSnapshot(limit);
+      if (snapshot) return snapshot;
+    } catch (err) {
+      console.warn("[engine-logger] Local snapshot failed, falling back to Supabase:", err);
+    }
+  }
+
   try {
     const { supabaseAdmin } = await import("@/server/supabase/admin");
     const since = new Date(Date.now() - PERSISTENCE_WINDOW_HOURS * 60 * 60 * 1000).toISOString();
@@ -122,6 +143,15 @@ export async function getPersistentSnapshot(limit: number): Promise<PersistentSn
 }
 
 export async function clearPersistentEntries(): Promise<boolean> {
+  if (isLocalLogsEnabled()) {
+    try {
+      const local = await import("@/server/local-services/engine-logger-local.service");
+      return await local.clearPersistentEntries();
+    } catch (err) {
+      console.warn("[engine-logger] Local clear failed, falling back to Supabase:", err);
+    }
+  }
+
   try {
     const { supabaseAdmin } = await import("@/server/supabase/admin");
     const { error } = await supabaseAdmin

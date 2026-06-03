@@ -1,5 +1,5 @@
 import { normalizeTmdbTitleDetails } from "@/server/normalizers/tmdb-title-details";
-import { supabaseAdmin } from "@/server/supabase/admin";
+import { isLocalCacheEnabled } from "@/server/runtime/local-db-flags";
 import { PoplogTitle } from "@/server/types/title";
 import { PoplogTitleDetails } from "@/server/types/title-details";
 
@@ -13,6 +13,11 @@ export type GetCachedTitleResult = {
   rawPayload: Record<string, unknown> | null;
 };
 
+async function getSupabaseAdmin() {
+  const { supabaseAdmin } = await import("@/server/supabase/admin");
+  return supabaseAdmin;
+}
+
 export async function getCachedTitle(
   mediaType: MediaType,
   tmdbId: number
@@ -25,6 +30,16 @@ export async function getCachedTitleWithPayload(
   mediaType: MediaType,
   tmdbId: number
 ): Promise<GetCachedTitleResult> {
+  if (isLocalCacheEnabled()) {
+    try {
+      const local = await import("@/server/local-services/title-cache-local.service");
+      return await local.getCachedTitleWithPayload(mediaType, tmdbId);
+    } catch (err) {
+      console.warn("[title-cache/get] local cache failed, falling back to Supabase:", err);
+    }
+  }
+
+  const supabaseAdmin = await getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
     .from("poplog3_titles")
     .select("*")
@@ -124,6 +139,15 @@ export async function upsertCachedTitle(
   title: CachedTitle,
   rawPayload: unknown
 ): Promise<UpsertCachedTitleResult> {
+  if (isLocalCacheEnabled()) {
+    try {
+      const local = await import("@/server/local-services/title-cache-local.service");
+      return await local.upsertCachedTitle(title, rawPayload);
+    } catch (err) {
+      console.warn("[title-cache/upsert] local cache failed, falling back to Supabase:", err);
+    }
+  }
+
   if (!title?.tmdb_id || !title.media_type) {
     console.warn("[title-cache/upsert] payload sem tmdb_id/media_type.");
     return { ok: false, persisted: null, skipped: "missing-id" };
@@ -157,6 +181,7 @@ export async function upsertCachedTitle(
     title.episode_run_time ?? existing?.episode_run_time ?? null;
 
   const now = new Date().toISOString();
+  const supabaseAdmin = await getSupabaseAdmin();
 
   const { error } = await supabaseAdmin.from("poplog3_titles").upsert(
     {

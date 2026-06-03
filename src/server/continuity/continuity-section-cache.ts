@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "@/server/supabase/admin";
+import { isLocalCacheEnabled } from "@/server/runtime/local-db-flags";
 
 export type ContinuitySectionCacheStatus = "hit" | "stale" | "miss" | "error";
 
@@ -15,6 +15,11 @@ type CacheRow = {
   updated_at: string;
 };
 
+async function getSupabaseAdmin() {
+  const { supabaseAdmin } = await import("@/server/supabase/admin");
+  return supabaseAdmin;
+}
+
 export async function readContinuitySectionCache<T>(
   sectionKey: string,
   options: {
@@ -23,7 +28,20 @@ export async function readContinuitySectionCache<T>(
     language?: string | null;
   } = {},
 ): Promise<ContinuitySectionCacheEntry<T> | null> {
+  if (isLocalCacheEnabled()) {
+    try {
+      const local = await import("@/server/local-services/continuity-section-cache-local.service");
+      return await local.readContinuitySectionCache<T>(sectionKey, options);
+    } catch (error) {
+      console.warn("[continuity-section-cache] local read failed, falling back to Supabase", {
+        sectionKey,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   try {
+    const supabaseAdmin = await getSupabaseAdmin();
     let query = supabaseAdmin
       .from("continuity_section_cache")
       .select("payload, expires_at, updated_at")
@@ -70,10 +88,24 @@ export async function writeContinuitySectionCache<T>(input: {
   payload: T;
   ttlMs: number;
 }) {
+  if (isLocalCacheEnabled()) {
+    try {
+      const local = await import("@/server/local-services/continuity-section-cache-local.service");
+      await local.writeContinuitySectionCache(input);
+      return;
+    } catch (error) {
+      console.warn("[continuity-section-cache] local write failed, falling back to Supabase", {
+        sectionKey: input.sectionKey,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
   const now = new Date();
   const expiresAt = new Date(now.getTime() + input.ttlMs);
 
   try {
+    const supabaseAdmin = await getSupabaseAdmin();
     const { error } = await supabaseAdmin
       .from("continuity_section_cache")
       .upsert(
@@ -105,16 +137,54 @@ export async function writeContinuitySectionCache<T>(input: {
 }
 
 export function invalidateContinuitySectionCache(userId: string) {
-  void supabaseAdmin
-    .from("continuity_section_cache")
-    .delete()
-    .eq("user_id", userId)
-    .then(({ error }) => {
-      if (error) {
-        console.warn("[continuity-section-cache] invalidation failed", {
+  if (isLocalCacheEnabled()) {
+    void import("@/server/local-services/continuity-section-cache-local.service")
+      .then((local) => local.invalidateContinuitySectionCacheLocal({ userId }))
+      .catch((error) => {
+        console.warn("[continuity-section-cache] local invalidation failed, falling back to Supabase", {
           userId,
-          error: error.message,
+          error: error instanceof Error ? error.message : String(error),
         });
-      }
+        void getSupabaseAdmin().then((supabaseAdmin) => {
+          void supabaseAdmin
+            .from("continuity_section_cache")
+            .delete()
+            .eq("user_id", userId)
+            .then(({ error: supabaseError }) => {
+              if (supabaseError) {
+                console.warn("[continuity-section-cache] invalidation failed", {
+                  userId,
+                  error: supabaseError.message,
+                });
+              }
+            });
+        }).catch((supabaseError) => {
+          console.warn("[continuity-section-cache] invalidation failed", {
+            userId,
+            error: supabaseError instanceof Error ? supabaseError.message : String(supabaseError),
+          });
+        });
+      });
+    return;
+  }
+
+  void getSupabaseAdmin().then((supabaseAdmin) => {
+    void supabaseAdmin
+      .from("continuity_section_cache")
+      .delete()
+      .eq("user_id", userId)
+      .then(({ error }) => {
+        if (error) {
+          console.warn("[continuity-section-cache] invalidation failed", {
+            userId,
+            error: error.message,
+          });
+        }
+      });
+  }).catch((error) => {
+    console.warn("[continuity-section-cache] invalidation failed", {
+      userId,
+      error: error instanceof Error ? error.message : String(error),
     });
+  });
 }

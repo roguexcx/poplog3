@@ -1,4 +1,4 @@
-import { supabaseAdmin } from "@/server/supabase/admin";
+import { isLocalCacheEnabled } from "@/server/runtime/local-db-flags";
 import type { PoplogRatings } from "@/server/types/ratings";
 
 type MediaType = "movie" | "tv";
@@ -9,6 +9,11 @@ export type CachedRatings = PoplogRatings & {
   updated_at: string | null;
 };
 
+async function getSupabaseAdmin() {
+  const { supabaseAdmin } = await import("@/server/supabase/admin");
+  return supabaseAdmin;
+}
+
 /**
  * Le os ratings cacheados de um titulo, se existirem.
  * Nao olha frescor — isso eh decisao da camada de sync.
@@ -17,6 +22,16 @@ export async function getCachedRatings(
   mediaType: MediaType,
   tmdbId: number
 ): Promise<CachedRatings | null> {
+  if (isLocalCacheEnabled()) {
+    try {
+      const local = await import("@/server/local-services/ratings-cache-local.service");
+      return await local.getCachedRatings(mediaType, tmdbId);
+    } catch (err) {
+      console.warn("[ratings-cache/getCachedRatings] local cache failed, falling back to Supabase:", err);
+    }
+  }
+
+  const supabaseAdmin = await getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
     .from("title_ratings")
     .select(
@@ -87,7 +102,18 @@ export type UpsertRatingsInput = {
 export async function upsertRatings(
   input: UpsertRatingsInput
 ): Promise<void> {
+  if (isLocalCacheEnabled()) {
+    try {
+      const local = await import("@/server/local-services/ratings-cache-local.service");
+      await local.upsertRatings(input);
+      return;
+    } catch (err) {
+      console.warn("[ratings-cache/upsertRatings] local cache failed, falling back to Supabase:", err);
+    }
+  }
+
   const now = new Date().toISOString();
+  const supabaseAdmin = await getSupabaseAdmin();
 
   const { error } = await supabaseAdmin
     .from("title_ratings")
