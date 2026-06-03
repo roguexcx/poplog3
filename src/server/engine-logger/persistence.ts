@@ -1,7 +1,7 @@
 import type { ApiName, EngineLogEntry, EngineStats } from "./types";
 import { isLocalLogsEnabled } from "@/server/runtime/local-db-flags";
 
-const API_NAMES: ApiName[] = ["tmdb", "omdb", "watchmode", "motn"];
+const API_NAMES: ApiName[] = ["tmdb", "omdb", "watchmode", "motn", "balloonerismm", "tvdb"];
 const PERSISTENCE_WINDOW_HOURS = 24;
 let persistWarningMutedUntil = 0;
 

@@ -298,16 +298,16 @@ export function TabApiHistory({ secret }: { secret: string }) {
 
       {/* Feedback */}
       {view.kind === "loading" && (
-        <AdminFeedback icon={<RefreshCw size={14} className="animate-spin" />} text="Carregando historico..." />
+        <AdminFeedback kind="loading" message="Carregando historico..." />
       )}
       {view.kind === "unauthorized" && (
-        <AdminFeedback icon={<span>🔒</span>} text="Secret incorreto." variant="error" />
+        <AdminFeedback kind="error" message="Secret incorreto." />
       )}
       {view.kind === "error" && (
-        <AdminFeedback icon={<span>⚠️</span>} text={view.message} variant="error" />
+        <AdminFeedback kind="error" message={view.message} />
       )}
       {view.kind === "idle" && (
-        <AdminFeedback icon={<BarChart2 size={14} />} text="Selecione uma janela e clique em Carregar." />
+        <AdminFeedback kind="success" message="Selecione uma janela e clique em Carregar." />
       )}
 
       {/* API Summary Cards */}
@@ -328,7 +328,7 @@ export function TabApiHistory({ secret }: { secret: string }) {
 
       {/* No data */}
       {view.kind === "ok" && activeApis.length === 0 && (
-        <AdminFeedback icon={<BarChart2 size={14} />} text={`Nenhuma chamada registrada nos ultimos ${view.days} dias.`} />
+        <AdminFeedback kind="success" message={`Nenhuma chamada registrada nos ultimos ${view.days} dias.`} />
       )}
 
       {/* Daily breakdown table */}

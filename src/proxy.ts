@@ -11,7 +11,17 @@ const PROTECTED_ROUTES = [
   "/sorteio",
 ];
 
+function isLocalAuthActive(): boolean {
+  const v = process.env.POPLOG_LOCAL_AUTH_ENABLED?.trim().toLowerCase();
+  return v === "true" || v === "1" || v === "yes" || v === "on";
+}
+
 export async function proxy(request: NextRequest) {
+  // Com POPLOG_LOCAL_AUTH_ENABLED=true: libera todas as rotas protegidas sem Supabase.
+  if (isLocalAuthActive()) {
+    return NextResponse.next({ request });
+  }
+
   let response = NextResponse.next({
     request,
   });

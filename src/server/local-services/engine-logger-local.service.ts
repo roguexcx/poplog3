@@ -6,7 +6,7 @@ import {
 } from "@/server/repositories";
 import type { ApiName, EngineLogEntry, EngineStats } from "@/server/engine-logger/types";
 
-const API_NAMES: ApiName[] = ["tmdb", "omdb", "watchmode", "motn"];
+const API_NAMES: ApiName[] = ["tmdb", "omdb", "watchmode", "motn", "balloonerismm", "tvdb"];
 const PERSISTENCE_WINDOW_HOURS = 24;
 
 type PersistentSnapshot = {

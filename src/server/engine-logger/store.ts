@@ -1,7 +1,7 @@
 import type { ApiName, EngineLogEntry, EngineStats } from "./types";
 
 const MAX = 500;
-const API_NAMES: ApiName[] = ["tmdb", "omdb", "watchmode", "motn"];
+const API_NAMES: ApiName[] = ["tmdb", "omdb", "watchmode", "motn", "balloonerismm", "tvdb"];
 
 type Counter = {
   calls: number;
