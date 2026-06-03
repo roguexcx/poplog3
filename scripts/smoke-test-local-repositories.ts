@@ -1,6 +1,8 @@
 import { db } from "@/server/db/client";
 import {
   completePremiumApiUsage,
+  clearSeriesProgress,
+  computeUserSeriesProgress,
   createEngineLogEntry,
   createPremiumApiUsage,
   deleteCachedTitleRow,
@@ -10,25 +12,39 @@ import {
   deletePremiumApiUsage,
   deleteRatingsCache,
   deleteSeasonCache,
+  deleteUserRating,
+  deleteUserTitleState,
   getCachedEpisodeRow,
   getCachedSeasonRow,
   getCachedTitleRow,
   getExternalIdsCache,
   getCachedRatingsRow,
+  getUserCuradoriaPreference,
+  getUserLibraryItems,
+  getUserRating,
+  getUserTitle,
+  getWatchedEpisodesForSeries,
   invalidateContinuitySectionCache,
   isRatingsCacheFresh,
   isSeasonCacheFresh,
   isTitleCacheFresh,
   listCatalogAvailability,
   listRecentEngineLogEntries,
+  readUserTitleState,
   replaceCatalogAvailability,
   readContinuitySectionCache,
   readIcsAgendaCache,
+  removeUserTitle,
   upsertCachedTitleRow,
+  upsertUserCuradoriaPreference,
   upsertExternalIdsCache,
   upsertApiUsageDaily,
   upsertRatingsCache,
   upsertSeasonCache,
+  upsertUserRating,
+  upsertUserTitle,
+  upsertUserTitleState,
+  upsertWatchedEpisode,
   writeContinuitySectionCache,
   writeIcsAgendaCache,
 } from "@/server/repositories";
@@ -53,6 +69,17 @@ async function main() {
       id: userId,
       email: "local@poplog.dev",
       name: "POPLOG Local User",
+    },
+  });
+
+  const smokeUserId = `${userId}-repo-smoke`;
+  await db.user.upsert({
+    where: { id: smokeUserId },
+    update: { updatedAt: new Date() },
+    create: {
+      id: smokeUserId,
+      email: "repo-smoke@poplog.dev",
+      name: "POPLOG Repository Smoke User",
     },
   });
 
@@ -280,6 +307,193 @@ async function main() {
     "continuity cache invalidate",
     await invalidateContinuitySectionCache({ userId, sectionKey }),
   );
+
+  const libraryWatchlistId = 987654331;
+  const libraryWatchedId = 987654332;
+  const libraryWatchingSeriesId = 987654333;
+
+  await assertOk("library watchlist upsert", await upsertUserTitle({
+    userId: smokeUserId,
+    tmdbId: libraryWatchlistId,
+    mediaType: "movie",
+    status: "watchlist",
+    notes: "repository smoke watchlist",
+  }));
+  await assertOk("library watched upsert", await upsertUserTitle({
+    userId: smokeUserId,
+    tmdbId: libraryWatchedId,
+    mediaType: "movie",
+    status: "watched",
+    favorite: true,
+    rating: 5,
+  }));
+  await assertOk("library watching upsert", await upsertUserTitle({
+    userId: smokeUserId,
+    tmdbId: libraryWatchingSeriesId,
+    mediaType: "tv",
+    status: "watching",
+  }));
+  await assertOk("library title read", await getUserTitle({
+    userId: smokeUserId,
+    tmdbId: libraryWatchlistId,
+    mediaType: "movie",
+  }));
+  const watchlistItems = await assertOk("library list by status", await getUserLibraryItems({
+    userId: smokeUserId,
+    status: "watchlist",
+  }));
+  if (watchlistItems.length !== 1) {
+    throw new Error("library status filter failed");
+  }
+
+  await assertOk("user title state upsert", await upsertUserTitleState({
+    userId: smokeUserId,
+    tmdbId: libraryWatchingSeriesId,
+    mediaType: "tv",
+    status: "watching",
+    computedState: "in_progress",
+    watchedEpisodes: 1,
+    airedEpisodes: 2,
+    totalEpisodes: 2,
+    progressPct: 50,
+    nextSeason: 1,
+    nextEpisode: 2,
+    nextEpisodeAirDate: "2024-01-08",
+    watchedKeys: ["S01E01"],
+    editorialAffinity: 1.25,
+    editorialPenalty: 0.25,
+    editorialScore: 1,
+    isBoosted: true,
+  }));
+  await assertOk("user title state read", await readUserTitleState({
+    userId: smokeUserId,
+    tmdbId: libraryWatchingSeriesId,
+    mediaType: "tv",
+  }));
+
+  await assertBoolean("episode progress catalog write", await upsertSeasonCache({
+    seriesTmdbId: libraryWatchingSeriesId,
+    seasonNumber: 1,
+    tmdbSeasonId: 3331,
+    name: "Smoke Progress Season",
+    overview: "Progress repository smoke test.",
+    posterPath: "/progress-season.jpg",
+    airDate: "2024-01-01",
+    episodeCount: 2,
+    voteAverage: 7.9,
+    tmdbPayload: { source: "smoke-progress" },
+    episodes: [
+      {
+        episodeNumber: 1,
+        tmdbEpisodeId: 33311,
+        name: "Progress One",
+        overview: "Watched episode.",
+        stillPath: "/progress-one.jpg",
+        airDate: "2024-01-01",
+        runtime: 42,
+        voteAverage: 8,
+        voteCount: 10,
+        productionCode: "PRG001",
+        episodeType: "standard",
+      },
+      {
+        episodeNumber: 2,
+        tmdbEpisodeId: 33312,
+        name: "Progress Two",
+        overview: "Next episode.",
+        stillPath: "/progress-two.jpg",
+        airDate: "2024-01-08",
+        runtime: 43,
+        voteAverage: 8,
+        voteCount: 9,
+        productionCode: "PRG002",
+        episodeType: "standard",
+      },
+    ],
+  }));
+  await assertOk("episode progress write", await upsertWatchedEpisode({
+    userId: smokeUserId,
+    seriesTmdbId: libraryWatchingSeriesId,
+    seasonNumber: 1,
+    episodeNumber: 1,
+    runtimeMinutes: 42,
+  }));
+  const watchedEpisodes = await assertOk("episode progress read", await getWatchedEpisodesForSeries({
+    userId: smokeUserId,
+    seriesTmdbId: libraryWatchingSeriesId,
+  }));
+  if (watchedEpisodes.length !== 1) {
+    throw new Error("episode progress read count failed");
+  }
+  const progress = await assertOk("episode progress compute", await computeUserSeriesProgress({
+    userId: smokeUserId,
+    seriesTmdbId: libraryWatchingSeriesId,
+  }));
+  if (progress.watchedCount !== 1 || progress.airedEpisodes < 2 || progress.nextEpisode?.episodeNumber !== 2) {
+    throw new Error("episode progress compute failed");
+  }
+
+  await assertOk("user rating upsert", await upsertUserRating({
+    userId: smokeUserId,
+    mediaType: "movie",
+    tmdbId: libraryWatchedId,
+    rating: 4.5,
+  }));
+  const personalRating = await assertOk("user rating read", await getUserRating({
+    userId: smokeUserId,
+    mediaType: "movie",
+    tmdbId: libraryWatchedId,
+  }));
+  if (!personalRating || Number(personalRating.rating) !== 4.5) {
+    throw new Error("user rating read failed");
+  }
+
+  await assertOk("user preferences upsert", await upsertUserCuradoriaPreference({
+    userId: smokeUserId,
+    preferredSessionDurationMinutes: 50,
+    typicalWatchDays: ["friday", "saturday"],
+    typicalWatchTimeStart: 20,
+    typicalWatchTimeEnd: 23,
+    topGenres: ["Drama", "Sci-Fi"],
+    topPlatforms: ["Netflix"],
+    avgEpisodesPerSession: 2,
+    prefersShortContent: false,
+    bingeTendencyScore: 0.75,
+  }));
+  await assertOk("user preferences read", await getUserCuradoriaPreference(smokeUserId));
+
+  await assertOk("user rating delete", await deleteUserRating({
+    userId: smokeUserId,
+    mediaType: "movie",
+    tmdbId: libraryWatchedId,
+  }));
+  await assertOk("episode progress clear", await clearSeriesProgress({
+    userId: smokeUserId,
+    seriesTmdbId: libraryWatchingSeriesId,
+  }));
+  await assertOk("user title state delete", await deleteUserTitleState({
+    userId: smokeUserId,
+    tmdbId: libraryWatchingSeriesId,
+    mediaType: "tv",
+  }));
+  await assertOk("library watchlist delete", await removeUserTitle({
+    userId: smokeUserId,
+    tmdbId: libraryWatchlistId,
+    mediaType: "movie",
+  }));
+  await assertOk("library watched delete", await removeUserTitle({
+    userId: smokeUserId,
+    tmdbId: libraryWatchedId,
+    mediaType: "movie",
+  }));
+  await assertOk("library watching delete", await removeUserTitle({
+    userId: smokeUserId,
+    tmdbId: libraryWatchingSeriesId,
+    mediaType: "tv",
+  }));
+  await assertBoolean("episode progress catalog delete", await deleteSeasonCache(libraryWatchingSeriesId, 1));
+  await db.user.delete({ where: { id: smokeUserId } });
+  console.log("[smoke] user repositories cleanup: ok");
 
   await assertOk("ics cache delete", await deleteIcsAgendaCache(icsId));
   if (premiumUsage?.id) {
