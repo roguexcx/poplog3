@@ -1,3 +1,4 @@
+import type { UserCuradoriaPreference } from "@prisma/client";
 import {
   getUserCuradoriaPreference,
   upsertUserCuradoriaPreference,
@@ -18,7 +19,7 @@ export type UserCuradoriaPreferenceLocal = {
   updated_at: string;
 };
 
-function mapPreference(row: NonNullable<Awaited<ReturnType<typeof getUserCuradoriaPreference>> extends { ok: true; data: infer T } ? T : never>): UserCuradoriaPreferenceLocal {
+function mapPreference(row: UserCuradoriaPreference): UserCuradoriaPreferenceLocal {
   return {
     user_id: row.userId,
     preferred_session_duration_minutes: row.preferredSessionDurationMinutes,

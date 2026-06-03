@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { db } from "@/server/db/client";
 import type { MediaType, UserEvent } from "@prisma/client";
 import type { RepositoryResult, RepositoryVoidResult } from "./types";
@@ -24,7 +25,7 @@ export async function createUserEvent(
         tmdbId: input.tmdbId,
         mediaType: input.mediaType,
         eventType: input.eventType,
-        payload: input.payload ?? {},
+        payload: (input.payload ?? {}) as Prisma.InputJsonValue,
       },
     });
     return { ok: true, data: row };

@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { db } from "@/server/db/client";
 import type { UserCuradoriaSignal, UserCuradoriaSignalType } from "@prisma/client";
 import type { RepositoryResult, RepositoryVoidResult } from "./types";
@@ -22,7 +23,7 @@ export async function createCuradoriaSignal(
         userId: input.userId,
         contentId: input.contentId,
         signalType: input.signalType,
-        signalValue: input.signalValue ?? null,
+        signalValue: input.signalValue !== null ? (input.signalValue as Prisma.InputJsonValue) : Prisma.JsonNull,
       },
     });
     return { ok: true, data: row };

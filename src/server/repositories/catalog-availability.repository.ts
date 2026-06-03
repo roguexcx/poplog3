@@ -1,5 +1,10 @@
 import { db } from "@/server/db/client";
-import type { CatalogAvailabilitySource, MediaType, ProviderType, SourceConfidence } from "@prisma/client";
+import type {
+  CatalogAvailabilitySource,
+  MediaType,
+  ProviderType,
+  SourceConfidence,
+} from "@prisma/client";
 
 export type CatalogAvailabilityInput = {
   imdbId?: string | null;
@@ -61,17 +66,35 @@ export async function listCatalogAvailability(input: {
 export async function replaceCatalogAvailability(input: {
   imdbId?: string | null;
   traktId?: bigint | number | null;
+  tmdbId?: bigint | number | null;
+  mediaType?: MediaType;
+  source?: CatalogAvailabilitySource;
   providerRegion: string;
   rows: CatalogAvailabilityInput[];
 }): Promise<boolean> {
   try {
-    await db.catalogAvailability.deleteMany({
-      where: {
-        imdbId: input.imdbId ?? undefined,
-        traktId: input.traktId === undefined ? undefined : toBigIntValue(input.traktId),
-        providerRegion: input.providerRegion,
-      },
-    });
+    // When tmdbId + source are provided, use raw SQL to avoid Prisma enum where-filter
+    // validation issues in deleteMany. Otherwise use the ORM path.
+    if (input.tmdbId !== undefined && input.source !== undefined) {
+      const tmdbIdBig = toBigIntValue(input.tmdbId)!;
+      const mediaTypeStr = input.mediaType ?? "";
+      const sourceStr = String(input.source);
+      await db.$executeRaw`
+        DELETE FROM catalog_availability
+        WHERE tmdb_id = ${tmdbIdBig}
+          AND media_type = ${mediaTypeStr}
+          AND source = ${sourceStr}
+          AND provider_region = ${input.providerRegion}
+      `;
+    } else {
+      await db.catalogAvailability.deleteMany({
+        where: {
+          imdbId: input.imdbId ?? undefined,
+          traktId: input.traktId === undefined ? undefined : toBigIntValue(input.traktId),
+          providerRegion: input.providerRegion,
+        },
+      });
+    }
 
     if (input.rows.length === 0) return true;
 

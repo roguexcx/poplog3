@@ -66,7 +66,7 @@ export async function getCachedTitleWithPayload(
     );
     if (details) {
       return {
-        title: { ...details, last_synced_at: row.lastSyncedAt.toISOString() },
+        title: { ...details, last_synced_at: (row.lastSyncedAt ?? new Date(0)).toISOString() },
         rawPayload,
       };
     }
@@ -76,7 +76,7 @@ export async function getCachedTitleWithPayload(
     title: {
       tmdb_id: row.tmdbId,
       media_type: row.mediaType,
-      title: row.title,
+      title: row.title ?? "",
       original_title: row.originalTitle,
       overview: row.overview,
       poster_path: row.posterPath,
@@ -87,14 +87,14 @@ export async function getCachedTitleWithPayload(
       year: row.year,
       runtime: row.runtime,
       episode_run_time: row.episodeRunTime as number[] | null,
-      genres: row.genres ?? [],
+      genres: (row.genres ?? []) as unknown as number[],
       popularity: row.popularity === null ? null : Number(row.popularity),
       vote_average: row.voteAverage === null ? null : Number(row.voteAverage),
       vote_count: row.voteCount,
       number_of_episodes: row.numberOfEpisodes,
       number_of_seasons: row.numberOfSeasons,
       original_language: row.originalLanguage,
-      last_synced_at: row.lastSyncedAt.toISOString(),
+      last_synced_at: (row.lastSyncedAt ?? new Date(0)).toISOString(),
     },
     rawPayload,
   };

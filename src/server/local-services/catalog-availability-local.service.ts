@@ -56,6 +56,9 @@ export async function listAvailability(input: {
 export async function replaceAvailability(input: {
   imdbId?: string | null;
   traktId?: bigint | number | null;
+  tmdbId?: bigint | number | null;
+  mediaType?: MediaType;
+  source?: CatalogAvailabilitySource;
   providerRegion: string;
   rows: CatalogAvailabilityLocalInput[];
 }): Promise<boolean> {

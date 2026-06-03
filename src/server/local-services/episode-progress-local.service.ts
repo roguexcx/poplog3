@@ -9,6 +9,7 @@ import {
   upsertUserTitleState,
   upsertWatchedEpisode,
 } from "@/server/repositories";
+import type { UserEpisode } from "@prisma/client";
 import type { EpisodeKey, UserSeriesProgress } from "@/server/repositories/episode-progress.repository";
 
 export type { EpisodeKey, UserSeriesProgress };
@@ -31,7 +32,7 @@ export type ToggleEpisodeInput = {
   runtimeMinutes?: number | null;
 };
 
-function mapEpisode(row: Awaited<ReturnType<typeof getWatchedRows>> extends { ok: true; data: Array<infer R> } ? R : never): UserEpisodeRow {
+function mapEpisode(row: UserEpisode): UserEpisodeRow {
   return {
     user_id: row.userId,
     series_tmdb_id: row.seriesTmdbId,

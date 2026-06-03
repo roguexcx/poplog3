@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { db } from "@/server/db/client";
 import type { ComputedState, LibraryStatus, MediaType, UserTitleState } from "@prisma/client";
 import type { RepositoryResult, RepositoryVoidResult } from "./types";
@@ -237,7 +238,7 @@ export async function logUserEvent(input: {
         tmdbId: input.tmdbId,
         mediaType: input.mediaType,
         eventType: input.eventType,
-        payload: input.payload ?? {},
+        payload: (input.payload ?? {}) as Prisma.InputJsonValue,
       },
     });
     return { ok: true, data: null };

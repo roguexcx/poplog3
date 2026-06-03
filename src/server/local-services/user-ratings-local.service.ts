@@ -5,6 +5,7 @@ import {
   getUserRatingsBatch as getUserRatingRowsBatch,
   upsertUserRating as upsertUserRatingRow,
 } from "@/server/repositories";
+import type { UserRating } from "@prisma/client";
 import type { RatingMediaType, RatingSource, UserRatingData } from "@/types/user";
 
 export type { RatingMediaType, RatingSource, UserRatingData };
@@ -31,7 +32,7 @@ export type UpsertRatingInput = {
 
 export type DeleteRatingInput = Omit<UpsertRatingInput, "rating" | "ratingSource" | "isPublic">;
 
-function mapRating(row: NonNullable<Awaited<ReturnType<typeof getUserRatingRow>> extends { ok: true; data: infer T } ? T : never>): UserRatingData {
+function mapRating(row: UserRating): UserRatingData {
   return {
     rating: Number(row.rating),
     ratingSource: row.ratingSource,

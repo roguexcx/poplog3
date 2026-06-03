@@ -1,5 +1,5 @@
-import { supabaseAdmin } from "@/server/supabase/admin";
 import { formatError, logOnce } from "@/server/logging/log-control";
+import { isLocalAvailabilityEnabled } from "@/server/runtime/local-db-flags";
 
 type MediaType = "movie" | "tv";
 
@@ -97,11 +97,130 @@ function logIncompleteAvailabilitySchema(columns: string[]) {
   );
 }
 
+async function getSupabaseAdmin() {
+  const { supabaseAdmin } = await import("@/server/supabase/admin");
+  return supabaseAdmin;
+}
+
+// --- Compatibility bridge helpers ---
+
+// Mapping between Supabase availability_type and Prisma ProviderType
+function availTypeToProviderType(t: AvailabilityType): string {
+  if (t === "streaming") return "subscription";
+  return t;
+}
+
+// Reverse: Prisma ProviderType -> Supabase availability_type
+function providerTypeToAvailType(t: string): AvailabilityType {
+  if (t === "subscription" || t === "local") return "streaming";
+  if (t === "rent" || t === "buy" || t === "free" || t === "ads") {
+    return t as AvailabilityType;
+  }
+  return "streaming";
+}
+
+// Prisma CatalogAvailabilitySource includes tmdb/watchmode/motn — same string values
+function catalogSourceToAvailSource(s: string): AvailabilitySource {
+  if (s === "watchmode" || s === "motn") return s as AvailabilitySource;
+  return "tmdb";
+}
+
+async function getAvailabilityLocal(
+  mediaType: MediaType,
+  tmdbId: number,
+  country: string,
+): Promise<AvailabilityRow[]> {
+  try {
+    const local = await import("@/server/local-services/catalog-availability-local.service");
+    const rows = await local.listAvailability({
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      tmdbId: BigInt(tmdbId) as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      mediaType: mediaType as any,
+      providerRegion: country,
+    });
+    return rows.map((row) => ({
+      tmdb_id: row.tmdb_id ? Number(row.tmdb_id) : tmdbId,
+      media_type: row.media_type as MediaType,
+      provider_id: null,
+      provider_name: row.provider_name,
+      provider_logo_path: null,
+      tmdb_provider_id: null,
+      country,
+      availability_type: providerTypeToAvailType(String(row.provider_type)),
+      source: catalogSourceToAvailSource(String(row.source)),
+      deep_link: null,
+      quality: null,
+      last_synced_at: row.checked_at ?? null,
+      expires_at: row.expires_at ?? null,
+    }));
+  } catch (err) {
+    logOnce(
+      "availability:local:get-failed",
+      "[availability] leitura local falhou — retornando vazio\n- local path error",
+    );
+    console.warn("[availability-cache/local/get]", err);
+    return [];
+  }
+}
+
+async function replaceAvailabilityLocal(input: UpsertAvailabilityInput): Promise<void> {
+  const local = await import("@/server/local-services/catalog-availability-local.service");
+  const { tmdbId, mediaType, country, source, rows, ttlDays } = input;
+
+  const nowDate = new Date();
+  const expiresAt = new Date(nowDate.getTime() + (ttlDays ?? 7) * 24 * 60 * 60 * 1000);
+
+  const mappedRows = rows.map((r) => ({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tmdbId: BigInt(tmdbId) as any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mediaType: mediaType as any,
+    providerName: r.providerName,
+    providerRegion: country,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    providerType: availTypeToProviderType(r.availabilityType) as any,
+    providerUrl: null,
+    providerLogoUrl: null,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    source: source as any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    sourceConfidence: "medium" as any,
+    checkedAt: nowDate,
+    expiresAt,
+    rawPayloadJson: r.rawPayload ?? null,
+  }));
+
+  const ok = await local.replaceAvailability({
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    tmdbId: BigInt(tmdbId) as any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mediaType: mediaType as any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    source: source as any,
+    providerRegion: country,
+    rows: mappedRows,
+  });
+
+  if (!ok) {
+    throw new Error(
+      `[availability-cache/local] replaceAvailability failed for ${mediaType}/${tmdbId}/${country}`,
+    );
+  }
+}
+
+// --- Public API ---
+
 export async function getAvailability(
   mediaType: MediaType,
   tmdbId: number,
   country: string
 ): Promise<AvailabilityRow[]> {
+  if (isLocalAvailabilityEnabled()) {
+    return getAvailabilityLocal(mediaType, tmdbId, country);
+  }
+
+  const supabaseAdmin = await getSupabaseAdmin();
   const { data, error } = await supabaseAdmin
     .from("poplog3_title_availability")
     .select(AVAILABILITY_SELECT_FULL)
@@ -167,6 +286,10 @@ export function isAvailabilityFresh(
 export async function replaceAvailability(
   input: UpsertAvailabilityInput
 ): Promise<void> {
+  if (isLocalAvailabilityEnabled()) {
+    return replaceAvailabilityLocal(input);
+  }
+
   const { tmdbId, mediaType, country, source, rows } = input;
 
   // Cross-reference: para cada providerName/tmdbProviderId, tenta achar o
@@ -176,6 +299,7 @@ export async function replaceAvailability(
     .filter((v): v is number => typeof v === "number");
 
   const providerLookup = new Map<number, string>();
+  const supabaseAdmin = await getSupabaseAdmin();
   if (lookupKeys.length > 0) {
     const { data: providers } = await supabaseAdmin
       .from("streaming_providers")

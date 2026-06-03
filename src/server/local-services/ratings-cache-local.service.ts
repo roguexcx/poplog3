@@ -41,7 +41,7 @@ export async function getCachedRatings(
     rotten_tomatoes_score: row.rottenTomatoesScore ?? undefined,
     metacritic_score: row.metacriticScore ?? undefined,
     tmdb_rating: row.tmdbRating === null ? undefined : Number(row.tmdbRating),
-    poplog_score: row.poplogScore ?? undefined,
+    poplog_score: row.poplogScore === null ? undefined : Number(row.poplogScore),
     updated_at: row.updatedAt.toISOString(),
   };
 }

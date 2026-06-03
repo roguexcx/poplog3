@@ -4,7 +4,7 @@ import {
   deleteCuradoriaSignalsForContent,
   listCuradoriaSignals,
 } from "@/server/repositories";
-import type { MediaType, UserCuradoriaSignalType } from "@prisma/client";
+import type { MediaType, UserCuradoriaSignal, UserCuradoriaSignalType } from "@prisma/client";
 
 export type CuradoriaSignalType = UserCuradoriaSignalType;
 
@@ -17,7 +17,7 @@ export type CuradoriaSignalRow = {
   created_at: string;
 };
 
-function mapSignal(row: Awaited<ReturnType<typeof createCuradoriaSignal>> extends { ok: true; data: infer T } ? T : never): CuradoriaSignalRow {
+function mapSignal(row: UserCuradoriaSignal): CuradoriaSignalRow {
   return {
     id: row.id,
     user_id: row.userId,

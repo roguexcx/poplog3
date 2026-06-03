@@ -93,7 +93,7 @@ export async function getCachedSeason(
     air_date: dateToString(row.airDate),
     episode_count: row.episodeCount,
     vote_average: row.voteAverage === null ? null : Number(row.voteAverage),
-    last_synced_at: row.lastSyncedAt.toISOString(),
+    last_synced_at: (row.lastSyncedAt ?? new Date(0)).toISOString(),
     episodes: row.episodes.map(episodeToLegacy).filter((episode): episode is PoplogEpisode => episode !== null),
   } as PoplogSeason;
 }

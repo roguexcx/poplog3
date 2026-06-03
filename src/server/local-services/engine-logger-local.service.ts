@@ -19,7 +19,7 @@ function rowToEntry(row: EngineLogEntryRow): EngineLogEntry {
   return {
     id: Number(row.id),
     ts: row.ts.getTime(),
-    api: row.api,
+    api: row.api as ApiName,
     op: row.op,
     origin: row.origin as EngineLogEntry["origin"],
     mediaType: row.mediaType ?? undefined,
@@ -30,7 +30,7 @@ function rowToEntry(row: EngineLogEntryRow): EngineLogEntry {
     success: row.success,
     httpStatus: row.httpStatus ?? undefined,
     error: row.error ?? undefined,
-    fallbackFrom: row.fallbackFrom ?? undefined,
+    fallbackFrom: (row.fallbackFrom ?? undefined) as ApiName | undefined,
   };
 }
 

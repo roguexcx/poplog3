@@ -1,3 +1,4 @@
+import { Prisma } from "@prisma/client";
 import { db } from "@/server/db/client";
 import type {
   FeedbackScope,
@@ -117,7 +118,7 @@ export async function saveUserTitleFeedback(
         scope: input.scope ?? (input.sectionKey ? "section" : "global"),
         sectionKey: input.sectionKey?.slice(0, 160) ?? null,
         expiresAt: toDate(input.expiresAt),
-        metadata: input.metadata ?? {},
+        metadata: (input.metadata ?? {}) as Prisma.InputJsonValue,
         strength: input.strength ?? null,
         confidence: input.confidence ?? null,
       },
@@ -134,7 +135,7 @@ export async function saveUserTitleFeedback(
         scope: input.scope ?? (input.sectionKey ? "section" : "global"),
         sectionKey: input.sectionKey?.slice(0, 160) ?? null,
         expiresAt: toDate(input.expiresAt),
-        metadata: input.metadata ?? {},
+        metadata: (input.metadata ?? {}) as Prisma.InputJsonValue,
         strength: input.strength ?? null,
         confidence: input.confidence ?? null,
       },
@@ -201,7 +202,7 @@ export async function deactivateUserTitleFeedback(input: {
         userId: input.userId,
         tmdbId: input.tmdbId,
         mediaType: input.mediaType,
-        feedbackType,
+        feedbackType: feedbackType ?? undefined,
       },
       data: { active: false },
     });
@@ -226,7 +227,7 @@ export async function deleteUserTitleFeedbackRows(input: {
         userId: input.userId,
         tmdbId: input.tmdbId,
         mediaType: input.mediaType,
-        feedbackType,
+        feedbackType: feedbackType ?? undefined,
       },
     });
     return { ok: true, data: result.count };
