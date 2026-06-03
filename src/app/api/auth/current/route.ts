@@ -5,15 +5,25 @@ import { isAuthJsConfigured } from "@/server/auth/auth-options";
 import { isLocalAuthEnabled } from "@/server/runtime/local-db-flags";
 
 export async function GET() {
-  const user = await getCurrentUser();
+  try {
+    const user = await getCurrentUser();
 
-  return NextResponse.json({
-    ok: true,
-    user,
-    auth: {
-      local: isLocalAuthEnabled(),
-      authjsConfigured: isAuthJsConfigured(),
-      supabaseFallback: true,
-    },
-  });
+    return NextResponse.json({
+      ok: true,
+      user,
+      auth: {
+        local: isLocalAuthEnabled(),
+        authjsConfigured: isAuthJsConfigured(),
+      },
+    });
+  } catch {
+    return NextResponse.json({
+      ok: true,
+      user: null,
+      auth: {
+        local: isLocalAuthEnabled(),
+        authjsConfigured: false,
+      },
+    });
+  }
 }

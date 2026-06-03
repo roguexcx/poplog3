@@ -11,21 +11,32 @@ type TitleInput = {
 };
 
 export async function getUserTitles(_userId: string): Promise<UserTitle[]> {
-  throw new Error("Requires MySQL/Prisma — not yet implemented");
+  const res = await fetch("/api/library", { cache: "no-store" });
+  if (!res.ok) return [];
+  const json = (await res.json()) as { data?: UserTitle[] };
+  return json.data ?? [];
 }
 
 export async function isTitleInWatchlist(
   _userId: string,
-  _tmdbId: number,
-  _mediaType: MediaType
+  tmdbId: number,
+  mediaType: MediaType,
 ): Promise<boolean> {
-  throw new Error("Requires MySQL/Prisma — not yet implemented");
+  const res = await fetch(
+    `/api/library/title?tmdbId=${tmdbId}&mediaType=${mediaType}`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) return false;
+  const json = (await res.json()) as { data?: { status?: string } };
+  return json.data?.status === "watchlist";
 }
 
 export async function toggleWatchlist({
   userId,
   tmdbId,
   mediaType,
+  title,
+  releaseYear,
 }: TitleInput): Promise<boolean> {
   const inWatchlist = await isTitleInWatchlist(userId, tmdbId, mediaType);
 
@@ -42,7 +53,7 @@ export async function toggleWatchlist({
   const res = await fetch("/api/library/title", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ tmdbId, mediaType, status: "watchlist" }),
+    body: JSON.stringify({ tmdbId, mediaType, status: "watchlist", title, releaseYear }),
   });
   if (!res.ok) throw new Error(`POST ${res.status}`);
   return true;
@@ -50,16 +61,24 @@ export async function toggleWatchlist({
 
 export async function isTitleWatched(
   _userId: string,
-  _tmdbId: number,
-  _mediaType: MediaType
+  tmdbId: number,
+  mediaType: MediaType,
 ): Promise<boolean> {
-  throw new Error("Requires MySQL/Prisma — not yet implemented");
+  const res = await fetch(
+    `/api/library/title?tmdbId=${tmdbId}&mediaType=${mediaType}`,
+    { cache: "no-store" },
+  );
+  if (!res.ok) return false;
+  const json = (await res.json()) as { data?: { status?: string } };
+  return json.data?.status === "watched";
 }
 
 export async function toggleWatched({
   userId,
   tmdbId,
   mediaType,
+  title,
+  releaseYear,
 }: TitleInput): Promise<boolean> {
   const isWatched = await isTitleWatched(userId, tmdbId, mediaType);
 
@@ -76,7 +95,7 @@ export async function toggleWatched({
   const res = await fetch("/api/library/title", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ tmdbId, mediaType, status: "watched" }),
+    body: JSON.stringify({ tmdbId, mediaType, status: "watched", title, releaseYear }),
   });
   if (!res.ok) throw new Error(`POST ${res.status}`);
   return true;

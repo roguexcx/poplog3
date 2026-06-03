@@ -61,9 +61,10 @@ async function main() {
   assert("getCurrentUser() preserva contrato com campo id", typeof currentLocal?.id === "string");
 
   setEnv("POPLOG_LOCAL_AUTH_ENABLED", "false");
-  setEnv("AUTH_SECRET", original.authSecret ?? "auth-smoke-secret-auth-smoke-secret");
-  setEnv("AUTH_GOOGLE_ID", original.googleId ?? "auth-smoke-google-id");
-  setEnv("AUTH_GOOGLE_SECRET", original.googleSecret ?? "auth-smoke-google-secret");
+  // Usar || em vez de ?? para cobrir string vazia (AUTH_GOOGLE_ID= em .env.local)
+  setEnv("AUTH_SECRET", original.authSecret || "auth-smoke-secret-auth-smoke-secret");
+  setEnv("AUTH_GOOGLE_ID", original.googleId || "auth-smoke-google-id");
+  setEnv("AUTH_GOOGLE_SECRET", original.googleSecret || "auth-smoke-google-secret");
 
   assert("Auth.js helper identifica configuracao quando envs existem", isAuthJsConfigured());
 

@@ -32,4 +32,11 @@ git log --oneline -- supabase/
 git show <commit>:supabase/migrations/001_create_user_watching.sql
 ```
 
-Os arquivos deste diretório podem ser removidos a qualquer momento sem impacto no app.
+Os arquivos deste diretório podem ser removidos ou movidos a qualquer momento sem impacto no app.
+
+Para mover para `docs/legacy/supabase/` (destino documentado):
+
+```bash
+git mv supabase docs/legacy/supabase
+git commit -m "chore: mover supabase/ legado para docs/legacy/supabase/"
+```

@@ -1,7 +1,7 @@
 # POPLOG v3 — Checklist de Deploy Hostinger
 
 > Use este checklist antes de qualquer deploy no Hostinger.
-> Fase 13 (remoção Supabase) deve estar concluída antes do go-live final.
+> Stack de produção: MySQL/Prisma + Auth.js/Google OAuth. Supabase foi removido na Fase 13D.
 
 ---
 
@@ -36,7 +36,7 @@
 - [ ] Usuário MySQL criado com permissões completas (ALL PRIVILEGES)
 - [ ] `DATABASE_URL` testada: `mysql://USER:PASS@HOST:3306/DATABASE`
 - [ ] Conexão verificada: `npx prisma db pull` (ou `db push --dry-run` se disponível)
-- [ ] Schema aplicado: `npx prisma db push` (ou `npx prisma migrate deploy`)
+- [ ] Schema aplicado: `npx prisma migrate deploy` (ou `npx prisma db push`)
 - [ ] `npx prisma generate` executado após schema aplicado
 
 ---
@@ -47,14 +47,16 @@
 - [ ] `POPLOG_LOCAL_DB_ENABLED=true`
 - [ ] `POPLOG_LOCAL_AUTH_ENABLED=false` (nunca `true` em produção)
 - [ ] `LOCAL_USER_ID` **não** definido (remover do `.env` de prod)
-- [ ] `NEXT_PUBLIC_SUPABASE_URL` definido e válido
-- [ ] `NEXT_PUBLIC_SUPABASE_ANON_KEY` definido e válido
-- [ ] `SUPABASE_SERVICE_ROLE_KEY` definido e válido
+- [ ] `AUTH_SECRET` definido e válido (gerado com `npx auth secret`)
+- [ ] `AUTH_GOOGLE_ID` definido e válido
+- [ ] `AUTH_GOOGLE_SECRET` definido e válido
+- [ ] `ADMIN_SECRET` definido e válido
 - [ ] `TMDB_API_KEY` definido e válido
 - [ ] `OMDB_API_KEY` definido (ou módulo omdb desabilitado)
 - [ ] `WATCHMODE_API_KEY` definido (ou módulo watchmode desabilitado)
 - [ ] `NODE_ENV=production`
 - [ ] Arquivo `.env` **não** commitado no git
+- [ ] Variáveis Supabase (`NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`) **não** presentes no `.env` de produção
 
 ---
 
@@ -82,14 +84,16 @@
 - [ ] Domínio apontando para o IP da VPS
 - [ ] SSL/TLS configurado (Let's Encrypt via Certbot ou painel Hostinger)
 - [ ] HTTPS ativo e redirecionando HTTP → HTTPS
-- [ ] Next.js configurado com `NEXTAUTH_URL` (quando Fase 13 migrar auth)
+- [ ] Callback Google OAuth atualizado para o domínio de produção: `https://seu-dominio.com/api/auth/callback/google`
+- [ ] `AUTH_URL` configurado com a URL de produção (se necessário)
 
 ---
 
 ### 8 — Verificação pós-deploy
 
 - [ ] App acessível via HTTPS no domínio
-- [ ] Login com conta real Supabase funcionando
+- [ ] Login com Google OAuth funcionando (Auth.js)
+- [ ] Sessão persistida corretamente após login
 - [ ] Página `/library` carrega dados do MySQL Hostinger
 - [ ] Página `/acompanhando` funciona
 - [ ] Hero Spotlight carrega corretamente
@@ -120,14 +124,14 @@
 | Charset/collation MySQL divergente | Baixo | Usar `utf8mb4_unicode_ci` (padrão Prisma para MySQL) |
 | Host MySQL não acessível remotamente | Médio | Verificar se o Hostinger permite conexão externa (geralmente não em shared) |
 
-### Auth e Supabase
+### Auth.js e Google OAuth
 
 | Risco | Nível | Mitigação |
 |---|---|---|
 | `POPLOG_LOCAL_AUTH_ENABLED=true` em prod | Crítico | Verificar `.env` antes do deploy; CI/CD deve bloquear |
-| Supabase credentials expiradas/inválidas | Alto | Verificar no dashboard Supabase antes do deploy |
-| Usuários Supabase sem registro no MySQL local | Médio | Após Fase 13, sync automático; por ora, criar manualmente via `db:seed` |
-| Fase 13 não concluída antes do go-live | Alto | Não remover Supabase sem concluir Fase 13 completa |
+| `AUTH_SECRET` ausente ou inválido | Crítico | Verificar antes do deploy; gerar com `npx auth secret` |
+| Callback Google OAuth com URL errada | Alto | Adicionar URL de produção no Google Cloud Console antes do go-live |
+| Sessões inválidas após rotação de `AUTH_SECRET` | Médio | Avisar usuários; sessões antigas serão invalidadas |
 
 ### Dados e backup
 
@@ -146,25 +150,13 @@
 | `tmdb_payload` (JSON grande) lentifica queries | Baixo | Índice em `tmdbId` + `mediaType` já existe no schema |
 | Muitas conexões Prisma em rotas Next.js | Médio | Usar singleton do PrismaClient (`src/server/db/client.ts`) |
 
-### Limitações conhecidas do app (Fase 12)
-
-| Módulo | Status | Impacto em produção |
-|---|---|---|
-| `upcoming-episodes` | Ainda usa Supabase | Funciona desde que Supabase esteja configurado |
-| `streaming-preferences` | Ainda usa Supabase | Funciona desde que Supabase esteja configurado |
-| `genre-stats` | Ainda usa Supabase | Funciona desde que Supabase esteja configurado |
-| `for-you` | Ainda usa Supabase | Funciona desde que Supabase esteja configurado |
-| `sorteio` | Ainda usa Supabase | Funciona desde que Supabase esteja configurado |
-| `trending` | Ainda usa Supabase | Funciona desde que Supabase esteja configurado |
-| `rating_aggregates` | Não implementado no MySQL local | Community ratings não funcionam |
-| Auth UI client-side | Ainda usa Supabase | Login funciona normalmente |
-
 ---
 
 ## Referências
 
 - [DEPLOY_HOSTINGER.md](./DEPLOY_HOSTINGER.md) — guia completo de deploy
 - [HOSTINGER_ENV.md](./HOSTINGER_ENV.md) — referência de variáveis
+- [AUTH_JS_SETUP.md](./AUTH_JS_SETUP.md) — configuração do Auth.js
 - [DATABASE_EXPORT_IMPORT.md](./DATABASE_EXPORT_IMPORT.md) — export/import de dados
 - [BACKUP_RESTORE.md](./BACKUP_RESTORE.md) — backup/restore SQL
 - [LOCAL_FULL_MODE.md](./LOCAL_FULL_MODE.md) — modo local completo

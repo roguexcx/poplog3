@@ -1,9 +1,7 @@
 # POPLOG v3 — Guia de Deploy Hostinger
 
-> **Status**: documentação de preparação (Fase 12). Deploy real ainda não realizado.
-> Fase 13 (remoção Supabase) deve ser concluída antes do go-live em produção.
->
-> Supabase ainda está presente como fallback. Não remover nesta fase.
+> **Status**: documentação atualizada (Fase 13D+). Supabase removido completamente.
+> Auth.js com Google OAuth e MySQL/Prisma são o stack de produção.
 
 ---
 
@@ -21,7 +19,7 @@ Hostinger VPS (Node.js 20+)
 
 O banco local Docker é substituído pelo MySQL do Hostinger.
 Todos os módulos locais ficam ativos (`POPLOG_LOCAL_DB_ENABLED=true`).
-Auth local (`POPLOG_LOCAL_AUTH_ENABLED`) fica **desligada** — usa Supabase Auth até a Fase 13.
+Auth local (`POPLOG_LOCAL_AUTH_ENABLED`) fica **desligada** — auth em produção é feita via Auth.js com Google OAuth.
 
 ---
 
@@ -80,21 +78,21 @@ DATABASE_URL="mysql://HOSTINGER_DB_USER:HOSTINGER_DB_PASS@HOSTINGER_DB_HOST:3306
 Após configurar `DATABASE_URL`, aplique o schema no banco de produção:
 
 ```bash
-# Opção A — db push (atual, sem histórico de migrations)
-npx prisma db push
-
-# Opção B — migrate deploy (recomendado para produção futura; requer criação de migrations)
+# Opção A — migrate deploy (recomendado; requer migrations criadas)
 npx prisma migrate deploy
+
+# Opção B — db push (sem histórico de migrations)
+npx prisma db push
 ```
 
-**Recomendação**: antes de ir para produção, criar a migration inicial:
+**Recomendação**: antes de ir para produção, garantir que as migrations existem:
 ```bash
 # Uma única vez, no ambiente local (com banco limpo):
 npx prisma migrate dev --name init
 # Isso cria prisma/migrations/ — commitar e usar migrate deploy em prod
 ```
 
-Enquanto não houver migrations criadas, use `db push`. Ver detalhes em [HOSTINGER_ENV.md](./HOSTINGER_ENV.md#prisma-em-produção).
+Ver detalhes em [HOSTINGER_ENV.md](./HOSTINGER_ENV.md#prisma-em-produção).
 
 ---
 
@@ -114,13 +112,16 @@ DATABASE_URL="mysql://user:pass@host:3306/database"
 # Master switch: todos os módulos locais ativos
 POPLOG_LOCAL_DB_ENABLED=true
 
-# Auth: DESLIGADA em produção (usa Supabase Auth)
+# Auth local: DESLIGADA em produção
 POPLOG_LOCAL_AUTH_ENABLED=false
 
-# Supabase Auth (necessário até Fase 13)
-NEXT_PUBLIC_SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9...
+# Auth.js com Google OAuth (obrigatório em produção)
+AUTH_SECRET=seu_secret_gerado_com_npx_auth_secret
+AUTH_GOOGLE_ID=seu_google_client_id
+AUTH_GOOGLE_SECRET=seu_google_client_secret
+
+# Admin
+ADMIN_SECRET=seu_segredo_admin
 
 # APIs externas
 TMDB_API_KEY=sua_chave_tmdb
@@ -152,8 +153,8 @@ npm install
 npm run db:generate
 
 # Aplicar schema no banco Hostinger
-npx prisma db push
-# ou: npx prisma migrate deploy (se migrations existirem)
+npx prisma migrate deploy
+# ou: npx prisma db push (se migrations ainda não existirem)
 
 # Build
 npm run build
@@ -171,7 +172,7 @@ cd /var/www/poplog-v3
 git pull origin main
 npm install
 npm run db:generate
-npx prisma db push   # só se o schema mudou
+npx prisma migrate deploy   # só se o schema mudou
 npm run build
 pm2 reload poplog-v3
 ```
@@ -234,15 +235,21 @@ curl http://localhost:3000/api/health   # se existir
 
 ---
 
-## 6 — Supabase Auth em produção (até Fase 13)
+## 6 — Auth em produção
 
-Em produção (Fase 12), a auth ainda usa Supabase:
+Em produção, a autenticação usa Auth.js com Google OAuth:
 - `POPLOG_LOCAL_AUTH_ENABLED=false` — obrigatório
-- As credenciais Supabase (`NEXT_PUBLIC_SUPABASE_URL`, etc.) devem ser configuradas
-- O login de usuários passa pelo Supabase Auth normalmente
-- Os **dados** (biblioteca, títulos, etc.) ficam no MySQL Hostinger
+- `AUTH_SECRET`, `AUTH_GOOGLE_ID` e `AUTH_GOOGLE_SECRET` devem ser configurados
+- O login de usuários passa pelo fluxo OAuth Google → Auth.js → sessão no MySQL via Prisma
+- Os dados (biblioteca, títulos, etc.) ficam no MySQL Hostinger
 
-Este modelo híbrido é intencional e documentado. Ver seção [Ainda não remover Supabase](#ainda-não-remover-supabase).
+Para configurar o Google OAuth:
+1. Acesse o Google Cloud Console → APIs & Services → Credentials
+2. Crie um OAuth 2.0 Client ID (tipo: Web application)
+3. Adicione o callback de produção: `https://seu-dominio.com/api/auth/callback/google`
+4. Copie o Client ID e Client Secret para `AUTH_GOOGLE_ID` e `AUTH_GOOGLE_SECRET`
+
+Ver detalhes em [AUTH_JS_SETUP.md](./AUTH_JS_SETUP.md).
 
 ---
 
@@ -275,24 +282,6 @@ pm2 start ecosystem.config.js
 
 ---
 
-## Ainda não remover Supabase
-
-A remoção completa do Supabase está planejada para **Fase 13**.
-
-Antes de remover Supabase, é necessário:
-
-1. **Migrar auth**: substituir Supabase Auth por Auth.js (NextAuth) ou implementar
-   autenticação própria com JWT/sessões.
-2. **Migrar endpoints restantes**: módulos que ainda acessam Supabase diretamente
-   (streaming preferences, genre stats, for-you, sorteio, agenda engine, etc.).
-3. **Substituir UI de auth**: `LoginDrawer`, `useAuth`, `Sidebar` ainda usam Supabase client.
-4. **Remover dependências**: `@supabase/supabase-js`, `@supabase/ssr` do `package.json`.
-
-Remover prematuramente quebrará login, sessões e todos os endpoints não migrados.
-**Não alterar nada nesta fase relacionado ao Supabase.**
-
----
-
 ## Riscos e limitações
 
 Ver seção completa em [HOSTINGER_CHECKLIST.md](./HOSTINGER_CHECKLIST.md#riscos).
@@ -300,6 +289,6 @@ Ver seção completa em [HOSTINGER_CHECKLIST.md](./HOSTINGER_CHECKLIST.md#riscos
 Resumo:
 - Suporte a Next.js 16 varia por plano Hostinger
 - MySQL connection pool pode exigir ajustes de `DATABASE_URL`
-- Nenhum `prisma/migrations` criado ainda — `db push` em prod requer cuidado extra
+- Usar `npx prisma migrate deploy` em produção para garantir histórico de migrations
 - Logs centralizados via PM2 (sem observabilidade avançada por ora)
 - Uploads/storage não implementados no app ainda

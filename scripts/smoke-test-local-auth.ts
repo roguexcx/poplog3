@@ -137,14 +137,14 @@ async function testSafeWithEmptyLocalUserId() {
   process.env.LOCAL_USER_ID = origId ?? BASE_ID;
 }
 
-async function testFlagDisabledDoesNotBreakSupabasePath() {
-  // Com a flag desligada, getCurrentUser() NÃO deve chamar getLocalAuthUser()
+async function testFlagDisabledUsesAuthJs() {
+  // Com a flag desligada, getCurrentUser() usa Auth.js, não local-user
   // Verificamos que isLocalAuthEnabled() retorna false no env padrão
   const orig = process.env.POPLOG_LOCAL_AUTH_ENABLED;
   process.env.POPLOG_LOCAL_AUTH_ENABLED = "false";
 
   assert(
-    "com flag desligada, isLocalAuthEnabled() retorna false (caminho Supabase preservado)",
+    "com flag desligada, isLocalAuthEnabled() retorna false (Auth.js é o caminho real)",
     !isLocalAuthEnabled(),
   );
 
@@ -176,7 +176,7 @@ async function main() {
     await testFlagEnabled();
     await testGetLocalUserId();
     await testSafeWithEmptyLocalUserId();
-    await testFlagDisabledDoesNotBreakSupabasePath();
+    await testFlagDisabledUsesAuthJs();
     await testResolveExistingUser();
     await testAutoCreateUser();
     await testLocalUserCompatibility();

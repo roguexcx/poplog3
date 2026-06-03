@@ -1281,6 +1281,7 @@ export default function ProfilePageClient() {
   const searchParams = useSearchParams();
   const { user, loading: authLoading, refresh: refreshAuth } = useAuth();
 
+
   const [stats,        setStats]        = useState<LibraryStats>({ watched: 0, watching: 0, watchlist: 0, abandoned: 0, favorites: 0, movies: 0, series: 0, total: 0 });
   const [genres,       setGenres]       = useState<GenreStat[]>([]);
   const [allProviders, setAllProviders] = useState<StreamingProvider[]>([]);
@@ -1358,7 +1359,13 @@ export default function ProfilePageClient() {
   }, [user, loadData]);
 
   async function handleSignOut() {
-    await signOutAuthJs({ redirect: false });
+    if (user?.authProvider === "authjs") {
+      try {
+        await signOutAuthJs({ redirect: false });
+      } catch {
+        // Auth.js signout failed — estado local ainda será limpo
+      }
+    }
     await refreshAuth();
     router.push("/");
     router.refresh();

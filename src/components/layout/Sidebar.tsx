@@ -91,10 +91,16 @@ export default function Sidebar() {
   const [isHovered, setIsHovered] = useState(false);
   const [loginOpen, setLoginOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const { user, loading: authLoading, refresh: refreshAuth } = useAuth();
+  const { user, loading: authLoading, refresh: refreshAuth, authjsConfigured } = useAuth();
 
   async function handleLogout() {
-    await signOutAuthJs({ redirect: false });
+    if (user?.authProvider === "authjs") {
+      try {
+        await signOutAuthJs({ redirect: false });
+      } catch {
+        // Auth.js signout failed — estado local ainda será limpo
+      }
+    }
     await refreshAuth();
     setMobileMenuOpen(false);
     router.refresh();
@@ -411,6 +417,7 @@ export default function Sidebar() {
         open={loginOpen}
         onClose={() => setLoginOpen(false)}
         onSuccess={refreshUser}
+        oauthAvailable={authjsConfigured}
       />
     </>
   );

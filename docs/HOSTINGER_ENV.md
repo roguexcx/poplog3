@@ -14,7 +14,7 @@ Salvar como `.env` (ou configurar via painel da VPS) com os valores reais:
 ```env
 # ═══════════════════════════════════════════════════════════
 # POPLOG v3 — .env de produção (Hostinger)
-# Fase 12: MySQL local ativo + Supabase Auth preservado
+# Fase 13D+: Supabase removido. Auth.js + MySQL/Prisma.
 # ═══════════════════════════════════════════════════════════
 
 # ── Node ─────────────────────────────────────────────────
@@ -27,15 +27,16 @@ DATABASE_URL="mysql://HOSTINGER_DB_USER:HOSTINGER_DB_PASS@HOSTINGER_DB_HOST:3306
 # Master switch: ativa logs, caches e todos os sub-módulos.
 POPLOG_LOCAL_DB_ENABLED=true
 
-# ── Auth ──────────────────────────────────────────────────
-# DESLIGADA em produção. Supabase Auth é usado para login real.
+# ── Auth local: apenas para desenvolvimento ───────────────
+# DESLIGADA em produção. Auth.js com Google OAuth é usado para login real.
 # Só ligar em dev local com LOCAL_USER_ID.
 POPLOG_LOCAL_AUTH_ENABLED=false
 
-# ── Supabase Auth (necessário até Fase 13) ────────────────
-NEXT_PUBLIC_SUPABASE_URL=https://xxxxxxxxxxxxxxxxxxxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.PLACEHOLDER
-SUPABASE_SERVICE_ROLE_KEY=eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.PLACEHOLDER
+# ── Auth.js (Google OAuth) ────────────────────────────────
+AUTH_SECRET=SEU_AUTH_SECRET_GERADO_COM_npx_auth_secret
+AUTH_GOOGLE_ID=SEU_GOOGLE_CLIENT_ID
+AUTH_GOOGLE_SECRET=SEU_GOOGLE_CLIENT_SECRET
+# AUTH_URL=https://seu-dominio.com   # necessário em alguns provedores de hosting
 
 # ── APIs externas ─────────────────────────────────────────
 TMDB_API_KEY=SUA_CHAVE_TMDB
@@ -43,6 +44,9 @@ OMDB_API_KEY=SUA_CHAVE_OMDB
 WATCHMODE_API_KEY=SUA_CHAVE_WATCHMODE
 # MOTN_API_KEY=SUA_CHAVE_MOTN        # se usar Movie of the Night
 # TRAKT_API_KEY=SUA_CHAVE_TRAKT      # se usar Trakt
+
+# ── Admin ─────────────────────────────────────────────────
+ADMIN_SECRET=SEU_SEGREDO_ADMIN
 
 # ── Flags individuais (redundantes com POPLOG_LOCAL_DB_ENABLED=true) ──
 # Não é necessário setar quando POPLOG_LOCAL_DB_ENABLED=true.
@@ -122,7 +126,7 @@ Master switch. Quando `true`, ativa todos os sub-módulos locais sem precisar se
 
 **Nunca setar `true` em produção.** Isso elimina qualquer verificação de identidade real e permite acesso com qualquer valor de `LOCAL_USER_ID`.
 
-Em produção, a autenticação passa pelo Supabase Auth (ver abaixo).
+Em produção, a autenticação passa pelo Auth.js com Google OAuth (ver abaixo).
 
 ---
 
@@ -136,34 +140,42 @@ Apenas relevante quando `POPLOG_LOCAL_AUTH_ENABLED=true`. Ignorado em produção
 
 ---
 
-### `NEXT_PUBLIC_SUPABASE_URL`
+### `AUTH_SECRET`
 | | |
 |---|---|
-| Valor | URL do projeto Supabase (ex: `https://abcxyz.supabase.co`) |
-| Onde obter | Supabase Dashboard → Project Settings → API |
+| Valor | String aleatória segura (mínimo 32 chars) |
+| Como gerar | `npx auth secret` |
 
-Necessário até Fase 13. Exposto ao cliente (prefixo `NEXT_PUBLIC_`).
+Obrigatório em produção. Usado pelo Auth.js para assinar tokens de sessão e cookies. Nunca expor publicamente.
 
 ---
 
-### `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+### `AUTH_GOOGLE_ID`
 | | |
 |---|---|
-| Valor | JWT anon key do projeto Supabase |
-| Onde obter | Supabase Dashboard → Project Settings → API → `anon` `public` |
+| Valor | Client ID do OAuth 2.0 no Google Cloud Console |
+| Onde obter | Google Cloud Console → APIs & Services → Credentials |
 
-Necessário até Fase 13. Exposto ao cliente.
+Obrigatório em produção. Identifica o aplicativo POPLOG no provedor Google OAuth.
 
 ---
 
-### `SUPABASE_SERVICE_ROLE_KEY`
+### `AUTH_GOOGLE_SECRET`
 | | |
 |---|---|
-| Valor | JWT service role key (acesso admin sem RLS) |
-| Onde obter | Supabase Dashboard → Project Settings → API → `service_role` |
+| Valor | Client Secret do OAuth 2.0 no Google Cloud Console |
+| Onde obter | Google Cloud Console → APIs & Services → Credentials |
 
-**Nunca expor no cliente.** Usado apenas server-side para operações admin.
-Necessário até Fase 13.
+**Nunca expor no cliente.** Usado apenas server-side pelo Auth.js para trocar código de autorização por token.
+
+---
+
+### `ADMIN_SECRET`
+| | |
+|---|---|
+| Valor | String secreta para proteger rotas admin |
+
+Obrigatório para uso de endpoints `/api/admin/*`. Definir um valor forte e único em produção.
 
 ---
 
@@ -201,26 +213,13 @@ Usado para dados de disponibilidade em streamings.
 
 ## Prisma em produção
 
-### Situação atual (Fase 12)
+### Situação atual (Fase 13D+)
 
-O projeto usa `prisma db push` — sem histórico de migrations (`prisma/migrations/` não existe).
+O projeto usa migrations Prisma (`prisma/migrations/`) criadas a partir da Fase 13.
 
-`db push` aplica o schema atual diretamente no banco, sem registro de versões. É adequado para desenvolvimento, mas tem riscos em produção:
-
-- Não mantém histórico de alterações de schema
-- `db push` pode apagar dados em certas mudanças destrutivas (ex: renomear coluna)
-- Não permite rollback de schema
-
-### Caminho recomendado antes do go-live
+Em produção, aplicar com:
 
 ```bash
-# 1. No ambiente local, com banco limpo (após prisma migrate reset):
-npx prisma migrate dev --name init
-
-# 2. Isso cria prisma/migrations/TIMESTAMP_init/migration.sql
-# 3. Commitar a pasta prisma/migrations/
-
-# 4. Em produção, usar:
 npx prisma migrate deploy
 ```
 
@@ -252,6 +251,9 @@ npm run db:backup   # local
 | `LOCAL_USER_ID` | Exclusivo do modo dev local |
 | `MYSQL_DOCKER_CONTAINER` | Específico do Docker local |
 | Flags `POPLOG_LOCAL_*` individuais | Redundantes com `POPLOG_LOCAL_DB_ENABLED=true` |
+| `NEXT_PUBLIC_SUPABASE_URL` | Supabase removido na Fase 13D |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase removido na Fase 13D |
+| `SUPABASE_SERVICE_ROLE_KEY` | Supabase removido na Fase 13D |
 
 ---
 
@@ -262,9 +264,10 @@ NODE_ENV=production
 DATABASE_URL="mysql://poplog_prod:SENHA@mysql.hostinger.host:3306/poplog_v3"
 POPLOG_LOCAL_DB_ENABLED=true
 POPLOG_LOCAL_AUTH_ENABLED=false
-NEXT_PUBLIC_SUPABASE_URL=https://SEU_PROJETO.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJ...
-SUPABASE_SERVICE_ROLE_KEY=eyJ...
+AUTH_SECRET=...
+AUTH_GOOGLE_ID=...
+AUTH_GOOGLE_SECRET=...
+ADMIN_SECRET=...
 TMDB_API_KEY=...
 OMDB_API_KEY=...
 WATCHMODE_API_KEY=...

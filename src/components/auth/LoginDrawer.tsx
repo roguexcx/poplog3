@@ -7,11 +7,13 @@ type LoginDrawerProps = {
   open: boolean;
   onClose: () => void;
   onSuccess?: () => void;
+  oauthAvailable?: boolean;
 };
 
 export default function LoginDrawer({
   open,
   onClose,
+  oauthAvailable = false,
 }: LoginDrawerProps) {
   const overlayRef = useRef<HTMLDivElement>(null);
   const [oauthLoading, setOauthLoading] = useState(false);
@@ -28,17 +30,20 @@ export default function LoginDrawer({
         onClose();
       }
     }
-
-    if (open) {
-      window.addEventListener("keydown", handleKeyDown);
-    }
-
-    return () => {
-      window.removeEventListener("keydown", handleKeyDown);
-    };
+    if (open) window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
   }, [open, onClose]);
 
   async function handleGoogleSignIn() {
+    if (!oauthAvailable) {
+      setError(
+        "Google OAuth não está configurado. " +
+        "Defina AUTH_GOOGLE_ID e AUTH_GOOGLE_SECRET no .env.local " +
+        "ou use POPLOG_LOCAL_AUTH_ENABLED=true para dev local.",
+      );
+      return;
+    }
+
     setOauthLoading(true);
     setError(null);
 
@@ -64,11 +69,7 @@ export default function LoginDrawer({
           fixed inset-0 z-40
           bg-black/70 backdrop-blur-sm
           transition-opacity duration-300
-          ${
-            open
-              ? "opacity-100 pointer-events-auto"
-              : "opacity-0 pointer-events-none"
-          }
+          ${open ? "opacity-100 pointer-events-auto" : "opacity-0 pointer-events-none"}
         `}
       />
 
@@ -84,11 +85,7 @@ export default function LoginDrawer({
           md:backdrop-blur-[24px]
           md:shadow-[4px_0_40px_rgba(0,0,0,0.6)]
 
-          ${
-            open
-              ? "opacity-100 translate-x-0"
-              : "opacity-0 -translate-x-full pointer-events-none"
-          }
+          ${open ? "opacity-100 translate-x-0" : "opacity-0 -translate-x-full pointer-events-none"}
         `}
       >
         <div className="flex h-full flex-col overflow-y-auto px-8 py-10">
@@ -141,6 +138,12 @@ export default function LoginDrawer({
           >
             {oauthLoading ? "Redirecionando..." : "Continuar com Google"}
           </button>
+
+          {!oauthAvailable && (
+            <p className="mb-4 text-center text-[11px] text-zinc-600">
+              OAuth não configurado — use modo local dev
+            </p>
+          )}
 
           {error && (
             <div className="rounded-xl border border-red-500/20 bg-red-500/10 px-4 py-3 text-sm text-red-400">
