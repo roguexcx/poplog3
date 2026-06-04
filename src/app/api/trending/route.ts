@@ -16,11 +16,19 @@ import {
   readContinuitySectionCache,
   writeContinuitySectionCache,
 } from "@/server/continuity/continuity-section-cache";
+import {
+  catalogGetTrending,
+  isBalloonerismTrendingEnabled,
+} from "@/server/source-engine/engine";
+import { hydrateCatalogResults } from "@/server/source-engine/hydrate-catalog-results";
+import type { PoplogTitle } from "@/server/types/title";
 
 const TRENDING_CACHE_TTL_MS = 30 * 60_000;
 const TRENDING_EXTERNAL_TIMEOUT_MS = 2_500;
 const TRENDING_DB_TIMEOUT_MS = 1_500;
 const TRENDING_AUTH_TIMEOUT_MS = 500;
+const TRENDING_BALLOONERISMM_LIMIT = 15;
+const TRENDING_MIN_RESULTS = 5;
 
 type TrendingCachePayload = {
   results: unknown[];
@@ -58,6 +66,63 @@ async function resolveUserFeedback() {
   return { userId, feedbackMap };
 }
 
+/**
+ * Enriquece PoplogTitle[] com runtime_label para o componente TrendingNowSection.
+ * Reutiliza a mesma lógica do caminho legado TMDB.
+ */
+async function enrichWithRuntime(titles: PoplogTitle[]) {
+  const tvIds = titles
+    .filter((t) => t.media_type === "tv")
+    .map((t) => t.tmdb_id);
+
+  const episodeRuntimesBySeries =
+    tvIds.length > 0
+      ? await withTimeout(
+          getSeriesEpisodeRuntimesMap(tvIds),
+          TRENDING_DB_TIMEOUT_MS,
+          new Map()
+        )
+      : new Map();
+
+  return titles.map((title) => {
+    const runtimeResolution = resolveRuntimeByMediaType({
+      mediaType: title.media_type,
+      runtimeMinutes: title.runtime ?? null,
+      episodeRunTime: title.episode_run_time ?? null,
+      episodes: episodeRuntimesBySeries.get(title.tmdb_id) ?? null,
+    });
+    const runtimeLabel =
+      title.media_type === "tv"
+        ? formatEpisodeRuntimeLabel(runtimeResolution.minutes, {
+            estimated: runtimeResolution.estimated,
+          })
+        : formatRuntimeLabel(runtimeResolution.minutes, {
+            estimated: runtimeResolution.estimated,
+          });
+
+    return {
+      ...title,
+      id: title.tmdb_id,
+      runtime: runtimeResolution.minutes,
+      runtime_label: runtimeLabel,
+    };
+  });
+}
+
+/**
+ * Interleave movies and tv results: [movie1, tv1, movie2, tv2, ...]
+ * Preserves Balloonerismm popularity order within each type.
+ */
+function interleaveTrending(movies: PoplogTitle[], tv: PoplogTitle[]): PoplogTitle[] {
+  const result: PoplogTitle[] = [];
+  const len = Math.max(movies.length, tv.length);
+  for (let i = 0; i < len; i++) {
+    if (i < movies.length) result.push(movies[i]);
+    if (i < tv.length) result.push(tv[i]);
+  }
+  return result;
+}
+
 export async function GET() {
   const totalStartedAt = Date.now();
   const perf: Record<string, number> = { request_parse: 0 };
@@ -65,8 +130,6 @@ export async function GET() {
   const sectionKey = "home_trending";
 
   try {
-    // Resolve authenticated user before cache read so cached global results can
-    // still be reranked by the user's negative feedback.
     const { userId, feedbackMap } = await resolveUserFeedback();
     markStage(perf, stageRef, "auth");
 
@@ -83,11 +146,7 @@ export async function GET() {
         popularity?: number | null;
         vote_average?: number | null;
         vote_count?: number | null;
-      }>, {
-        userId,
-        feedbackMap,
-        context: "trending",
-      });
+      }>, { userId, feedbackMap, context: "trending" });
       markStage(perf, stageRef, "response_build");
       console.log("[trending/perf]", {
         cacheStatus: cached.status === "hit" ? "persistent_hit" : "persistent_stale",
@@ -107,13 +166,71 @@ export async function GET() {
       });
     }
 
+    // ── Balloonerismm primary path ────────────────────────────────────────────
+    if (isBalloonerismTrendingEnabled()) {
+      try {
+        const [movieResults, tvResults] = await Promise.all([
+          catalogGetTrending({ mediaType: "movie", limit: TRENDING_BALLOONERISMM_LIMIT }),
+          catalogGetTrending({ mediaType: "show", limit: TRENDING_BALLOONERISMM_LIMIT }),
+        ]);
+        markStage(perf, stageRef, "external_fetch");
+
+        const merged = interleaveTrending(
+          await hydrateCatalogResults(movieResults),
+          await hydrateCatalogResults(tvResults),
+        );
+        markStage(perf, stageRef, "normalization");
+
+        const validTitles = filterValidTitles(merged);
+
+        if (validTitles.length >= TRENDING_MIN_RESULTS) {
+          const withRuntime = await enrichWithRuntime(validTitles);
+          markStage(perf, stageRef, "cache_tables_read");
+
+          const results = applyUserFeedbackScoring(withRuntime, {
+            userId,
+            feedbackMap,
+            context: "trending",
+          });
+          markStage(perf, stageRef, "response_build");
+
+          void writeContinuitySectionCache({
+            sectionKey,
+            region: "BR",
+            language: "pt-BR",
+            ttlMs: TRENDING_CACHE_TTL_MS,
+            payload: {
+              results: withRuntime,
+              generatedAt: new Date().toISOString(),
+            } satisfies TrendingCachePayload,
+          });
+
+          console.log("[trending/perf]", {
+            cacheStatus: "balloonerismm_primary",
+            returned: results.length,
+            ...perf,
+            total: Date.now() - totalStartedAt,
+          });
+
+          return NextResponse.json({ ok: true, count: results.length, results });
+        }
+
+        console.log(
+          `[trending] source=balloonerismm_fallback reason=${validTitles.length < TRENDING_MIN_RESULTS ? "insufficient" : "empty"}`
+        );
+      } catch (err) {
+        console.warn(
+          "[trending] source=balloonerismm_fallback reason=error",
+          err instanceof Error ? err.message : err
+        );
+        markStage(perf, stageRef, "external_fetch");
+      }
+    }
+
+    // ── Legacy TMDB path (fallback) ──────────────────────────────────────────
     const data = await withTimeout(
-      tmdbFetch<{
-        results: TmdbTitleSummary[];
-      }>("/trending/all/week", {
-        params: {
-          page: 1,
-        },
+      tmdbFetch<{ results: TmdbTitleSummary[] }>("/trending/all/week", {
+        params: { page: 1 },
       }),
       TRENDING_EXTERNAL_TIMEOUT_MS,
       { results: [] },
@@ -138,9 +255,6 @@ export async function GET() {
     );
     markStage(perf, stageRef, "normalization");
 
-    // Runtime data from DB — not yet migrated to Prisma, skip gracefully
-    const cachedRows: unknown[] = [];
-
     type CachedRuntimeRow = {
       tmdb_id: number;
       media_type: "movie" | "tv";
@@ -149,7 +263,7 @@ export async function GET() {
     };
 
     const runtimeMap = new Map(
-      (cachedRows as CachedRuntimeRow[]).map((row) => [
+      ([] as CachedRuntimeRow[]).map((row) => [
         `${row.media_type}-${row.tmdb_id}`,
         row,
       ])
@@ -188,8 +302,6 @@ export async function GET() {
       };
     });
 
-    // Apply editorial feedback scoring when user is authenticated.
-    // Not interested titles are pushed down while still remaining searchable.
     const results = applyUserFeedbackScoring(withRuntime, {
       userId,
       feedbackMap,
@@ -216,21 +328,15 @@ export async function GET() {
       total: Date.now() - totalStartedAt,
     });
 
-    return NextResponse.json({
-      ok: true,
-      count: results.length,
-      results,
-    });
+    return NextResponse.json({ ok: true, count: results.length, results });
   } catch (error) {
     console.error("[trending route]", error);
-
     console.log("[trending/perf]", {
       cacheStatus: "error_empty_fallback",
       returned: 0,
       ...perf,
       total: Date.now() - totalStartedAt,
     });
-
     return NextResponse.json({
       ok: true,
       count: 0,
