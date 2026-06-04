@@ -1,15 +1,45 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { withOrigin } from "@/server/engine-logger";
-import { syncTmdbSeason } from "@/server/sync/sync-tmdb-season";
 import { getCachedSeason } from "@/server/cache/season-cache";
 import { resolvePoplogTitleIdentity } from "@/server/titles/poplog-title-identity";
 import { getPoplogTitleDetails } from "@/server/titles/poplog-title-details";
 import { normalizeSearchTerm } from "@/server/search/fuzzy-title-search";
 import { db } from "@/server/db/client";
+import { tvdbAdapter } from "@/server/source-engine/adapters/tvdb-adapter";
+import type { CatalogEpisode, CatalogSeason } from "@/server/source-engine/types/catalog.types";
+import type { PoplogTitleExternalIds } from "@/server/titles/poplog-title-identity";
 import type { PoplogSeason } from "@/server/types/season";
 
-function seasonPayload(season: PoplogSeason) {
+type SeasonDebugSource = {
+  poplogId: string | number | null;
+  externalIds: PoplogTitleExternalIds;
+  seriesIdentityUsed: string;
+  seasonAliasLookupSource: string | null;
+  seasonSource: "cache" | "tvdb" | "unavailable";
+  episodeSource: "cache" | "tvdb" | "unavailable";
+  usedTmdbApi: false;
+  usedLegacy: false;
+  fallbackUsed: boolean;
+  fallbackReason: string | null;
+  incompleteSeasonData: boolean;
+  missingSeasonCache: boolean;
+  alternativeSourceUnavailable: boolean;
+};
+
+function createSeasonDebug(input: Omit<SeasonDebugSource, "usedTmdbApi" | "usedLegacy">): SeasonDebugSource {
+  return {
+    ...input,
+    usedTmdbApi: false,
+    usedLegacy: false,
+  };
+}
+
+function seasonPayload(season: PoplogSeason, options?: {
+  poplogId?: string | number | null;
+  externalIds?: PoplogTitleExternalIds;
+  debugSource?: SeasonDebugSource;
+}) {
   const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
   const tmdbImage = (path: string | null, size: string) => {
     if (!path) return null;
@@ -18,6 +48,7 @@ function seasonPayload(season: PoplogSeason) {
   };
 
   return {
+    ok: true,
     seriesTmdbId: season.series_tmdb_id,
     seasonNumber: season.season_number,
     name: season.name,
@@ -38,6 +69,82 @@ function seasonPayload(season: PoplogSeason) {
       voteCount: e.vote_count,
       episodeType: e.episode_type,
     })),
+    poplogId: options?.poplogId ?? null,
+    externalIds: options?.externalIds ?? {},
+    ...(options?.debugSource ? { debugSource: options.debugSource } : {}),
+  };
+}
+
+function tvdbImage(value?: string | null) {
+  return value ?? null;
+}
+
+function tvdbSeasonPayload(input: {
+  seriesTmdbId: number;
+  seasonNumber: number;
+  season: CatalogSeason | null;
+  episodes: CatalogEpisode[];
+  poplogId: string | number | null;
+  externalIds: PoplogTitleExternalIds;
+  debugSource?: SeasonDebugSource;
+}) {
+  return {
+    ok: true,
+    seriesTmdbId: input.seriesTmdbId,
+    seasonNumber: input.seasonNumber,
+    name: input.season?.title ?? `Temporada ${input.seasonNumber}`,
+    overview: null,
+    posterUrl: tvdbImage(input.season?.posterPath),
+    airDate: input.episodes
+      .map((episode) => episode.firstAired)
+      .filter((value): value is string => Boolean(value))
+      .sort()[0] ?? null,
+    episodeCount: input.episodes.length || null,
+    voteAverage: null,
+    lastSyncedAt: null,
+    episodes: input.episodes
+      .filter((episode) => episode.season === input.seasonNumber && episode.number > 0)
+      .sort((a, b) => a.number - b.number)
+      .map((episode) => ({
+        episodeNumber: episode.number,
+        name: episode.title ?? null,
+        overview: episode.overview ?? null,
+        stillUrl: tvdbImage(episode.stillPath),
+        airDate: episode.firstAired ?? null,
+        runtime: episode.runtime ?? null,
+        voteAverage: null,
+        voteCount: null,
+        episodeType: null,
+      })),
+    poplogId: input.poplogId,
+    externalIds: input.externalIds,
+    ...(input.debugSource ? { debugSource: input.debugSource } : {}),
+  };
+}
+
+function incompleteSeasonPayload(input: {
+  seriesTmdbId: number | null;
+  seasonNumber: number;
+  poplogId: string | number | null;
+  externalIds: PoplogTitleExternalIds;
+  debugSource?: SeasonDebugSource;
+}) {
+  return {
+    ok: true,
+    incompleteSeasonData: true,
+    seriesTmdbId: input.seriesTmdbId,
+    seasonNumber: input.seasonNumber,
+    name: `Temporada ${input.seasonNumber}`,
+    overview: null,
+    posterUrl: null,
+    airDate: null,
+    episodeCount: null,
+    voteAverage: null,
+    lastSyncedAt: null,
+    episodes: [],
+    poplogId: input.poplogId,
+    externalIds: input.externalIds,
+    ...(input.debugSource ? { debugSource: input.debugSource } : {}),
   };
 }
 
@@ -63,6 +170,24 @@ async function findLocalSeriesByTitleYear(title?: string | null, year?: number |
       .filter(Boolean);
     return candidates.includes(normalized);
   }) ?? null;
+}
+
+async function findExternalIdsByTmdbId(tmdbId: number): Promise<PoplogTitleExternalIds> {
+  const row = await db.titleExternalId.findFirst({
+    where: { mediaType: "tv", tmdbId },
+    select: { imdbId: true, tvdbId: true, traktId: true },
+  }).catch(() => null);
+
+  if (!row) return {};
+
+  const tvdbId = row.tvdbId ? Number(row.tvdbId) : undefined;
+  return {
+    tmdbId,
+    imdbId: row.imdbId ?? undefined,
+    tvdbId: Number.isFinite(tvdbId) ? tvdbId : undefined,
+    traktId: row.traktId ?? undefined,
+    balloonerismmId: row.imdbId ?? undefined,
+  };
 }
 
 export async function GET(
@@ -114,11 +239,13 @@ export async function GET(
       }).catch(() => null);
       const localByTitle = await findLocalSeriesByTitleYear(details?.title, details?.year);
       if (localByTitle) {
+        const localExternalIds = await findExternalIdsByTmdbId(localByTitle.tmdbId);
         seriesTmdbId = localByTitle.tmdbId;
         resolvedPoplogId = localByTitle.id;
         externalIds = {
           ...externalIds,
           ...details?.externalIds,
+          ...localExternalIds,
           tmdbId: localByTitle.tmdbId,
         };
         seasonAliasLookupSource = "localTitle:titleYearFromBalloonerismm";
@@ -140,28 +267,28 @@ export async function GET(
             : "unknown";
 
     if (!seriesTmdbId) {
+      const debug = createSeasonDebug({
+        poplogId: resolvedPoplogId,
+        externalIds,
+        seriesIdentityUsed,
+        seasonAliasLookupSource,
+        seasonSource: "unavailable",
+        episodeSource: "unavailable",
+        fallbackUsed: true,
+        fallbackReason: "missing_local_season_cache",
+        incompleteSeasonData: true,
+        missingSeasonCache: true,
+        alternativeSourceUnavailable: true,
+      });
+
       return NextResponse.json(
-        {
-          ok: false,
-          error: "Season source id unavailable",
-          poplogId: identity.poplogId ?? null,
+        incompleteSeasonPayload({
+          seriesTmdbId: null,
+          seasonNumber,
+          poplogId: resolvedPoplogId,
           externalIds,
-          ...(debugSource
-            ? {
-                debugSource: {
-                  seriesIdentityUsed,
-                  seasonSource: "unavailable",
-                  episodeSource: "unavailable",
-                  externalIds,
-                  usedTmdbApi: false,
-                  usedLegacy: false,
-                  fallbackUsed: true,
-                  fallbackReason: "missing_tmdb_alias_for_existing_season_cache",
-                },
-              }
-            : {}),
-        },
-        { status: 404 },
+          debugSource: debugSource ? debug : undefined,
+        }),
       );
     }
 
@@ -174,104 +301,107 @@ export async function GET(
     });
 
     const cached = !refresh ? await getCachedSeason(seriesTmdbId, seasonNumber) : null;
-    const result = cached
-      ? { season: cached, source: "cache" as const, cache_status: "fresh" as const }
-      : await syncTmdbSeason(seriesTmdbId, seasonNumber, { force: refresh });
-
-    if (!result.season) {
-      // season null = TMDB retornou 404 ou série não encontrada.
-      // Retornamos 404 para o cliente, mas com mensagem informativa
-      // para facilitar diagnóstico (sem tratar como erro grave no servidor).
-      console.warn("[poplog3/tv/season] season não encontrada — provavelmente TMDB 404", {
-        requestedId: resolved.id,
-        seriesTmdbId,
-        seasonNumber,
-        source: result.source,
-        cacheStatus: result.cache_status,
-        hint: "Verifique se o tmdb_id corresponde a uma série (não a um filme) e se a temporada existe no TMDB",
+    if (cached) {
+      const debug = createSeasonDebug({
+        poplogId: resolvedPoplogId,
+        externalIds,
+        seriesIdentityUsed,
+        seasonAliasLookupSource,
+        seasonSource: "cache",
+        episodeSource: "cache",
+        fallbackUsed: false,
+        fallbackReason: null,
+        incompleteSeasonData: cached.episodes.length === 0,
+        missingSeasonCache: false,
+        alternativeSourceUnavailable: false,
       });
+
       return NextResponse.json(
+        seasonPayload(cached, {
+          poplogId: resolvedPoplogId,
+          externalIds,
+          debugSource: debugSource ? debug : undefined,
+        }),
         {
-          ok: false,
-          error: "Season not found",
-          hint: `Série ${seriesTmdbId} temporada ${seasonNumber} não encontrada no cache/local ou fallback legado.`,
-          ...(debugSource
-            ? {
-                debugSource: {
-                  seriesIdentityUsed,
-                  seasonAliasLookupSource,
-                  seasonSource: result.source,
-                  episodeSource: result.source,
-                  externalIds,
-                  usedTmdbApi: result.source === "tmdb",
-                  usedLegacy: result.source === "tmdb",
-                  fallbackUsed: true,
-                  fallbackReason: "season_not_found",
-                },
-              }
-            : {}),
+          headers: {
+            "x-poplog-source": "cache",
+            "x-poplog-cache": "fresh",
+          },
         },
-        { status: 404 }
       );
     }
 
-    console.log("[poplog3/tv/season] season sincronizada com sucesso", {
-      requestedId: resolved.id,
-      seriesTmdbId,
-      seasonNumber,
-      episodeCount: result.season.episodes?.length ?? 0,
-      source: result.source,
-      cacheStatus: result.cache_status,
-    });
+    if (externalIds.tvdbId) {
+      const [seasons, episodes] = await Promise.all([
+        tvdbAdapter.getSeasons({ tvdbId: externalIds.tvdbId, season: seasonNumber }).catch(() => []),
+        tvdbAdapter.getEpisodes({ tvdbId: externalIds.tvdbId, season: seasonNumber }).catch(() => []),
+      ]);
+      const season = seasons.find((item) => item.number === seasonNumber) ?? null;
 
-    const payload = {
-      ...seasonPayload(result.season),
+      if (season || episodes.length > 0) {
+        const debug = createSeasonDebug({
+          poplogId: resolvedPoplogId,
+          externalIds,
+          seriesIdentityUsed,
+          seasonAliasLookupSource,
+          seasonSource: "tvdb",
+          episodeSource: "tvdb",
+          fallbackUsed: false,
+          fallbackReason: null,
+          incompleteSeasonData: episodes.length === 0,
+          missingSeasonCache: true,
+          alternativeSourceUnavailable: false,
+        });
+
+        return NextResponse.json(
+          tvdbSeasonPayload({
+            seriesTmdbId,
+            seasonNumber,
+            season,
+            episodes,
+            poplogId: resolvedPoplogId,
+            externalIds,
+            debugSource: debugSource ? debug : undefined,
+          }),
+          {
+            headers: {
+              "x-poplog-source": "tvdb",
+              "x-poplog-cache": "external_no_persist",
+            },
+          },
+        );
+      }
+    }
+
+    const debug = createSeasonDebug({
       poplogId: resolvedPoplogId,
       externalIds,
-      ...(debugSource
-        ? {
-            debugSource: {
-              seriesIdentityUsed,
-              seasonAliasLookupSource,
-              seasonSource: result.source,
-              episodeSource: result.source,
-              externalIds,
-              usedTmdbApi: result.source === "tmdb",
-              usedLegacy: result.source === "tmdb",
-              fallbackUsed: result.source === "tmdb",
-              fallbackReason: result.source === "tmdb" ? "legacy_tmdb_season_fallback" : null,
-            },
-          }
-        : {}),
-    };
+      seriesIdentityUsed,
+      seasonAliasLookupSource,
+      seasonSource: "unavailable",
+      episodeSource: "unavailable",
+      fallbackUsed: true,
+      fallbackReason: externalIds.tvdbId
+        ? "season_data_incomplete_without_tmdb"
+        : "alternative_source_unavailable",
+      incompleteSeasonData: true,
+      missingSeasonCache: true,
+      alternativeSourceUnavailable: true,
+    });
 
-    return NextResponse.json(payload, {
+    return NextResponse.json(incompleteSeasonPayload({
+      seriesTmdbId,
+      seasonNumber,
+      poplogId: resolvedPoplogId,
+      externalIds,
+      debugSource: debugSource ? debug : undefined,
+    }), {
       headers: {
-        "x-poplog-source": result.source,
-        "x-poplog-cache": result.cache_status,
+        "x-poplog-source": "unavailable",
+        "x-poplog-cache": "missing",
       },
     });
   } catch (error) {
-    const errorMsg = error instanceof Error ? error.message : String(error);
-
-    // Se é um erro 404 do TMDB, provavelmente o ID não existe em TMDB
-    if (errorMsg.includes("404") || errorMsg.includes("not found")) {
-      console.error("[poplog3/tv/season] TMDB retornou 404 - série pode não existir em TMDB", {
-        requestedId: resolved.id,
-        seasonNumber,
-        error: errorMsg,
-      });
-      return NextResponse.json(
-        {
-          ok: false,
-          error: "Season not found in TMDB",
-          details: `TMDB não encontrou a série ${resolved.id} ou a temporada ${seasonNumber}. ` +
-                   `O ID pode ser inválido ou a série foi removida de TMDB.`,
-        },
-        { status: 404 }
-      );
-    }
-
     console.error("[poplog3/tv/season] erro:", error);
     return NextResponse.json(
       {
