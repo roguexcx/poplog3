@@ -140,7 +140,7 @@ async function searchTv(title: string): Promise<TmdbEnrichment | null> {
 }
 
 export async function POST(req: NextRequest) {
-  if (process.env.ENABLE_TMDB_ICS_ENRICHMENT === "false") {
+  if (process.env.ENABLE_TMDB_ICS_ENRICHMENT !== "true") {
     return NextResponse.json({
       ok: false,
       disabled: true,

@@ -15,9 +15,9 @@ import { refineCategoryFromTmdb } from "./ics-engine";
 import { buildTmdbHeaders, buildTmdbUrl, getTmdbToken } from "@/server/api-clients/tmdb/client";
 
 // ── Feature flag ─────────────────────────────────────────────────────────────
-// Desligar com ENABLE_TMDB_ICS_ENRICHMENT=false no .env.
-// Por padrão habilitado (valor não definido = enabled).
-const ENABLE_ENRICHMENT = process.env.ENABLE_TMDB_ICS_ENRICHMENT !== "false";
+// Ligar explicitamente com ENABLE_TMDB_ICS_ENRICHMENT=true no .env.
+// Por padrão desabilitado (valor ausente ou qualquer outro = disabled).
+const ENABLE_ENRICHMENT = process.env.ENABLE_TMDB_ICS_ENRICHMENT === "true";
 
 // ── Configuração de rate limit ────────────────────────────────────────────────
 
