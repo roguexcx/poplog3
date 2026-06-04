@@ -6,6 +6,7 @@ import {
   isBalloonerismDiscoverEnabled,
 } from "@/server/source-engine/engine";
 import { hydrateCatalogResults } from "@/server/source-engine/hydrate-catalog-results";
+import { balloonerismGet } from "@/server/api-clients/balloonerismm/client";
 import type { PoplogTitle } from "@/server/types/title";
 
 type DiscoverMediaType = "all" | "movie" | "tv";
@@ -31,16 +32,59 @@ function parseGenre(value: string | null): number | undefined {
 
 // Balloonerismm helpers ───────────────────────────────────────────────────────
 
+async function getBalloonerismByGenre(
+  mediaType: "movie" | "tv",
+  genre: number,
+): Promise<PoplogTitle[]> {
+  const path = mediaType === "movie" ? "/discover/movie" : "/discover/tv";
+  const raw = await balloonerismGet<unknown>(path, {
+    params: { with_genres: genre, language: "pt-BR", region: "BR", page: 1 },
+    ttlSeconds: 3600,
+  });
+  if (!raw) return [];
+
+  const items = Array.isArray(raw) ? raw
+    : Array.isArray((raw as Record<string, unknown>).results) ? (raw as Record<string, unknown>).results as unknown[]
+    : [];
+
+  const { normalizeSearchResult } = await import("@/server/source-engine/normalizers/normalize-search");
+  const catalogResults = (items as Array<Record<string, unknown>>).map((item) => {
+    const imdbId = typeof item.imdb_id === "string" ? item.imdb_id : undefined;
+    return normalizeSearchResult(
+      {
+        ids: {
+          imdbId,
+          tmdbId: typeof item.tmdb_id === "number" ? item.tmdb_id : undefined,
+          balloonerismmId: imdbId,
+        },
+        mediaType: mediaType === "tv" ? "show" : "movie",
+        title: typeof item.title === "string" ? item.title : typeof item.name === "string" ? item.name : "",
+        originalTitle: typeof item.original_title === "string" ? item.original_title : undefined,
+        year: typeof item.year === "number" ? item.year : undefined,
+        releaseDate: typeof item.release_date === "string" ? item.release_date : undefined,
+        firstAirDate: typeof item.first_air_date === "string" ? item.first_air_date : undefined,
+        overview: typeof item.overview === "string" ? item.overview : undefined,
+        posterRemoteUrl: typeof item.poster_path === "string" ? item.poster_path : undefined,
+        backdropRemoteUrl: typeof item.backdrop_path === "string" ? item.backdrop_path : undefined,
+        voteAverage: typeof item.vote_average === "number" ? item.vote_average : undefined,
+      },
+      { primary: "balloonerismm", confidence: "medium", usedFallback: false, fetchedAt: new Date().toISOString() },
+    );
+  });
+
+  const hydrated = await hydrateCatalogResults(catalogResults);
+  return filterValidTitles(hydrated);
+}
+
 async function getBalloonerismSection(
   mediaType: "movie" | "tv",
   genre?: number
 ): Promise<PoplogTitle[]> {
+  if (genre) return getBalloonerismByGenre(mediaType, genre);
   const catalogMediaType = mediaType === "tv" ? "show" : "movie";
   const raw = await catalogGetPopular({ mediaType: catalogMediaType });
   const hydrated = await hydrateCatalogResults(raw);
-  const valid = filterValidTitles(hydrated);
-  // Genre filter applied from local DB data (genres field already hydrated)
-  return genre ? valid.filter((t) => (t.genres ?? []).includes(genre)) : valid;
+  return filterValidTitles(hydrated);
 }
 
 function toBalloonerismDiscoverSection(titles: PoplogTitle[]) {

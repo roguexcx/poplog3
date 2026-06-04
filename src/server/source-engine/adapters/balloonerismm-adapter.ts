@@ -240,6 +240,8 @@ function balloonerismShowToTitle(show: BalloonerismShow): CatalogTitle {
       votes: numberFrom(detail.votes ?? detail.vote_count),
       posterRemoteUrl: detail.poster_path ?? detail.images?.poster,
       backdropRemoteUrl: detail.backdrop_path ?? detail.images?.backdrop,
+      numberOfSeasons: show.number_of_seasons ?? null,
+      numberOfEpisodes: show.number_of_episodes ?? null,
     },
     meta,
   );

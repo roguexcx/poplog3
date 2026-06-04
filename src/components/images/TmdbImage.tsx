@@ -55,7 +55,13 @@ type TmdbImageV3Props = {
 
 function normalizePath(path: string | null | undefined) {
   if (!path) return null;
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
   return path.startsWith("/") ? path : `/${path}`;
+}
+
+function buildImageSrc(path: string, size: string): string {
+  if (path.startsWith("http://") || path.startsWith("https://")) return path;
+  return `${TMDB_IMAGE_BASE}/${size}${path}`;
 }
 
 export function TmdbImageLegacy({
@@ -79,7 +85,7 @@ export function TmdbImageLegacy({
     );
   }
 
-  const src = `${TMDB_IMAGE_BASE}/${size}${imagePath}`;
+  const src = buildImageSrc(imagePath, size);
 
   return (
     <Image

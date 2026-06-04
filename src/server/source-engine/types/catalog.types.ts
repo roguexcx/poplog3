@@ -27,6 +27,8 @@ export type CatalogTitle = {
   votes?: number;
   posterPath?: string;
   backdropPath?: string;
+  numberOfSeasons?: number | null;
+  numberOfEpisodes?: number | null;
   source: SourceMeta;
 };
 

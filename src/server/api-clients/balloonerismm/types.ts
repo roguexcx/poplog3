@@ -60,6 +60,8 @@ export type BalloonerismShow = {
   certification?: string | null;
   rating?: number | null;
   votes?: number | null;
+  number_of_seasons?: number | null;
+  number_of_episodes?: number | null;
   ids?: BalloonerismIds;
   images?: BalloonerismImages;
   trailers?: BalloonerismVideo[] | null;

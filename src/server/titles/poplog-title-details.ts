@@ -38,6 +38,8 @@ export type PoplogTitleDetailsResult = {
   voteAverage?: number | null;
   voteCount?: number | null;
   externalIds: PoplogTitleExternalIds;
+  numberOfSeasons?: number | null;
+  numberOfEpisodes?: number | null;
   cast?: Array<{
     id: string | number;
     name: string;
@@ -222,6 +224,8 @@ function balloonerismmToDetails(
     runtime: title.runtime ?? null,
     voteAverage: title.rating ?? null,
     voteCount: title.votes ?? null,
+    numberOfSeasons: title.numberOfSeasons ?? null,
+    numberOfEpisodes: title.numberOfEpisodes ?? null,
     externalIds: compactExternalIds({
       ...identity.externalIds,
       tmdbId: title.ids.tmdbId ?? identity.externalIds.tmdbId,

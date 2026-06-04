@@ -105,7 +105,8 @@
       "Bash(dir \"I:\\\\poplog-v3\\\\src\\\\middleware*\")",
       "Bash(dir \"I:\\\\poplog-v3\\\\middleware*\")",
       "Bash(Get-ChildItem -Path \"I:\\\\poplog-v3\" -Filter \"middleware*\" -Recurse -ErrorAction SilentlyContinue)",
-      "Bash(cd /I/poplog-v3 && grep -n \"export.*listUserTitleStates\\\\|export { listUserTitleStates\" src/server/repositories/index.ts src/server/repositories/user-title-state.repository.ts 2>/dev/null | head -20)"
+      "Bash(cd /I/poplog-v3 && grep -n \"export.*listUserTitleStates\\\\|export { listUserTitleStates\" src/server/repositories/index.ts src/server/repositories/user-title-state.repository.ts 2>/dev/null | head -20)",
+      "PowerShell(Get-ChildItem -Path \"src\" -Recurse -File | Select-String -Pattern \"cast|credits|crew|trailer|videos|recommendations|related|similar|collection|getRelated|catalogGetRelated\" | Select-Object Path,LineNumber,Line | Format-Table -AutoSize -Wrap | Out-String -Width 200 | Out-File \"C:\\\\Users\\\\Philipe\\\\.claude\\\\projects\\\\I--poplog-v3\\\\audit-credits.txt\"; Write-Host \"Done. Line count: $\\(\\(Get-Content 'C:\\\\Users\\\\Philipe\\\\.claude\\\\projects\\\\I--poplog-v3\\\\audit-credits.txt'\\).Count\\)\")"
     ]
   }
 }

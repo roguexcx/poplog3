@@ -90,6 +90,14 @@ export type GetTitlePageDataOptions = {
   debugSource?: boolean;
 };
 
+function toEmbedUrl(url: string): string {
+  if (!url) return url;
+  // youtube.com/watch?v=ID → youtube.com/embed/ID
+  const watchMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);
+  if (watchMatch) return `https://www.youtube.com/embed/${watchMatch[1]}`;
+  return url;
+}
+
 function poplogDetailsToTitlePageData(
   details: PoplogTitleDetailsResult,
   country: string,
@@ -130,8 +138,8 @@ function poplogDetailsToTitlePageData(
     releaseDate: details.mediaType === "movie" ? details.releaseDate ?? null : null,
     firstAirDate: details.mediaType === "tv" ? details.releaseDate ?? null : null,
     lastAirDate: null,
-    numberOfSeasons: null,
-    numberOfEpisodes: null,
+    numberOfSeasons: details.numberOfSeasons ?? null,
+    numberOfEpisodes: details.numberOfEpisodes ?? null,
     overview: details.overview ?? null,
     posterUrl: details.posterUrl ?? null,
     backdropUrl: details.backdropUrl ?? null,
@@ -150,7 +158,7 @@ function poplogDetailsToTitlePageData(
           key: String(trailerVideo.id),
           name: trailerVideo.title,
           url: trailerVideo.url,
-          embedUrl: trailerVideo.url,
+          embedUrl: toEmbedUrl(trailerVideo.url),
         }
       : null,
     nextEpisode: null,

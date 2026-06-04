@@ -18,6 +18,8 @@ type NormalizeTitleInput = {
   votes?: number | null;
   posterRemoteUrl?: string | null;
   backdropRemoteUrl?: string | null;
+  numberOfSeasons?: number | null;
+  numberOfEpisodes?: number | null;
 };
 
 export function normalizeTitle(input: NormalizeTitleInput, meta: SourceMeta): CatalogTitle {
@@ -38,6 +40,8 @@ export function normalizeTitle(input: NormalizeTitleInput, meta: SourceMeta): Ca
     votes: input.votes ?? undefined,
     posterPath: input.posterRemoteUrl ?? undefined,
     backdropPath: input.backdropRemoteUrl ?? undefined,
+    numberOfSeasons: input.numberOfSeasons ?? undefined,
+    numberOfEpisodes: input.numberOfEpisodes ?? undefined,
     source: { ...meta, fetchedAt: meta.fetchedAt ?? new Date().toISOString() },
   };
 }
