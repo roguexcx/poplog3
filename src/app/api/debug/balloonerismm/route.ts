@@ -23,6 +23,11 @@ import {
   isProvidersEnabled,
   isProvidersDebugOnly,
 } from "@/server/titles/balloonerismm-providers";
+import {
+  resolvePoplogTitleIdentity,
+  type PoplogTitleSourceHint,
+} from "@/server/titles/poplog-title-identity";
+import { getPoplogTitleDetails } from "@/server/titles/poplog-title-details";
 import type { MediaType } from "@prisma/client";
 
 type DebugResult = {
@@ -44,6 +49,7 @@ export async function GET(request: Request): Promise<NextResponse> {
   const q = url.searchParams.get("q") ?? "matrix";
   const id = url.searchParams.get("id") ?? "";
   const raw = url.searchParams.get("raw") === "1";
+  const sourceHint = (url.searchParams.get("sourceHint") ?? "auto") as PoplogTitleSourceHint;
 
   const active = isBalloonerismActive();
   const baseUrl = BALLOONERISMM_BASE_URL;
@@ -126,6 +132,52 @@ export async function GET(request: Request): Promise<NextResponse> {
       endpoint = "/discover/tv";
       data = await balloonerismGet<BalloonerismSearchResult[]>("/discover/tv", { ttlSeconds: 0 });
 
+    } else if (type === "resolve-title") {
+      const media = (url.searchParams.get("media") ?? "movie") as "movie" | "tv";
+      if (media !== "movie" && media !== "tv") return errorResponse("media deve ser movie ou tv");
+      if (!id) return errorResponse("Param id obrigatorio para type=resolve-title");
+
+      endpoint = `resolve-title(media=${media}, id=${id}, sourceHint=${sourceHint})`;
+      const identity = await resolvePoplogTitleIdentity({
+        mediaType: media,
+        id,
+        sourceHint,
+      });
+
+      data = {
+        source: "poplog-identity",
+        resolvedFrom: identity.resolvedFrom,
+        poplogId: identity.poplogId ?? null,
+        externalIds: identity.externalIds,
+        fallbackUsed: false,
+        fallbackReason: null,
+        rawSource: "local",
+        normalizedTitle: identity,
+      };
+
+    } else if (type === "title-details") {
+      const media = (url.searchParams.get("media") ?? "movie") as "movie" | "tv";
+      if (media !== "movie" && media !== "tv") return errorResponse("media deve ser movie ou tv");
+      if (!id) return errorResponse("Param id obrigatorio para type=title-details");
+
+      endpoint = `title-details(media=${media}, id=${id}, sourceHint=${sourceHint})`;
+      const details = await getPoplogTitleDetails({
+        mediaType: media,
+        id,
+        sourceHint,
+      });
+
+      data = {
+        source: details?.sourceMeta.primarySource ?? "unknown",
+        resolvedFrom: details?.sourceMeta.resolvedFrom ?? "unknown",
+        poplogId: details?.poplogId ?? null,
+        externalIds: details?.externalIds ?? {},
+        fallbackUsed: details?.sourceMeta.fallbackUsed ?? false,
+        fallbackReason: details?.sourceMeta.fallbackReason ?? null,
+        rawSource: details?.sourceMeta.rawSource ?? null,
+        normalizedTitle: details,
+      };
+
     // ── Etapa 3: cross-reference e providers ────────────────────────────────
 
     } else if (type === "external-ids" || type === "cross-ref") {
@@ -196,7 +248,7 @@ export async function GET(request: Request): Promise<NextResponse> {
       }
 
     } else {
-      return errorResponse(`type desconhecido: ${type}. Valores validos: search, search-movie, search-tv, popular, popular-movie, popular-tv, movie, movie-credits, movie-external-ids, tv, tv-credits, tv-external-ids, person, person-credits, genre-movie, genre-tv, discover-movie, discover-tv, external-ids, cross-ref, providers`);
+      return errorResponse(`type desconhecido: ${type}. Valores validos: search, search-movie, search-tv, popular, popular-movie, popular-tv, movie, movie-credits, movie-external-ids, tv, tv-credits, tv-external-ids, person, person-credits, genre-movie, genre-tv, discover-movie, discover-tv, resolve-title, title-details, external-ids, cross-ref, providers`);
     }
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
