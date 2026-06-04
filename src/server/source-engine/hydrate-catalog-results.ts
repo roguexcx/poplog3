@@ -44,12 +44,22 @@ export type PoplogCatalogCandidate = {
 };
 
 export type HydratedPoplogTitle = PoplogTitle & {
-  poplogId?: string;
+  poplogId?: string | number | null;
   externalIds?: ExternalIds;
   sourceMeta?: PoplogCatalogCandidate["sourceMeta"];
   genre_names?: string[];
   search_source?: "balloonerismm" | "cache-fuzzy";
   isTemporaryCatalogCandidate?: boolean;
+};
+
+export type CatalogIdentityFields = {
+  poplogId?: string | number | null;
+  externalIds?: ExternalIds;
+  identityUsed: string;
+  linkIdUsed: string | number;
+  hasPoplogId: boolean;
+  normalizedFrom: "balloonerismm" | "legacy" | "cache-fuzzy";
+  legacyCompatibilityUsed: boolean;
 };
 
 export type HydrationDebug = {
@@ -203,6 +213,13 @@ function rowToPoplogTitle(row: TitleRow, candidate?: PoplogCatalogCandidate): Hy
     imdb_id: candidate?.externalIds.imdbId,
     poplogId: row.id,
     externalIds: candidate?.externalIds,
+    ...resolveCatalogIdentityFields({
+      tmdb_id: row.tmdbId,
+      media_type: row.mediaType,
+      imdb_id: candidate?.externalIds.imdbId,
+      poplogId: row.id,
+      externalIds: candidate?.externalIds,
+    }),
     sourceMeta: candidate?.sourceMeta,
     search_source: "balloonerismm",
   };
@@ -234,9 +251,64 @@ function candidateToTemporaryTitle(candidate: PoplogCatalogCandidate): HydratedP
     original_language: null,
     imdb_id: candidate.externalIds.imdbId,
     externalIds: candidate.externalIds,
+    ...resolveCatalogIdentityFields({
+      tmdb_id: candidate.externalIds.tmdbId ?? syntheticId,
+      media_type: mediaType,
+      imdb_id: candidate.externalIds.imdbId,
+      externalIds: candidate.externalIds,
+    }),
     sourceMeta: candidate.sourceMeta,
     search_source: "balloonerismm",
     isTemporaryCatalogCandidate: true,
+  };
+}
+
+export function resolveCatalogIdentityFields(
+  title: Partial<HydratedPoplogTitle> & {
+    tmdb_id?: number | null;
+    media_type?: MediaType;
+  },
+  normalizedFrom: CatalogIdentityFields["normalizedFrom"] = "balloonerismm",
+): CatalogIdentityFields {
+  const externalIds = title.externalIds ?? {
+    tmdbId: title.tmdb_id ?? undefined,
+    imdbId: title.imdb_id ?? undefined,
+  };
+  const poplogId = title.poplogId ?? null;
+  const linkIdUsed =
+    poplogId ??
+    externalIds.imdbId ??
+    externalIds.balloonerismmId ??
+    externalIds.slug ??
+    externalIds.tvdbId ??
+    externalIds.traktId ??
+    externalIds.tmdbId ??
+    title.tmdb_id ??
+    "";
+  const identityUsed = poplogId
+    ? "poplog_id"
+    : externalIds.imdbId
+      ? "imdb_id"
+      : externalIds.balloonerismmId
+        ? "balloonerismm_id"
+        : externalIds.slug
+          ? "slug"
+          : externalIds.tvdbId
+            ? "tvdb_id"
+            : externalIds.traktId
+              ? "trakt_id"
+              : externalIds.tmdbId
+                ? "tmdb_id_alias"
+                : "temporary_catalog_candidate";
+
+  return {
+    poplogId,
+    externalIds,
+    identityUsed,
+    linkIdUsed,
+    hasPoplogId: Boolean(poplogId),
+    normalizedFrom,
+    legacyCompatibilityUsed: Boolean(title.tmdb_id && linkIdUsed !== title.tmdb_id),
   };
 }
 

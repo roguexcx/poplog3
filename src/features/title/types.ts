@@ -251,6 +251,18 @@ export type TitleSeriesProgress = {
 
 export type TitlePageData = {
   id: number | string;
+  poplogId?: string | number | null;
+  externalIds?: {
+    tmdbId?: number;
+    imdbId?: string;
+    tvdbId?: number;
+    traktId?: number | string;
+    balloonerismmId?: string;
+    slug?: string;
+  };
+  identityUsed?: string;
+  linkIdUsed?: string | number;
+  legacyCompatibilityUsed?: boolean;
   mediaType: TitleMediaType;
   title: string;
   originalTitle?: string | null;

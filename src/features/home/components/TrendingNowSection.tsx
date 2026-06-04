@@ -20,6 +20,18 @@ type MediaFilter = "all" | "movie" | "tv";
 
 interface TrendingItem {
   id: number;
+  poplogId?: string | number | null;
+  externalIds?: {
+    tmdbId?: number;
+    imdbId?: string;
+    tvdbId?: number;
+    traktId?: number | string;
+    balloonerismmId?: string;
+    slug?: string;
+  };
+  identityUsed?: string;
+  linkIdUsed?: string | number;
+  hasPoplogId?: boolean;
   media_type: "movie" | "tv";
   title_label: string;
   original_title_label: string | null;
@@ -37,6 +49,11 @@ interface TrendingItem {
 
 interface RawItem {
   tmdb_id: number;
+  poplogId?: string | number | null;
+  externalIds?: TrendingItem["externalIds"];
+  identityUsed?: string;
+  linkIdUsed?: string | number;
+  hasPoplogId?: boolean;
   title: string;
   original_title?: string | null;
   media_type: "movie" | "tv";
@@ -79,6 +96,11 @@ function toTrendingItem(raw: RawItem): TrendingItem {
 
   return {
     id: raw.tmdb_id,
+    poplogId: raw.poplogId,
+    externalIds: raw.externalIds,
+    identityUsed: raw.identityUsed,
+    linkIdUsed: raw.linkIdUsed,
+    hasPoplogId: raw.hasPoplogId,
     media_type: raw.media_type,
     title_label: raw.title,
     original_title_label: raw.original_title ?? null,
@@ -173,7 +195,7 @@ function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
   const [imgErr, setImgErr] = useState(false);
   const posterPath = item.poster_path;
   const isMovie = item.media_type === "movie";
-  const slug = `/title/${item.media_type}/${item.id}`;
+  const slug = `/title/${item.media_type}/${item.linkIdUsed ?? item.poplogId ?? item.externalIds?.imdbId ?? item.id}`;
 
   const sharedProps = {
     tmdbId: item.id,

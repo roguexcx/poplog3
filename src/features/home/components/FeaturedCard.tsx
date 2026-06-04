@@ -34,6 +34,7 @@ export default function FeaturedCard({
   overview,
 }: Props) {
   const originalTitle = getOriginalTitle(item);
+  const linkId = item.linkIdUsed ?? item.poplogId ?? item.externalIds?.imdbId ?? item.id;
 
   return (
     <div className="hidden justify-end lg:flex">
@@ -91,7 +92,7 @@ export default function FeaturedCard({
 
             <div className="mt-5 flex items-center gap-2">
               <Link
-                href={`/title/${mediaType}/${item.id}`}
+                href={`/title/${mediaType}/${linkId}`}
                 className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-xs font-bold text-white backdrop-blur-md transition hover:bg-white/15"
               >
                 Ver detalhes

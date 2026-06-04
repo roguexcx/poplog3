@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import { filterValidTitles } from "@/server/utils/filter-valid-titles";
 import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import { normalizeTmdbTitle } from "@/server/normalizers/tmdb-title";
@@ -20,7 +20,10 @@ import {
   catalogGetTrending,
   isBalloonerismTrendingEnabled,
 } from "@/server/source-engine/engine";
-import { hydrateCatalogResults } from "@/server/source-engine/hydrate-catalog-results";
+import {
+  hydrateCatalogResultsWithDebug,
+  resolveCatalogIdentityFields,
+} from "@/server/source-engine/hydrate-catalog-results";
 import type { PoplogTitle } from "@/server/types/title";
 
 const TRENDING_CACHE_TTL_MS = 30 * 60_000;
@@ -103,6 +106,7 @@ async function enrichWithRuntime(titles: PoplogTitle[]) {
     return {
       ...title,
       id: title.tmdb_id,
+      ...resolveCatalogIdentityFields(title, title.normalizedFrom === "cache-fuzzy" ? "cache-fuzzy" : "balloonerismm"),
       runtime: runtimeResolution.minutes,
       runtime_label: runtimeLabel,
     };
@@ -123,7 +127,8 @@ function interleaveTrending(movies: PoplogTitle[], tv: PoplogTitle[]): PoplogTit
   return result;
 }
 
-export async function GET() {
+export async function GET(request: NextRequest) {
+  const debugSource = request.nextUrl.searchParams.get("debugSource") === "1";
   const totalStartedAt = Date.now();
   const perf: Record<string, number> = { request_parse: 0 };
   const stageRef = { value: totalStartedAt };
@@ -163,6 +168,19 @@ export async function GET() {
         cacheStatus: cached.status,
         count: results.length,
         results,
+        ...(debugSource
+          ? {
+              debugSource: {
+                source: "cache",
+                fallbackUsed: false,
+                usedTmdbApi: false,
+                normalizedFrom: "continuity_section_cache",
+                identityUsed: "cached_payload",
+                legacyCompatibilityUsed: true,
+                cacheStatus: cached.status,
+              },
+            }
+          : {}),
       });
     }
 
@@ -175,10 +193,48 @@ export async function GET() {
         ]);
         markStage(perf, stageRef, "external_fetch");
 
-        const merged = interleaveTrending(
-          await hydrateCatalogResults(movieResults),
-          await hydrateCatalogResults(tvResults),
-        );
+        const [movieHydrated, tvHydrated] = await Promise.all([
+          hydrateCatalogResultsWithDebug(movieResults),
+          hydrateCatalogResultsWithDebug(tvResults),
+        ]);
+        const merged = interleaveTrending(movieHydrated.titles, tvHydrated.titles);
+        const balloonerismmDebug = {
+          source: "balloonerismm",
+          rawCount: movieHydrated.debug.rawCount + tvHydrated.debug.rawCount,
+          normalizedCount:
+            movieHydrated.debug.normalizedCount + tvHydrated.debug.normalizedCount,
+          poplogResolvedCount:
+            movieHydrated.debug.poplogResolvedCount + tvHydrated.debug.poplogResolvedCount,
+          searchCompatibleCount:
+            movieHydrated.debug.searchCompatibleCount + tvHydrated.debug.searchCompatibleCount,
+          fallbackUsed: false,
+          fallbackReason: null as string | null,
+          usedTmdbApi: false,
+          normalizedFrom: "balloonerismm",
+          identityUsed: "poplog_id_or_best_alias",
+          legacyCompatibilityUsed: true,
+          externalIdStats: {
+            imdbId:
+              movieHydrated.debug.externalIdStats.imdbId + tvHydrated.debug.externalIdStats.imdbId,
+            tmdbId:
+              movieHydrated.debug.externalIdStats.tmdbId + tvHydrated.debug.externalIdStats.tmdbId,
+            tvdbId:
+              movieHydrated.debug.externalIdStats.tvdbId + tvHydrated.debug.externalIdStats.tvdbId,
+            traktId:
+              movieHydrated.debug.externalIdStats.traktId + tvHydrated.debug.externalIdStats.traktId,
+            balloonerismmId:
+              movieHydrated.debug.externalIdStats.balloonerismmId +
+              tvHydrated.debug.externalIdStats.balloonerismmId,
+            slug:
+              movieHydrated.debug.externalIdStats.slug + tvHydrated.debug.externalIdStats.slug,
+            poplogResolved:
+              movieHydrated.debug.externalIdStats.poplogResolved +
+              tvHydrated.debug.externalIdStats.poplogResolved,
+            temporaryCandidates:
+              movieHydrated.debug.externalIdStats.temporaryCandidates +
+              tvHydrated.debug.externalIdStats.temporaryCandidates,
+          },
+        };
         markStage(perf, stageRef, "normalization");
 
         const validTitles = filterValidTitles(merged);
@@ -212,9 +268,17 @@ export async function GET() {
             total: Date.now() - totalStartedAt,
           });
 
-          return NextResponse.json({ ok: true, count: results.length, results });
+          return NextResponse.json({
+            ok: true,
+            count: results.length,
+            results,
+            ...(debugSource ? { debugSource: balloonerismmDebug } : {}),
+          });
         }
 
+        balloonerismmDebug.fallbackUsed = true;
+        balloonerismmDebug.fallbackReason =
+          validTitles.length < TRENDING_MIN_RESULTS ? "insufficient" : "empty";
         console.log(
           `[trending] source=balloonerismm_fallback reason=${validTitles.length < TRENDING_MIN_RESULTS ? "insufficient" : "empty"}`
         );
@@ -297,6 +361,10 @@ export async function GET() {
       return {
         ...title,
         id: title.tmdb_id,
+        ...resolveCatalogIdentityFields({
+          ...title,
+          externalIds: { tmdbId: title.tmdb_id },
+        }, "legacy"),
         runtime: runtimeResolution.minutes,
         runtime_label: runtimeLabel,
       };
@@ -328,7 +396,25 @@ export async function GET() {
       total: Date.now() - totalStartedAt,
     });
 
-    return NextResponse.json({ ok: true, count: results.length, results });
+    return NextResponse.json({
+      ok: true,
+      count: results.length,
+      results,
+      ...(debugSource
+        ? {
+            debugSource: {
+              source: "legacy",
+              fallbackUsed: true,
+              fallbackReason: "balloonerismm_unavailable_or_insufficient",
+              usedTmdbApi: true,
+              usedLegacy: true,
+              normalizedFrom: "legacy",
+              identityUsed: "tmdb_id_alias",
+              legacyCompatibilityUsed: true,
+            },
+          }
+        : {}),
+    });
   } catch (error) {
     console.error("[trending route]", error);
     console.log("[trending/perf]", {

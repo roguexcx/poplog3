@@ -1,6 +1,20 @@
 export type PoplogTitle = {
   tmdb_id: number;
   media_type: "movie" | "tv";
+  poplogId?: string | number | null;
+  externalIds?: {
+    tmdbId?: number;
+    imdbId?: string;
+    tvdbId?: number;
+    traktId?: number | string;
+    balloonerismmId?: string;
+    slug?: string;
+  };
+  identityUsed?: string;
+  linkIdUsed?: string | number;
+  hasPoplogId?: boolean;
+  normalizedFrom?: string;
+  legacyCompatibilityUsed?: boolean;
 
   title: string;
   original_title?: string | null;

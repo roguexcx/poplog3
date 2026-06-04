@@ -2,6 +2,20 @@ export type TMDBMediaType = "movie" | "tv";
 
 export interface TMDBItem {
   id: number;
+  poplogId?: string | number | null;
+  externalIds?: {
+    tmdbId?: number;
+    imdbId?: string;
+    tvdbId?: number;
+    traktId?: number | string;
+    balloonerismmId?: string;
+    slug?: string;
+  };
+  identityUsed?: string;
+  linkIdUsed?: string | number;
+  hasPoplogId?: boolean;
+  normalizedFrom?: string;
+  legacyCompatibilityUsed?: boolean;
   media_type?: TMDBMediaType;
   title?: string;
   name?: string;

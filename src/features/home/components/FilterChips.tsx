@@ -18,11 +18,11 @@ export default function FilterChips() {
       const res = await fetch("/api/trending");
       if (!res.ok) throw new Error("fetch failed");
       const data = await res.json();
-      const results: { id: number; media_type?: string }[] = data.results ?? [];
+      const results: { id: number; media_type?: string; linkIdUsed?: string | number; poplogId?: string | number | null }[] = data.results ?? [];
       const eligible = results.filter((r) => r.media_type === "movie" || r.media_type === "tv");
       if (eligible.length === 0) throw new Error("empty");
       const pick = eligible[Math.floor(Math.random() * eligible.length)];
-      router.push(`/title/${pick.media_type}/${pick.id}`);
+      router.push(`/title/${pick.media_type}/${pick.linkIdUsed ?? pick.poplogId ?? pick.id}`);
     } catch {
       // falha silenciosa
     } finally {

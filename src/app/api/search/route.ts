@@ -18,6 +18,7 @@ import {
 } from "@/server/source-engine/engine";
 import {
   hydrateCatalogResultsWithDebug,
+  resolveCatalogIdentityFields,
   type HydrationDebug,
 } from "@/server/source-engine/hydrate-catalog-results";
 
@@ -81,6 +82,13 @@ export async function GET(request: NextRequest) {
         balloonerismmDebug = hydratedResult.debug;
         const validTitles = filterValidTitles(hydrated);
         balloonerismmDebug.searchCompatibleCount = validTitles.length;
+        Object.assign(balloonerismmDebug, {
+          usedTmdbApi: false,
+          usedLegacy: false,
+          normalizedFrom: "balloonerismm",
+          identityUsed: "poplog_id_or_best_alias",
+          legacyCompatibilityUsed: true,
+        });
 
         if (validTitles.length > 0) {
           const seenKeys = new Set(
@@ -180,7 +188,17 @@ export async function GET(request: NextRequest) {
     const rawCombined = [...rawResults, ...fuzzyTitles.map(fuzzyMatchToTmdbSummary)];
 
     const results = applyUserFeedbackScoring(
-      rawCombined.map((item) => ({ ...item, id: item.id })),
+      rawCombined.map((item) => ({
+        ...item,
+        id: item.id,
+        ...(item.media_type === "movie" || item.media_type === "tv"
+          ? resolveCatalogIdentityFields({
+              tmdb_id: item.id,
+              media_type: item.media_type,
+              externalIds: { tmdbId: item.id },
+            }, "legacy")
+          : {}),
+      })),
       { userId, feedbackMap, context: "search", preserveOrder: true },
     );
 
@@ -191,7 +209,20 @@ export async function GET(request: NextRequest) {
       count: results.length,
       fuzzyCount: fuzzyTitles.length,
       results,
-      ...(debugSource && balloonerismmDebug ? { debugSource: balloonerismmDebug } : {}),
+      ...(debugSource
+        ? {
+            debugSource: balloonerismmDebug ?? {
+              source: "legacy",
+              fallbackUsed: true,
+              fallbackReason: "balloonerismm_disabled",
+              usedTmdbApi: true,
+              usedLegacy: true,
+              normalizedFrom: "legacy",
+              identityUsed: "tmdb_id_alias",
+              legacyCompatibilityUsed: true,
+            },
+          }
+        : {}),
     });
   } catch (error) {
     console.error("[search]", error);

@@ -13,7 +13,10 @@ import {
   catalogSearch,
   isBalloonerismSearchEnabled,
 } from "@/server/source-engine/engine";
-import { hydrateCatalogResults } from "@/server/source-engine/hydrate-catalog-results";
+import {
+  hydrateCatalogResultsWithDebug,
+  resolveCatalogIdentityFields,
+} from "@/server/source-engine/hydrate-catalog-results";
 
 type SearchMediaType = "all" | "movie" | "tv";
 const TMDB_MAX_SEARCH_PAGE = 500;
@@ -106,6 +109,7 @@ export async function GET(request: NextRequest) {
   const mediaType = parseMediaType(searchParams.get("type"));
   const page = parsePage(searchParams.get("page"));
   const genre = parseGenre(searchParams.get("genre"));
+  const debugSource = searchParams.get("debugSource") === "1";
 
   if (!query) {
     return NextResponse.json(
@@ -124,7 +128,8 @@ export async function GET(request: NextRequest) {
           mediaType: toCatalogMediaType(mediaType),
           page: 1,
         });
-        const hydrated = await hydrateCatalogResults(catalogResults);
+        const hydratedResult = await hydrateCatalogResultsWithDebug(catalogResults);
+        const hydrated = hydratedResult.titles;
 
         // Apply genre filter if present (from local DB data)
         const filtered = genre
@@ -140,7 +145,16 @@ export async function GET(request: NextRequest) {
           const fuzzyTitles = shouldUseFuzzyFallback(validTitles.length, page)
             ? await findCachedFuzzyTitles({ query, mediaType, genre, excludeKeys: seenKeys })
             : [];
-          const results = [...validTitles, ...fuzzyTitles];
+          const results = [
+            ...validTitles,
+            ...fuzzyTitles.map((title) => ({
+              ...title,
+              ...resolveCatalogIdentityFields({
+                ...title,
+                externalIds: { tmdbId: title.tmdb_id },
+              }, "cache-fuzzy"),
+            })),
+          ];
 
           console.log(
             `[poplog3/search] source=balloonerismm count=${validTitles.length} fuzzy=${fuzzyTitles.length}`
@@ -160,6 +174,18 @@ export async function GET(request: NextRequest) {
             peopleCount: 0,
             results,
             people: [],
+            ...(debugSource
+              ? {
+                  debugSource: {
+                    ...hydratedResult.debug,
+                    usedTmdbApi: false,
+                    usedLegacy: false,
+                    normalizedFrom: "balloonerismm",
+                    identityUsed: "poplog_id_or_best_alias",
+                    legacyCompatibilityUsed: true,
+                  },
+                }
+              : {}),
           });
         }
 
@@ -234,7 +260,13 @@ export async function GET(request: NextRequest) {
     const fuzzyTitles = shouldUseFuzzyFallback(titles.length, page)
       ? await findCachedFuzzyTitles({ query, mediaType, genre, excludeKeys: seenTitleKeys })
       : [];
-    const results = [...titles, ...fuzzyTitles];
+    const results = [...titles, ...fuzzyTitles].map((title) => ({
+      ...title,
+      ...resolveCatalogIdentityFields({
+        ...title,
+        externalIds: { tmdbId: title.tmdb_id },
+      }, "legacy"),
+    }));
 
     return NextResponse.json({
       ok: true,
@@ -250,6 +282,20 @@ export async function GET(request: NextRequest) {
       peopleCount: people.length,
       results,
       people,
+      ...(debugSource
+        ? {
+            debugSource: {
+              source: "legacy",
+              fallbackUsed: true,
+              fallbackReason: "balloonerismm_unavailable_or_empty",
+              usedTmdbApi: true,
+              usedLegacy: true,
+              normalizedFrom: "legacy",
+              identityUsed: "tmdb_id_alias",
+              legacyCompatibilityUsed: true,
+            },
+          }
+        : {}),
     });
   } catch (error) {
     console.error("[poplog3/search]", error);

@@ -16,6 +16,18 @@ type SearchMediaType = "all" | "movie" | "tv";
 
 type SearchResult = {
   tmdb_id: number;
+  poplogId?: string | number | null;
+  externalIds?: {
+    tmdbId?: number;
+    imdbId?: string;
+    tvdbId?: number;
+    traktId?: number | string;
+    balloonerismmId?: string;
+    slug?: string;
+  };
+  identityUsed?: string;
+  linkIdUsed?: string | number;
+  hasPoplogId?: boolean;
   media_type: "movie" | "tv";
   title: string;
   original_title?: string | null;
@@ -124,6 +136,10 @@ function imageUrl(path: string | null, size = "w185") {
   return buildTmdbRawUrl(size, path);
 }
 
+function titleLinkId(title: SearchResult) {
+  return title.linkIdUsed ?? title.poplogId ?? title.externalIds?.imdbId ?? title.externalIds?.balloonerismmId ?? title.tmdb_id;
+}
+
 function SectionDivider() {
   return (
     <div className="h-px w-full bg-gradient-to-r from-transparent via-white/[0.06] to-transparent" />
@@ -137,7 +153,7 @@ function TitleGrid({ titles }: { titles: SearchResult[] }) {
         <InteractivePosterCard
           key={`${title.media_type}-${title.tmdb_id}`}
           id={title.tmdb_id}
-          href={`/title/${title.media_type}/${title.tmdb_id}`}
+          href={`/title/${title.media_type}/${titleLinkId(title)}`}
           mediaType={title.media_type}
           title={title.title}
           originalTitle={title.original_title ?? null}

@@ -10,7 +10,10 @@ import {
   catalogGetPopular,
   isBalloonerismDiscoverEnabled,
 } from "@/server/source-engine/engine";
-import { hydrateCatalogResults } from "@/server/source-engine/hydrate-catalog-results";
+import {
+  hydrateCatalogResultsWithDebug,
+  resolveCatalogIdentityFields,
+} from "@/server/source-engine/hydrate-catalog-results";
 
 type MediaType = "movie" | "tv";
 const DISCOVER_MIN_RESULTS = 5;
@@ -18,6 +21,7 @@ const DISCOVER_MIN_RESULTS = 5;
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const mediaType = (searchParams.get("mediaType") as MediaType) || "movie";
+  const debugSource = searchParams.get("debugSource") === "1";
 
   if (mediaType !== "movie" && mediaType !== "tv") {
     return NextResponse.json({ ok: false, error: "Invalid media type" }, { status: 400 });
@@ -42,8 +46,17 @@ export async function GET(request: NextRequest) {
       try {
         const catalogMediaType = mediaType === "tv" ? "show" : "movie";
         const catalogResults = await catalogGetPopular({ mediaType: catalogMediaType });
-        const hydrated = await hydrateCatalogResults(catalogResults);
+        const hydratedResult = await hydrateCatalogResultsWithDebug(catalogResults);
+        const hydrated = hydratedResult.titles;
         const validTitles = filterValidTitles(hydrated);
+        const balloonerismmDebug = {
+          ...hydratedResult.debug,
+          usedTmdbApi: false,
+          usedLegacy: false,
+          normalizedFrom: "balloonerismm",
+          identityUsed: "poplog_id_or_best_alias",
+          legacyCompatibilityUsed: true,
+        };
 
         if (validTitles.length >= DISCOVER_MIN_RESULTS) {
           const scoredTitles = applyUserFeedbackScoring(
@@ -60,9 +73,13 @@ export async function GET(request: NextRequest) {
             mediaType,
             count: scoredTitles.length,
             results: scoredTitles,
+            ...(debugSource ? { debugSource: balloonerismmDebug } : {}),
           });
         }
 
+        balloonerismmDebug.fallbackUsed = true;
+        balloonerismmDebug.fallbackReason =
+          validTitles.length < DISCOVER_MIN_RESULTS ? "insufficient" : "empty";
         console.log(
           `[discover] source=balloonerismm_fallback reason=${validTitles.length < DISCOVER_MIN_RESULTS ? "insufficient" : "empty"} mediaType=${mediaType}`
         );
@@ -84,7 +101,15 @@ export async function GET(request: NextRequest) {
     );
 
     const scoredTitles = applyUserFeedbackScoring(
-      titles.map((t) => ({ ...t, id: t.tmdb_id, media_type: mediaType })),
+      titles.map((t) => ({
+        ...t,
+        id: t.tmdb_id,
+        media_type: mediaType,
+        ...resolveCatalogIdentityFields({
+          ...t,
+          externalIds: { tmdbId: t.tmdb_id },
+        }, "legacy"),
+      })),
       { userId, feedbackMap, context: "discovery", mediaType },
     );
 
@@ -93,6 +118,20 @@ export async function GET(request: NextRequest) {
       mediaType,
       count: scoredTitles.length,
       results: scoredTitles,
+      ...(debugSource
+        ? {
+            debugSource: {
+              source: "legacy",
+              fallbackUsed: true,
+              fallbackReason: "balloonerismm_unavailable_or_insufficient",
+              usedTmdbApi: true,
+              usedLegacy: true,
+              normalizedFrom: "legacy",
+              identityUsed: "tmdb_id_alias",
+              legacyCompatibilityUsed: true,
+            },
+          }
+        : {}),
     });
   } catch (error) {
     console.error("[discover route]", error);

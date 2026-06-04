@@ -11,6 +11,10 @@ import { getOriginalTitle, getRating, getReleaseYear, getTitle } from "@/lib/tmd
 
 const MAX_VISIBLE = 5;
 
+function titleLinkId(item: { id: number; linkIdUsed?: string | number }) {
+  return item.linkIdUsed ?? item.id;
+}
+
 export default function SearchBar() {
   const router = useRouter();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -42,7 +46,7 @@ export default function SearchBar() {
     if (!item) return;
     setQuery("");
     setIsOpen(false);
-    router.push(`/title/${item.media_type ?? "movie"}/${item.id}`);
+    router.push(`/title/${item.media_type ?? "movie"}/${titleLinkId(item)}`);
   }
 
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -117,7 +121,7 @@ export default function SearchBar() {
             return (
               <Link
                 key={`${type}-${item.id}`}
-                href={`/title/${type}/${item.id}`}
+                href={`/title/${type}/${titleLinkId(item)}`}
                 role="option"
                 aria-selected={isActive}
                 className={[

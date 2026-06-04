@@ -95,9 +95,33 @@ function poplogDetailsToTitlePageData(
   country: string,
 ): TitlePageData {
   const trailerVideo = details.videos?.find((video) => video.type === "trailer") ?? details.videos?.[0];
+  const legacyCompatibleId =
+    details.externalIds.tmdbId ??
+    details.poplogId ??
+    details.externalIds.imdbId ??
+    details.externalIds.balloonerismmId ??
+    details.title;
+  const linkIdUsed =
+    details.poplogId ??
+    details.externalIds.imdbId ??
+    details.externalIds.balloonerismmId ??
+    details.externalIds.slug ??
+    details.externalIds.tmdbId ??
+    legacyCompatibleId;
 
   return {
-    id: details.poplogId ?? details.externalIds.tmdbId ?? details.externalIds.imdbId ?? details.externalIds.balloonerismmId ?? details.title,
+    id: legacyCompatibleId,
+    poplogId: details.poplogId ?? null,
+    externalIds: details.externalIds,
+    identityUsed: details.poplogId
+      ? "poplog_id"
+      : details.externalIds.imdbId
+        ? "imdb_id"
+        : details.externalIds.tmdbId
+          ? "tmdb_id_alias"
+          : "temporary_catalog_candidate",
+    linkIdUsed,
+    legacyCompatibilityUsed: Boolean(details.externalIds.tmdbId && linkIdUsed !== details.externalIds.tmdbId),
     mediaType: details.mediaType,
     title: details.title,
     originalTitle: details.originalTitle ?? null,
@@ -860,6 +884,19 @@ export async function getTitlePageData(
 
       const payload: TitlePageData = {
         id: title.tmdb_id,
+        poplogId: poplogDetails?.poplogId ?? null,
+        externalIds: {
+          ...poplogDetails?.externalIds,
+          tmdbId: title.tmdb_id,
+          imdbId: imdbId ?? poplogDetails?.externalIds.imdbId,
+        },
+        identityUsed: poplogDetails?.poplogId ? "poplog_id" : "tmdb_id_alias",
+        linkIdUsed:
+          poplogDetails?.poplogId ??
+          poplogDetails?.externalIds.imdbId ??
+          poplogDetails?.externalIds.balloonerismmId ??
+          title.tmdb_id,
+        legacyCompatibilityUsed: true,
         mediaType: title.media_type,
         title: title.title ?? "Sem titulo",
         originalTitle: title.original_title ?? null,
