@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { filterValidTitles } from "@/server/utils/filter-valid-titles";
-import { tmdbFetch } from "@/server/api-clients/tmdb/client";
-import { normalizeTmdbTitle } from "@/server/normalizers/tmdb-title";
-import { upsertCachedTitle } from "@/server/cache/title-cache";
 import {
   findCachedFuzzyTitles,
   normalizeSearchTerm,
@@ -18,7 +15,6 @@ import {
 } from "@/server/source-engine/engine";
 import {
   hydrateCatalogResultsWithDebug,
-  resolveCatalogIdentityFields,
   type HydrationDebug,
 } from "@/server/source-engine/hydrate-catalog-results";
 
@@ -157,50 +153,14 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // ── Legacy TMDB path (fallback) ──────────────────────────────────────────
-    const data = await tmdbFetch<{ results: TmdbTitleSummary[] }>("/search/multi", {
-      params: { query, include_adult: false, page: 1 },
+    const fuzzyTitles = await findCachedFuzzyTitles({ query, mediaType: "all" });
+    const rawCombined = fuzzyTitles.map(fuzzyMatchToTmdbSummary);
+    const results = applyUserFeedbackScoring(rawCombined, {
+      userId,
+      feedbackMap,
+      context: "search",
+      preserveOrder: true,
     });
-
-    const rawResults = data.results.filter(
-      (item) => item.media_type === "movie" || item.media_type === "tv"
-    );
-
-    const titles = filterValidTitles(rawResults.map((item) => normalizeTmdbTitle(item)));
-
-    Promise.all(
-      titles.map(async (title, index) => {
-        try {
-          await upsertCachedTitle(title, rawResults[index]);
-        } catch (cacheError) {
-          console.warn(
-            `[search] falha ao cachear ${title.media_type}/${title.tmdb_id}:`,
-            cacheError instanceof Error ? cacheError.message : cacheError
-          );
-        }
-      })
-    ).catch(() => {/* silent */});
-
-    const seenTitleKeys = new Set(titles.map((t) => `${t.media_type}-${t.tmdb_id}`));
-    const fuzzyTitles = shouldUseFuzzyFallback(titles.length, 1)
-      ? await findCachedFuzzyTitles({ query, mediaType: "all", excludeKeys: seenTitleKeys })
-      : [];
-    const rawCombined = [...rawResults, ...fuzzyTitles.map(fuzzyMatchToTmdbSummary)];
-
-    const results = applyUserFeedbackScoring(
-      rawCombined.map((item) => ({
-        ...item,
-        id: item.id,
-        ...(item.media_type === "movie" || item.media_type === "tv"
-          ? resolveCatalogIdentityFields({
-              tmdb_id: item.id,
-              media_type: item.media_type,
-              externalIds: { tmdbId: item.id },
-            }, "legacy")
-          : {}),
-      })),
-      { userId, feedbackMap, context: "search", preserveOrder: true },
-    );
 
     return NextResponse.json({
       ok: true,
@@ -212,13 +172,13 @@ export async function GET(request: NextRequest) {
       ...(debugSource
         ? {
             debugSource: balloonerismmDebug ?? {
-              source: "legacy",
+              source: "local_cache",
               fallbackUsed: true,
-              fallbackReason: "balloonerismm_disabled",
-              usedTmdbApi: true,
-              usedLegacy: true,
-              normalizedFrom: "legacy",
-              identityUsed: "tmdb_id_alias",
+              fallbackReason: "tmdb_fallback_blocked",
+              usedTmdbApi: false,
+              usedLegacy: false,
+              normalizedFrom: "local_cache",
+              identityUsed: "poplog_id_or_best_alias",
               legacyCompatibilityUsed: true,
             },
           }

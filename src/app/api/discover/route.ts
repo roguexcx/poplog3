@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { filterValidTitles } from "@/server/utils/filter-valid-titles";
-import { tmdbFetch } from "@/server/api-clients/tmdb/client";
-import { normalizeTmdbTitle } from "@/server/normalizers/tmdb-title";
-import type { TmdbTitleSummary } from "@/server/api-clients/tmdb/types";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { getUserFeedbackMap } from "@/lib/personalization/feedback";
 import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
@@ -12,7 +9,6 @@ import {
 } from "@/server/source-engine/engine";
 import {
   hydrateCatalogResultsWithDebug,
-  resolveCatalogIdentityFields,
 } from "@/server/source-engine/hydrate-catalog-results";
 
 type MediaType = "movie" | "tv";
@@ -91,43 +87,21 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // ── Legacy TMDB path (fallback) ──────────────────────────────────────────
-    const data = await tmdbFetch<{ results: TmdbTitleSummary[] }>(`/discover/${mediaType}`, {
-      params: { sort_by: "popularity.desc", page: 1 },
-    });
-
-    const titles = filterValidTitles(
-      data.results.map((item) => normalizeTmdbTitle(item))
-    );
-
-    const scoredTitles = applyUserFeedbackScoring(
-      titles.map((t) => ({
-        ...t,
-        id: t.tmdb_id,
-        media_type: mediaType,
-        ...resolveCatalogIdentityFields({
-          ...t,
-          externalIds: { tmdbId: t.tmdb_id },
-        }, "legacy"),
-      })),
-      { userId, feedbackMap, context: "discovery", mediaType },
-    );
-
     return NextResponse.json({
       ok: true,
       mediaType,
-      count: scoredTitles.length,
-      results: scoredTitles,
+      count: 0,
+      results: [],
       ...(debugSource
         ? {
             debugSource: {
-              source: "legacy",
+              source: "unavailable",
               fallbackUsed: true,
-              fallbackReason: "balloonerismm_unavailable_or_insufficient",
-              usedTmdbApi: true,
-              usedLegacy: true,
-              normalizedFrom: "legacy",
-              identityUsed: "tmdb_id_alias",
+              fallbackReason: "tmdb_fallback_blocked",
+              usedTmdbApi: false,
+              usedLegacy: false,
+              normalizedFrom: "none",
+              identityUsed: "none",
               legacyCompatibilityUsed: true,
             },
           }

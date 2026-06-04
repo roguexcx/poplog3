@@ -1,8 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { filterValidTitles } from "@/server/utils/filter-valid-titles";
-import { tmdbFetch } from "@/server/api-clients/tmdb/client";
-import { normalizeTmdbTitle } from "@/server/normalizers/tmdb-title";
-import type { TmdbTitleSummary } from "@/server/api-clients/tmdb/types";
 import {
   formatEpisodeRuntimeLabel,
   formatRuntimeLabel,
@@ -27,7 +24,6 @@ import {
 import type { PoplogTitle } from "@/server/types/title";
 
 const TRENDING_CACHE_TTL_MS = 30 * 60_000;
-const TRENDING_EXTERNAL_TIMEOUT_MS = 2_500;
 const TRENDING_DB_TIMEOUT_MS = 1_500;
 const TRENDING_AUTH_TIMEOUT_MS = 500;
 const TRENDING_BALLOONERISMM_LIMIT = 15;
@@ -174,6 +170,7 @@ export async function GET(request: NextRequest) {
                 source: "cache",
                 fallbackUsed: false,
                 usedTmdbApi: false,
+                usedLegacy: false,
                 normalizedFrom: "continuity_section_cache",
                 identityUsed: "cached_payload",
                 legacyCompatibilityUsed: true,
@@ -291,125 +288,29 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // ── Legacy TMDB path (fallback) ──────────────────────────────────────────
-    const data = await withTimeout(
-      tmdbFetch<{ results: TmdbTitleSummary[] }>("/trending/all/week", {
-        params: { page: 1 },
-      }),
-      TRENDING_EXTERNAL_TIMEOUT_MS,
-      { results: [] },
-    );
-    markStage(perf, stageRef, "external_fetch");
-
-    if (!data.results.length) {
-      markStage(perf, stageRef, "response_build");
-      console.log("[trending/perf]", {
-        cacheStatus: "miss_empty_fallback",
-        returned: 0,
-        normalization: 0,
-        db_write: 0,
-        ...perf,
-        total: Date.now() - totalStartedAt,
-      });
-      return NextResponse.json({ ok: true, count: 0, results: [] });
-    }
-
-    const titles = filterValidTitles(
-      data.results.map((item) => normalizeTmdbTitle(item))
-    );
-    markStage(perf, stageRef, "normalization");
-
-    type CachedRuntimeRow = {
-      tmdb_id: number;
-      media_type: "movie" | "tv";
-      runtime: number | null;
-      episode_run_time: number[] | null;
-    };
-
-    const runtimeMap = new Map(
-      ([] as CachedRuntimeRow[]).map((row) => [
-        `${row.media_type}-${row.tmdb_id}`,
-        row,
-      ])
-    );
-    const tvIds = titles
-      .filter((title) => title.media_type === "tv")
-      .map((title) => title.tmdb_id);
-    const episodeRuntimesBySeries =
-      tvIds.length > 0
-        ? await withTimeout(getSeriesEpisodeRuntimesMap(tvIds), TRENDING_DB_TIMEOUT_MS, new Map())
-        : new Map();
-    markStage(perf, stageRef, "cache_tables_read");
-
-    const withRuntime = titles.map((title) => {
-      const cached = runtimeMap.get(`${title.media_type}-${title.tmdb_id}`);
-      const runtimeResolution = resolveRuntimeByMediaType({
-        mediaType: title.media_type,
-        runtimeMinutes: cached?.runtime ?? title.runtime ?? null,
-        episodeRunTime: cached?.episode_run_time ?? title.episode_run_time ?? null,
-        episodes: episodeRuntimesBySeries.get(title.tmdb_id) ?? null,
-      });
-      const runtimeLabel =
-        title.media_type === "tv"
-          ? formatEpisodeRuntimeLabel(runtimeResolution.minutes, {
-              estimated: runtimeResolution.estimated,
-            })
-          : formatRuntimeLabel(runtimeResolution.minutes, {
-              estimated: runtimeResolution.estimated,
-            });
-
-      return {
-        ...title,
-        id: title.tmdb_id,
-        ...resolveCatalogIdentityFields({
-          ...title,
-          externalIds: { tmdbId: title.tmdb_id },
-        }, "legacy"),
-        runtime: runtimeResolution.minutes,
-        runtime_label: runtimeLabel,
-      };
-    });
-
-    const results = applyUserFeedbackScoring(withRuntime, {
-      userId,
-      feedbackMap,
-      context: "trending",
-    });
     markStage(perf, stageRef, "response_build");
 
-    void writeContinuitySectionCache({
-      sectionKey,
-      region: "BR",
-      language: "pt-BR",
-      ttlMs: TRENDING_CACHE_TTL_MS,
-      payload: {
-        results: withRuntime,
-        generatedAt: new Date().toISOString(),
-      } satisfies TrendingCachePayload,
-    });
-    perf.db_write = 0;
-
     console.log("[trending/perf]", {
-      cacheStatus: "persistent_miss",
-      returned: results.length,
+      cacheStatus: "tmdb_fallback_blocked",
+      returned: 0,
       ...perf,
       total: Date.now() - totalStartedAt,
     });
 
     return NextResponse.json({
       ok: true,
-      count: results.length,
-      results,
+      count: 0,
+      results: [],
       ...(debugSource
         ? {
             debugSource: {
-              source: "legacy",
+              source: "unavailable",
               fallbackUsed: true,
-              fallbackReason: "balloonerismm_unavailable_or_insufficient",
-              usedTmdbApi: true,
-              usedLegacy: true,
-              normalizedFrom: "legacy",
-              identityUsed: "tmdb_id_alias",
+              fallbackReason: "tmdb_fallback_blocked",
+              usedTmdbApi: false,
+              usedLegacy: false,
+              normalizedFrom: "none",
+              identityUsed: "none",
               legacyCompatibilityUsed: true,
             },
           }

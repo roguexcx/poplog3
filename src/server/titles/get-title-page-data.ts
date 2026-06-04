@@ -187,6 +187,52 @@ function poplogDetailsToTitlePageData(
   };
 }
 
+function buildTmdbFallbackBlockedPageData({
+  details,
+  country,
+  debugSource,
+  mediaType,
+  requestedId,
+}: {
+  details: PoplogTitleDetailsResult | null;
+  country: string;
+  debugSource: boolean;
+  mediaType: MediaType;
+  requestedId: string;
+}): TitlePageData | null {
+  if (!details) return null;
+
+  console.warn("[getTitlePageData] legacy TMDB fallback blocked", {
+    mediaType,
+    requestedId,
+    tmdbId: details.externalIds.tmdbId,
+    resolvedFrom: details.sourceMeta.resolvedFrom,
+    fallbackReason: details.sourceMeta.fallbackReason ?? "legacy_tmdb_fallback",
+  });
+
+  const fallbackBlockedPayload = poplogDetailsToTitlePageData(details, country);
+
+  return {
+    ...fallbackBlockedPayload,
+    cacheInfo: {
+      ...fallbackBlockedPayload.cacheInfo,
+      title: {
+        source: details.sourceMeta.primarySource,
+        status: "tmdb_fallback_blocked",
+      },
+    },
+    ...(debugSource
+      ? {
+          debugSource: getPoplogTitleDetailsDebugSource(details, {
+            usedLegacy: false,
+            usedTmdbApi: false,
+            fallbackReason: "tmdb_fallback_blocked",
+          }),
+        }
+      : {}),
+  } as TitlePageData;
+}
+
 /**
  * Monta o TitlePageData completo para um título.
  * Retorna null se o id/mediaType for inválido ou o sync falhar.
@@ -219,6 +265,16 @@ export async function getTitlePageData(
         } as TitlePageData;
       }
 
+      const fallbackBlockedPageData = buildTmdbFallbackBlockedPageData({
+        details: poplogDetails,
+        country,
+        debugSource,
+        mediaType,
+        requestedId,
+      });
+      if (fallbackBlockedPageData) {
+        return fallbackBlockedPageData;
+      }
       if (!legacyTmdbId) {
         return null;
       }

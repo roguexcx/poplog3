@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { syncTmdbTitle } from "@/server/sync/sync-tmdb-title";
 import {
   getPoplogTitleDetails,
   getPoplogTitleDetailsDebugSource,
@@ -25,9 +24,6 @@ export async function GET(
   const mediaType = resolvedParams.mediaType as MediaType;
   const id = resolvedParams.id;
 
-  const refresh =
-    request.nextUrl.searchParams.get("refresh") === "1" ||
-    request.nextUrl.searchParams.get("force") === "1";
   const sourceHint =
     (request.nextUrl.searchParams.get("sourceHint") ?? "auto") as PoplogTitleSourceHint;
   const debugSource = request.nextUrl.searchParams.get("debugSource") === "1";
@@ -52,7 +48,6 @@ export async function GET(
       id,
       sourceHint,
     });
-    const tmdbId = poplogDetails?.externalIds.tmdbId;
 
     if (poplogDetails && poplogDetails.sourceMeta.primarySource !== "legacy") {
       const response = {
@@ -71,48 +66,25 @@ export async function GET(
       return NextResponse.json(response);
     }
 
-    if (!tmdbId) {
-      return NextResponse.json({
-        ok: Boolean(poplogDetails),
-        source: poplogDetails?.sourceMeta.primarySource ?? "unknown",
-        cache_status: poplogDetails?.sourceMeta.fallbackUsed ? "legacy_fallback_needed" : "fresh",
-        refreshed: false,
-        result: poplogDetails,
-        ...(debugSource
-          ? {
-              debugSource: getPoplogTitleDetailsDebugSource(poplogDetails, {
-                usedLegacy: Boolean(poplogDetails?.sourceMeta.fallbackUsed),
-              }),
-            }
-          : {}),
-      });
-    }
-
-    console.warn("[title route] legacy TMDB fallback", {
+    console.warn("[title route] legacy TMDB fallback blocked", {
       mediaType,
       requestedId: id,
-      tmdbId,
       resolvedFrom: poplogDetails?.sourceMeta.resolvedFrom,
       fallbackReason: poplogDetails?.sourceMeta.fallbackReason ?? "legacy_tmdb_fallback",
     });
 
-    const syncedTitle = await syncTmdbTitle(mediaType, tmdbId, {
-      force: refresh,
-    });
-
     return NextResponse.json({
-      ok: true,
-      source: syncedTitle.source,
-      cache_status: syncedTitle.cache_status,
-      refreshed: refresh,
-      result: syncedTitle.title,
+      ok: Boolean(poplogDetails),
+      source: poplogDetails?.sourceMeta.primarySource ?? "unavailable",
+      cache_status: poplogDetails?.sourceMeta.fallbackUsed ? "tmdb_fallback_blocked" : "fresh",
+      refreshed: false,
+      result: poplogDetails,
       ...(debugSource
         ? {
             debugSource: getPoplogTitleDetailsDebugSource(poplogDetails, {
-              usedLegacy: true,
-              usedTmdbApi: true,
-              fallbackReason:
-                poplogDetails?.sourceMeta.fallbackReason ?? "legacy_tmdb_fallback",
+              usedLegacy: false,
+              usedTmdbApi: false,
+              fallbackReason: "tmdb_fallback_blocked",
             }),
           }
         : {}),
