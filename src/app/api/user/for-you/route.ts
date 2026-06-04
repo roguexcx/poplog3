@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/get-current-user";
-import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import { db } from "@/server/db/client";
+import { catalogGetRelated } from "@/server/source-engine/engine";
+import { isBalloonerismActive } from "@/server/api-clients/balloonerismm/client";
 import type { UserTitle } from "@/types/user";
 
 // ─── Genre map (TMDB IDs → pt-BR) ────────────────────────────────────────────
@@ -29,7 +30,7 @@ function ratingWeight(rating: number): number {
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type TmdbRec = {
+type RecItem = {
   id: number;
   title?: string;
   name?: string;
@@ -90,8 +91,8 @@ function buildWeightedSeeds(
     if (t.favorite) weight += 100;
     if (rating !== null) weight += ratingWeight(rating);
     if (t.status === "watchlist") weight += 20;
-    if (t.status === "watching") weight += 15; // ativamente assistindo = interesse ativo
-    if (t.status === "watched") weight += 10;  // viu até o fim = sinal positivo implícito
+    if (t.status === "watching") weight += 15;
+    if (t.status === "watched") weight += 10;
 
     if (weight > 0) {
       seeds.push({ title: t, weight, rating, isFavorite: t.favorite });
@@ -151,8 +152,6 @@ function buildReason(seed: WeightedSeed, titleLabel: string): string {
 // ─── Weighted random sampler ──────────────────────────────────────────────────
 
 // Roulette-wheel selection without replacement.
-// Weight for a candidate = (vote_average - 4), giving a linear preference
-// for quality while still allowing mid-tier titles to surface.
 function weightedSample<T>(
   items: T[],
   getWeight: (item: T) => number,
@@ -177,28 +176,85 @@ function weightedSample<T>(
   return result;
 }
 
-// ─── TMDB ─────────────────────────────────────────────────────────────────────
+// ─── Recommendations ──────────────────────────────────────────────────────────
 
-async function fetchRecs(tmdbId: number, mediaType: "movie" | "tv"): Promise<TmdbRec[]> {
+async function fetchRecs(
+  mediaType: "movie" | "tv",
+  imdbId?: string | null,
+): Promise<RecItem[]> {
+  // 1. Try Balloonerismm (IMDb-first, needs imdbId)
+  if (imdbId) {
+    try {
+      const results = await catalogGetRelated({
+        mediaType: mediaType === "tv" ? "show" : "movie",
+        imdbId,
+      });
+      const mapped: RecItem[] = results
+        .filter((r) => typeof r.ids.tmdbId === "number")
+        .map((r) => ({
+          id: r.ids.tmdbId!,
+          title: r.mediaType === "movie" ? r.title : undefined,
+          name: r.mediaType === "show" ? r.title : undefined,
+          original_title: r.originalTitle,
+          overview: r.overview,
+          poster_path: r.posterPath ?? null,
+          backdrop_path: r.backdropPath ?? null,
+          vote_average: r.voteAverage,
+          release_date: r.releaseDate,
+          first_air_date: r.firstAirDate,
+          genre_ids: r.genreIds,
+          media_type: r.mediaType === "show" ? "tv" : "movie",
+        }));
+      if (mapped.length > 0) return mapped;
+    } catch { /* fall through to local DB */ }
+  }
+
+  // 2. Local DB fallback: popular titles of same media type
   try {
-    const data = await tmdbFetch<{ results?: TmdbRec[] }>(
-      `/${mediaType}/${tmdbId}/recommendations`,
-      { params: { language: "pt-BR" }, revalidate: 3600 },
-    );
-    return (data.results ?? []).slice(0, 20);
+    const rows = await db.poplog3Title.findMany({
+      where: { mediaType, voteAverage: { gte: 5 } },
+      orderBy: { popularity: "desc" },
+      take: 40,
+      select: {
+        tmdbId: true,
+        title: true,
+        originalTitle: true,
+        overview: true,
+        posterPath: true,
+        backdropPath: true,
+        voteAverage: true,
+        releaseDate: true,
+        firstAirDate: true,
+        mediaType: true,
+      },
+    });
+    return rows.map((row) => ({
+      id: row.tmdbId,
+      title: row.mediaType === "movie" ? (row.title ?? undefined) : undefined,
+      name: row.mediaType === "tv" ? (row.title ?? undefined) : undefined,
+      original_title: row.originalTitle ?? undefined,
+      overview: row.overview ?? undefined,
+      poster_path: row.posterPath ?? null,
+      backdrop_path: row.backdropPath ?? null,
+      vote_average: row.voteAverage ? Number(row.voteAverage) : undefined,
+      release_date: row.releaseDate?.toISOString().slice(0, 10),
+      first_air_date: row.firstAirDate?.toISOString().slice(0, 10),
+      genre_ids: [],
+      media_type: row.mediaType,
+    }));
   } catch {
     return [];
   }
 }
 
-function yearFrom(r: TmdbRec): string | null {
+function yearFrom(r: RecItem): string | null {
   const d = r.release_date ?? r.first_air_date;
   if (!d) return null;
   const y = new Date(d).getFullYear();
   return Number.isFinite(y) ? String(y) : null;
 }
 
-function toItem(r: TmdbRec, mediaType: "movie" | "tv", reason: string): ForYouItem {
+function toItem(r: RecItem, mediaType: "movie" | "tv", reason: string): ForYouItem {
   const titleLabel =
     (mediaType === "movie" ? r.title : r.name) ?? r.title ?? r.name ?? "Título";
   const originalTitle =
@@ -229,7 +285,12 @@ export async function POST(req: NextRequest) {
     const titles: UserTitle[] = Array.isArray(body?.titles) ? body.titles : [];
 
     if (titles.length === 0) {
-      return NextResponse.json({ featured: null, items: [] });
+      return NextResponse.json({
+        featured: null,
+        items: [],
+        usedTmdbApi: false,
+        recommendationSource: "controlled_empty",
+      });
     }
 
     const librarySet = new Set(titles.map((t) => `${t.media_type}:${t.tmdb_id}`));
@@ -260,7 +321,12 @@ export async function POST(req: NextRequest) {
     const picks = pickSeeds(weightedSeeds);
 
     if (picks.length === 0) {
-      return NextResponse.json({ featured: null, items: [] });
+      return NextResponse.json({
+        featured: null,
+        items: [],
+        usedTmdbApi: false,
+        recommendationSource: "controlled_empty",
+      });
     }
 
     // Resolve seed labels from Prisma cache (for reason strings)
@@ -284,13 +350,37 @@ export async function POST(req: NextRequest) {
       }),
     );
 
-    // Fetch TMDB recommendations for all picks in parallel
+    // Resolve imdbId for Balloonerismm (if active)
+    const imdbIdMap = new Map<string, string>();
+    if (isBalloonerismActive()) {
+      await Promise.all(
+        picks.map(async (seed) => {
+          const key = `${seed.title.media_type}:${seed.title.tmdb_id}`;
+          const ext = await db.titleExternalId
+            .findFirst({
+              where: {
+                tmdbId: seed.title.tmdb_id,
+                mediaType: seed.title.media_type,
+                imdbId: { not: null },
+              },
+              select: { imdbId: true },
+            })
+            .catch(() => null);
+          if (ext?.imdbId) imdbIdMap.set(key, ext.imdbId);
+        }),
+      );
+    }
+
+    // Fetch recommendations for all picks in parallel
     const recArrays = await Promise.all(
-      picks.map((s) => fetchRecs(s.title.tmdb_id, s.title.media_type)),
+      picks.map((s) => {
+        const key = `${s.title.media_type}:${s.title.tmdb_id}`;
+        return fetchRecs(s.title.media_type, imdbIdMap.get(key));
+      }),
     );
 
     // Aggregate, deduplicate, filter library items
-    type Candidate = { rec: TmdbRec; mediaType: "movie" | "tv"; reason: string };
+    type Candidate = { rec: RecItem; mediaType: "movie" | "tv"; reason: string };
     const seen = new Set<string>();
     const candidates: Candidate[] = [];
 
@@ -310,7 +400,12 @@ export async function POST(req: NextRequest) {
     }
 
     if (candidates.length === 0) {
-      return NextResponse.json({ featured: null, items: [] });
+      return NextResponse.json({
+        featured: null,
+        items: [],
+        usedTmdbApi: false,
+        recommendationSource: "controlled_empty",
+      });
     }
 
     // Query not_interested feedback for all candidates — block completely
@@ -332,8 +427,7 @@ export async function POST(req: NextRequest) {
       } catch { /* non-fatal */ }
     }
 
-    // Quality pool: remove not_interested and very low-rated titles,
-    // then take the top 20 by vote_average to form the eligible pool.
+    // Quality pool: remove not_interested and very low-rated titles
     const pool = candidates
       .filter((c) => !notInterestedSet.has(`${c.mediaType}:${c.rec.id}`))
       .filter((c) => (c.rec.vote_average ?? 0) >= 4)
@@ -341,12 +435,19 @@ export async function POST(req: NextRequest) {
       .slice(0, 20);
 
     if (pool.length === 0) {
-      return NextResponse.json({ featured: null, items: [] });
+      return NextResponse.json({
+        featured: null,
+        items: [],
+        usedTmdbApi: false,
+        recommendationSource: "controlled_empty",
+      });
     }
 
-    // Weighted random sample of 5 from the pool.
-    // Weight = vote_average - 4 (linear curve: 7.0 → 3, 8.0 → 4, 9.0 → 5).
-    // Ensures high quality appears more often but still allows variety.
+    // Determine recommendation source for debug
+    const hadBalloonerismm = isBalloonerismActive() && imdbIdMap.size > 0;
+    const recommendationSource = hadBalloonerismm ? "balloonerismm" : "local_db";
+
+    // Weighted random sample of 5 from the pool
     const selected = weightedSample(
       pool,
       (c) => (c.rec.vote_average ?? 5) - 4,
@@ -357,8 +458,7 @@ export async function POST(req: NextRequest) {
       toItem(rec, mediaType, reason),
     );
 
-    // Featured = highest vote_average among items with a backdrop;
-    // fallback to first item with any backdrop; then absolute first.
+    // Featured = highest vote_average among items with a backdrop
     const withBackdrop = items
       .map((it, i) => ({ it, i }))
       .filter(({ it }) => it.backdrop_path);
@@ -373,9 +473,19 @@ export async function POST(req: NextRequest) {
     const featured = items[pickedIdx] ?? null;
     const rest = items.filter((_, i) => i !== pickedIdx);
 
-    return NextResponse.json({ featured, items: rest });
+    return NextResponse.json({
+      featured,
+      items: rest,
+      usedTmdbApi: false,
+      recommendationSource,
+    });
   } catch (err) {
     console.error("[/api/user/for-you]", err);
-    return NextResponse.json({ featured: null, items: [] });
+    return NextResponse.json({
+      featured: null,
+      items: [],
+      usedTmdbApi: false,
+      recommendationSource: "controlled_empty",
+    });
   }
 }

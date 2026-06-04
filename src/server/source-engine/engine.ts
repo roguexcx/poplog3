@@ -28,6 +28,7 @@ import type {
   GetTitleParams,
   PopularParams,
   TrendingParams,
+  RelatedParams,
   RatingParams,
   PeopleParams,
   VideoParams,
@@ -121,6 +122,19 @@ export async function catalogGetTrending(
 ): Promise<CatalogSearchResult[]> {
   if (!balloonerismEnabled()) return [];
   return balloonerismAdapter.getTrending(params);
+}
+
+// ─── Related ─────────────────────────────────────────────────────────────────
+
+/**
+ * Títulos relacionados via adapter primário (Balloonerismm IMDb-first).
+ * Retorna [] quando inativo ou sem dados — o caller usa fallback local.
+ */
+export async function catalogGetRelated(
+  params: RelatedParams,
+): Promise<CatalogSearchResult[]> {
+  if (!balloonerismEnabled()) return [];
+  return balloonerismAdapter.getRelated(params);
 }
 
 // ─── Ratings ─────────────────────────────────────────────────────────────────

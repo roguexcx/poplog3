@@ -1,26 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import { translateToPtBr } from "@/server/translate/translate-to-pt-br";
 
 const TRAKT_API_BASE = "https://api.trakt.tv";
-
-type HighlightSource = "tmdb" | "trakt";
-
-type TmdbReview = {
-  id: string;
-  author: string;
-  content: string;
-  created_at?: string;
-  updated_at?: string;
-  author_details?: {
-    rating?: number | null;
-  };
-};
-
-type TmdbReviewsResponse = {
-  results?: TmdbReview[];
-};
 
 type TraktUser = {
   username?: string;
@@ -40,7 +22,7 @@ type TraktComment = {
 
 type CommunityHighlight = {
   id: string;
-  source: HighlightSource;
+  source: "trakt";
   author: string;
   content: string;
   originalContent?: string;
@@ -63,22 +45,6 @@ function uniqueById(items: CommunityHighlight[]) {
   });
 }
 
-function scoreTmdbReview(review: TmdbReview) {
-  const content = cleanText(review.content ?? "");
-  const rating = review.author_details?.rating ?? 0;
-
-  let score = 0;
-
-  if (content.length >= 80) score += 2;
-  if (content.length >= 200) score += 2;
-  if (content.length > 1200) score -= 2;
-  if (rating >= 7) score += 2;
-  if (rating >= 9) score += 1;
-  if (review.updated_at || review.created_at) score += 1;
-
-  return score;
-}
-
 function scoreTraktComment(comment: TraktComment) {
   const content = cleanText(comment.comment ?? "");
 
@@ -95,22 +61,6 @@ function scoreTraktComment(comment: TraktComment) {
   if (comment.spoiler) score -= 8;
 
   return score;
-}
-
-async function toTmdbHighlight(review: TmdbReview): Promise<CommunityHighlight> {
-  const originalContent = cleanText(review.content);
-  const translation = await translateToPtBr(originalContent);
-
-  return {
-    id: `tmdb-${review.id}`,
-    source: "tmdb",
-    author: review.author || "TMDB user",
-    content: translation.translatedText || originalContent,
-    originalContent,
-    translationStatus: translation.translated ? "translated" : "original",
-    sourceLanguage: translation.sourceLanguage,
-    score: scoreTmdbReview(review),
-  };
 }
 
 async function toTraktHighlight(
@@ -188,36 +138,6 @@ async function findTraktMovieIdFromTmdb(tmdbId: number) {
   return first?.movie?.ids?.slug || first?.movie?.ids?.trakt || null;
 }
 
-async function getTmdbHighlights(tmdbId: number) {
-  try {
-    const data = await tmdbFetch<TmdbReviewsResponse>(
-      `/movie/${tmdbId}/reviews`,
-      {
-        params: {
-          language: "en-US",
-          page: 1,
-        },
-        revalidate: 21600,
-      },
-    );
-
-    const bestTmdbReviews =
-      data.results
-        ?.filter((review) => cleanText(review.content ?? "").length >= 40)
-        .sort((a, b) => scoreTmdbReview(b) - scoreTmdbReview(a))
-        .slice(0, 4) ?? [];
-
-    return await Promise.all(bestTmdbReviews.map(toTmdbHighlight));
-  } catch (error) {
-    console.warn(
-      "[social/highlights] TMDB reviews falhou:",
-      error instanceof Error ? error.message : error,
-    );
-
-    return [];
-  }
-}
-
 async function getTraktHighlights(tmdbId: number) {
   try {
     const traktMovieId = await findTraktMovieIdFromTmdb(tmdbId);
@@ -251,27 +171,6 @@ async function getTraktHighlights(tmdbId: number) {
   }
 }
 
-function pickHighlights(
-  tmdbHighlights: CommunityHighlight[],
-  traktHighlights: CommunityHighlight[],
-) {
-  const bestTmdb = tmdbHighlights[0] ?? null;
-  const bestTrakt = traktHighlights[0] ?? null;
-
-  const selected = [bestTmdb, bestTrakt].filter(Boolean) as CommunityHighlight[];
-
-  const extraPool = [...tmdbHighlights.slice(1), ...traktHighlights.slice(1)]
-    .sort((a, b) => b.score - a.score);
-
-  const extra = extraPool.find(
-    (item) => !selected.some((selectedItem) => selectedItem.id === item.id),
-  );
-
-  if (extra) selected.push(extra);
-
-  return uniqueById(selected).slice(0, 3);
-}
-
 export async function GET(request: NextRequest) {
   const { searchParams } = new URL(request.url);
 
@@ -284,21 +183,18 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const [tmdbHighlights, traktHighlights] = await Promise.all([
-    getTmdbHighlights(tmdbId),
-    getTraktHighlights(tmdbId),
-  ]);
-
-  const highlights = pickHighlights(tmdbHighlights, traktHighlights).map(
-    ({ score: _score, ...highlight }) => highlight,
-  );
+  const highlights = (await getTraktHighlights(tmdbId))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 3);
 
   return NextResponse.json({
     ok: true,
+    usedTmdbApi: false,
+    skippedReasons: ["tmdb_reviews_disabled"],
     sources: {
-      tmdb: tmdbHighlights.length,
-      trakt: traktHighlights.length,
+      tmdb: 0,
+      trakt: highlights.length,
     },
-    highlights,
+    highlights: uniqueById(highlights).map(({ score: _score, ...h }) => h),
   });
 }
