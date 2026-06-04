@@ -4,6 +4,7 @@ import ActionButton from "@/components/ui/ActionButton";
 import EmptyState from "@/components/ui/EmptyState";
 import TitlePageView from "@/features/title/TitlePageView";
 import { getTitlePageData } from "@/server/titles/get-title-page-data";
+import type { PoplogTitleSourceHint } from "@/server/titles/poplog-title-identity";
 
 type MediaType = "movie" | "tv";
 
@@ -26,6 +27,9 @@ export default async function TitlePage({ params, searchParams }: PageProps) {
 
   const refresh =
     pickFlag(resolvedSearch?.refresh) || pickFlag(resolvedSearch?.force);
+  const sourceHint = Array.isArray(resolvedSearch?.sourceHint)
+    ? resolvedSearch?.sourceHint[0]
+    : resolvedSearch?.sourceHint;
 
   if (mediaType !== "movie" && mediaType !== "tv") {
     return (
@@ -40,9 +44,7 @@ export default async function TitlePage({ params, searchParams }: PageProps) {
     );
   }
 
-  const numericId = Number(id);
-
-  if (!numericId || Number.isNaN(numericId)) {
+  if (!id?.trim()) {
     return (
       <section className="px-4 py-10 sm:px-6 md:px-10">
         <EmptyState
@@ -62,7 +64,8 @@ export default async function TitlePage({ params, searchParams }: PageProps) {
 
   const title = await getTitlePageData({
     mediaType,
-    id: numericId,
+    id,
+    sourceHint: (sourceHint ?? "auto") as PoplogTitleSourceHint,
     force: refresh,
   });
 

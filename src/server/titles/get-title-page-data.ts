@@ -39,6 +39,11 @@ import type { UserRatingData } from "@/types/user";
 import { getUserRating } from "@/server/ratings/user-rating-service";
 import { getPublicRating } from "@/server/ratings/rating-aggregate-service";
 import { buildTmdbRawUrl } from "@/lib/images/url";
+import {
+  getPoplogTitleDetails,
+  type PoplogTitleDetailsResult,
+} from "@/server/titles/poplog-title-details";
+import type { PoplogTitleSourceHint } from "@/server/titles/poplog-title-identity";
 
 type MediaType = "movie" | "tv";
 
@@ -77,10 +82,84 @@ function filterValidSeasons(
 
 export type GetTitlePageDataOptions = {
   mediaType: MediaType;
-  id: number;
+  id: number | string;
+  sourceHint?: PoplogTitleSourceHint;
   force?: boolean;
   country?: string;
 };
+
+function poplogDetailsToTitlePageData(
+  details: PoplogTitleDetailsResult,
+  country: string,
+): TitlePageData {
+  const trailerVideo = details.videos?.find((video) => video.type === "trailer") ?? details.videos?.[0];
+
+  return {
+    id: details.poplogId ?? details.externalIds.tmdbId ?? details.externalIds.imdbId ?? details.externalIds.balloonerismmId ?? details.title,
+    mediaType: details.mediaType,
+    title: details.title,
+    originalTitle: details.originalTitle ?? null,
+    tagline: null,
+    year: details.year ?? null,
+    releaseDate: details.mediaType === "movie" ? details.releaseDate ?? null : null,
+    firstAirDate: details.mediaType === "tv" ? details.releaseDate ?? null : null,
+    lastAirDate: null,
+    numberOfSeasons: null,
+    numberOfEpisodes: null,
+    overview: details.overview ?? null,
+    posterUrl: details.posterUrl ?? null,
+    backdropUrl: details.backdropUrl ?? null,
+    runtime: details.mediaType === "movie" ? details.runtime ?? null : null,
+    episodeRunTimeMinutes: details.mediaType === "tv" ? details.runtime ?? null : null,
+    runtimeEstimated: false,
+    totalRuntimeMinutes: null,
+    totalRuntimeEstimated: false,
+    voteAverage: details.voteAverage ?? null,
+    genres: details.genres ?? [],
+    status: null,
+    availabilityState: "unknown",
+    certification: null,
+    trailer: trailerVideo
+      ? {
+          key: String(trailerVideo.id),
+          name: trailerVideo.title,
+          url: trailerVideo.url,
+          embedUrl: trailerVideo.url,
+        }
+      : null,
+    nextEpisode: null,
+    seasons: [],
+    ratings: details.voteAverage
+      ? {
+          imdbRating: details.voteAverage,
+          imdbVotes: details.voteCount ?? null,
+          rottenTomatoesScore: null,
+          metacriticScore: null,
+          tmdbRating: null,
+          poplogScore: null,
+        }
+      : null,
+    generalIndex: details.voteAverage ?? null,
+    userState: { isAuthenticated: false },
+    communityRating: null,
+    userSeriesProgress: null,
+    providers: [],
+    country,
+    cast: details.cast ?? [],
+    crew: details.crew ?? [],
+    recommendations: [],
+    metadata: null,
+    lastSyncedAt: null,
+    cacheInfo: {
+      title: {
+        source: details.sourceMeta.primarySource,
+        status: details.sourceMeta.fallbackUsed ? "legacy_fallback_needed" : "fresh",
+      },
+      ratings: null,
+      availability: null,
+    },
+  };
+}
 
 /**
  * Monta o TitlePageData completo para um título.
@@ -89,13 +168,30 @@ export type GetTitlePageDataOptions = {
 export async function getTitlePageData(
   options: GetTitlePageDataOptions,
 ): Promise<TitlePageData | null> {
-  const { mediaType, id, force = false, country = "BR" } = options;
+  const { mediaType, id, sourceHint = "auto", force = false, country = "BR" } = options;
 
   if (mediaType !== "movie" && mediaType !== "tv") return null;
-  if (!id || Number.isNaN(id)) return null;
+  const requestedId = String(id).trim();
+  if (!requestedId) return null;
 
   return withOrigin("title", async () => {
     try {
+      const poplogDetails = await getPoplogTitleDetails({
+        mediaType,
+        id: requestedId,
+        sourceHint,
+      });
+
+      const legacyTmdbId = poplogDetails?.externalIds.tmdbId;
+
+      if (!legacyTmdbId) {
+        if (poplogDetails && poplogDetails.sourceMeta.primarySource !== "legacy") {
+          return poplogDetailsToTitlePageData(poplogDetails, country);
+        }
+        return null;
+      }
+
+      const id = legacyTmdbId;
       const synced = await syncTmdbTitle(mediaType, id, { force });
       const title = synced.title;
 

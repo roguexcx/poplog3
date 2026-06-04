@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTitlePageData } from "@/server/titles/get-title-page-data";
+import type { PoplogTitleSourceHint } from "@/server/titles/poplog-title-identity";
 
 type MediaType = "movie" | "tv";
 
@@ -13,7 +14,7 @@ export async function GET(
 ) {
   const resolved = await params;
   const mediaType = resolved.mediaType as MediaType;
-  const id = Number(resolved.id);
+  const id = resolved.id;
 
   const refresh =
     request.nextUrl.searchParams.get("refresh") === "1" ||
@@ -21,6 +22,8 @@ export async function GET(
 
   const country =
     request.nextUrl.searchParams.get("country")?.toUpperCase() ?? "BR";
+  const sourceHint =
+    (request.nextUrl.searchParams.get("sourceHint") ?? "auto") as PoplogTitleSourceHint;
 
   if (mediaType !== "movie" && mediaType !== "tv") {
     return NextResponse.json(
@@ -29,14 +32,20 @@ export async function GET(
     );
   }
 
-  if (!id || Number.isNaN(id)) {
+  if (!id?.trim()) {
     return NextResponse.json(
-      { ok: false, error: "Invalid TMDB id" },
+      { ok: false, error: "Invalid title id" },
       { status: 400 },
     );
   }
 
-  const payload = await getTitlePageData({ mediaType, id, force: refresh, country });
+  const payload = await getTitlePageData({
+    mediaType,
+    id,
+    sourceHint,
+    force: refresh,
+    country,
+  });
 
   if (!payload) {
     return NextResponse.json(

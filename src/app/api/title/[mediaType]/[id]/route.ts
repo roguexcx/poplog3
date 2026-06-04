@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { syncTmdbTitle } from "@/server/sync/sync-tmdb-title";
+import { getPoplogTitleDetails } from "@/server/titles/poplog-title-details";
+import type { PoplogTitleSourceHint } from "@/server/titles/poplog-title-identity";
 
 type MediaType = "movie" | "tv";
 
@@ -18,11 +20,13 @@ export async function GET(
   const resolvedParams = await params;
 
   const mediaType = resolvedParams.mediaType as MediaType;
-  const id = Number(resolvedParams.id);
+  const id = resolvedParams.id;
 
   const refresh =
     request.nextUrl.searchParams.get("refresh") === "1" ||
     request.nextUrl.searchParams.get("force") === "1";
+  const sourceHint =
+    (request.nextUrl.searchParams.get("sourceHint") ?? "auto") as PoplogTitleSourceHint;
 
   if (mediaType !== "movie" && mediaType !== "tv") {
     return NextResponse.json(
@@ -31,15 +35,32 @@ export async function GET(
     );
   }
 
-  if (!id || Number.isNaN(id)) {
+  if (!id?.trim()) {
     return NextResponse.json(
-      { ok: false, error: "Invalid TMDB id" },
+      { ok: false, error: "Invalid title id" },
       { status: 400 }
     );
   }
 
   try {
-    const syncedTitle = await syncTmdbTitle(mediaType, id, {
+    const poplogDetails = await getPoplogTitleDetails({
+      mediaType,
+      id,
+      sourceHint,
+    });
+    const tmdbId = poplogDetails?.externalIds.tmdbId;
+
+    if (!tmdbId) {
+      return NextResponse.json({
+        ok: Boolean(poplogDetails),
+        source: poplogDetails?.sourceMeta.primarySource ?? "unknown",
+        cache_status: poplogDetails?.sourceMeta.fallbackUsed ? "legacy_fallback_needed" : "fresh",
+        refreshed: false,
+        result: poplogDetails,
+      });
+    }
+
+    const syncedTitle = await syncTmdbTitle(mediaType, tmdbId, {
       force: refresh,
     });
 
