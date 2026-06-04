@@ -119,6 +119,26 @@ function localGenres(value: unknown): string[] {
     .filter((genre): genre is string => Boolean(genre));
 }
 
+function compactExternalIds(ids: PoplogTitleExternalIds): PoplogTitleExternalIds {
+  return Object.fromEntries(
+    Object.entries(ids).filter(([, value]) => value !== undefined && value !== null && value !== ""),
+  ) as PoplogTitleExternalIds;
+}
+
+function remoteGenres(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((genre) => {
+      if (typeof genre === "string") return genre;
+      if (genre && typeof genre === "object" && "name" in genre) {
+        const name = (genre as { name?: unknown }).name;
+        return typeof name === "string" ? name : null;
+      }
+      return null;
+    })
+    .filter((genre): genre is string => Boolean(genre));
+}
+
 function localToDetails(
   identity: PoplogTitleIdentity,
   row: LocalTitleRow,
@@ -164,22 +184,26 @@ function balloonerismmToDetails(
   return {
     poplogId: identity.poplogId,
     mediaType: title.mediaType === "show" ? "tv" : "movie",
-    title: title.title,
+    title: title.title || identity.title || "Sem titulo",
     originalTitle: undefined,
     overview: title.overview ?? null,
     year: title.year ?? null,
     releaseDate: title.year ? `${title.year}-01-01` : null,
     posterUrl: imageUrl(title.posterPath, "w500"),
     backdropUrl: imageUrl(title.backdropPath, "w1280"),
-    genres: title.genres ?? [],
+    genres: remoteGenres(title.genres),
     runtime: title.runtime ?? null,
     voteAverage: title.rating ?? null,
     voteCount: title.votes ?? null,
-    externalIds: {
+    externalIds: compactExternalIds({
       ...identity.externalIds,
-      ...title.ids,
+      tmdbId: title.ids.tmdbId ?? identity.externalIds.tmdbId,
+      imdbId: title.ids.imdbId ?? identity.externalIds.imdbId,
+      tvdbId: title.ids.tvdbId ?? identity.externalIds.tvdbId,
+      traktId: title.ids.traktId ?? identity.externalIds.traktId,
       balloonerismmId: identity.externalIds.balloonerismmId ?? title.ids.imdbId,
-    },
+      slug: identity.externalIds.slug,
+    }),
     cast: (people?.cast ?? []).map((person) => ({
       id: person.ids.imdbId ?? person.name,
       name: person.name,

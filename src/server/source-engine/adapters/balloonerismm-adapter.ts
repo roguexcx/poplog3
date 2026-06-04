@@ -81,19 +81,86 @@ function resolveId(params: { imdbId?: string; traktId?: number; traktSlug?: stri
   return params.imdbId ?? params.traktSlug ?? (params.traktId ? String(params.traktId) : null) ?? null;
 }
 
+type BalloonerismTitleLike = {
+  id?: string | number | null;
+  imdb_id?: string | null;
+  tmdb_id?: number | string | null;
+  tvdb_id?: number | string | null;
+  trakt_id?: number | string | null;
+  slug?: string | null;
+  title?: string | null;
+  name?: string | null;
+  original_title?: string | null;
+  original_name?: string | null;
+  year?: number | string | null;
+  release_date?: string | null;
+  first_air_date?: string | null;
+  overview?: string | null;
+  tagline?: string | null;
+  runtime?: number | string | null;
+  status?: string | null;
+  genres?: Array<string | { name?: string | null }> | null;
+  genre_ids?: Array<number | string> | null;
+  country?: string | null;
+  language?: string | null;
+  certification?: string | null;
+  rating?: number | string | null;
+  votes?: number | string | null;
+  vote_average?: number | string | null;
+  vote_count?: number | string | null;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+  images?: { poster?: string | null; backdrop?: string | null };
+  ids?: { imdb?: string | null; tmdb?: number | string | null; tvdb?: number | string | null; trakt?: number | string | null };
+};
+
+function numberFrom(value: unknown): number | undefined {
+  const numberValue = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numberValue) ? numberValue : undefined;
+}
+
+function yearFrom(...values: unknown[]): number | undefined {
+  for (const value of values) {
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string" && /^\d{4}/.test(value)) return Number(value.slice(0, 4));
+  }
+  return undefined;
+}
+
+function imdbIdFrom(item: BalloonerismTitleLike): string | undefined {
+  const directId = typeof item.id === "string" ? item.id : undefined;
+  return item.imdb_id ?? item.ids?.imdb ?? (directId?.startsWith("tt") ? directId : undefined);
+}
+
+function genresFrom(item: BalloonerismTitleLike): string[] | undefined {
+  const genres = [
+    ...(item.genres ?? []).map((genre) => (typeof genre === "string" ? genre : genre.name)),
+    ...(item.genre_ids ?? []).filter((genre): genre is string => typeof genre === "string"),
+  ].filter((genre): genre is string => Boolean(genre));
+  return genres.length > 0 ? genres : undefined;
+}
+
 function movieIds(item: BalloonerismMovie): CatalogIds {
+  const detail = item as BalloonerismTitleLike;
   return {
-    imdbId: item.imdb_id,
-    tvdbId: item.ids?.tvdb,
-    tmdbId: item.ids?.tmdb, // histórico apenas
+    imdbId: imdbIdFrom(detail),
+    tvdbId: numberFrom(detail.tvdb_id ?? detail.ids?.tvdb),
+    tmdbId: numberFrom(detail.tmdb_id ?? detail.ids?.tmdb), // histórico apenas
+    traktId: numberFrom(detail.trakt_id ?? detail.ids?.trakt),
+    balloonerismmId: typeof detail.id === "string" ? detail.id : imdbIdFrom(detail),
+    slug: detail.slug ?? undefined,
   };
 }
 
 function showIds(item: BalloonerismShow): CatalogIds {
+  const detail = item as BalloonerismTitleLike;
   return {
-    imdbId: item.imdb_id,
-    tvdbId: item.ids?.tvdb,
-    tmdbId: item.ids?.tmdb,
+    imdbId: imdbIdFrom(detail),
+    tvdbId: numberFrom(detail.tvdb_id ?? detail.ids?.tvdb),
+    tmdbId: numberFrom(detail.tmdb_id ?? detail.ids?.tmdb),
+    traktId: numberFrom(detail.trakt_id ?? detail.ids?.trakt),
+    balloonerismmId: typeof detail.id === "string" ? detail.id : imdbIdFrom(detail),
+    slug: detail.slug ?? undefined,
   };
 }
 
@@ -127,50 +194,52 @@ function extractArray<T>(raw: unknown, path: string): T[] {
 // ─── Converters ───────────────────────────────────────────────────────────────
 
 function balloonerismMovieToTitle(movie: BalloonerismMovie): CatalogTitle {
-  const meta = sourceMeta(movie.imdb_id, countFields(movie as unknown as Record<string, unknown>));
+  const detail = movie as BalloonerismTitleLike;
+  const meta = sourceMeta(imdbIdFrom(detail), countFields(movie as unknown as Record<string, unknown>));
   return normalizeTitle(
     {
       ids: movieIds(movie),
       mediaType: "movie",
-      title: movie.title,
-      year: movie.year,
-      overview: movie.overview,
-      tagline: movie.tagline,
-      runtime: movie.runtime,
-      status: movie.status,
-      genres: movie.genres,
-      country: movie.country,
-      language: movie.language,
-      certification: movie.certification,
-      rating: movie.rating,
-      votes: movie.votes,
-      posterRemoteUrl: movie.images?.poster,
-      backdropRemoteUrl: movie.images?.backdrop,
+      title: detail.title ?? detail.name ?? detail.original_title ?? detail.original_name,
+      year: yearFrom(detail.year, detail.release_date, detail.first_air_date),
+      overview: detail.overview,
+      tagline: detail.tagline,
+      runtime: numberFrom(detail.runtime),
+      status: detail.status,
+      genres: genresFrom(detail),
+      country: detail.country,
+      language: detail.language,
+      certification: detail.certification,
+      rating: numberFrom(detail.rating ?? detail.vote_average),
+      votes: numberFrom(detail.votes ?? detail.vote_count),
+      posterRemoteUrl: detail.poster_path ?? detail.images?.poster,
+      backdropRemoteUrl: detail.backdrop_path ?? detail.images?.backdrop,
     },
     meta,
   );
 }
 
 function balloonerismShowToTitle(show: BalloonerismShow): CatalogTitle {
-  const meta = sourceMeta(show.imdb_id, countFields(show as unknown as Record<string, unknown>));
+  const detail = show as BalloonerismTitleLike;
+  const meta = sourceMeta(imdbIdFrom(detail), countFields(show as unknown as Record<string, unknown>));
   return normalizeTitle(
     {
       ids: showIds(show),
       mediaType: "show",
-      title: show.title,
-      year: show.year,
-      overview: show.overview,
-      tagline: show.tagline,
-      runtime: show.runtime,
-      status: show.status,
-      genres: show.genres,
-      country: show.country,
-      language: show.language,
-      certification: show.certification,
-      rating: show.rating,
-      votes: show.votes,
-      posterRemoteUrl: show.images?.poster,
-      backdropRemoteUrl: show.images?.backdrop,
+      title: detail.title ?? detail.name ?? detail.original_title ?? detail.original_name,
+      year: yearFrom(detail.year, detail.first_air_date, detail.release_date),
+      overview: detail.overview,
+      tagline: detail.tagline,
+      runtime: numberFrom(detail.runtime),
+      status: detail.status,
+      genres: genresFrom(detail),
+      country: detail.country,
+      language: detail.language,
+      certification: detail.certification,
+      rating: numberFrom(detail.rating ?? detail.vote_average),
+      votes: numberFrom(detail.votes ?? detail.vote_count),
+      posterRemoteUrl: detail.poster_path ?? detail.images?.poster,
+      backdropRemoteUrl: detail.backdrop_path ?? detail.images?.backdrop,
     },
     meta,
   );
