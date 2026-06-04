@@ -305,7 +305,8 @@ export async function syncOmdbRatings(
     });
 
     // Fallback: tentar Balloonerismm como fonte de rating IMDb-first.
-    const ballRatings = await catalogGetRatings({ mediaType, imdbId }).catch(() => null);
+    const ballMediaType = mediaType === "tv" ? "show" : "movie" as const;
+    const ballRatings = await catalogGetRatings({ mediaType: ballMediaType, imdbId }).catch(() => null);
     if (ballRatings?.rating) {
       const score = computePoplogScore({ imdb: ballRatings.rating, tmdb: input.tmdbRating });
       await upsertRatings({
@@ -363,7 +364,8 @@ export async function syncOmdbRatings(
     });
 
     // Fallback: tentar Balloonerismm quando OMDb não conhece o título.
-    const ballRatings = await catalogGetRatings({ mediaType, imdbId }).catch(() => null);
+    const ballMediaType = mediaType === "tv" ? "show" : "movie" as const;
+    const ballRatings = await catalogGetRatings({ mediaType: ballMediaType, imdbId }).catch(() => null);
     if (ballRatings?.rating) {
       const score = computePoplogScore({ imdb: ballRatings.rating, tmdb: input.tmdbRating });
       await upsertRatings({
