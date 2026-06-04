@@ -1,7 +1,7 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import { getCurrentUser } from "@/server/auth/get-current-user";
-import { tmdbFetch } from "@/server/api-clients/tmdb/client";
+import { db } from "@/server/db/client";
 import { applyLegacyBrazilianBonus } from "@/server/agenda/editorial-regional-bonus";
 import { normalizeTmdbPopularity } from "@/lib/score/tmdb-popularity";
 import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
@@ -10,43 +10,11 @@ import {
   getLocalTitleAvailabilityBatch,
   getLocalAgendaStateBatch,
 } from "@/server/local-services/continuity-local.service";
-
-// ── TMDB response shapes ──────────────────────────────────────────────────────
-
-type TmdbMovie = {
-  id: number;
-  title: string;
-  poster_path: string | null;
-  backdrop_path: string | null;
-  release_date: string;
-  vote_average: number;
-  vote_count: number;
-  popularity: number;
-  overview: string;
-  genre_ids: number[];
-};
-
-type TmdbTv = {
-  id: number;
-  name: string;
-  original_language?: string;
-  poster_path: string | null;
-  backdrop_path: string | null;
-  first_air_date: string;
-  vote_average: number;
-  vote_count: number;
-  popularity: number;
-  overview: string;
-  genre_ids: number[];
-};
-
-type TmdbPageResult<T> = {
-  page: number;
-  results: T[];
-  total_pages: number;
-  total_results: number;
-  dates?: { maximum: string; minimum: string };
-};
+import {
+  catalogGetTrending,
+  isBalloonerismTrendingEnabled,
+} from "@/server/source-engine/engine";
+import type { CatalogSearchResult } from "@/server/source-engine/types/catalog.types";
 
 // ── Canonical agenda shapes ───────────────────────────────────────────────────
 
@@ -113,6 +81,8 @@ export type AgendaResponse = {
   userLibraryIds: Record<string, string>; // "movie-123" => status
 };
 
+// ── Filters ───────────────────────────────────────────────────────────────────
+
 // Gêneros a excluir de séries: Talk Show (10767) e Notícias (10763)
 const EXCLUDED_TV_GENRES = new Set([10767, 10763]);
 const STREAMING_TYPES = new Set(["streaming", "subscription", "flatrate", "free", "ads"]);
@@ -121,42 +91,198 @@ function isTalkOrNews(item: { genre_ids: number[] }): boolean {
   return item.genre_ids.some((g) => EXCLUDED_TV_GENRES.has(g));
 }
 
-// ── helpers ───────────────────────────────────────────────────────────────────
+// ── Genre extraction from DB JSON ─────────────────────────────────────────────
 
-function normalizeMovie(m: TmdbMovie): AgendaMovie {
+function extractGenreIds(genres: unknown): number[] {
+  if (!Array.isArray(genres)) return [];
+  return genres.flatMap((g) => {
+    if (typeof g === "number") return [g];
+    if (g && typeof g === "object" && typeof (g as { id?: unknown }).id === "number") {
+      return [(g as { id: number }).id];
+    }
+    return [];
+  });
+}
+
+// ── DB row → agenda item converters ──────────────────────────────────────────
+
+type TitleRow = Awaited<ReturnType<typeof db.poplog3Title.findMany>>[number];
+
+function rowToMovie(row: TitleRow): AgendaMovie {
   return {
-    id: m.id,
+    id: row.tmdbId,
     media_type: "movie",
-    title: m.title,
-    poster_path: m.poster_path,
-    backdrop_path: m.backdrop_path,
-    release_date: m.release_date,
-    vote_average: m.vote_average,
-    vote_count: m.vote_count,
-    popularity: m.popularity,
-    overview: m.overview,
-    genre_ids: m.genre_ids,
+    title: row.title ?? "",
+    poster_path: row.posterPath,
+    backdrop_path: row.backdropPath,
+    release_date: row.releaseDate ? row.releaseDate.toISOString().slice(0, 10) : "",
+    vote_average: row.voteAverage !== null ? Number(row.voteAverage) : 0,
+    vote_count: row.voteCount ?? 0,
+    popularity: row.popularity !== null ? Number(row.popularity) : 0,
+    overview: row.overview ?? "",
+    genre_ids: extractGenreIds(row.genres),
   };
 }
 
-function normalizeTv(t: TmdbTv): AgendaTv {
+function rowToTv(row: TitleRow): AgendaTv {
   return {
-    id: t.id,
+    id: row.tmdbId,
     media_type: "tv",
-    title: t.name,
-    original_language: t.original_language,
-    poster_path: t.poster_path,
-    backdrop_path: t.backdrop_path,
-    first_air_date: t.first_air_date,
-    vote_average: t.vote_average,
-    vote_count: t.vote_count,
-    popularity: t.popularity,
-    overview: t.overview,
-    genre_ids: t.genre_ids,
+    title: row.title ?? "",
+    original_language: row.originalLanguage ?? undefined,
+    poster_path: row.posterPath,
+    backdrop_path: row.backdropPath,
+    first_air_date: row.firstAirDate ? row.firstAirDate.toISOString().slice(0, 10) : "",
+    vote_average: row.voteAverage !== null ? Number(row.voteAverage) : 0,
+    vote_count: row.voteCount ?? 0,
+    popularity: row.popularity !== null ? Number(row.popularity) : 0,
+    overview: row.overview ?? "",
+    genre_ids: extractGenreIds(row.genres),
   };
 }
 
-type EnrichableAgendaItem = AgendaMovie | AgendaTv;
+// ── Balloonerismm result → agenda item converters ─────────────────────────────
+
+function catalogResultToMovie(r: CatalogSearchResult): AgendaMovie | null {
+  const id = r.ids.tmdbId;
+  if (!id) return null;
+  return {
+    id,
+    media_type: "movie",
+    title: r.title,
+    poster_path: r.posterPath ?? null,
+    backdrop_path: r.backdropPath ?? null,
+    release_date: r.releaseDate ?? "",
+    vote_average: r.voteAverage ?? 0,
+    vote_count: r.voteCount ?? 0,
+    popularity: 0,
+    overview: r.overview ?? "",
+    genre_ids: r.genreIds ?? [],
+  };
+}
+
+function catalogResultToTv(r: CatalogSearchResult): AgendaTv | null {
+  const id = r.ids.tmdbId;
+  if (!id) return null;
+  return {
+    id,
+    media_type: "tv",
+    title: r.title,
+    poster_path: r.posterPath ?? null,
+    backdrop_path: r.backdropPath ?? null,
+    first_air_date: r.firstAirDate ?? "",
+    vote_average: r.voteAverage ?? 0,
+    vote_count: r.voteCount ?? 0,
+    popularity: 0,
+    overview: r.overview ?? "",
+    genre_ids: r.genreIds ?? [],
+  };
+}
+
+// ── Local DB section queries ──────────────────────────────────────────────────
+
+async function getLocalNowPlaying(ninetyDaysAgo: Date, today: Date): Promise<AgendaMovie[]> {
+  try {
+    const rows = await db.poplog3Title.findMany({
+      where: {
+        mediaType: "movie",
+        releaseDate: { gte: ninetyDaysAgo, lte: today },
+        posterPath: { not: null },
+      },
+      orderBy: [{ popularity: "desc" }, { releaseDate: "desc" }],
+      take: 20,
+    });
+    return rows.map(rowToMovie);
+  } catch {
+    return [];
+  }
+}
+
+async function getLocalUpcoming(tomorrow: Date, ninetyDaysAhead: Date): Promise<AgendaMovie[]> {
+  try {
+    const rows = await db.poplog3Title.findMany({
+      where: {
+        mediaType: "movie",
+        releaseDate: { gte: tomorrow, lte: ninetyDaysAhead },
+        posterPath: { not: null },
+      },
+      orderBy: { releaseDate: "asc" },
+      take: 20,
+    });
+    return rows.map(rowToMovie);
+  } catch {
+    return [];
+  }
+}
+
+async function getLocalNewSeries(fortyFiveDaysAgo: Date, today: Date): Promise<AgendaTv[]> {
+  try {
+    const rows = await db.poplog3Title.findMany({
+      where: {
+        mediaType: "tv",
+        firstAirDate: { gte: fortyFiveDaysAgo, lte: today },
+        posterPath: { not: null },
+        voteCount: { gte: 3 },
+      },
+      orderBy: { popularity: "desc" },
+      take: 20,
+    });
+    return rows
+      .filter((r) => !isTalkOrNews({ genre_ids: extractGenreIds(r.genres) }))
+      .map(rowToTv);
+  } catch {
+    return [];
+  }
+}
+
+async function getTrendingMovies(): Promise<{ movies: AgendaMovie[]; source: string }> {
+  if (isBalloonerismTrendingEnabled()) {
+    try {
+      const raw = await catalogGetTrending({ mediaType: "movie", limit: 20 });
+      const movies = raw.map(catalogResultToMovie).filter((m): m is AgendaMovie => m !== null);
+      if (movies.length >= 5) return { movies, source: "balloonerismm" };
+    } catch (err) {
+      console.warn("[agenda] balloonerismm trending movies failed", err instanceof Error ? err.message : err);
+    }
+  }
+  try {
+    const rows = await db.poplog3Title.findMany({
+      where: { mediaType: "movie", posterPath: { not: null }, popularity: { not: null } },
+      orderBy: { popularity: "desc" },
+      take: 20,
+    });
+    return { movies: rows.map(rowToMovie), source: "local_db" };
+  } catch {
+    return { movies: [], source: "empty" };
+  }
+}
+
+async function getTrendingTv(): Promise<{ shows: AgendaTv[]; source: string }> {
+  if (isBalloonerismTrendingEnabled()) {
+    try {
+      const raw = await catalogGetTrending({ mediaType: "show", limit: 20 });
+      const shows = raw.map(catalogResultToTv).filter((s): s is AgendaTv => s !== null);
+      if (shows.length >= 5) return { shows, source: "balloonerismm" };
+    } catch (err) {
+      console.warn("[agenda] balloonerismm trending tv failed", err instanceof Error ? err.message : err);
+    }
+  }
+  try {
+    const rows = await db.poplog3Title.findMany({
+      where: { mediaType: "tv", posterPath: { not: null }, popularity: { not: null } },
+      orderBy: { popularity: "desc" },
+      take: 20,
+    });
+    const shows = rows
+      .filter((r) => !isTalkOrNews({ genre_ids: extractGenreIds(r.genres) }))
+      .map(rowToTv);
+    return { shows, source: "local_db" };
+  } catch {
+    return { shows: [], source: "empty" };
+  }
+}
+
+// ── Availability + user state enrichment (local DB only) ──────────────────────
 
 type AvailabilityRow = {
   tmdb_id: number;
@@ -177,11 +303,12 @@ type StateRow = {
   best_provider_logo: string | null;
 };
 
+type EnrichableAgendaItem = AgendaMovie | AgendaTv;
+
 function availabilityScore(row: AvailabilityRow, favoriteProviderIds: Set<string>) {
   const type = row.availability_type ?? "";
   const isPreferred = row.tmdb_provider_id !== null && favoriteProviderIds.has(String(row.tmdb_provider_id));
   const isStreaming = STREAMING_TYPES.has(type);
-
   let score = 0;
   if (isPreferred) score += 1000;
   if (isStreaming) score += 300;
@@ -258,167 +385,46 @@ async function enrichAgendaItems(input: {
   }
 }
 
-// Merge resultados de múltiplas páginas dedupando por id
-function mergeDedup<T extends { id: number }>(
-  ...settled: PromiseSettledResult<TmdbPageResult<T>>[]
-): T[] {
-  const seen = new Set<number>();
-  const out: T[] = [];
-  for (const r of settled) {
-    if (r.status !== "fulfilled") continue;
-    for (const item of r.value.results) {
-      if (!seen.has(item.id)) {
-        seen.add(item.id);
-        out.push(item);
-      }
-    }
-  }
-  return out;
-}
+// ── Route ─────────────────────────────────────────────────────────────────────
 
-// ── route ─────────────────────────────────────────────────────────────────────
+export async function GET(request: NextRequest) {
+  const debugSource = request.nextUrl.searchParams.get("debugSource") === "1";
 
-export async function GET() {
   try {
-    const nowDate = new Date();
-    const todayStr          = nowDate.toISOString().slice(0, 10);
-    const fortyFiveDaysAgo  = new Date(nowDate.getTime() - 45  * 86_400_000).toISOString().slice(0, 10);
-    const eightDaysAhead    = new Date(nowDate.getTime() + 8   * 86_400_000).toISOString().slice(0, 10);
-    const ninetyDaysAhead   = new Date(nowDate.getTime() + 90  * 86_400_000).toISOString().slice(0, 10);
+    const now = new Date();
+    const today = new Date(now.toISOString().slice(0, 10));
+    const ninetyDaysAgo    = new Date(today.getTime() - 90 * 86_400_000);
+    const fortyFiveDaysAgo = new Date(today.getTime() - 45 * 86_400_000);
+    const tomorrow         = new Date(today.getTime() + 86_400_000);
+    const ninetyDaysAhead  = new Date(today.getTime() + 90 * 86_400_000);
 
-    const WITHOUT_TALK = "10767,10763";
-
-    // 12 fetches paralelos — todos cacheados individualmente pelo Next.js
     const [
-      nowPlayingRes,
-      upcomingRes,
-      airingTodayRes1,
-      airingTodayRes2,
-      onTheAirRes1,
-      onTheAirRes2,
-      newSeriesRes,
-      soonToReturnRes1,
-      soonToReturnRes2,
-      trendingMoviesRes,
-      trendingTvRes,
-    ] = await Promise.allSettled([
-      // Filmes em cartaz (Brasil)
-      tmdbFetch<TmdbPageResult<TmdbMovie>>("/movie/now_playing", {
-        params: { region: "BR", page: 1 },
-        revalidate: 3600 * 6,
-      }),
-      // Próximos lançamentos (Brasil)
-      tmdbFetch<TmdbPageResult<TmdbMovie>>("/movie/upcoming", {
-        params: { region: "BR", page: 1 },
-        revalidate: 3600 * 6,
-      }),
-      // Episódios hoje — página 1 (~20 séries)
-      tmdbFetch<TmdbPageResult<TmdbTv>>("/tv/airing_today", {
-        params: { page: 1 },
-        revalidate: 3600 * 2,
-      }),
-      // Episódios hoje — página 2 (~40 séries total)
-      tmdbFetch<TmdbPageResult<TmdbTv>>("/tv/airing_today", {
-        params: { page: 2 },
-        revalidate: 3600 * 2,
-      }),
-      // No ar esta semana — página 1
-      tmdbFetch<TmdbPageResult<TmdbTv>>("/tv/on_the_air", {
-        params: { page: 1 },
-        revalidate: 3600 * 4,
-      }),
-      // No ar esta semana — página 2
-      tmdbFetch<TmdbPageResult<TmdbTv>>("/tv/on_the_air", {
-        params: { page: 2 },
-        revalidate: 3600 * 4,
-      }),
-      // Estreias: séries com première nos últimos 45 dias
-      tmdbFetch<TmdbPageResult<TmdbTv>>("/discover/tv", {
-        params: {
-          "first_air_date.gte": fortyFiveDaysAgo,
-          "first_air_date.lte": todayStr,
-          "sort_by": "popularity.desc",
-          "vote_count.gte": "3",
-          "without_genres": WITHOUT_TALK,
-          page: 1,
-        },
-        revalidate: 3600 * 6,
-      }),
-      // Retornando em breve: séries com episódios nos próximos 90 dias — página 1
-      tmdbFetch<TmdbPageResult<TmdbTv>>("/discover/tv", {
-        params: {
-          "air_date.gte": eightDaysAhead,
-          "air_date.lte": ninetyDaysAhead,
-          "sort_by": "popularity.desc",
-          "vote_count.gte": "20",
-          "without_genres": WITHOUT_TALK,
-          page: 1,
-        },
-        revalidate: 3600 * 6,
-      }),
-      // Retornando em breve — página 2
-      tmdbFetch<TmdbPageResult<TmdbTv>>("/discover/tv", {
-        params: {
-          "air_date.gte": eightDaysAhead,
-          "air_date.lte": ninetyDaysAhead,
-          "sort_by": "popularity.desc",
-          "vote_count.gte": "20",
-          "without_genres": WITHOUT_TALK,
-          page: 2,
-        },
-        revalidate: 3600 * 6,
-      }),
-      // Trending filmes (semana)
-      tmdbFetch<TmdbPageResult<TmdbMovie>>("/trending/movie/week", {
-        params: { page: 1 },
-        revalidate: 3600 * 4,
-      }),
-      // Trending séries (semana)
-      tmdbFetch<TmdbPageResult<TmdbTv>>("/trending/tv/week", {
-        params: { page: 1 },
-        revalidate: 3600 * 4,
-      }),
+      nowPlayingRaw,
+      upcomingRaw,
+      newSeriesRaw,
+      { movies: trendingMoviesRaw, source: trendingMoviesSource },
+      { shows: trendingTvRaw,   source: trendingTvSource },
+    ] = await Promise.all([
+      getLocalNowPlaying(ninetyDaysAgo, today),
+      getLocalUpcoming(tomorrow, ninetyDaysAhead),
+      getLocalNewSeries(fortyFiveDaysAgo, today),
+      getTrendingMovies(),
+      getTrendingTv(),
     ]);
 
-    // Merge + dedup multi-página; filtro talk/news aplicado pós-fetch (endpoints sem parâmetro)
-    const airingTodayRaw = mergeDedup(airingTodayRes1, airingTodayRes2).filter((t) => !isTalkOrNews(t));
-    const onTheAirRaw    = mergeDedup(onTheAirRes1, onTheAirRes2).filter((t) => !isTalkOrNews(t));
-    const soonToReturnRaw = mergeDedup(soonToReturnRes1, soonToReturnRes2);
+    // Apply BR editorial bonus to TV sections only (matches original behaviour)
+    const nowPlaying     = nowPlayingRaw;
+    const upcoming       = upcomingRaw;
+    const newSeries      = applyLegacyBrazilianBonus(newSeriesRaw, normalizeTmdbPopularity);
+    const trendingMovies = trendingMoviesRaw;
+    const trendingTv     = applyLegacyBrazilianBonus(trendingTvRaw, normalizeTmdbPopularity);
 
-    // Bônus BR: aplicado nos arrays de TV/filmes legados antes da entrega ao cliente.
-    // applyLegacyBrazilianBonus() adiciona editorial_score e br_bonus e reordena
-    // por editorial_score, garantindo que produções brasileiras elegíveis ganhem
-    // visibilidade consistente com o pipeline principal do AgendaEngine.
-    const airingToday = applyLegacyBrazilianBonus(
-      airingTodayRaw.map(normalizeTv),
-      normalizeTmdbPopularity,
-    );
-    const onTheAir = applyLegacyBrazilianBonus(
-      onTheAirRaw.map(normalizeTv),
-      normalizeTmdbPopularity,
-    );
+    // Calendar-based sections — deferred to ICS/Radar/TVDB etapa
+    const airingToday: AgendaTv[]   = [];
+    const onTheAir: AgendaTv[]      = [];
+    const soonToReturn: AgendaTv[]  = [];
 
-    const nowPlaying = nowPlayingRes.status === "fulfilled"
-      ? nowPlayingRes.value.results.map(normalizeMovie) : [];
-    const upcoming = upcomingRes.status === "fulfilled"
-      ? upcomingRes.value.results.map(normalizeMovie) : [];
-    const newSeries = applyLegacyBrazilianBonus(
-      newSeriesRes.status === "fulfilled"
-        ? newSeriesRes.value.results.filter((t) => !isTalkOrNews(t)).map(normalizeTv)
-        : [],
-      normalizeTmdbPopularity,
-    );
-    const soonToReturn = applyLegacyBrazilianBonus(
-      soonToReturnRaw.map(normalizeTv),
-      normalizeTmdbPopularity,
-    );
-    const trendingMovies = trendingMoviesRes.status === "fulfilled"
-      ? trendingMoviesRes.value.results.map(normalizeMovie) : [];
-    const trendingTv = trendingTvRes.status === "fulfilled"
-      ? trendingTvRes.value.results.filter((t) => !isTalkOrNews(t)).map(normalizeTv) : [];
-
-
-    // user library (optional)
+    // User library (optional — auth failure is non-fatal)
     const userLibraryIds: Record<string, string> = {};
     let userId: string | null = null;
     try {
@@ -428,19 +434,17 @@ export async function GET() {
         Object.assign(userLibraryIds, await getLocalUserLibraryIds(user.id));
       }
     } catch {
-      // auth failure e nao-fatal
+      // non-fatal
     }
 
+    // Enrich all items with local availability + user state
     try {
       await enrichAgendaItems({
         userId,
         items: [
           ...nowPlaying,
           ...upcoming,
-          ...airingToday,
-          ...onTheAir,
           ...newSeries,
-          ...soonToReturn,
           ...trendingMovies,
           ...trendingTv,
         ],
@@ -449,21 +453,60 @@ export async function GET() {
       console.warn("[agenda] enrichment failed", err);
     }
 
-    const response: AgendaResponse = {
-      nowPlaying,
-      upcoming,
-      airingToday,
-      onTheAir,
-      newSeries,
-      soonToReturn,
-      trendingMovies,
-      trendingTv,
-      userLibraryIds,
-    };
+    // Source accounting
+    const localDbCount =
+      nowPlayingRaw.length +
+      upcomingRaw.length +
+      newSeriesRaw.length +
+      (trendingMoviesSource === "local_db" ? trendingMoviesRaw.length : 0) +
+      (trendingTvSource    === "local_db" ? trendingTvRaw.length    : 0);
+    const balloonerismmCount =
+      (trendingMoviesSource === "balloonerismm" ? trendingMoviesRaw.length : 0) +
+      (trendingTvSource    === "balloonerismm" ? trendingTvRaw.length    : 0);
 
-    return NextResponse.json(response, {
-      headers: { "Cache-Control": "private, max-age=300" },
-    });
+    const agendaSource =
+      balloonerismmCount > 0 && localDbCount > 0 ? "mixed"
+      : balloonerismmCount > 0                   ? "balloonerismm"
+      : localDbCount > 0                         ? "local_db"
+      :                                            "empty_controlled";
+
+    const skippedReasons = [
+      "airing_today_requires_episode_calendar_source",
+      "on_the_air_requires_episode_calendar_source",
+      "soon_to_return_requires_episode_calendar_source",
+    ];
+
+    return NextResponse.json(
+      {
+        nowPlaying,
+        upcoming,
+        airingToday,
+        onTheAir,
+        newSeries,
+        soonToReturn,
+        trendingMovies,
+        trendingTv,
+        userLibraryIds,
+        usedTmdbApi: false,
+        agendaSource,
+        sourceCounts: { local_db: localDbCount, balloonerismm: balloonerismmCount },
+        skippedReasons,
+        ...(debugSource && {
+          debugSource: {
+            trendingMoviesSource,
+            trendingTvSource,
+            sectionCounts: {
+              nowPlaying:     nowPlaying.length,
+              upcoming:       upcoming.length,
+              newSeries:      newSeries.length,
+              trendingMovies: trendingMovies.length,
+              trendingTv:     trendingTv.length,
+            },
+          },
+        }),
+      },
+      { headers: { "Cache-Control": "private, max-age=300" } },
+    );
   } catch (err) {
     console.error("[agenda] route error:", err);
     return NextResponse.json(
