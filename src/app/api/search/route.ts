@@ -12,6 +12,11 @@ import type { TmdbTitleSummary } from "@/server/api-clients/tmdb/types";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { getUserFeedbackMap } from "@/lib/personalization/feedback";
 import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
+import {
+  catalogSearch,
+  isBalloonerismSearchEnabled,
+} from "@/server/source-engine/engine";
+import { hydrateCatalogResults } from "@/server/source-engine/hydrate-catalog-results";
 
 function fuzzyMatchToTmdbSummary(
   title: Awaited<ReturnType<typeof findCachedFuzzyTitles>>[number]
@@ -43,10 +48,7 @@ export async function GET(request: NextRequest) {
 
   if (!query) {
     return NextResponse.json(
-      {
-        ok: false,
-        error: "Missing search query. Use ?q=",
-      },
+      { ok: false, error: "Missing search query. Use ?q=" },
       { status: 400 }
     );
   }
@@ -65,61 +67,89 @@ export async function GET(request: NextRequest) {
       // Unauthenticated -- proceed without personalization.
     }
 
-    const data = await tmdbFetch<{
-      results: TmdbTitleSummary[];
-    }>("/search/multi", {
-      params: {
-        query,
-        include_adult: false,
-        page: 1,
-      },
+    // ── Balloonerismm primary path ────────────────────────────────────────────
+    if (isBalloonerismSearchEnabled()) {
+      try {
+        const catalogResults = await catalogSearch({ query });
+        const hydrated = await hydrateCatalogResults(catalogResults);
+        const validTitles = filterValidTitles(hydrated);
+
+        if (validTitles.length > 0) {
+          const seenKeys = new Set(
+            validTitles.map((t) => `${t.media_type}-${t.tmdb_id}`)
+          );
+          const fuzzyTitles = shouldUseFuzzyFallback(validTitles.length, 1)
+            ? await findCachedFuzzyTitles({ query, mediaType: "all", excludeKeys: seenKeys })
+            : [];
+
+          const rawCombined = [
+            ...validTitles.map((t) => ({ ...t, id: t.tmdb_id })),
+            ...fuzzyTitles.map(fuzzyMatchToTmdbSummary),
+          ];
+
+          const results = applyUserFeedbackScoring(rawCombined, {
+            userId,
+            feedbackMap,
+            context: "search",
+            preserveOrder: true,
+          });
+
+          console.log(
+            `[search] source=balloonerismm count=${validTitles.length} fuzzy=${fuzzyTitles.length}`
+          );
+
+          return NextResponse.json({
+            ok: true,
+            query,
+            normalizedQuery: normalizeSearchTerm(query),
+            count: results.length,
+            fuzzyCount: fuzzyTitles.length,
+            results,
+          });
+        }
+
+        console.log("[search] source=balloonerismm_fallback reason=empty");
+      } catch (err) {
+        console.warn(
+          "[search] source=balloonerismm_fallback reason=error",
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
+
+    // ── Legacy TMDB path (fallback) ──────────────────────────────────────────
+    const data = await tmdbFetch<{ results: TmdbTitleSummary[] }>("/search/multi", {
+      params: { query, include_adult: false, page: 1 },
     });
 
     const rawResults = data.results.filter(
       (item) => item.media_type === "movie" || item.media_type === "tv"
     );
 
-    const titles = filterValidTitles(
-      rawResults.map((item) => normalizeTmdbTitle(item))
-    );
+    const titles = filterValidTitles(rawResults.map((item) => normalizeTmdbTitle(item)));
 
-    // Cache is best-effort -- do not block search results on cache failures.
     Promise.all(
       titles.map(async (title, index) => {
         try {
           await upsertCachedTitle(title, rawResults[index]);
         } catch (cacheError) {
           console.warn(
-            `[poplog3/search] falha ao cachear ${title.media_type}/${title.tmdb_id}:`,
+            `[search] falha ao cachear ${title.media_type}/${title.tmdb_id}:`,
             cacheError instanceof Error ? cacheError.message : cacheError
           );
         }
       })
     ).catch(() => {/* silent */});
 
-    const seenTitleKeys = new Set(
-      titles.map((title) => `${title.media_type}-${title.tmdb_id}`)
-    );
+    const seenTitleKeys = new Set(titles.map((t) => `${t.media_type}-${t.tmdb_id}`));
     const fuzzyTitles = shouldUseFuzzyFallback(titles.length, 1)
-      ? await findCachedFuzzyTitles({
-          query,
-          mediaType: "all",
-          excludeKeys: seenTitleKeys,
-        })
+      ? await findCachedFuzzyTitles({ query, mediaType: "all", excludeKeys: seenTitleKeys })
       : [];
     const rawCombined = [...rawResults, ...fuzzyTitles.map(fuzzyMatchToTmdbSummary)];
 
-    // Apply editorial feedback in search context: preserves TMDB order,
-    // attaches userFeedback metadata (notInterested, activeTypes) for UI.
-    // Hidden titles are NOT excluded from search (users can still find them).
     const results = applyUserFeedbackScoring(
       rawCombined.map((item) => ({ ...item, id: item.id })),
-      {
-        userId,
-        feedbackMap,
-        context: "search",
-        preserveOrder: true,
-      },
+      { userId, feedbackMap, context: "search", preserveOrder: true },
     );
 
     return NextResponse.json({
@@ -131,14 +161,13 @@ export async function GET(request: NextRequest) {
       results,
     });
   } catch (error) {
-    console.error("[poplog3/search]", error);
+    console.error("[search]", error);
 
     return NextResponse.json(
       {
         ok: false,
-        error: "Failed to search TMDB",
-        details:
-          error instanceof Error ? error.message : String(error),
+        error: "Failed to search",
+        details: error instanceof Error ? error.message : String(error),
       },
       { status: 500 }
     );
