@@ -1,6 +1,7 @@
 import { logApiCall } from "@/server/engine-logger";
 import { omdbFetch } from "@/server/api-clients/omdb/client";
 import type { OmdbTitleResponse } from "@/server/api-clients/omdb/types";
+import { catalogGetRatings } from "@/server/source-engine/engine";
 import {
   completePremiumApiBudget,
   reservePremiumApiBudget,
@@ -47,7 +48,7 @@ export type SyncOmdbInput = {
 };
 
 export type SyncOmdbResult = {
-  source: "cache" | "omdb" | "skipped";
+  source: "cache" | "omdb" | "balloonerismm" | "skipped";
 
   cache_status:
     | "fresh"
@@ -285,18 +286,6 @@ export async function syncOmdbRatings(
       error instanceof Error ? error.message : error
     );
 
-    // Toca updated_at para ativar cooldown de 1 dia e evitar burn loop.
-    await upsertRatings({
-      tmdbId,
-      mediaType,
-      imdbRating: cached?.imdb_rating ?? null,
-      imdbVotes: cached?.imdb_votes ?? null,
-      rottenTomatoesScore: cached?.rotten_tomatoes_score ?? null,
-      metacriticScore: cached?.metacritic_score ?? null,
-      tmdbRating: input.tmdbRating ?? cached?.tmdb_rating ?? null,
-      poplogScore: cached?.poplog_score ?? null,
-    }).catch(() => {});
-
     await completePremiumApiBudget(
       budget.reservation,
       "failed",
@@ -315,6 +304,34 @@ export async function syncOmdbRatings(
       error: error instanceof Error ? error.message : String(error),
     });
 
+    // Fallback: tentar Balloonerismm como fonte de rating IMDb-first.
+    const ballRatings = await catalogGetRatings({ mediaType, imdbId }).catch(() => null);
+    if (ballRatings?.rating) {
+      const score = computePoplogScore({ imdb: ballRatings.rating, tmdb: input.tmdbRating });
+      await upsertRatings({
+        tmdbId,
+        mediaType,
+        imdbRating: ballRatings.rating,
+        imdbVotes: ballRatings.votes ?? null,
+        tmdbRating: input.tmdbRating ?? cached?.tmdb_rating ?? null,
+        poplogScore: score?.score ?? null,
+      }).catch(() => {});
+      logApiCall({ api: "balloonerismm", op: "ratings-fallback", endpoint: imdbId, durationMs: Date.now() - t0, cacheStatus: "miss", success: true });
+      return { source: "balloonerismm", cache_status: "stale_refreshed", ratings: await getCachedRatings(mediaType, tmdbId) };
+    }
+
+    // Toca updated_at para ativar cooldown de 1 dia e evitar burn loop.
+    await upsertRatings({
+      tmdbId,
+      mediaType,
+      imdbRating: cached?.imdb_rating ?? null,
+      imdbVotes: cached?.imdb_votes ?? null,
+      rottenTomatoesScore: cached?.rotten_tomatoes_score ?? null,
+      metacriticScore: cached?.metacritic_score ?? null,
+      tmdbRating: input.tmdbRating ?? cached?.tmdb_rating ?? null,
+      poplogScore: cached?.poplog_score ?? null,
+    }).catch(() => {});
+
     return {
       source: "cache",
       cache_status: "omdb_failed",
@@ -326,18 +343,6 @@ export async function syncOmdbRatings(
     console.warn(
       `[sync-omdb-ratings] OMDb retornou False para ${imdbId}: ${response.Error ?? ""}`
     );
-
-    // Idem: toca updated_at para não tentar de novo hoje.
-    await upsertRatings({
-      tmdbId,
-      mediaType,
-      imdbRating: cached?.imdb_rating ?? null,
-      imdbVotes: cached?.imdb_votes ?? null,
-      rottenTomatoesScore: cached?.rotten_tomatoes_score ?? null,
-      metacriticScore: cached?.metacritic_score ?? null,
-      tmdbRating: input.tmdbRating ?? cached?.tmdb_rating ?? null,
-      poplogScore: cached?.poplog_score ?? null,
-    }).catch(() => {});
 
     await completePremiumApiBudget(
       budget.reservation,
@@ -356,6 +361,34 @@ export async function syncOmdbRatings(
       success: false,
       error: response.Error ?? "Response=False",
     });
+
+    // Fallback: tentar Balloonerismm quando OMDb não conhece o título.
+    const ballRatings = await catalogGetRatings({ mediaType, imdbId }).catch(() => null);
+    if (ballRatings?.rating) {
+      const score = computePoplogScore({ imdb: ballRatings.rating, tmdb: input.tmdbRating });
+      await upsertRatings({
+        tmdbId,
+        mediaType,
+        imdbRating: ballRatings.rating,
+        imdbVotes: ballRatings.votes ?? null,
+        tmdbRating: input.tmdbRating ?? cached?.tmdb_rating ?? null,
+        poplogScore: score?.score ?? null,
+      }).catch(() => {});
+      logApiCall({ api: "balloonerismm", op: "ratings-fallback", endpoint: imdbId, durationMs: Date.now() - t0, cacheStatus: "miss", success: true });
+      return { source: "balloonerismm", cache_status: "stale_refreshed", ratings: await getCachedRatings(mediaType, tmdbId) };
+    }
+
+    // Idem: toca updated_at para não tentar de novo hoje.
+    await upsertRatings({
+      tmdbId,
+      mediaType,
+      imdbRating: cached?.imdb_rating ?? null,
+      imdbVotes: cached?.imdb_votes ?? null,
+      rottenTomatoesScore: cached?.rotten_tomatoes_score ?? null,
+      metacriticScore: cached?.metacritic_score ?? null,
+      tmdbRating: input.tmdbRating ?? cached?.tmdb_rating ?? null,
+      poplogScore: cached?.poplog_score ?? null,
+    }).catch(() => {});
 
     return {
       source: "cache",

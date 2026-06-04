@@ -39,10 +39,6 @@ function catalogSource(): string {
   return process.env.CATALOG_SOURCE ?? "legacy";
 }
 
-function catalogFallback(): string {
-  return process.env.CATALOG_FALLBACK ?? "legacy";
-}
-
 /** Balloonerismm está ativo e configurado como fonte primária ou complementar. */
 function balloonerismEnabled(): boolean {
   return isBalloonerismActive() || catalogSource() === "balloonerismm";
