@@ -24,6 +24,9 @@ import type { IcsSeriesGroup, SeriesEpisodeWindow } from "@/lib/ics-engine";
 import { tmdbFetchSafe } from "@/server/api-clients/tmdb/client";
 
 
+// Feature flag — desligado por padrão; ligar com ENABLE_TMDB_RETROFILL=true no .env
+const ENABLE_RETROFILL = process.env.ENABLE_TMDB_RETROFILL === "true";
+
 // Janela: episodio anterior aceitavel se air_date >= hoje - RETRO_WINDOW_DAYS
 const RETRO_WINDOW_DAYS     = 14;
 // Limite de grupos processados por execucao
@@ -197,6 +200,10 @@ export async function applyRetrofill(
   groups: IcsSeriesGroup[],
   accessToken: string,
 ): Promise<void> {
+  if (!ENABLE_RETROFILL) {
+    console.log("[radar-retrofill] ENABLE_TMDB_RETROFILL=false — retrofill disabled");
+    return;
+  }
   if (!accessToken) return; // keep for backward compat — token is read centrally
 
   const today       = todayStr();

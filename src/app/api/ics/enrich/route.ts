@@ -140,6 +140,16 @@ async function searchTv(title: string): Promise<TmdbEnrichment | null> {
 }
 
 export async function POST(req: NextRequest) {
+  if (process.env.ENABLE_TMDB_ICS_ENRICHMENT === "false") {
+    return NextResponse.json({
+      ok: false,
+      disabled: true,
+      usedTmdbApi: false,
+      skippedReasons: ["tmdb_enrichment_disabled"],
+      results: {},
+    });
+  }
+
   try {
     getTmdbToken(); // validates token is present
   } catch {

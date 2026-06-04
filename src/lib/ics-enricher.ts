@@ -14,6 +14,11 @@ import type { IcsSeriesGroup, TmdbEnrichment } from "./ics-engine";
 import { refineCategoryFromTmdb } from "./ics-engine";
 import { buildTmdbHeaders, buildTmdbUrl, getTmdbToken } from "@/server/api-clients/tmdb/client";
 
+// ── Feature flag ─────────────────────────────────────────────────────────────
+// Desligar com ENABLE_TMDB_ICS_ENRICHMENT=false no .env.
+// Por padrão habilitado (valor não definido = enabled).
+const ENABLE_ENRICHMENT = process.env.ENABLE_TMDB_ICS_ENRICHMENT !== "false";
+
 // ── Configuração de rate limit ────────────────────────────────────────────────
 
 // Número máximo de enriquecimentos acontecendo em paralelo.
@@ -425,6 +430,11 @@ export async function enrichSeriesGroups(
   groups: IcsSeriesGroup[],
   options: EnricherOptions = {},
 ): Promise<IcsSeriesGroup[]> {
+  if (!ENABLE_ENRICHMENT) {
+    console.log("[ics-enricher] ENABLE_TMDB_ICS_ENRICHMENT=false — enrichment disabled");
+    return groups;
+  }
+
   const {
     concurrency  = CONCURRENCY_LIMIT,
     onBatchDone,
