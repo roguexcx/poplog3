@@ -24,6 +24,7 @@ export async function GET(
     request.nextUrl.searchParams.get("country")?.toUpperCase() ?? "BR";
   const sourceHint =
     (request.nextUrl.searchParams.get("sourceHint") ?? "auto") as PoplogTitleSourceHint;
+  const debugSource = request.nextUrl.searchParams.get("debugSource") === "1";
 
   if (mediaType !== "movie" && mediaType !== "tv") {
     return NextResponse.json(
@@ -45,6 +46,7 @@ export async function GET(
     sourceHint,
     force: refresh,
     country,
+    debugSource,
   });
 
   if (!payload) {

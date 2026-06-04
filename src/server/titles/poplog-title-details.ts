@@ -19,6 +19,10 @@ type MediaType = "movie" | "tv";
 export type PoplogTitleDetailsSource = "balloonerismm" | "local" | "legacy";
 
 export type PoplogTitleDetailsResult = {
+  /**
+   * May be null/undefined for titles resolved from external aliases before a
+   * controlled POPLOG_ID persistence step links them to the internal catalog.
+   */
   poplogId?: string | number;
   mediaType: MediaType;
   title: string;
@@ -60,6 +64,19 @@ export type PoplogTitleDetailsResult = {
     resolvedFrom?: PoplogTitleIdentity["resolvedFrom"];
     rawSource?: PoplogTitleDetailsSource;
   };
+};
+
+export type PoplogTitleDetailsDebugSource = {
+  source: PoplogTitleDetailsSource | "legacy_tmdb_fallback" | "unknown";
+  resolvedFrom?: PoplogTitleIdentity["resolvedFrom"];
+  poplogId: string | number | null;
+  externalIds: PoplogTitleExternalIds;
+  fallbackUsed: boolean;
+  fallbackReason: string | null;
+  rawSource: PoplogTitleDetailsSource | "unknown";
+  usedLegacy: boolean;
+  usedTmdbApi: boolean;
+  usedBalloonerismm: boolean;
 };
 
 type LoaderInput = {
@@ -255,6 +272,42 @@ async function findLocalTitle(identity: PoplogTitleIdentity): Promise<LocalTitle
 
 function detailLookupId(identity: PoplogTitleIdentity): string | null {
   return identity.externalIds.imdbId ?? identity.externalIds.balloonerismmId ?? null;
+}
+
+export function getPoplogTitleDetailsDebugSource(
+  details: PoplogTitleDetailsResult | null,
+  options: {
+    usedLegacy?: boolean;
+    usedTmdbApi?: boolean;
+    fallbackReason?: string | null;
+  } = {},
+): PoplogTitleDetailsDebugSource {
+  const primarySource = details?.sourceMeta.primarySource ?? "unknown";
+  const usedLegacy = options.usedLegacy ?? primarySource === "legacy";
+  const usedTmdbApi = options.usedTmdbApi ?? false;
+  const source = usedTmdbApi
+    ? "legacy_tmdb_fallback"
+    : primarySource;
+
+  return {
+    source,
+    resolvedFrom: details?.sourceMeta.resolvedFrom,
+    poplogId: details?.poplogId ?? null,
+    externalIds: details?.externalIds ?? {},
+    fallbackUsed: Boolean(
+      options.usedLegacy ||
+        options.usedTmdbApi ||
+        details?.sourceMeta.fallbackUsed,
+    ),
+    fallbackReason:
+      options.fallbackReason ??
+      details?.sourceMeta.fallbackReason ??
+      (usedTmdbApi ? "legacy_tmdb_fallback" : null),
+    rawSource: details?.sourceMeta.rawSource ?? primarySource,
+    usedLegacy,
+    usedTmdbApi,
+    usedBalloonerismm: primarySource === "balloonerismm",
+  };
 }
 
 export async function getPoplogTitleDetails({

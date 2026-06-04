@@ -41,6 +41,7 @@ import { getPublicRating } from "@/server/ratings/rating-aggregate-service";
 import { buildTmdbRawUrl } from "@/lib/images/url";
 import {
   getPoplogTitleDetails,
+  getPoplogTitleDetailsDebugSource,
   type PoplogTitleDetailsResult,
 } from "@/server/titles/poplog-title-details";
 import type { PoplogTitleSourceHint } from "@/server/titles/poplog-title-identity";
@@ -86,6 +87,7 @@ export type GetTitlePageDataOptions = {
   sourceHint?: PoplogTitleSourceHint;
   force?: boolean;
   country?: string;
+  debugSource?: boolean;
 };
 
 function poplogDetailsToTitlePageData(
@@ -168,7 +170,7 @@ function poplogDetailsToTitlePageData(
 export async function getTitlePageData(
   options: GetTitlePageDataOptions,
 ): Promise<TitlePageData | null> {
-  const { mediaType, id, sourceHint = "auto", force = false, country = "BR" } = options;
+  const { mediaType, id, sourceHint = "auto", force = false, country = "BR", debugSource = false } = options;
 
   if (mediaType !== "movie" && mediaType !== "tv") return null;
   const requestedId = String(id).trim();
@@ -184,14 +186,29 @@ export async function getTitlePageData(
 
       const legacyTmdbId = poplogDetails?.externalIds.tmdbId;
 
+      if (poplogDetails && poplogDetails.sourceMeta.primarySource !== "legacy") {
+        return {
+          ...poplogDetailsToTitlePageData(poplogDetails, country),
+          ...(debugSource
+            ? { debugSource: getPoplogTitleDetailsDebugSource(poplogDetails) }
+            : {}),
+        } as TitlePageData;
+      }
+
       if (!legacyTmdbId) {
-        if (poplogDetails && poplogDetails.sourceMeta.primarySource !== "legacy") {
-          return poplogDetailsToTitlePageData(poplogDetails, country);
-        }
         return null;
       }
 
       const id = legacyTmdbId;
+      console.warn("[getTitlePageData] legacy TMDB fallback", {
+        mediaType,
+        requestedId,
+        tmdbId: id,
+        resolvedFrom: poplogDetails?.sourceMeta.resolvedFrom,
+        fallbackReason:
+          poplogDetails?.sourceMeta.fallbackReason ?? "legacy_tmdb_fallback",
+      });
+
       const synced = await syncTmdbTitle(mediaType, id, { force });
       const title = synced.title;
 
@@ -932,7 +949,19 @@ export async function getTitlePageData(
         },
       };
 
-      return payload;
+      return {
+        ...payload,
+        ...(debugSource
+          ? {
+              debugSource: getPoplogTitleDetailsDebugSource(poplogDetails, {
+                usedLegacy: true,
+                usedTmdbApi: true,
+                fallbackReason:
+                  poplogDetails?.sourceMeta.fallbackReason ?? "legacy_tmdb_fallback",
+              }),
+            }
+          : {}),
+      } as TitlePageData;
     } catch (error) {
       console.error("[getTitlePageData] erro:", error);
       return null;
