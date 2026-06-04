@@ -13,6 +13,7 @@ import {
   type PoplogTitleIdentity,
   type PoplogTitleSourceHint,
 } from "./poplog-title-identity";
+import type { PoplogTitleAliasResolution } from "./poplog-title-aliases";
 
 type MediaType = "movie" | "tv";
 
@@ -63,6 +64,7 @@ export type PoplogTitleDetailsResult = {
     confidence?: number;
     resolvedFrom?: PoplogTitleIdentity["resolvedFrom"];
     rawSource?: PoplogTitleDetailsSource;
+    aliasResolution?: PoplogTitleAliasResolution;
   };
 };
 
@@ -77,6 +79,13 @@ export type PoplogTitleDetailsDebugSource = {
   usedLegacy: boolean;
   usedTmdbApi: boolean;
   usedBalloonerismm: boolean;
+  aliasLookupAttempted?: boolean;
+  aliasLookupSource?: string[];
+  aliasLookupFound?: boolean;
+  externalIdsBefore?: PoplogTitleExternalIds;
+  externalIdsAfter?: PoplogTitleExternalIds;
+  aliasPersisted?: boolean;
+  aliasPersistReason?: string | null;
 };
 
 type LoaderInput = {
@@ -188,6 +197,7 @@ function localToDetails(
       confidence: identity.confidence,
       resolvedFrom: identity.resolvedFrom,
       rawSource: "local",
+      aliasResolution: identity.aliasResolution,
     },
   };
 }
@@ -245,6 +255,7 @@ function balloonerismmToDetails(
       confidence: identity.confidence,
       resolvedFrom: identity.resolvedFrom,
       rawSource: "balloonerismm",
+      aliasResolution: identity.aliasResolution,
     },
   };
 }
@@ -283,6 +294,7 @@ export function getPoplogTitleDetailsDebugSource(
   } = {},
 ): PoplogTitleDetailsDebugSource {
   const primarySource = details?.sourceMeta.primarySource ?? "unknown";
+  const aliasResolution = details?.sourceMeta.aliasResolution;
   const usedLegacy = options.usedLegacy ?? primarySource === "legacy";
   const usedTmdbApi = options.usedTmdbApi ?? false;
   const source = usedTmdbApi
@@ -307,6 +319,13 @@ export function getPoplogTitleDetailsDebugSource(
     usedLegacy,
     usedTmdbApi,
     usedBalloonerismm: primarySource === "balloonerismm",
+    aliasLookupAttempted: aliasResolution?.aliasLookupAttempted,
+    aliasLookupSource: aliasResolution?.aliasLookupSource,
+    aliasLookupFound: aliasResolution?.aliasLookupFound,
+    externalIdsBefore: aliasResolution?.externalIdsBefore,
+    externalIdsAfter: aliasResolution?.externalIdsAfter,
+    aliasPersisted: aliasResolution?.aliasPersisted,
+    aliasPersistReason: aliasResolution?.aliasPersistReason,
   };
 }
 
@@ -351,6 +370,7 @@ export async function getPoplogTitleDetails({
         confidence: identity.confidence,
         resolvedFrom: identity.resolvedFrom,
         rawSource: "local",
+        aliasResolution: identity.aliasResolution,
       },
     };
   }
@@ -367,6 +387,7 @@ export async function getPoplogTitleDetails({
       confidence: identity.confidence,
       resolvedFrom: identity.resolvedFrom,
       rawSource: "legacy",
+      aliasResolution: identity.aliasResolution,
     },
   };
 }

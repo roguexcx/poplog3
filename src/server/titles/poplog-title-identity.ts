@@ -1,5 +1,9 @@
 import { db } from "@/server/db/client";
 import { normalizeSearchTerm } from "@/server/search/fuzzy-title-search";
+import {
+  resolveAndMergeExternalIdsForPoplogTitle,
+  type PoplogTitleAliasResolution,
+} from "./poplog-title-aliases";
 
 type MediaType = "movie" | "tv";
 
@@ -26,6 +30,7 @@ export type PoplogTitleIdentity = {
   title?: string;
   year?: number;
   externalIds: PoplogTitleExternalIds;
+  aliasResolution?: PoplogTitleAliasResolution;
   resolvedFrom:
     | "poplog"
     | "slug"
@@ -58,6 +63,25 @@ function toPositiveNumber(value: string): number | undefined {
   if (!/^\d+$/.test(value)) return undefined;
   const parsed = Number(value);
   return Number.isSafeInteger(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+async function enrichIdentity(identity: PoplogTitleIdentity): Promise<PoplogTitleIdentity> {
+  const aliases = await resolveAndMergeExternalIdsForPoplogTitle({
+    mediaType: identity.mediaType,
+    poplogId: identity.poplogId,
+    externalIds: identity.externalIds,
+    title: identity.title,
+    year: identity.year,
+  });
+
+  return {
+    ...identity,
+    poplogId: aliases.poplogId ?? identity.poplogId,
+    title: aliases.title ?? identity.title,
+    year: aliases.year ?? identity.year,
+    externalIds: aliases.externalIds,
+    aliasResolution: aliases.debug,
+  };
 }
 
 function slugParts(value: string): { title?: string; year?: number } {
@@ -208,21 +232,21 @@ export async function resolvePoplogTitleIdentity({
 
   if (sourceHint === "poplog" || (!numericId && !isImdbId && sourceHint === "auto")) {
     const row = await findByPoplogId(mediaType, cleanId);
-    if (row) return identityFromRow(row as TitleRow, "poplog", 1);
+    if (row) return enrichIdentity(identityFromRow(row as TitleRow, "poplog", 1));
   }
 
   if (isImdbId || sourceHint === "imdb" || sourceHint === "balloonerismm") {
     const imdbId = isImdbId ? cleanId : undefined;
     const match = await findByExternalId(mediaType, { imdbId });
     if (match) {
-      return identityFromRow(match.row as TitleRow, "imdb_id", 0.96, {
+      return enrichIdentity(identityFromRow(match.row as TitleRow, "imdb_id", 0.96, {
         ...match.externalIds,
         imdbId,
         balloonerismmId: imdbId,
-      });
+      }));
     }
 
-    return {
+    return enrichIdentity({
       mediaType,
       externalIds: {
         imdbId,
@@ -230,37 +254,37 @@ export async function resolvePoplogTitleIdentity({
       },
       resolvedFrom: sourceHint === "balloonerismm" ? "balloonerismm_id" : "imdb_id",
       confidence: imdbId ? 0.72 : 0.2,
-    };
+    });
   }
 
   if (numericId) {
     if (sourceHint === "tmdb") {
       const row = await findByTmdbId(mediaType, numericId);
       if (row) {
-        return identityFromRow(row as TitleRow, "tmdb_id", 0.9, { tmdbId: numericId });
+        return enrichIdentity(identityFromRow(row as TitleRow, "tmdb_id", 0.9, { tmdbId: numericId }));
       }
-      return {
+      return enrichIdentity({
         mediaType,
         externalIds: { tmdbId: numericId },
         resolvedFrom: "tmdb_id",
         confidence: 0.45,
-      };
+      });
     }
 
     const rowByPoplogId = await findByPoplogId(mediaType, cleanId);
-    if (rowByPoplogId) return identityFromRow(rowByPoplogId as TitleRow, "poplog", 1);
+    if (rowByPoplogId) return enrichIdentity(identityFromRow(rowByPoplogId as TitleRow, "poplog", 1));
 
     const rowByTmdbId = await findByTmdbId(mediaType, numericId);
     if (rowByTmdbId) {
-      return identityFromRow(rowByTmdbId as TitleRow, "tmdb_id", 0.75, { tmdbId: numericId });
+      return enrichIdentity(identityFromRow(rowByTmdbId as TitleRow, "tmdb_id", 0.75, { tmdbId: numericId }));
     }
 
-    return {
+    return enrichIdentity({
       mediaType,
       externalIds: { tmdbId: numericId },
       resolvedFrom: "unknown",
       confidence: 0.25,
-    };
+    });
   }
 
   const parsedSlug = sourceHint === "slug" || sourceHint === "auto"
@@ -272,17 +296,17 @@ export async function resolvePoplogTitleIdentity({
     year ?? parsedSlug.year,
   );
   if (rowByTitle) {
-    return identityFromRow(rowByTitle as TitleRow, sourceHint === "slug" ? "slug" : "title_match", 0.82, {
+    return enrichIdentity(identityFromRow(rowByTitle as TitleRow, sourceHint === "slug" ? "slug" : "title_match", 0.82, {
       slug: cleanId,
-    });
+    }));
   }
 
-  return {
+  return enrichIdentity({
     mediaType,
     title: title ?? parsedSlug.title,
     year: year ?? parsedSlug.year,
     externalIds: { slug: cleanId },
     resolvedFrom: sourceHint === "slug" ? "slug" : "unknown",
     confidence: parsedSlug.title ? 0.35 : 0.1,
-  };
+  });
 }
