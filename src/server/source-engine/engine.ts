@@ -44,6 +44,21 @@ function balloonerismEnabled(): boolean {
   return isBalloonerismActive() || catalogSource() === "balloonerismm";
 }
 
+/** Balloonerismm ativo como fonte primária de busca. */
+export function isBalloonerismSearchEnabled(): boolean {
+  return balloonerismEnabled() && process.env.BALLOONERISMM_SEARCH_ENABLED === "true";
+}
+
+/** Balloonerismm ativo como fonte primária de trending. */
+export function isBalloonerismTrendingEnabled(): boolean {
+  return balloonerismEnabled() && process.env.BALLOONERISMM_TRENDING_ENABLED === "true";
+}
+
+/** Balloonerismm ativo como fonte primária de discover/popular. */
+export function isBalloonerismDiscoverEnabled(): boolean {
+  return balloonerismEnabled() && process.env.BALLOONERISMM_DISCOVER_ENABLED === "true";
+}
+
 // ─── Search ──────────────────────────────────────────────────────────────────
 
 /**
