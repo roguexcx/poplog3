@@ -1,6 +1,10 @@
-import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import { db } from "@/server/db/client";
 import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
+import {
+  catalogGetTrending,
+  catalogGetPopular,
+} from "@/server/source-engine/engine";
+import type { CatalogSearchResult } from "@/server/source-engine/types/catalog.types";
 
 type MediaType = "movie" | "tv";
 export type SorteioMode = "discovery" | "watchlist";
@@ -52,29 +56,10 @@ export type SorteioPoolResult = {
     recentDemotedCount: number;
     totalBeforeFallback: number;
     poolCount: number;
+    usedTmdbApi: boolean;
+    poolSource: string;
+    skippedReasons: string[];
   };
-};
-
-type TmdbItem = {
-  id: number;
-  title?: string;
-  name?: string;
-  original_title?: string;
-  original_name?: string;
-  poster_path: string | null;
-  backdrop_path: string | null;
-  release_date?: string;
-  first_air_date?: string;
-  vote_average?: number;
-  vote_count?: number;
-  popularity?: number;
-  overview?: string;
-  genre_ids?: number[];
-  original_language?: string;
-};
-
-type TmdbPage<T> = {
-  results: T[];
 };
 
 type AvailabilityRow = {
@@ -88,8 +73,6 @@ type AvailabilityRow = {
 
 const INTENSE_GENRES = new Set([18, 80, 53, 27, 9648, 10752]);
 const LIGHT_GENRES = new Set([35, 10751, 10749, 16]);
-const DISCOVERY_GENRES = [28, 35, 18, 27, 53, 878, 10749, 16, 99];
-const DISCOVERY_LANGUAGES = ["pt", "en", "es", "ko", "ja", "fr"];
 const STREAMING_TYPES = new Set(["streaming", "subscription", "flatrate", "free", "ads"]);
 const DIGITAL_TYPES = new Set(["rent", "buy"]);
 
@@ -105,27 +88,30 @@ function itemDate(item: SorteioItem) {
   return item.media_type === "movie" ? item.release_date : item.first_air_date;
 }
 
-function normalizeTmdbItem(item: TmdbItem, mediaType: MediaType, source: string): SorteioItem | null {
-  const title = mediaType === "movie" ? item.title : item.name;
-  const date = mediaType === "movie" ? item.release_date : item.first_air_date;
-  if (!title?.trim() || !item.poster_path || !isPastOrToday(date)) return null;
+function normalizeCatalogResult(item: CatalogSearchResult, source: string): SorteioItem | null {
+  const tmdbId = item.ids.tmdbId;
+  if (!tmdbId) return null;
 
-  const rawOriginalTitle = mediaType === "movie" ? item.original_title : item.original_name;
+  const mediaType: MediaType = item.mediaType === "show" ? "tv" : "movie";
+  const date = mediaType === "movie" ? item.releaseDate : item.firstAirDate;
+
+  if (!item.title?.trim() || !item.posterPath || !isPastOrToday(date)) return null;
+
   return {
-    id: item.id,
+    id: tmdbId,
     media_type: mediaType,
-    title: title.trim(),
-    original_title: rawOriginalTitle?.trim() || null,
-    poster_path: item.poster_path,
-    backdrop_path: item.backdrop_path ?? null,
+    title: item.title.trim(),
+    original_title: item.originalTitle?.trim() ?? null,
+    poster_path: item.posterPath,
+    backdrop_path: item.backdropPath ?? null,
     release_date: mediaType === "movie" ? date ?? "" : "",
     first_air_date: mediaType === "tv" ? date ?? "" : "",
-    vote_average: item.vote_average ?? 0,
-    vote_count: item.vote_count ?? 0,
-    popularity: item.popularity ?? 0,
+    vote_average: item.voteAverage ?? 0,
+    vote_count: item.voteCount ?? 0,
+    popularity: 0,
     overview: item.overview ?? "",
-    genre_ids: item.genre_ids ?? [],
-    original_language: item.original_language ?? null,
+    genre_ids: item.genreIds ?? [],
+    original_language: null,
     availability_scope: "none",
     sorteio_source: source,
   };
@@ -217,119 +203,107 @@ function weightedPick(items: SorteioItem[]) {
   return items[0];
 }
 
-async function safeTmdb(path: string, mediaType: MediaType, source: string, params: Record<string, string | number | boolean | undefined> = {}) {
-  try {
-    const response = await tmdbFetch<TmdbPage<TmdbItem>>(path, {
-      params: { page: 1, ...params },
-      revalidate: 3600 * 4,
-    });
-    return response.results
-      .map((item) => normalizeTmdbItem(item, mediaType, source))
-      .filter((item): item is SorteioItem => item !== null);
-  } catch (err) {
-    console.warn("[sorteio-engine] source failed", { source, path, err });
-    return [];
-  }
-}
+async function fetchBalloonerismmDiscovery(): Promise<SorteioItem[]> {
+  const LIMIT = 20;
+  const sources = await Promise.allSettled([
+    catalogGetTrending({ mediaType: "movie", limit: LIMIT }),
+    catalogGetTrending({ mediaType: "show", limit: LIMIT }),
+    catalogGetPopular({ mediaType: "movie", limit: LIMIT }),
+    catalogGetPopular({ mediaType: "show", limit: LIMIT }),
+  ]);
 
-async function fetchDiscoveryPool(favoriteProviderIds: string[], region: string) {
-  const today = todayIso();
-  const providerList = favoriteProviderIds.join("|");
-  const sources: Array<Promise<SorteioItem[]>> = [
-    safeTmdb("/trending/movie/day", "movie", "trending_day"),
-    safeTmdb("/trending/tv/day", "tv", "trending_day"),
-    safeTmdb("/trending/movie/week", "movie", "trending_week"),
-    safeTmdb("/trending/tv/week", "tv", "trending_week"),
-    safeTmdb("/movie/popular", "movie", "popular"),
-    safeTmdb("/tv/popular", "tv", "popular"),
-    safeTmdb("/movie/top_rated", "movie", "top_rated"),
-    safeTmdb("/tv/top_rated", "tv", "top_rated"),
-    safeTmdb("/discover/movie", "movie", "discover_movie", {
-      include_adult: false,
-      "release_date.lte": today,
-      "vote_count.gte": 80,
-      sort_by: "popularity.desc",
-      region,
-    }),
-    safeTmdb("/discover/tv", "tv", "discover_tv", {
-      "first_air_date.lte": today,
-      "vote_count.gte": 60,
-      sort_by: "popularity.desc",
-      watch_region: region,
-    }),
-  ];
+  const sourceNames = [
+    "balloonerismm_trending_movie",
+    "balloonerismm_trending_tv",
+    "balloonerismm_popular_movie",
+    "balloonerismm_popular_tv",
+  ] as const;
 
-  for (const genre of DISCOVERY_GENRES) {
-    sources.push(safeTmdb("/discover/movie", "movie", `popular_genre_movie_${genre}`, {
-      include_adult: false,
-      "release_date.lte": today,
-      "vote_count.gte": 80,
-      with_genres: genre,
-      sort_by: "popularity.desc",
-      region,
-    }));
-    sources.push(safeTmdb("/discover/tv", "tv", `popular_genre_tv_${genre}`, {
-      "first_air_date.lte": today,
-      "vote_count.gte": 60,
-      with_genres: genre,
-      sort_by: "popularity.desc",
-      watch_region: region,
-    }));
-  }
-
-  for (const language of DISCOVERY_LANGUAGES) {
-    sources.push(safeTmdb("/discover/movie", "movie", `popular_language_movie_${language}`, {
-      include_adult: false,
-      "release_date.lte": today,
-      "vote_count.gte": 80,
-      with_original_language: language,
-      sort_by: "popularity.desc",
-      region,
-    }));
-    sources.push(safeTmdb("/discover/tv", "tv", `popular_language_tv_${language}`, {
-      "first_air_date.lte": today,
-      "vote_count.gte": 60,
-      with_original_language: language,
-      sort_by: "popularity.desc",
-      watch_region: region,
-    }));
-  }
-
-  // Busca múltiplas páginas para fontes de provider — são as mais relevantes para
-  // "meus streamings" e o TMDB confirma a disponibilidade diretamente no filtro.
-  const PROVIDER_POOL_PAGES = 5;
-  if (providerList) {
-    for (let page = 1; page <= PROVIDER_POOL_PAGES; page++) {
-      sources.push(safeTmdb("/discover/movie", "movie", "popular_provider_movie", {
-        include_adult: false,
-        "release_date.lte": today,
-        "vote_count.gte": 40,
-        watch_region: region,
-        with_watch_providers: providerList,
-        with_watch_monetization_types: "flatrate",
-        sort_by: "popularity.desc",
-        page,
-      }));
-      sources.push(safeTmdb("/discover/tv", "tv", "popular_provider_tv", {
-        "first_air_date.lte": today,
-        "vote_count.gte": 30,
-        watch_region: region,
-        with_watch_providers: providerList,
-        with_watch_monetization_types: "flatrate",
-        sort_by: "popularity.desc",
-        page,
-      }));
+  const items: SorteioItem[] = [];
+  for (let i = 0; i < sources.length; i++) {
+    const result = sources[i];
+    if (result.status === "rejected") {
+      console.warn("[sorteio-engine] balloonerismm source failed", { source: sourceNames[i], err: result.reason });
+      continue;
+    }
+    for (const catalogItem of result.value) {
+      const normalized = normalizeCatalogResult(catalogItem, sourceNames[i]);
+      if (normalized) items.push(normalized);
     }
   }
+  return items;
+}
 
-  const settled = await Promise.all(sources);
-  const items = dedupe(settled.flat()).filter((item) => {
+async function fetchLocalDiscovery(): Promise<SorteioItem[]> {
+  const rows = await db.poplog3Title.findMany({
+    where: { posterPath: { not: null } },
+    orderBy: { popularity: "desc" },
+    take: 300,
+    select: {
+      tmdbId: true,
+      mediaType: true,
+      title: true,
+      originalTitle: true,
+      posterPath: true,
+      backdropPath: true,
+      releaseDate: true,
+      firstAirDate: true,
+      voteAverage: true,
+      popularity: true,
+      originalLanguage: true,
+    },
+  });
+
+  return rows
+    .map((row): SorteioItem | null => {
+      const mediaType = row.mediaType as MediaType;
+      const date = mediaType === "movie" ? dateOnly(row.releaseDate) : dateOnly(row.firstAirDate);
+      const title = row.title ?? row.originalTitle;
+      if (!title?.trim() || !row.posterPath || !isPastOrToday(date)) return null;
+      return {
+        id: row.tmdbId,
+        media_type: mediaType,
+        title: title.trim(),
+        original_title: row.originalTitle ?? null,
+        poster_path: row.posterPath,
+        backdrop_path: row.backdropPath ?? null,
+        release_date: mediaType === "movie" ? date ?? "" : "",
+        first_air_date: mediaType === "tv" ? date ?? "" : "",
+        vote_average: row.voteAverage === null ? 0 : Number(row.voteAverage),
+        vote_count: 0,
+        popularity: row.popularity === null ? 0 : Number(row.popularity),
+        overview: "",
+        genre_ids: [],
+        original_language: row.originalLanguage ?? null,
+        availability_scope: "none",
+        sorteio_source: "local_db",
+      };
+    })
+    .filter((item): item is SorteioItem => item !== null);
+}
+
+async function fetchDiscoveryPool(_favoriteProviderIds: string[], _region: string): Promise<{ items: SorteioItem[]; poolSource: string; skippedReasons: string[] }> {
+  const skippedReasons: string[] = [];
+  const [balloonerismmItems, localItems] = await Promise.all([
+    fetchBalloonerismmDiscovery().catch((err) => {
+      console.warn("[sorteio-engine] fetchBalloonerismmDiscovery failed", err);
+      skippedReasons.push("balloonerismm_unavailable");
+      return [] as SorteioItem[];
+    }),
+    fetchLocalDiscovery().catch((err) => {
+      console.warn("[sorteio-engine] fetchLocalDiscovery failed", err);
+      skippedReasons.push("local_db_unavailable");
+      return [] as SorteioItem[];
+    }),
+  ]);
+
+  const poolSource = balloonerismmItems.length > 0 ? "balloonerismm+local_db" : "local_db";
+  const items = dedupe([...balloonerismmItems, ...localItems]).filter((item) => {
     if (!item.poster_path || !item.title || !isPastOrToday(itemDate(item))) return false;
-    if (item.sorteio_source?.includes("top_rated") && item.vote_count < 1000) return false;
     return true;
   });
 
-  return items;
+  return { items, poolSource, skippedReasons };
 }
 
 async function fetchLibraryRows(userId: string) {
@@ -580,15 +554,23 @@ export async function buildSorteioPool(userId: string, filters: SorteioFilters):
   const libraryKeys = new Set(libraryRows.map((row) => `${row.media_type}-${row.tmdb_id}`));
   const excludedKeys = new Set([...libraryKeys, ...notInterestedKeys]);
 
-  const initialItems = filters.mode === "watchlist"
-    ? await fetchWatchlistPool(userId)
-    : (await fetchDiscoveryPool([...favoriteProviderIds], region)).filter(
-        (item) => !excludedKeys.has(`${item.media_type}-${item.id}`),
-      );
+  let poolSource = "watchlist";
+  let skippedReasons: string[] = [];
+
+  let initialItems: SorteioItem[];
+  if (filters.mode === "watchlist") {
+    initialItems = await fetchWatchlistPool(userId);
+  } else {
+    const discovery = await fetchDiscoveryPool([...favoriteProviderIds], region);
+    poolSource = discovery.poolSource;
+    skippedReasons = discovery.skippedReasons;
+    initialItems = discovery.items.filter(
+      (item) => !excludedKeys.has(`${item.media_type}-${item.id}`),
+    );
+  }
 
   if (filters.mode === "discovery") {
     await enrichAvailability(initialItems, favoriteProviderIds, region);
-
   }
 
   const strictCandidates = initialItems.filter((item) => {
@@ -630,6 +612,9 @@ export async function buildSorteioPool(userId: string, filters: SorteioFilters):
       recentDemotedCount,
       totalBeforeFallback: strictCandidates.length,
       poolCount: weighted.length,
+      usedTmdbApi: false,
+      poolSource,
+      skippedReasons,
     },
   };
 }
