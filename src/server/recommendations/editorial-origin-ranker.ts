@@ -1,4 +1,3 @@
-import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import type {
   PoplogTitleCompany,
   PoplogTitleDetails,
@@ -155,20 +154,9 @@ function editorialOriginScore(
 }
 
 async function fetchRecommendationEditorialDetails(
-  item: PoplogTitleRecommendation,
+  _item: PoplogTitleRecommendation,
 ): Promise<TmdbEditorialDetails | null> {
-  try {
-    return await tmdbFetch<TmdbEditorialDetails>(`/${item.media_type}/${item.id}`, {
-      params: { language: "pt-BR" },
-      revalidate: 86400,
-    });
-  } catch (error) {
-    console.warn(
-      `[editorial-origin-ranker] detalhes indisponiveis para ${item.media_type}/${item.id}:`,
-      error instanceof Error ? error.message : error,
-    );
-    return null;
-  }
+  return null;
 }
 
 export async function rankRecommendationsByEditorialOrigin(params: {

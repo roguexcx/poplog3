@@ -1,4 +1,4 @@
-// -- /api/ics/agenda ────────────────────────────────────────────────────────────
+﻿// -- /api/ics/agenda ────────────────────────────────────────────────────────────
 // Pipeline: ICS fetch -> parse -> engine -> enriquecimento TMDB -> resposta JSON.
 //
 // REGRA DE FONTE (permanente):
@@ -35,7 +35,6 @@ import {
   fetchTmdbTrendingFeed,
   isTmdbFeedEnabled,
 } from "@/lib/radar/tmdb-trending-feed";
-import { buildTmdbUrl, buildTmdbHeaders, getTmdbToken } from "@/server/api-clients/tmdb/client";
 
 // Nao usar cache do Next.js — gerenciamos o cache manualmente no Supabase
 export const revalidate = 0;
@@ -201,170 +200,15 @@ type TmdbReleaseDatesResponse = {
 };
 
 async function fetchMovieReleaseDateBR(
-  tmdbId: number,
-  token: string,
-  globalReleaseDate: string | undefined,
+  _tmdbId: number,
+  _token: string,
+  _globalReleaseDate: string | undefined,
 ): Promise<{ date: string; confidence: CinemaReleaseGroup["dateConfidence"] } | null> {
-  try {
-    const res = await fetch(
-      buildTmdbUrl(`/movie/${tmdbId}/release_dates`),
-      { headers: buildTmdbHeaders(token) },
-    );
-    if (!res.ok) {
-      if (globalReleaseDate) return { date: globalReleaseDate, confidence: "cinema_global_fallback" };
-      return null;
-    }
-    const data = await res.json() as TmdbReleaseDatesResponse;
-
-    const brEntry = (data.results ?? []).find((r) => r.iso_3166_1 === "BR");
-    if (brEntry) {
-      const theatrical = brEntry.release_dates
-        .filter((rd) => rd.type === 3 && rd.release_date)
-        .sort((a, b) => a.release_date.localeCompare(b.release_date))[0];
-      if (theatrical?.release_date) {
-        return {
-          date: theatrical.release_date.slice(0, 10),
-          confidence: "cinema_br_confirmed",
-        };
-      }
-      const anyBr = brEntry.release_dates
-        .filter((rd) => rd.release_date)
-        .sort((a, b) => a.release_date.localeCompare(b.release_date))[0];
-      if (anyBr?.release_date) {
-        return {
-          date: anyBr.release_date.slice(0, 10),
-          confidence: "cinema_global_fallback",
-        };
-      }
-    }
-
-    if (globalReleaseDate) {
-      return { date: globalReleaseDate, confidence: "cinema_global_fallback" };
-    }
-
-    return null;
-  } catch {
-    if (globalReleaseDate) return { date: globalReleaseDate, confidence: "cinema_global_fallback" };
-    return null;
-  }
+  return null;
 }
 
-async function fetchCinemaReleasesBR(token: string): Promise<CinemaReleaseGroup[]> {
-  const today = dateAdd(0);
-  const tenDaysAgo = dateAdd(-10);
-  const thirtyDaysAhead = dateAdd(30);
-
-  const [discoveryPast, discoveryFuture, upcomingBR] = await Promise.all([
-    (async (): Promise<TmdbMovieListItem[]> => {
-      try {
-        const res = await fetch(
-          buildTmdbUrl("/discover/movie", {
-            region: "BR",
-            sort_by: "primary_release_date.desc",
-            "primary_release_date.gte": tenDaysAgo,
-            "primary_release_date.lte": today,
-            with_release_type: "3",
-            "vote_count.gte": "0",
-            page: "1",
-          }),
-          { headers: buildTmdbHeaders(token) },
-        );
-        if (!res.ok) return [];
-        const data = await res.json() as { results?: TmdbMovieListItem[] };
-        return (data.results ?? []).filter((m) => m.id && m.title);
-      } catch { return []; }
-    })(),
-
-    (async (): Promise<TmdbMovieListItem[]> => {
-      try {
-        const tomorrow = dateAdd(1);
-        const res = await fetch(
-          buildTmdbUrl("/discover/movie", {
-            region: "BR",
-            sort_by: "primary_release_date.asc",
-            "primary_release_date.gte": tomorrow,
-            "primary_release_date.lte": thirtyDaysAhead,
-            with_release_type: "3",
-            "vote_count.gte": "0",
-            page: "1",
-          }),
-          { headers: buildTmdbHeaders(token) },
-        );
-        if (!res.ok) return [];
-        const data = await res.json() as { results?: TmdbMovieListItem[] };
-        return (data.results ?? []).filter((m) => m.id && m.title);
-      } catch { return []; }
-    })(),
-
-    (async (): Promise<TmdbMovieListItem[]> => {
-      try {
-        const res = await fetch(
-          buildTmdbUrl("/movie/upcoming", { region: "BR", page: "1" }),
-          { headers: buildTmdbHeaders(token) },
-        );
-        if (!res.ok) return [];
-        const data = await res.json() as { results?: TmdbMovieListItem[] };
-        return (data.results ?? []).filter((m) => m.id && m.title);
-      } catch { return []; }
-    })(),
-  ]);
-
-  const candidateMap = new Map<number, TmdbMovieListItem>();
-  for (const m of [...upcomingBR, ...discoveryFuture, ...discoveryPast]) {
-    if (!candidateMap.has(m.id)) candidateMap.set(m.id, m);
-  }
-  const candidates = Array.from(candidateMap.values());
-
-  console.log(`[cinema-fetch] ${candidates.length} candidatos para busca de datas BR (past=${discoveryPast.length} future=${discoveryFuture.length} upcoming=${upcomingBR.length})`);
-
-  const CONCURRENCY = 8;
-  const results: CinemaReleaseGroup[] = [];
-
-  for (let i = 0; i < candidates.length; i += CONCURRENCY) {
-    const batch = candidates.slice(i, i + CONCURRENCY);
-    const batchResults = await Promise.all(
-      batch.map(async (m) => {
-        const dateInfo = await fetchMovieReleaseDateBR(m.id, token, m.release_date);
-        if (!dateInfo) return null;
-
-        if (dateInfo.date < tenDaysAgo || dateInfo.date > thirtyDaysAhead) return null;
-
-        const group: CinemaReleaseGroup = {
-          key: `cinema-${m.id}`,
-          eventType: "movie_theatrical_release",
-          source: "tmdb_cinema_release",
-          releaseDate: dateInfo.date,
-          dateConfidence: dateInfo.confidence,
-          movie: {
-            tmdb_id: m.id,
-            name: m.title,
-            original_name: m.original_title ?? m.title,
-            release_date: m.release_date ?? null,
-            backdrop_path: m.backdrop_path ?? null,
-            poster_path: m.poster_path ?? null,
-            clean_backdrop_path: m.backdrop_path ?? null,
-            popularity: m.popularity,
-            vote_average: m.vote_average,
-            vote_count: m.vote_count,
-            original_language: m.original_language,
-            overview: m.overview ?? null,
-            genre_ids: m.genre_ids ?? [],
-            genres: (m.genre_ids ?? []).map((id) => MOVIE_GENRE_NAMES[id]).filter(Boolean),
-            origin_country: m.origin_country ?? [],
-          },
-          // Sem score editorial — distribuicao e puramente por data de estreia
-          relevanceScore: 0,
-        };
-        return group;
-      }),
-    );
-    for (const g of batchResults) {
-      if (g) results.push(g);
-    }
-  }
-
-  console.log(`[cinema-fetch] ${results.length} estreias de cinema confirmadas na janela (${tenDaysAgo} -> ${thirtyDaysAhead})`);
-  return results.sort((a, b) => a.releaseDate.localeCompare(b.releaseDate));
+async function fetchCinemaReleasesBR(_token: string): Promise<CinemaReleaseGroup[]> {
+  return [];
 }
 
 // ── Verificar cache Supabase ──────────────────────────────────────────────────
@@ -514,32 +358,11 @@ async function buildAgendaPayload(): Promise<IcsAgendaResponse> {
     includeHidden: false,
   });
 
-  // 4. Estreias de cinema BR (unica chamada ativa ao TMDB como fonte primaria).
-  //    Trending IDs removidos — sem score editorial no pipeline unificado.
-  let cinemaReleases: CinemaReleaseGroup[] = [];
-  let accessToken = "";
-  try { accessToken = getTmdbToken(); } catch { /* token not configured — cinema releases skipped */ }
-
-  if (accessToken) {
-    cinemaReleases = await fetchCinemaReleasesBR(accessToken);
-  }
+  // 4. Cinema releases — TMDB removed; skipped permanently.
+  const cinemaReleases: CinemaReleaseGroup[] = [];
 
   // Serie TMDB ativas: ZERO. Log permanente de conformidade.
-  console.log(`[radar-source] ics=${groups.length} tmdbSeries=0 cinema=${cinemaReleases.length}`);
-
-  // 5. Enriquecimento dos grupos BDS via TMDB.
-  //    Todos os grupos passam pelo enriquecimento — sem filtro por categoria aqui.
-  if (accessToken && groups.length > 0) {
-    console.log(`[ICS Agenda] enriquecendo ${groups.length} grupos BDS via TMDB...`);
-    await enrichSeriesGroups(groups, { accessToken, concurrency: 5 });
-    console.log("[ICS Agenda] enriquecimento concluido");
-  }
-
-  // 5b. Retrofill de episodios via TMDB (para grupos BDS sem episodios recentes).
-  //     TMDB retroalimenta episodios de titulos que ja vieram do BDS — nao cria grupos.
-  if (accessToken) {
-    await applyRetrofill(groups, accessToken);
-  }
+  console.log(`[radar-source] ics=${groups.length} tmdbSeries=0 cinema=0 (tmdb_disabled)`);
 
   // 6. Pos-enriquecimento: reclassificacao de reality.
   //    Sem score editorial — relevanceScore nao e mais calculado nem usado para ordenacao.

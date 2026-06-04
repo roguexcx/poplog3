@@ -10,8 +10,6 @@
 
 import type { UserSeriesProgress } from "@/server/episodes/episode-progress-service";
 import { formatError, rateLimitedWarn } from "@/server/logging/log-control";
-import { syncTmdbSeason } from "@/server/sync/sync-tmdb-season";
-import { syncTmdbTitle } from "@/server/sync/sync-tmdb-title";
 
 // ── Tipos públicos ────────────────────────────────────────────────────────────
 
@@ -181,37 +179,8 @@ async function refreshTvCatalogForStateSync(
     return cached.promise;
   }
 
-  const promise = (async () => {
-    const titleResult = await syncTmdbTitle("tv", tmdbId, {
-      force: options.force ?? false,
-    });
-
-    const rawPayload = (titleResult.rawPayload ?? {}) as Record<string, unknown>;
-    const today = new Date().toISOString().slice(0, 10);
-    const seasonsToSync = new Set<number>();
-
-    const lastSeason = readSeasonNumberFromEpisode(rawPayload.last_episode_to_air);
-    if (lastSeason !== null) seasonsToSync.add(lastSeason);
-
-    const nextSeason = readSeasonNumberFromEpisode(rawPayload.next_episode_to_air);
-    const nextAirDate = readAirDateFromEpisode(rawPayload.next_episode_to_air);
-    if (nextSeason !== null && nextAirDate !== null && nextAirDate <= today) {
-      seasonsToSync.add(nextSeason);
-    }
-
-    if (seasonsToSync.size === 0) {
-      const seasonCount = (rawPayload.number_of_seasons as number | null) ?? null;
-      if (typeof seasonCount === "number" && Number.isFinite(seasonCount) && seasonCount > 0) {
-        seasonsToSync.add(Math.floor(seasonCount));
-      }
-    }
-
-    for (const seasonNumber of seasonsToSync) {
-      await syncTmdbSeason(tmdbId, seasonNumber, {
-        force: options.force ?? false,
-      });
-    }
-  })();
+  // TMDB catalog refresh disabled
+  const promise = Promise.resolve();
 
   tvCatalogRefreshCache.set(tmdbId, {
     expiresAt: Date.now() + ttlMs,

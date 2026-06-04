@@ -11,16 +11,17 @@ IDs externos são aliases/metadados — nunca fonte primária de fluxo público.
 
 ## Regra de TMDB
 
-- `tmdb_id` pode existir como alias histórico e chave de lookup local.
-- A API TMDB (`api.themoviedb.org`) não pode ser fallback automático em fluxos públicos.
-- A API TMDB não pode ser fonte primária de nenhum fluxo público.
+- `tmdb_id` pode existir apenas como alias histórico e chave de lookup local.
+- `poster_path`, `backdrop_path`, `vote_average`, `tmdb_payload` podem persistir como campos legados no banco.
+- A API TMDB (`api.themoviedb.org`) não pode ser chamada em nenhum fluxo — público, admin ou debug.
+- Imagens já salvas no cache local continuam sendo exibidas normalmente.
 
 ## Fluxos públicos migrados
 
 | Fluxo | Status |
 |---|---|
 | Search | POPLOG-first |
-| Title details | POPLOG-first (legacy fallback apenas para títulos sem cobertura POPLOG) |
+| Title details | POPLOG-first (legacy fallback TMDB removido) |
 | Discover | POPLOG-first |
 | People | POPLOG-first |
 | Sorteio | POPLOG-first |
@@ -31,56 +32,61 @@ IDs externos são aliases/metadados — nunca fonte primária de fluxo público.
 | Movie comments | POPLOG-first |
 | For You | POPLOG-first (Balloonerismm getRelated + local DB fallback) |
 
+## Hard removal of TMDB operational infrastructure
+
+Realizado na branch `feature/balloonerismm-api-migration` (etapas 16–19 unificadas):
+
+- `src/server/api-clients/tmdb/client.ts` — **deletado**
+- `src/server/sync/sync-tmdb-title.ts` — **deletado**
+- `src/server/sync/sync-tmdb-season.ts` — **deletado**
+- `/api/debug/tmdb` — retorna 410 Gone (sem import TMDB)
+- `/api/admin/hydrate-library` — retorna 410 (TMDB hydration removed)
+- `/api/admin/hydrate-series-episodes` — retorna 410 (TMDB season hydration removed)
+- `continuity-background-refresh.ts` — sync TMDB removido (no-op)
+- `user-title-state.ts` — refresh via TMDB removido (no-op)
+- `social-context-builder.ts` — sync TMDB removido (stub minimalista)
+- `get-title-page-data.ts` — legacy TMDB fallback removido (retorna null)
+- `sync-availability.ts` — `fetchTmdbWatchProviders` retorna null (sem API call)
+- `editorial-origin-ranker.ts` — details fetch TMDB removido (retorna null)
+- `agenda-engine.ts` — `fetchLegacyAgenda` retorna arrays vazios tipados
+- `discover-service.ts` — todas as chamadas TMDB removidas (retorna [])
+- `priority-monitor.ts` — TMDB fetch removido (retorna [])
+- `home-api.ts` — todas as chamadas TMDB removidas (retorna [])
+- `lib/images/fetch.ts` — `fetchTitleImages` retorna {} (sem API call)
+- `lib/radar/tmdb-retrofill.ts` — permanentemente desativado
+- `lib/radar/tmdb-trending-feed.ts` — permanentemente desativado
+- `lib/ics-enricher.ts` — permanentemente desativado
+- `/api/ics/agenda` — cinema releases e enriquecimento TMDB removidos
+- `/api/ics/enrich` — retorna disabled (sem import TMDB)
+- `/api/poplog3/search/discovery` — retorna disabled (sem TMDB)
+- `/api/poplog3/discover/special` — retorna disabled (sem TMDB)
+
 ## ICS / Radar
 
-TMDB está controlado por feature flags — todas desligadas por padrão:
+TMDB completamente removido do pipeline ICS/Radar:
 
-| Flag | Comportamento padrão |
+| Módulo | Status |
 |---|---|
-| `ENABLE_TMDB_ICS_ENRICHMENT` | `false` (code default) |
-| `ENABLE_TMDB_RETROFILL` | `false` (code default) |
-| `ENABLE_TMDB_TRENDING_FEED` | `false` (via `.env`) |
-
-## Admin / Dev / Debug
-
-Rotas técnicas que ainda utilizam TMDB são manuais, protegidas e isoladas:
-
-| Rota | Proteção |
-|---|---|
-| `/api/debug/tmdb` | `isAdminRequest` |
-| `/api/admin/hydrate-library` | `x-admin-secret` |
-| `/api/admin/hydrate-series-episodes` | `x-admin-secret` |
-| `/api/dev/trakt-*` | `isAdminRequest` |
-
-## Detalhes de ocorrências TMDB auditadas
-
-Todos os usos restantes de `syncTmdbTitle` / `syncTmdbSeason` / `api.themoviedb.org`
-foram classificados como:
-
-- **Infraestrutura** — clientes e definições (`tmdb/client.ts`, `sync-tmdb-*.ts`)
-- **Legacy fallback explícito** — `get-title-page-data.ts` dispara somente quando
-  `primarySource === "legacy"` e o título ainda não tem cobertura POPLOG-first; emite
-  `console.warn` auditável
-- **Background sync opt-in** — `continuity-background-refresh.ts` e
-  `user-title-state.ts` disparam apenas quando chamados com flags específicas por
-  rotas admin
-- **Código exportado sem chamadas ativas** — `buildSocialContextFromTmdb` em
-  `social-context-builder.ts` é exportado mas sem callers no codebase atual
-- **Rotas admin/debug protegidas** — guard obrigatório em todas
+| ICS Enrichment | permanentemente desativado |
+| TMDB Retrofill | permanentemente desativado |
+| TMDB Trending Feed | permanentemente desativado |
+| Cinema Releases | removido do pipeline |
 
 ## Estado atual
 
-O sistema opera em modo POPLOG-first.  
-TMDB permanece apenas como alias histórico e em rotas técnicas controladas.
+O sistema opera em modo POPLOG-first com infraestrutura TMDB operacional **completamente removida**.  
+`tmdb_id` e campos legados (`poster_path`, `backdrop_path`, `vote_average`, `tmdb_payload`) 
+continuam existindo apenas como aliases/campos de banco — sem disparar nenhuma chamada TMDB.
 
-**Lint:** 0 errors (warnings pré-existentes permitidos)  
+**Lint:** 0 errors  
 **Build:** compilado com sucesso
 
-## Próximos upgrades
+## Pendências futuras
 
-- Persistir `poplogId` diretamente nas tabelas de user state.
-- Substituir hidratação admin TMDB por Balloonerismm / TVDB.
-- Remover ou substituir `buildSocialContextFromTmdb` (sem callers ativos).
-- Melhorar People com fonte alternativa ao TMDB.
-- Refinar ICS / Radar com TVDB / agenda local.
-- Melhorar recomendações com modelo local / cache.
+- Admin hydration via Balloonerismm
+- Season hydration via TVDB
+- Image backfill via providers alternativos
+- Substituir `buildSocialContextFromTmdb` (sem callers ativos, pode ser removida)
+- Melhorar People com fonte alternativa
+- Refinar ICS / Radar com TVDB / agenda local
+- Melhorar recomendações com modelo local / cache

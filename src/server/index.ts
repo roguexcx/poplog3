@@ -1,4 +1,3 @@
-export * from "./api-clients/tmdb/client";
 export * from "./normalizers/tmdb-title";
 
 export * from "./normalizers/omdb-ratings";

@@ -2,7 +2,6 @@ import { logApiCall } from "@/server/engine-logger";
 import { debugLog, formatError, isDebugEnabled, rateLimitedWarn } from "@/server/logging/log-control";
 import { motnFetch } from "@/server/api-clients/movieofthenight/client";
 import type { MotnTitleResponse } from "@/server/api-clients/movieofthenight/types";
-import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import { watchmodeFetch } from "@/server/api-clients/watchmode/client";
 import type { WatchmodeSource } from "@/server/api-clients/watchmode/types";
 
@@ -142,26 +141,10 @@ function fallbackOrigin(input: SyncAvailabilityInput): AvailabilityFallbackOrigi
 }
 
 async function fetchTmdbWatchProviders(
-  tmdbId: number,
-  mediaType: MediaType,
+  _tmdbId: number,
+  _mediaType: MediaType,
 ): Promise<TmdbWatchProvidersPayload | null> {
-  try {
-    return await tmdbFetch<TmdbWatchProvidersPayload>(
-      `/${mediaType}/${tmdbId}/watch/providers`,
-      {
-        params: { language: "en-US" },
-        revalidate: 60 * 60 * 12,
-      },
-    );
-  } catch (error) {
-    rateLimitedWarn(
-      "availability:tmdb-watch-providers-failed",
-      AVAILABILITY_LOG_TTL_MS,
-      "[availability] TMDB watch/providers falhou\n- fallback aplicado: cache ou vazio",
-      formatError(error),
-    );
-    return null;
-  }
+  return null;
 }
 
 function tmdbCategoryToType(category: string): AvailabilityType | null {

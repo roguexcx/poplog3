@@ -1,6 +1,5 @@
 import type { NewEpisodeItem } from "@/app/api/poplog3/continuity/new-episodes/route";
 import type { UpcomingEpisodeItem } from "@/app/api/poplog3/continuity/upcoming-episodes/route";
-import { tmdbFetch } from "@/server/api-clients/tmdb/client";
 import type { DiscoverMediaItem } from "@/server/agenda/discover-service";
 import { normalizeTmdbPopularity, popularityToVisualWeight } from "@/lib/score/tmdb-popularity";
 import {
@@ -145,116 +144,21 @@ function eventFromLegacyMovie(
   };
 }
 
-async function fetchLegacyAgenda() {
-  const now = new Date();
-  const today = dateAdd(0, now);
-  // Janela alinhada com a UI: 30 dias para trás (newSeries) e 30 dias para frente (soonToReturn).
-  // A janela antiga de 45/90 dias processava dados que a interface raramente exibia.
-  const thirtyDaysAgo  = dateAdd(-30, now);
-  const eightDaysAhead = dateAdd(8, now);
-  const thirtyDaysAhead = dateAdd(30, now);
-
-  const [
-    nowPlayingRes,
-    upcomingRes,
-    airingTodayRes1,
-    airingTodayRes2,
-    onTheAirRes1,
-    onTheAirRes2,
-    newSeriesRes,
-    soonToReturnRes1,
-    soonToReturnRes2,
-  ] = await Promise.allSettled([
-    tmdbFetch<TmdbPageResult<TmdbMovie>>("/movie/now_playing", {
-      params: { region: "BR", page: 1 },
-      revalidate: 3600 * 6,
-    }),
-    tmdbFetch<TmdbPageResult<TmdbMovie>>("/movie/upcoming", {
-      params: { region: "BR", page: 1 },
-      revalidate: 3600 * 6,
-    }),
-    tmdbFetch<TmdbPageResult<TmdbTv>>("/tv/airing_today", {
-      params: { page: 1 },
-      revalidate: 3600 * 2,
-    }),
-    tmdbFetch<TmdbPageResult<TmdbTv>>("/tv/airing_today", {
-      params: { page: 2 },
-      revalidate: 3600 * 2,
-    }),
-    tmdbFetch<TmdbPageResult<TmdbTv>>("/tv/on_the_air", {
-      params: { page: 1 },
-      revalidate: 3600 * 4,
-    }),
-    tmdbFetch<TmdbPageResult<TmdbTv>>("/tv/on_the_air", {
-      params: { page: 2 },
-      revalidate: 3600 * 4,
-    }),
-    tmdbFetch<TmdbPageResult<TmdbTv>>("/discover/tv", {
-      params: {
-        "first_air_date.gte": thirtyDaysAgo,   // 30 dias (era 45)
-        "first_air_date.lte": today,
-        sort_by: "popularity.desc",
-        "vote_count.gte": "3",
-        without_genres: WITHOUT_TALK,
-        page: 1,
-      },
-      revalidate: editorialCacheTTL(),
-    }),
-    tmdbFetch<TmdbPageResult<TmdbTv>>("/discover/tv", {
-      params: {
-        "air_date.gte": eightDaysAhead,
-        "air_date.lte": thirtyDaysAhead,        // 30 dias (era 90)
-        sort_by: "popularity.desc",
-        "vote_count.gte": "20",
-        without_genres: WITHOUT_TALK,
-        page: 1,
-      },
-      revalidate: editorialCacheTTL(),
-    }),
-    tmdbFetch<TmdbPageResult<TmdbTv>>("/discover/tv", {
-      params: {
-        "air_date.gte": eightDaysAhead,
-        "air_date.lte": thirtyDaysAhead,        // 30 dias (era 90)
-        sort_by: "popularity.desc",
-        "vote_count.gte": "20",
-        without_genres: WITHOUT_TALK,
-        page: 2,
-      },
-      revalidate: editorialCacheTTL(),
-    }),
-  ]);
-
-  // Bônus BR aplicado nos arrays legados: adiciona editorial_score e br_bonus
-  // e reordena por editorial_score antes de retornar. Consistente com route.ts.
+async function fetchLegacyAgenda(): Promise<{
+  nowPlaying: LegacyAgendaMovie[];
+  upcoming: LegacyAgendaMovie[];
+  airingToday: LegacyAgendaTv[];
+  onTheAir: LegacyAgendaTv[];
+  newSeries: LegacyAgendaTv[];
+  soonToReturn: LegacyAgendaTv[];
+}> {
   return {
-    nowPlaying:
-      nowPlayingRes.status === "fulfilled"
-        ? nowPlayingRes.value.results.map(normalizeMovie)
-        : [],
-    upcoming:
-      upcomingRes.status === "fulfilled" ? upcomingRes.value.results.map(normalizeMovie) : [],
-    airingToday: applyLegacyBrazilianBonus(
-      mergeDedup(airingTodayRes1, airingTodayRes2)
-        .filter((item) => !isTalkOrNews(item))
-        .map(normalizeTv),
-      normalizeTmdbPopularity,
-    ),
-    onTheAir: applyLegacyBrazilianBonus(
-      mergeDedup(onTheAirRes1, onTheAirRes2)
-        .filter((item) => !isTalkOrNews(item))
-        .map(normalizeTv),
-      normalizeTmdbPopularity,
-    ),
-    newSeries: applyLegacyBrazilianBonus(
-      newSeriesRes.status === "fulfilled"
-        ? newSeriesRes.value.results.filter((item) => !isTalkOrNews(item)).map(normalizeTv)
-        : [],
-      normalizeTmdbPopularity,
-    ),
-    soonToReturn: applyLegacyBrazilianBonus(
-      mergeDedup(soonToReturnRes1, soonToReturnRes2).map(normalizeTv),
-      normalizeTmdbPopularity,
-    ),
+    nowPlaying: [],
+    upcoming: [],
+    airingToday: [],
+    onTheAir: [],
+    newSeries: [],
+    soonToReturn: [],
   };
 }
 

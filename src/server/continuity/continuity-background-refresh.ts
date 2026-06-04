@@ -1,7 +1,5 @@
 import { isTitleCacheFresh } from "@/server/cache/is-title-cache-fresh";
 import { isSeasonCacheFresh } from "@/server/cache/season-cache";
-import { syncTmdbSeason } from "@/server/sync/sync-tmdb-season";
-import { syncTmdbTitle } from "@/server/sync/sync-tmdb-title";
 
 type MediaType = "movie" | "tv";
 
@@ -69,28 +67,8 @@ export function scheduleContinuityTitleRefresh(input: {
       const key = `title:${target.mediaType}:${target.tmdbId}`;
       if (!shouldStartRefresh(key)) return;
 
-      const startedAt = Date.now();
-      try {
-        const result = await syncTmdbTitle(target.mediaType, target.tmdbId, {
-          force: false,
-        });
-        console.log("[continuity-background-refresh/title]", {
-          context: input.context,
-          mediaType: target.mediaType,
-          tmdbId: target.tmdbId,
-          source: result.source,
-          cache_status: result.cache_status,
-          duration: Date.now() - startedAt,
-        });
-      } catch (error) {
-        console.warn("[continuity-background-refresh/title] failed", {
-          context: input.context,
-          mediaType: target.mediaType,
-          tmdbId: target.tmdbId,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        clearRefresh(key);
-      }
+      // TMDB title sync disabled
+      clearRefresh(key);
     }),
   );
 }
@@ -122,28 +100,8 @@ export function scheduleContinuitySeasonRefresh(input: {
       const key = `season:${target.seriesTmdbId}:${seasonNumber}`;
       if (!shouldStartRefresh(key)) return;
 
-      const startedAt = Date.now();
-      try {
-        const result = await syncTmdbSeason(target.seriesTmdbId, seasonNumber, {
-          force: false,
-        });
-        console.log("[continuity-background-refresh/season]", {
-          context: input.context,
-          seriesTmdbId: target.seriesTmdbId,
-          seasonNumber,
-          source: result.source,
-          cache_status: result.cache_status,
-          duration: Date.now() - startedAt,
-        });
-      } catch (error) {
-        console.warn("[continuity-background-refresh/season] failed", {
-          context: input.context,
-          seriesTmdbId: target.seriesTmdbId,
-          seasonNumber,
-          error: error instanceof Error ? error.message : String(error),
-        });
-        clearRefresh(key);
-      }
+      // TMDB season sync disabled
+      clearRefresh(key);
     }),
   );
 }

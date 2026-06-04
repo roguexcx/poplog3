@@ -1,5 +1,3 @@
-import { syncTmdbTitle } from "@/server/sync/sync-tmdb-title";
-import { syncTmdbSeason } from "@/server/sync/sync-tmdb-season";
 
 export type SocialMediaType = "movie" | "tv";
 
@@ -196,146 +194,39 @@ function buildTitleAliases(params: {
 export async function buildSocialContextFromTmdb(
   input: SocialContextInput,
 ): Promise<SocialContext> {
-  const titleResult = await syncTmdbTitle(input.mediaType, input.tmdbId, {
-    force: input.force,
-  });
-
-  const title = titleResult.title as any;
-
-  const displayTitle = clean(title?.title || title?.name || "Untitled");
-  const originalTitle = clean(title?.original_title || title?.original_name) || null;
-
-  const translatedTitle =
-    originalTitle && compact(originalTitle) !== compact(displayTitle)
-      ? displayTitle
-      : null;
-
-  const canonicalTitle = originalTitle || displayTitle;
-
-  const releaseYear = getTitleYear(title);
-
-  let seasonSource: "cache" | "tmdb" | undefined;
-  let episode: SocialContext["episode"] = null;
-
-  if (
+  const episode: SocialContext["episode"] =
     input.mediaType === "tv" &&
     typeof input.seasonNumber === "number" &&
     typeof input.episodeNumber === "number"
-  ) {
-    const seasonResult = await syncTmdbSeason(input.tmdbId, input.seasonNumber, {
-      force: input.force,
-    });
-
-    seasonSource = seasonResult.source;
-
-    if (seasonResult.season) {
-      episode = getEpisodeFromSeason(
-        seasonResult.season,
-        input.episodeNumber,
-      );
-    }
-
-    if (!episode) {
-      episode = {
-        seasonNumber: input.seasonNumber,
-        episodeNumber: input.episodeNumber,
-        code: getEpisodeCode(input.seasonNumber, input.episodeNumber),
-        title: null,
-        overview: null,
-        airDate: null,
-      };
-    } else {
-      // O seasonNumber e o code do episódio são sempre derivados do input,
-      // não do dado cacheado do TMDB — o cache pode estar desatualizado
-      // (ex: gravado antes da temporada N existir, retornando season_number errado).
-      // O input vem diretamente da seleção do usuário na UI e é sempre autoritativo.
-      episode = {
-        ...episode,
-        seasonNumber: input.seasonNumber,
-        episodeNumber: input.episodeNumber,
-        code: getEpisodeCode(input.seasonNumber, input.episodeNumber),
-      };
-    }
-  }
-
-  const creators = namesFrom(title?.created_by, 8);
-
-  const directors = crewByJob(title?.crew, ["Director"], 8);
-
-  const writers = crewByJob(
-    title?.crew,
-    ["Writer", "Screenplay", "Story", "Teleplay", "Author"],
-    8,
-  );
-
-  const cast = namesFrom(title?.cast, 12);
-
-  const genres = namesFrom(title?.genres, 12);
-  const networks = namesFrom(title?.networks, 8);
-  const productionCompanies = namesFrom(title?.production_companies, 8);
-
-  const collectionName = title?.belongs_to_collection?.name ?? null;
-
-  const titleAliases = buildTitleAliases({
-    title: displayTitle,
-    originalTitle,
-    translatedTitle,
-  });
-
-  const requiredTitleAliases = unique([
-    canonicalTitle,
-    originalTitle,
-    displayTitle,
-    translatedTitle,
-  ]);
-
-  const contextTerms = unique([
-    episode?.title,
-    episode?.code,
-    ...creators,
-    ...directors,
-    ...writers,
-    ...cast.slice(0, 6),
-    ...genres,
-    ...networks,
-    ...productionCompanies,
-    collectionName,
-    releaseYear ? String(releaseYear) : null,
-  ]);
+      ? {
+          seasonNumber: input.seasonNumber,
+          episodeNumber: input.episodeNumber,
+          code: getEpisodeCode(input.seasonNumber, input.episodeNumber),
+          title: null,
+          overview: null,
+          airDate: null,
+        }
+      : null;
 
   return {
     tmdbId: input.tmdbId,
     mediaType: input.mediaType,
-
-    canonicalTitle,
-    originalTitle,
-    translatedTitle,
-    releaseYear,
-
-    requiredTitleAliases,
-    titleAliases,
-    contextTerms,
-
+    canonicalTitle: String(input.tmdbId),
+    originalTitle: null,
+    translatedTitle: null,
+    releaseYear: null,
+    requiredTitleAliases: [],
+    titleAliases: [],
+    contextTerms: [],
     episode,
-
-    people: {
-      creators,
-      directors,
-      writers,
-      cast,
-    },
-
+    people: { creators: [], directors: [], writers: [], cast: [] },
     metadata: {
-      genres,
-      networks,
-      productionCompanies,
-      collectionName,
-      originalLanguage: title?.original_language ?? null,
+      genres: [],
+      networks: [],
+      productionCompanies: [],
+      collectionName: null,
+      originalLanguage: null,
     },
-
-    debug: {
-      titleSource: titleResult.source,
-      seasonSource,
-    },
+    debug: { titleSource: "cache" },
   };
 }
