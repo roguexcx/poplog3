@@ -13,6 +13,17 @@ import type {
   BalloonerismExternalIds,
   BalloonerismGenreList,
 } from "@/server/api-clients/balloonerismm/types";
+import {
+  resolveExternalIdsForTitle,
+  resolveTmdbIdFromImdbId,
+  isExternalIdsEnabled,
+} from "@/server/titles/balloonerismm-external-ids";
+import {
+  getBalloonerismProviders,
+  isProvidersEnabled,
+  isProvidersDebugOnly,
+} from "@/server/titles/balloonerismm-providers";
+import type { MediaType } from "@prisma/client";
 
 type DebugResult = {
   ok: boolean;
@@ -114,8 +125,78 @@ export async function GET(request: Request): Promise<NextResponse> {
     } else if (type === "discover-tv") {
       endpoint = "/discover/tv";
       data = await balloonerismGet<BalloonerismSearchResult[]>("/discover/tv", { ttlSeconds: 0 });
+
+    // ── Etapa 3: cross-reference e providers ────────────────────────────────
+
+    } else if (type === "external-ids" || type === "cross-ref") {
+      const media = (url.searchParams.get("media") ?? "movie") as MediaType;
+      if (!id) return errorResponse("Param id obrigatorio para type=external-ids|cross-ref");
+
+      const isImdbId = id.startsWith("tt");
+
+      if (type === "external-ids") {
+        // type=external-ids: resolve via Balloonerismm /external_ids (raw)
+        if (!isImdbId) return errorResponse("type=external-ids requer IMDb ID (tt...)");
+        const bPath = media === "movie"
+          ? `/movie/${id}/external_ids`
+          : `/tv/${id}/external_ids`;
+        endpoint = bPath;
+        data = await balloonerismGet<BalloonerismExternalIds>(bPath, { ttlSeconds: 0 });
+      } else {
+        // type=cross-ref: resolução completa IMDb ↔ TMDB via DB + Balloonerismm
+        let tmdbId: number | null = null;
+        if (isImdbId) {
+          tmdbId = await resolveTmdbIdFromImdbId(id, media);
+          endpoint = `cross-ref(imdbId=${id} → tmdbId=${tmdbId ?? "not_found"})`;
+          if (!tmdbId) {
+            data = {
+              resolved: false,
+              reason: "IMDb ID not found in title_external_ids cache. Sync the title via TMDB first.",
+              imdbId: id,
+              mediaType: media,
+              externalIdsEnabled: isExternalIdsEnabled(),
+            };
+          } else {
+            data = await resolveExternalIdsForTitle(tmdbId, media);
+          }
+        } else {
+          const numericId = parseInt(id, 10);
+          if (!Number.isFinite(numericId) || numericId <= 0) {
+            return errorResponse("id deve ser IMDb ID (tt...) ou TMDB ID numerico positivo");
+          }
+          tmdbId = numericId;
+          endpoint = `cross-ref(tmdbId=${tmdbId})`;
+          data = await resolveExternalIdsForTitle(tmdbId, media);
+        }
+      }
+
+    } else if (type === "providers") {
+      const media = (url.searchParams.get("media") ?? "movie") as "movie" | "tv";
+      const region = url.searchParams.get("region") ?? undefined;
+      if (!id) return errorResponse("Param id obrigatorio para type=providers (IMDb ID)");
+      if (!id.startsWith("tt")) return errorResponse("type=providers requer IMDb ID (tt...)");
+
+      endpoint = `providers(imdbId=${id}, media=${media}${region ? `, region=${region}` : ""})`;
+
+      if (!isProvidersEnabled() && !isProvidersDebugOnly()) {
+        data = {
+          available: false,
+          reason: "BALLOONERISMM_PROVIDERS_ENABLED=false e BALLOONERISMM_PROVIDERS_DEBUG_ONLY=false",
+        };
+      } else {
+        const providers = await getBalloonerismProviders(id, media, region);
+        data = {
+          available: providers !== null,
+          count: providers?.length ?? 0,
+          providersEnabled: isProvidersEnabled(),
+          debugOnly: isProvidersDebugOnly(),
+          providers: providers ?? [],
+          note: "Providers Balloonerismm não são persistidos em DB (AvailabilitySource enum não inclui balloonerismm).",
+        };
+      }
+
     } else {
-      return errorResponse(`type desconhecido: ${type}. Valores validos: search, search-movie, search-tv, popular, popular-movie, popular-tv, movie, movie-credits, movie-external-ids, tv, tv-credits, tv-external-ids, person, person-credits, genre-movie, genre-tv, discover-movie, discover-tv`);
+      return errorResponse(`type desconhecido: ${type}. Valores validos: search, search-movie, search-tv, popular, popular-movie, popular-tv, movie, movie-credits, movie-external-ids, tv, tv-credits, tv-external-ids, person, person-credits, genre-movie, genre-tv, discover-movie, discover-tv, external-ids, cross-ref, providers`);
     }
   } catch (err) {
     error = err instanceof Error ? err.message : String(err);
