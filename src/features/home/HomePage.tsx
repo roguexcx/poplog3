@@ -10,7 +10,7 @@ import {
 } from "@/features/home/home-utils";
 
 import { getCurrentUser } from "@/server/auth/get-current-user";
-import { buildTmdbUrl } from "@/lib/images";
+import { buildTmdbUrlLoose } from "@/lib/images";
 import { getMediaType, getTitle } from "@/lib/tmdb-utils";
 
 export const dynamic = "force-dynamic";
@@ -54,11 +54,11 @@ export default async function HomePage() {
     : "Destaque do momento";
 
   const backdropUrl = featuredItem
-    ? buildTmdbUrl("backdrop", "hero", featuredItem.backdrop_path)
+    ? buildTmdbUrlLoose("backdrop", "hero", featuredItem.backdrop_path)
     : null;
 
   const posterUrl = featuredItem
-    ? buildTmdbUrl("poster", "detail", featuredItem.poster_path)
+    ? buildTmdbUrlLoose("poster", "detail", featuredItem.poster_path)
     : null;
 
   const year = parseYear(

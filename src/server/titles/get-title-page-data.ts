@@ -43,6 +43,8 @@ import {
   type PoplogTitleDetailsResult,
 } from "@/server/titles/poplog-title-details";
 import type { PoplogTitleSourceHint } from "@/server/titles/poplog-title-identity";
+import { catalogGetRelated } from "@/server/source-engine/engine";
+import type { TitleRecommendation } from "@/features/title/types";
 
 type MediaType = "movie" | "tv";
 
@@ -255,8 +257,29 @@ export async function getTitlePageData(
       const legacyTmdbId = poplogDetails?.externalIds.tmdbId;
 
       if (poplogDetails && poplogDetails.sourceMeta.primarySource !== "legacy") {
+        const base = poplogDetailsToTitlePageData(poplogDetails, country);
+
+        const currentUser = await getCurrentUser().catch(() => null);
+        const isAuthenticated = Boolean(currentUser?.id);
+
+        const imdbId = poplogDetails.externalIds.imdbId;
+        const catalogMediaType = mediaType === "tv" ? "show" : "movie";
+        const relatedRaw = imdbId
+          ? await catalogGetRelated({ mediaType: catalogMediaType, imdbId }).catch(() => [])
+          : [];
+        const recommendations: TitleRecommendation[] = relatedRaw.slice(0, 12).map((r) => ({
+          id: r.ids.imdbId ?? r.ids.tmdbId ?? r.title,
+          mediaType: r.mediaType === "show" ? "tv" : "movie",
+          title: r.title,
+          originalTitle: r.originalTitle ?? null,
+          year: r.year ?? null,
+          posterPath: r.posterPath ?? null,
+        }));
+
         return {
-          ...poplogDetailsToTitlePageData(poplogDetails, country),
+          ...base,
+          userState: { ...base.userState, isAuthenticated },
+          recommendations,
           ...(debugSource
             ? { debugSource: getPoplogTitleDetailsDebugSource(poplogDetails) }
             : {}),
