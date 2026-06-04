@@ -103,6 +103,29 @@ function countFields(obj: Record<string, unknown>): number {
   return Object.values(obj).filter((v) => v !== null && v !== undefined).length;
 }
 
+// ─── Array extraction helper ─────────────────────────────────────────────────
+
+/**
+ * Extrai array de uma resposta da API que pode vir como array direto ou
+ * como objeto wrapper ({ results, data, items }). Loga as keys quando o
+ * formato for inválido para facilitar diagnóstico.
+ */
+function extractArray<T>(raw: unknown, path: string): T[] {
+  if (Array.isArray(raw)) return raw as T[];
+  if (raw !== null && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    if (Array.isArray(obj.results)) return obj.results as T[];
+    if (Array.isArray(obj.data)) return obj.data as T[];
+    if (Array.isArray(obj.items)) return obj.items as T[];
+    console.warn(
+      `[balloonerismm] formato inválido em ${path} — keys recebidas: ${Object.keys(obj).join(", ")}`
+    );
+    return [];
+  }
+  console.warn(`[balloonerismm] resposta inesperada em ${path} — tipo: ${typeof raw}`);
+  return [];
+}
+
 // ─── Converters ───────────────────────────────────────────────────────────────
 
 function balloonerismMovieToTitle(movie: BalloonerismMovie): CatalogTitle {
@@ -180,12 +203,14 @@ export const balloonerismAdapter: CatalogAdapter = {
       params.mediaType === "movie" ? "/search/movie"
       : params.mediaType === "show" ? "/search/tv"
       : "/search/multi";
-    const data = await balloonerismGet<BalloonerismSearchResult[]>(path, {
+    const raw = await balloonerismGet<unknown>(path, {
       params: { query: params.query, page: params.page ?? 1 },
       ttlSeconds: 3600,
     });
-    if (!data) return [];
-    return data.map(searchItemToResult);
+    if (raw === null) return [];
+    const items = extractArray<BalloonerismSearchResult>(raw, path);
+    console.log(`[balloonerismm] searchTitles path=${path} count=${items.length}`);
+    return items.map(searchItemToResult);
   },
 
   // ── Filme ──────────────────────────────────────────────────────────────────
@@ -224,24 +249,24 @@ export const balloonerismAdapter: CatalogAdapter = {
 
   async getTrending(params: TrendingParams): Promise<CatalogSearchResult[]> {
     const path = params.mediaType === "movie" ? "/popular/movie" : "/popular/tv";
-    const data = await balloonerismGet<BalloonerismPopularItem[]>(path, {
+    const raw = await balloonerismGet<unknown>(path, {
       params: { limit: params.limit ?? 20, page: params.page ?? 1 },
       ttlSeconds: 3600,
     });
-    if (!data) return [];
-    return data.map(searchItemToResult);
+    if (raw === null) return [];
+    return extractArray<BalloonerismPopularItem>(raw, path).map(searchItemToResult);
   },
 
   // ── Popular ────────────────────────────────────────────────────────────────
 
   async getPopular(params: PopularParams): Promise<CatalogSearchResult[]> {
     const path = params.mediaType === "movie" ? "/popular/movie" : "/popular/tv";
-    const data = await balloonerismGet<BalloonerismPopularItem[]>(path, {
+    const raw = await balloonerismGet<unknown>(path, {
       params: { limit: params.limit ?? 20, page: params.page ?? 1 },
       ttlSeconds: 21600,
     });
-    if (!data) return [];
-    return data.map(searchItemToResult);
+    if (raw === null) return [];
+    return extractArray<BalloonerismPopularItem>(raw, path).map(searchItemToResult);
   },
 
   // ── Relacionados ───────────────────────────────────────────────────────────
@@ -250,12 +275,12 @@ export const balloonerismAdapter: CatalogAdapter = {
     const id = resolveId(params);
     if (!id) return [];
     const path = params.mediaType === "movie" ? `/movie/${id}/similar` : `/tv/${id}/similar`;
-    const data = await balloonerismGet<BalloonerismSearchResult[]>(path, {
+    const raw = await balloonerismGet<unknown>(path, {
       params: { limit: 10 },
       ttlSeconds: 86400,
     });
-    if (!data) return [];
-    return data.map(searchItemToResult);
+    if (raw === null) return [];
+    return extractArray<BalloonerismSearchResult>(raw, path).map(searchItemToResult);
   },
 
   // ── Ratings ────────────────────────────────────────────────────────────────
