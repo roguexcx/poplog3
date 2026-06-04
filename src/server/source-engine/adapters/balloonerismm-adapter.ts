@@ -16,8 +16,6 @@ import { balloonerismGet } from "@/server/api-clients/balloonerismm/client";
 import type {
   BalloonerismMovie,
   BalloonerismShow,
-  BalloonerismSearchResult,
-  BalloonerismPopularItem,
   BalloonerismCreditsResponse,
 } from "@/server/api-clients/balloonerismm/types";
 
@@ -178,16 +176,78 @@ function balloonerismShowToTitle(show: BalloonerismShow): CatalogTitle {
   );
 }
 
-function searchItemToResult(item: BalloonerismSearchResult | BalloonerismPopularItem): CatalogSearchResult {
-  const meta = sourceMeta(item.imdb_id);
+type BalloonerismSearchLike = {
+  id?: string | number | null;
+  imdb_id?: string | null;
+  tmdb_id?: number | null;
+  tvdb_id?: number | string | null;
+  trakt_id?: number | string | null;
+  slug?: string | null;
+  media_type?: "movie" | "tv" | "show" | "person" | string | null;
+  title?: string | null;
+  name?: string | null;
+  original_title?: string | null;
+  original_name?: string | null;
+  year?: number | null;
+  release_date?: string | null;
+  first_air_date?: string | null;
+  overview?: string | null;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+  genre_ids?: Array<number | string> | null;
+  vote_average?: number | null;
+  vote_count?: number | null;
+  images?: { poster?: string | null; backdrop?: string | null };
+  ids?: { imdb?: string | null; tmdb?: number | null; tvdb?: number | string | null; trakt?: number | string | null };
+};
+
+function toNumber(value: unknown): number | undefined {
+  const numberValue = typeof value === "number" ? value : Number(value);
+  return Number.isFinite(numberValue) ? numberValue : undefined;
+}
+
+function toYear(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && /^\d{4}/.test(value)) {
+    return Number(value.slice(0, 4));
+  }
+  return undefined;
+}
+
+function searchItemToResult(item: BalloonerismSearchLike): CatalogSearchResult {
+  const itemId = typeof item.id === "string" ? item.id : undefined;
+  const imdbId = item.imdb_id ?? item.ids?.imdb ?? (itemId?.startsWith("tt") ? itemId : undefined);
+  const mediaType = item.media_type === "tv" || item.media_type === "show" ? "show" : "movie";
+  const releaseDate = item.release_date ?? undefined;
+  const firstAirDate = item.first_air_date ?? undefined;
+  const genreValues = Array.isArray(item.genre_ids) ? item.genre_ids : [];
+  const genreIds = genreValues.filter((genre): genre is number => typeof genre === "number");
+  const genres = genreValues.filter((genre): genre is string => typeof genre === "string");
+  const meta = sourceMeta(imdbId);
+
   return normalizeSearchResult(
     {
-      ids: { imdbId: item.imdb_id },
-      mediaType: item.media_type === "show" ? "show" : "movie",
-      title: item.title,
-      year: item.year,
+      ids: {
+        imdbId,
+        tmdbId: item.tmdb_id ?? item.ids?.tmdb ?? undefined,
+        tvdbId: toNumber(item.tvdb_id ?? item.ids?.tvdb),
+        traktId: toNumber(item.trakt_id ?? item.ids?.trakt),
+        balloonerismmId: itemId ?? imdbId,
+        slug: item.slug ?? undefined,
+      },
+      mediaType,
+      title: item.title ?? item.name,
+      originalTitle: item.original_title ?? item.original_name,
+      year: item.year ?? toYear(releaseDate ?? firstAirDate),
+      releaseDate,
+      firstAirDate,
       overview: item.overview,
-      posterRemoteUrl: item.images?.poster,
+      posterRemoteUrl: item.poster_path ?? item.images?.poster,
+      backdropRemoteUrl: item.backdrop_path ?? item.images?.backdrop,
+      genres,
+      genreIds,
+      voteAverage: item.vote_average,
+      voteCount: item.vote_count,
     },
     meta,
   );
@@ -208,7 +268,7 @@ export const balloonerismAdapter: CatalogAdapter = {
       ttlSeconds: 3600,
     });
     if (raw === null) return [];
-    const items = extractArray<BalloonerismSearchResult>(raw, path);
+    const items = extractArray<BalloonerismSearchLike>(raw, path);
     console.log(`[balloonerismm] searchTitles path=${path} count=${items.length}`);
     return items.map(searchItemToResult);
   },
@@ -254,7 +314,7 @@ export const balloonerismAdapter: CatalogAdapter = {
       ttlSeconds: 3600,
     });
     if (raw === null) return [];
-    return extractArray<BalloonerismPopularItem>(raw, path).map(searchItemToResult);
+    return extractArray<BalloonerismSearchLike>(raw, path).map(searchItemToResult);
   },
 
   // ── Popular ────────────────────────────────────────────────────────────────
@@ -266,7 +326,7 @@ export const balloonerismAdapter: CatalogAdapter = {
       ttlSeconds: 21600,
     });
     if (raw === null) return [];
-    return extractArray<BalloonerismPopularItem>(raw, path).map(searchItemToResult);
+    return extractArray<BalloonerismSearchLike>(raw, path).map(searchItemToResult);
   },
 
   // ── Relacionados ───────────────────────────────────────────────────────────
@@ -280,7 +340,7 @@ export const balloonerismAdapter: CatalogAdapter = {
       ttlSeconds: 86400,
     });
     if (raw === null) return [];
-    return extractArray<BalloonerismSearchResult>(raw, path).map(searchItemToResult);
+    return extractArray<BalloonerismSearchLike>(raw, path).map(searchItemToResult);
   },
 
   // ── Ratings ────────────────────────────────────────────────────────────────

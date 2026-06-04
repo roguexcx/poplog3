@@ -65,8 +65,8 @@ export function isBalloonerismDiscoverEnabled(): boolean {
  * Busca de títulos via adapter primário.
  * Retorna [] quando Balloonerismm está inativo — o caller usa TMDB.
  *
- * NOTA: resultados Balloonerismm têm apenas imdbId. Para rotas que precisam
- * de tmdbId (frontend), usar o cross-reference cache (Etapa 3).
+ * NOTA: resultados externos devem ser interpretados como aliases. Callers que
+ * ainda expõem tmdb_id ao frontend devem usar a hidratação POPLOG-first.
  */
 export async function catalogSearch(
   params: SearchParams,
@@ -103,7 +103,7 @@ export async function catalogGetShow(
 
 /**
  * Títulos populares via adapter primário.
- * NOTA: resultados têm imdbId, sem tmdbId — cross-reference necessário (Etapa 3).
+ * NOTA: resultados podem vir sem tmdbId; esse ID é apenas alias histórico.
  */
 export async function catalogGetPopular(
   params: PopularParams,

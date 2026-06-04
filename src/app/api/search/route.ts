@@ -16,7 +16,10 @@ import {
   catalogSearch,
   isBalloonerismSearchEnabled,
 } from "@/server/source-engine/engine";
-import { hydrateCatalogResults } from "@/server/source-engine/hydrate-catalog-results";
+import {
+  hydrateCatalogResultsWithDebug,
+  type HydrationDebug,
+} from "@/server/source-engine/hydrate-catalog-results";
 
 function fuzzyMatchToTmdbSummary(
   title: Awaited<ReturnType<typeof findCachedFuzzyTitles>>[number]
@@ -45,6 +48,7 @@ function fuzzyMatchToTmdbSummary(
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const query = searchParams.get("q")?.trim();
+  const debugSource = searchParams.get("debugSource") === "1";
 
   if (!query) {
     return NextResponse.json(
@@ -68,11 +72,15 @@ export async function GET(request: NextRequest) {
     }
 
     // ── Balloonerismm primary path ────────────────────────────────────────────
+    let balloonerismmDebug: HydrationDebug | null = null;
     if (isBalloonerismSearchEnabled()) {
       try {
         const catalogResults = await catalogSearch({ query });
-        const hydrated = await hydrateCatalogResults(catalogResults);
+        const hydratedResult = await hydrateCatalogResultsWithDebug(catalogResults);
+        const hydrated = hydratedResult.titles;
+        balloonerismmDebug = hydratedResult.debug;
         const validTitles = filterValidTitles(hydrated);
+        balloonerismmDebug.searchCompatibleCount = validTitles.length;
 
         if (validTitles.length > 0) {
           const seenKeys = new Set(
@@ -105,11 +113,35 @@ export async function GET(request: NextRequest) {
             count: results.length,
             fuzzyCount: fuzzyTitles.length,
             results,
+            ...(debugSource ? { debugSource: balloonerismmDebug } : {}),
           });
         }
 
-        console.log("[search] source=balloonerismm_fallback reason=empty");
+        const fallbackReason = catalogResults.length === 0 ? "raw_empty" : "normalized_empty";
+        balloonerismmDebug.fallbackUsed = true;
+        balloonerismmDebug.fallbackReason = fallbackReason;
+        console.log(`[search] source=balloonerismm_fallback reason=${fallbackReason}`);
       } catch (err) {
+        balloonerismmDebug = {
+          source: "balloonerismm",
+          rawCount: 0,
+          normalizedCount: 0,
+          poplogResolvedCount: 0,
+          searchCompatibleCount: 0,
+          fallbackUsed: true,
+          fallbackReason: "error",
+          discardReasons: {},
+          externalIdStats: {
+            imdbId: 0,
+            tmdbId: 0,
+            tvdbId: 0,
+            traktId: 0,
+            balloonerismmId: 0,
+            slug: 0,
+            poplogResolved: 0,
+            temporaryCandidates: 0,
+          },
+        };
         console.warn(
           "[search] source=balloonerismm_fallback reason=error",
           err instanceof Error ? err.message : err
@@ -159,6 +191,7 @@ export async function GET(request: NextRequest) {
       count: results.length,
       fuzzyCount: fuzzyTitles.length,
       results,
+      ...(debugSource && balloonerismmDebug ? { debugSource: balloonerismmDebug } : {}),
     });
   } catch (error) {
     console.error("[search]", error);

@@ -4,8 +4,10 @@ export type CatalogIds = {
   tmdbId?: number;
   imdbId?: string;
   tvdbId?: number;
-  traktId?: number;
+  traktId?: number | string;
   traktSlug?: string;
+  balloonerismmId?: string;
+  slug?: string;
 };
 
 export type CatalogTitle = {
@@ -32,9 +34,17 @@ export type CatalogSearchResult = {
   ids: CatalogIds;
   mediaType: "movie" | "show";
   title: string;
+  originalTitle?: string;
   year?: number;
+  releaseDate?: string;
+  firstAirDate?: string;
   overview?: string;
   posterPath?: string;
+  backdropPath?: string | null;
+  genres?: string[];
+  genreIds?: number[];
+  voteAverage?: number;
+  voteCount?: number;
   source: SourceMeta;
 };
 
