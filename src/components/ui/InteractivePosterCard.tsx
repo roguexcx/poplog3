@@ -11,6 +11,9 @@ import type { ReactNode } from "react";
 
 type InteractivePosterCardProps = {
   id: number;
+  poplogId?: string | number | null;
+  imdbId?: string | null;
+  slug?: string | null;
   mediaType: "movie" | "tv";
   title: string;
   originalTitle?: string | null;
@@ -29,12 +32,18 @@ type InteractivePosterCardProps = {
 
 function ActionButtons({
   id,
+  poplogId,
+  imdbId,
+  slug,
   mediaType,
   title,
   year,
   source = "card",
 }: {
   id: number;
+  poplogId?: string | number | null;
+  imdbId?: string | null;
+  slug?: string | null;
   mediaType: "movie" | "tv";
   title: string;
   year?: number | string | null;
@@ -45,6 +54,9 @@ function ActionButtons({
 
   const watchlist = useWatchlistToggle({
     tmdbId: id,
+    poplogId,
+    imdbId,
+    slug,
     mediaType,
     title,
     releaseYear,
@@ -52,12 +64,15 @@ function ActionButtons({
 
   const watched = useWatchedToggle({
     tmdbId: id,
+    poplogId,
+    imdbId,
+    slug,
     mediaType,
     title,
     releaseYear,
   });
 
-  const feedback = useUserFeedbackToggle({ tmdbId: id, mediaType, source });
+  const feedback = useUserFeedbackToggle({ tmdbId: id, poplogId, imdbId, slug, mediaType, source });
 
   return (
     <div
@@ -102,6 +117,9 @@ function ActionButtons({
 
 export default function InteractivePosterCard({
   id,
+  poplogId,
+  imdbId,
+  slug,
   mediaType,
   title,
   originalTitle,
@@ -135,6 +153,9 @@ export default function InteractivePosterCard({
       bottomOverlay={
         <ActionButtons
           id={id}
+          poplogId={poplogId}
+          imdbId={imdbId}
+          slug={slug}
           mediaType={mediaType}
           title={title}
           year={year}

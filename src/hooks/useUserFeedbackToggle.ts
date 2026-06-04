@@ -9,6 +9,9 @@ import type { MediaType } from "@/types/user";
 
 type Input = {
   tmdbId: number;
+  poplogId?: string | number | null;
+  imdbId?: string | null;
+  slug?: string | null;
   mediaType: MediaType;
   source: string;
   initialNotInterested?: boolean;
@@ -16,6 +19,9 @@ type Input = {
 
 export function useUserFeedbackToggle({
   tmdbId,
+  poplogId = null,
+  imdbId = null,
+  slug = null,
   mediaType,
   source,
   initialNotInterested = false,
@@ -57,6 +63,9 @@ export function useUserFeedbackToggle({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           tmdb_id: tmdbId,
+          poplogId,
+          imdbId,
+          slug,
           media_type: mediaType,
           feedback_type: "not_interested",
           source,
@@ -78,7 +87,7 @@ export function useUserFeedbackToggle({
     } finally {
       setSaving(false);
     }
-  }, [mediaType, notInterested, saving, source, tmdbId, user]);
+  }, [mediaType, notInterested, saving, source, tmdbId, poplogId, imdbId, slug, user]);
 
   return {
     notInterested,

@@ -153,6 +153,9 @@ function TitleGrid({ titles }: { titles: SearchResult[] }) {
         <InteractivePosterCard
           key={`${title.media_type}-${title.tmdb_id}`}
           id={title.tmdb_id}
+          poplogId={title.poplogId ?? null}
+          imdbId={title.externalIds?.imdbId ?? null}
+          slug={title.externalIds?.slug ?? null}
           href={`/title/${title.media_type}/${titleLinkId(title)}`}
           mediaType={title.media_type}
           title={title.title}

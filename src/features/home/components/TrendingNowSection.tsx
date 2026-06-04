@@ -199,6 +199,9 @@ function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
 
   const sharedProps = {
     tmdbId: item.id,
+    poplogId: item.poplogId ?? null,
+    imdbId: item.externalIds?.imdbId ?? null,
+    slug: item.externalIds?.slug ?? null,
     mediaType: item.media_type as "movie" | "tv",
     title: item.title_label,
     releaseYear: item.year ? Number(item.year) : null,
@@ -207,6 +210,9 @@ function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
   const watched   = useWatchedToggle(sharedProps);
   const feedback  = useUserFeedbackToggle({
     tmdbId: item.id,
+    poplogId: item.poplogId ?? null,
+    imdbId: item.externalIds?.imdbId ?? null,
+    slug: item.externalIds?.slug ?? null,
     mediaType: item.media_type,
     source: "trending",
     initialNotInterested: Boolean(item.userFeedback?.notInterested),

@@ -100,6 +100,9 @@ export default function FeaturedCard({
 
               <FeaturedCardActions
                 tmdbId={item.id}
+                poplogId={item.poplogId ?? null}
+                imdbId={item.externalIds?.imdbId ?? null}
+                slug={item.externalIds?.slug ?? null}
                 mediaType={mediaType}
                 title={title}
                 releaseYear={year ? Number(year) : null}

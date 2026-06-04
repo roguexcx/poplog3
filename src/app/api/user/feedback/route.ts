@@ -20,14 +20,24 @@ import {
 } from "@/server/repositories";
 import { resolveEditorialPolicy } from "@/lib/personalization/editorial-policy";
 import type { MediaType } from "@/types/user";
+import {
+  resolveUserStateIdentity,
+  userStateIdentityDebug,
+} from "@/server/user-state/poplog-user-state-identity";
 
 type FeedbackPayload = {
+  poplogId?: unknown;
+  imdbId?: unknown;
+  slug?: unknown;
   tmdb_id?: unknown;
+  tmdbId?: unknown;
   media_type?: unknown;
+  mediaType?: unknown;
   feedback_type?: unknown;
   weight?: unknown;
   reason?: unknown;
   source?: unknown;
+  debugSource?: unknown;
 };
 
 type ParsedPayload =
@@ -38,25 +48,38 @@ type ParsedPayload =
       weight?: number;
       reason: string | null;
       source: string | null;
+      debugSource: boolean;
+      debugSourcePayload: ReturnType<typeof userStateIdentityDebug>;
     }
   | { error: string };
 
-function parsePayload(payload: FeedbackPayload): ParsedPayload {
-  const tmdbId = Number(payload.tmdb_id);
-  const mediaType = payload.media_type;
+async function parsePayload(payload: FeedbackPayload): Promise<ParsedPayload> {
+  const mediaType = payload.media_type ?? payload.mediaType;
   const feedbackType = payload.feedback_type ?? "not_interested";
+  const debugSource = payload.debugSource === true;
 
-  if (!Number.isInteger(tmdbId) || tmdbId <= 0) return { error: "tmdb_id invalido." };
   if (!isMediaType(mediaType)) return { error: "media_type deve ser movie ou tv." };
   if (!isFeedbackType(feedbackType)) return { error: "feedback_type invalido." };
 
+  const identity = await resolveUserStateIdentity({
+    mediaType,
+    poplogId: payload.poplogId,
+    tmdbId: payload.tmdb_id ?? payload.tmdbId,
+    imdbId: payload.imdbId,
+    slug: payload.slug,
+  });
+
+  if (!identity?.tmdbId) return { error: "tmdb_id/poplogId invalido." };
+
   return {
-    tmdbId,
+    tmdbId: identity.tmdbId,
     mediaType,
     feedbackType,
     weight: typeof payload.weight === "number" ? payload.weight : undefined,
     reason: typeof payload.reason === "string" ? payload.reason.slice(0, 240) : null,
     source: typeof payload.source === "string" ? payload.source.slice(0, 120) : null,
+    debugSource,
+    debugSourcePayload: userStateIdentityDebug(identity),
   };
 }
 
@@ -158,23 +181,32 @@ export async function GET(request: Request) {
   if (!user) return NextResponse.json({ titleState: { userFeedback: { notInterested: false } } });
 
   const params = new URL(request.url).searchParams;
-  const parsed = parsePayload({
+  const parsed = await parsePayload({
     tmdb_id: params.get("tmdb_id"),
+    tmdbId: params.get("tmdbId"),
+    poplogId: params.get("poplogId"),
+    imdbId: params.get("imdbId"),
+    slug: params.get("slug"),
     media_type: params.get("media_type"),
+    mediaType: params.get("mediaType"),
     feedback_type: params.get("feedback_type") ?? "not_interested",
+    debugSource: params.get("debugSource") === "1",
   });
 
   if ("error" in parsed) return NextResponse.json({ error: parsed.error }, { status: 400 });
 
   const state = await readLocalTitleState(user.id, parsed.tmdbId, parsed.mediaType);
-  return NextResponse.json({ titleState: { userFeedback: state, feedbackConflict: null } });
+  return NextResponse.json({
+    titleState: { userFeedback: state, feedbackConflict: null },
+    ...(parsed.debugSource ? { debugSource: parsed.debugSourcePayload } : {}),
+  });
 }
 
 export async function POST(request: Request) {
   const { user } = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Sessao obrigatoria." }, { status: 401 });
 
-  const parsed = parsePayload(await request.json().catch(() => ({})));
+  const parsed = await parsePayload(await request.json().catch(() => ({})));
   if ("error" in parsed) return NextResponse.json({ error: parsed.error }, { status: 400 });
 
   const conflict =
@@ -193,6 +225,7 @@ export async function POST(request: Request) {
         userFeedback: state,
         feedbackConflict: conflict.conflict,
       },
+      ...(parsed.debugSource ? { debugSource: parsed.debugSourcePayload } : {}),
     });
   }
 
@@ -213,6 +246,7 @@ export async function POST(request: Request) {
       userFeedback: state,
       feedbackConflict: conflict.conflict,
     },
+    ...(parsed.debugSource ? { debugSource: parsed.debugSourcePayload } : {}),
   });
 }
 
@@ -220,7 +254,7 @@ export async function DELETE(request: Request) {
   const { user } = await getSessionUser();
   if (!user) return NextResponse.json({ error: "Sessao obrigatoria." }, { status: 401 });
 
-  const parsed = parsePayload(await request.json().catch(() => ({})));
+  const parsed = await parsePayload(await request.json().catch(() => ({})));
   if ("error" in parsed) return NextResponse.json({ error: parsed.error }, { status: 400 });
 
   await deleteLocalFeedback(user.id, parsed.tmdbId, parsed.mediaType, parsed.feedbackType);
@@ -231,5 +265,6 @@ export async function DELETE(request: Request) {
       userFeedback: state,
       feedbackConflict: null,
     },
+    ...(parsed.debugSource ? { debugSource: parsed.debugSourcePayload } : {}),
   });
 }

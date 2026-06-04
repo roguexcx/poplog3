@@ -23,6 +23,10 @@ import {
 } from "@/server/ratings/user-rating-service";
 import { getPublicRating } from "@/server/ratings/rating-aggregate-service";
 import type { RatingMediaType, RatingSource } from "@/types/user";
+import {
+  resolveUserStateIdentity,
+  userStateIdentityDebug,
+} from "@/server/user-state/poplog-user-state-identity";
 
 // ── Validators ────────────────────────────────────────────────────────────────
 
@@ -97,6 +101,7 @@ export async function GET(request: NextRequest) {
     const tmdbIdRaw = sp.get("tmdbId");
     const seasonNumber = parseIntParam(sp.get("seasonNumber"));
     const episodeNumber = parseIntParam(sp.get("episodeNumber"));
+    const debugSource = sp.get("debugSource") === "1";
 
     if (!isValidMediaType(mediaType)) {
       return NextResponse.json(
@@ -105,11 +110,21 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    const tmdbId = parseIntParam(tmdbIdRaw);
+    const identity = await resolveUserStateIdentity({
+      mediaType,
+      poplogId: sp.get("poplogId"),
+      tmdbId: tmdbIdRaw,
+      imdbId: sp.get("imdbId"),
+      slug: sp.get("slug"),
+    });
+    const tmdbId = identity?.tmdbId;
 
     if (!tmdbId) {
       return NextResponse.json(
-        { error: "Parâmetro tmdbId inválido" },
+        {
+          error: "Parâmetro tmdbId/poplogId inválido",
+          ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),
+        },
         { status: 400 }
       );
     }
@@ -122,6 +137,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       data: { userRating, communityRating },
+      ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),
     });
   } catch (error) {
     console.error("[RATINGS_GET_ERROR]", error);
@@ -144,6 +160,7 @@ export async function POST(request: NextRequest) {
 
     const body = await request.json();
     const { mediaType, tmdbId, rating, seasonNumber, episodeNumber, ratingSource } = body;
+    const debugSource = body.debugSource === true;
 
     if (!isValidMediaType(mediaType)) {
       return NextResponse.json(
@@ -152,11 +169,23 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const tmdbIdN = parseFloatBody(tmdbId);
+    const identity = await resolveUserStateIdentity({
+      mediaType,
+      poplogId: body.poplogId,
+      tmdbId,
+      imdbId: body.imdbId,
+      slug: body.slug,
+      title: body.title,
+      year: body.releaseYear,
+    });
+    const tmdbIdN = identity?.tmdbId;
 
     if (!tmdbIdN || tmdbIdN <= 0) {
       return NextResponse.json(
-        { error: "Campo tmdbId inválido" },
+        {
+          error: "Campo tmdbId/poplogId inválido",
+          ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),
+        },
         { status: 400 }
       );
     }
@@ -176,7 +205,7 @@ export async function POST(request: NextRequest) {
     const saved = await upsertUserRating({
       userId: user.id,
       mediaType,
-      tmdbId: Math.floor(tmdbIdN),
+      tmdbId: tmdbIdN,
       seasonNumber: seasonNumber ?? null,
       episodeNumber: episodeNumber ?? null,
       rating: ratingN,
@@ -185,16 +214,17 @@ export async function POST(request: NextRequest) {
 
     const mutationRatings = await getMutationRatings(
       mediaType,
-      Math.floor(tmdbIdN),
+      tmdbIdN,
       seasonNumber ?? null,
       episodeNumber ?? null
     );
 
-    revalidateRatingConsumers(mediaType, Math.floor(tmdbIdN));
+    revalidateRatingConsumers(mediaType, tmdbIdN);
 
     return NextResponse.json({
       success: true,
       data: { userRating: saved, ...mutationRatings },
+      ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),
     });
   } catch (error) {
     console.error("[RATINGS_POST_ERROR]", error);
@@ -217,6 +247,7 @@ export async function DELETE(request: NextRequest) {
 
     const body = await request.json();
     const { mediaType, tmdbId, seasonNumber, episodeNumber } = body;
+    const debugSource = body.debugSource === true;
 
     if (!isValidMediaType(mediaType)) {
       return NextResponse.json(
@@ -225,11 +256,21 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const tmdbIdN = parseFloatBody(tmdbId);
+    const identity = await resolveUserStateIdentity({
+      mediaType,
+      poplogId: body.poplogId,
+      tmdbId,
+      imdbId: body.imdbId,
+      slug: body.slug,
+    });
+    const tmdbIdN = identity?.tmdbId;
 
     if (!tmdbIdN || tmdbIdN <= 0) {
       return NextResponse.json(
-        { error: "Campo tmdbId inválido" },
+        {
+          error: "Campo tmdbId/poplogId inválido",
+          ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),
+        },
         { status: 400 }
       );
     }
@@ -237,21 +278,25 @@ export async function DELETE(request: NextRequest) {
     await deleteUserRating({
       userId: user.id,
       mediaType,
-      tmdbId: Math.floor(tmdbIdN),
+      tmdbId: tmdbIdN,
       seasonNumber: seasonNumber ?? null,
       episodeNumber: episodeNumber ?? null,
     });
 
     const mutationRatings = await getMutationRatings(
       mediaType,
-      Math.floor(tmdbIdN),
+      tmdbIdN,
       seasonNumber ?? null,
       episodeNumber ?? null
     );
 
-    revalidateRatingConsumers(mediaType, Math.floor(tmdbIdN));
+    revalidateRatingConsumers(mediaType, tmdbIdN);
 
-    return NextResponse.json({ success: true, data: mutationRatings });
+    return NextResponse.json({
+      success: true,
+      data: mutationRatings,
+      ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),
+    });
   } catch (error) {
     console.error("[RATINGS_DELETE_ERROR]", error);
     return NextResponse.json(

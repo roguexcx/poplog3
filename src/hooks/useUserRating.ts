@@ -24,6 +24,9 @@ import type {
 type UseUserRatingOptions = {
   mediaType: RatingMediaType;
   tmdbId: number;
+  poplogId?: string | number | null;
+  imdbId?: string | null;
+  slug?: string | null;
   seasonNumber?: number | null;
   episodeNumber?: number | null;
   initialRating?: UserRatingData | null;
@@ -50,6 +53,9 @@ const DEBOUNCE_MS = 400;
 export function useUserRating({
   mediaType,
   tmdbId,
+  poplogId = null,
+  imdbId = null,
+  slug = null,
   seasonNumber = null,
   episodeNumber = null,
   initialRating = null,
@@ -72,6 +78,9 @@ export function useUserRating({
   const baseParams = {
     mediaType,
     tmdbId,
+    poplogId,
+    imdbId,
+    slug,
     seasonNumber,
     episodeNumber,
   };
@@ -91,6 +100,9 @@ export function useUserRating({
       mediaType,
       tmdbId: String(tmdbId),
     });
+    if (poplogId) params.set("poplogId", String(poplogId));
+    if (imdbId) params.set("imdbId", imdbId);
+    if (slug) params.set("slug", slug);
 
     if (seasonNumber !== null) {
       params.set("seasonNumber", String(seasonNumber));
@@ -141,6 +153,9 @@ export function useUserRating({
     isAuthenticated,
     mediaType,
     tmdbId,
+    poplogId,
+    imdbId,
+    slug,
     seasonNumber,
     episodeNumber,
     onCommunityRatingChange,
@@ -205,6 +220,9 @@ export function useUserRating({
             detail: {
               mediaType,
               tmdbId,
+              poplogId,
+              imdbId,
+              slug,
               seasonNumber,
               episodeNumber,
               rating: newRating,
@@ -231,6 +249,9 @@ export function useUserRating({
     [
       mediaType,
       tmdbId,
+      poplogId,
+      imdbId,
+      slug,
       seasonNumber,
       episodeNumber,
       onCommunityRatingChange,

@@ -325,6 +325,9 @@ export default function TitleHero({
             <div className="mt-7 sm:mt-9">
               <TitleActions
                 tmdbId={title.id}
+                poplogId={title.poplogId ?? null}
+                imdbId={title.externalIds?.imdbId ?? null}
+                slug={title.externalIds?.slug ?? null}
                 mediaType={title.mediaType}
                 initialState={title.userState}
                 initialProgress={title.userSeriesProgress ?? null}

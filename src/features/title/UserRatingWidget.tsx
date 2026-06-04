@@ -20,6 +20,9 @@ import type { RatingMediaType } from "@/types/user";
 type UserRatingWidgetProps = {
   mediaType: TitleMediaType;
   tmdbId: number;
+  poplogId?: string | number | null;
+  imdbId?: string | null;
+  slug?: string | null;
   userRating?: UserRatingData | null;
   communityRating?: CommunityRatingData | null;
   ratings?: TitleRatings | null;
@@ -79,6 +82,9 @@ function sourceSummary(ratings?: TitleRatings | null): string {
 export default function UserRatingWidget({
   mediaType,
   tmdbId,
+  poplogId = null,
+  imdbId = null,
+  slug = null,
   userRating: initialUserRating,
   communityRating,
   ratings,
@@ -90,6 +96,9 @@ export default function UserRatingWidget({
   const { rating, isPending, error, selectRating, clearRating } = useUserRating({
     mediaType: ratingMediaType,
     tmdbId,
+    poplogId,
+    imdbId,
+    slug,
     initialRating: initialUserRating,
     isAuthenticated,
     onCommunityRatingChange,

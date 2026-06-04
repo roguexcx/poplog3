@@ -11,14 +11,14 @@
  * são marcadas com hydration_skipped=true em user_title_state para não re-processar.
  *
  * O cliente chama em loop até `remaining === 0` OU `stopped === true`.
- * Cada chamada processa até MAX_SERIES_PER_RUN séries para respeitar rate-limit TMDB.
+ * Cada chamada processa até MAX_SERIES_PER_RUN séries. A rota não chama mais
+ * a API TMDB; quando falta cache local, retorna estado controlado para a UI.
  *
  * Fluxo por série:
- * 1. Sync de metadados do título  →  garante number_of_seasons no banco
- * 2. Sync de cada temporada       →  popula poplog3_episodes
- * 3. Re-verifica se episódios foram inseridos (remaining real pós-batch)
- * 4. Marca como skipped se ainda sem episódios (permanentemente não-hidratável)
- * 5. Atualiza aired_episodes no user_title_state
+ * 1. Lê metadados locais do título
+ * 2. Lê temporadas/episódios já persistidos
+ * 3. Calcula backfill local de duração quando possível
+ * 4. Retorna pendências incompletas sem acionar fallback TMDB
  */
 
 import { NextResponse } from "next/server";
@@ -26,15 +26,10 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { db } from "@/server/db/client";
 import { backfillDurationSortMinutesForUserTitles } from "@/server/state/user-title-state";
-import { syncTmdbSeason } from "@/server/sync/sync-tmdb-season";
-import { syncTmdbTitle } from "@/server/sync/sync-tmdb-title";
 
-const SLEEP_MS = 150;
 const MAX_SERIES_PER_RUN = 3;
 const MAX_DURATION_BACKFILL_PER_RUN = 10;
 const DEBUG_WATCHLIST_HYDRATION = process.env.DEBUG_WATCHLIST_HYDRATION === "true";
-
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 type WatchlistStateRow = {
   tmdb_id: number;
@@ -362,7 +357,7 @@ export async function POST() {
       titlesData.map((title) => [title.tmdbId, title.numberOfSeasons]),
     );
 
-    // ── 4. Processa cada série do lote ────────────────────────────────────────────
+    // ── 4. Processa cada série do lote sem fallback TMDB ──────────────────────────
     const results: {
       tmdb_id: number;
       ok: boolean;
@@ -370,83 +365,31 @@ export async function POST() {
       episodes_found: number;
       error?: string;
     }[] = [];
-    const today = new Date().toISOString().slice(0, 10);
 
     for (const tmdbId of batch) {
-      try {
-        let numberOfSeasons = seasonMap.get(tmdbId) ?? null;
+      const numberOfSeasons = seasonMap.get(tmdbId) ?? null;
+      const episodesFound = episodeStatsById.get(tmdbId)?.episodeCount ?? 0;
+      const error = episodesFound > 0
+        ? undefined
+        : numberOfSeasons
+          ? "missing_local_episode_cache"
+          : "missing_local_season_cache";
 
-        if (!numberOfSeasons) {
-          const titleSync = await syncTmdbTitle("tv", tmdbId, { force: true });
-          const raw = titleSync.title as Record<string, unknown> | null;
-          numberOfSeasons = typeof raw?.number_of_seasons === "number"
-            ? raw.number_of_seasons
-            : null;
-          await sleep(SLEEP_MS);
-        }
+      logDebug("tmdb hydration disabled", {
+        tmdbId,
+        title: getTitleLabel(tmdbId, titleMetaMap),
+        numberOfSeasons,
+        episodesFound,
+        error,
+      });
 
-        if (!numberOfSeasons || numberOfSeasons <= 0) {
-          logDebug("sem seasons", { tmdbId, title: getTitleLabel(tmdbId, titleMetaMap) });
-          results.push({ tmdb_id: tmdbId, ok: false, seasons_synced: 0, episodes_found: 0, error: "no_seasons_data" });
-          continue;
-        }
-
-        // Sync de cada temporada (season >= 1, ignora season 0)
-        let seasonsSynced = 0;
-        for (let s = 1; s <= numberOfSeasons; s++) {
-          try {
-            await syncTmdbSeason(tmdbId, s, { force: false });
-            seasonsSynced++;
-          } catch {
-            // temporada individual falha → continua com as demais
-          }
-          await sleep(SLEEP_MS);
-        }
-
-        // Conta episódios efetivamente inseridos após o sync
-        const episodesFound = await db.poplog3Episode.count({
-          where: {
-            seriesTmdbId: tmdbId,
-            seasonNumber: { gt: 0 },
-          },
-        });
-        logDebug("series hydrated", {
-          tmdbId,
-          title: getTitleLabel(tmdbId, titleMetaMap),
-          seasonsSynced,
-          episodesFound,
-        });
-
-        // Atualiza aired_episodes no state
-        const airedCount = await db.poplog3Episode.count({
-          where: {
-            seriesTmdbId: tmdbId,
-            seasonNumber: { gt: 0 },
-            airDate: { lte: new Date(`${today}T00:00:00.000Z`) },
-          },
-        });
-
-        await db.userTitleState.updateMany({
-          where: {
-            userId: user.id,
-            tmdbId,
-            mediaType: "tv",
-          },
-          data: {
-            airedEpisodes: airedCount,
-          },
-        });
-
-        results.push({ tmdb_id: tmdbId, ok: episodesFound > 0, seasons_synced: seasonsSynced, episodes_found: episodesFound });
-      } catch (err) {
-        results.push({
-          tmdb_id: tmdbId,
-          ok: false,
-          seasons_synced: 0,
-          episodes_found: 0,
-          error: err instanceof Error ? err.message : "unknown",
-        });
-      }
+      results.push({
+        tmdb_id: tmdbId,
+        ok: episodesFound > 0,
+        seasons_synced: 0,
+        episodes_found: episodesFound,
+        ...(error ? { error } : {}),
+      });
     }
 
     if (durationBackfillBatch.length > 0) {
@@ -479,21 +422,11 @@ export async function POST() {
       postBatchEps.map((row) => row.seriesTmdbId),
     );
 
-    // Séries processadas mas ainda sem episódios → marcar como skipped para não re-processar
+    // Sem TMDB fallback, não marcamos como skipped automaticamente. A ausência
+    // de cache local deve permanecer visível e controlada para futura fonte POPLOG.
     const stillEmptyAfterSync = batch.filter((id) => !hydratedAfterBatch.has(id));
     if (stillEmptyAfterSync.length > 0) {
-      logDebug("marking hydration skipped", { tmdbIds: stillEmptyAfterSync });
-
-      await db.userTitleState.updateMany({
-        where: {
-          userId: user.id,
-          mediaType: "tv",
-          tmdbId: { in: stillEmptyAfterSync },
-        },
-        data: {
-          hydrationSkipped: true,
-        },
-      });
+      logDebug("local cache missing; tmdb fallback blocked", { tmdbIds: stillEmptyAfterSync });
     }
 
     // ── 6. Calcular remaining REAL pós-batch ──────────────────────────────────────
@@ -516,9 +449,10 @@ export async function POST() {
       postBatchAllEps.map((row) => row.seriesTmdbId),
     );
 
-    // Séries que ainda precisam hidratar = todas - hidratadas - skipped(stillEmpty)
+    // Séries que ainda precisam hidratar = todas - hidratadas. Sem fallback
+    // TMDB, itens sem cache local continuam pendentes e a resposta para o loop.
     const stillPendingIds = allTmdbIds.filter(
-      (id) => !hydratedAfterAll.has(id) && !stillEmptyAfterSync.includes(id),
+      (id) => !hydratedAfterAll.has(id),
     );
 
     const postStateRows = await db.userTitleState.findMany({
@@ -553,7 +487,8 @@ export async function POST() {
     // IDs informativos para debug
     const processedTmdbIds = batch;
     const hydratedTmdbIds = batch.filter((id) => hydratedAfterBatch.has(id));
-    const skippedTmdbIds = stillEmptyAfterSync;
+    const skippedTmdbIds: number[] = [];
+    const missingLocalCacheTmdbIds = stillEmptyAfterSync;
     const stillPendingTmdbIds = stillPendingIds;
     const durationBackfilledTmdbIds = durationBackfillResult?.updatedTmdbIds ?? [];
     const durationUnavailableTmdbIds = durationBackfillResult?.unavailableTmdbIds ?? [];
@@ -592,6 +527,7 @@ export async function POST() {
       processedTmdbIds,
       hydratedTmdbIds,
       skippedTmdbIds,
+      missingLocalCacheTmdbIds,
       stillPendingTmdbIds,
       durationBackfillBatch,
       durationBackfilledTmdbIds,
@@ -619,7 +555,7 @@ export async function POST() {
     if (shouldLogFullReport || stopped) {
       logFinalStatus({
         stopped,
-        reason: stopped ? "remaining_not_decreasing" : undefined,
+        reason: stopped ? "tmdb_hydration_disabled_missing_local_cache" : undefined,
         sortableCount: finalDurationReady,
         unavailableCount: finalDurationUnavailable,
         refreshExpected: hydratedTmdbIds.length > 0 || durationBackfilledTmdbIds.length > 0,
@@ -638,18 +574,24 @@ export async function POST() {
       failed: results.filter((r) => !r.ok).length,
       processed: processedTmdbIds.length + (durationBackfillResult?.processedTmdbIds.length ?? 0),
       skipped: skippedTmdbIds.length,
+      missingLocalCache: missingLocalCacheTmdbIds.length,
       durationBackfilled: durationBackfilledTmdbIds.length,
       durationUnavailable: durationUnavailableTmdbIds.length,
       needsDurationBackfill: stillNeedsDurationBackfillTmdbIds.length,
       remaining: afterRemaining,
       stopped,
-      ...(stopped ? { reason: "remaining_not_decreasing" } : {}),
+      ...(stopped ? { reason: "tmdb_hydration_disabled_missing_local_cache" } : {}),
+      usedTmdbApi: false,
+      fallbackUsed: stopped,
+      fallbackReason: stopped ? "missing_local_season_or_episode_cache" : null,
+      missingLocalSeasonCache: stillEmptyAfterSync.length > 0,
       // Debug
       beforeRemaining,
       afterRemaining,
       processedTmdbIds,
       hydratedTmdbIds,
       skippedTmdbIds,
+      missingLocalCacheTmdbIds,
       stillPendingTmdbIds,
       durationBackfillBatch,
       durationBackfilledTmdbIds,

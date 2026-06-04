@@ -31,6 +31,9 @@ type TitleSeasonSummary = {
 
 type TitleActionsProps = {
   tmdbId: number | string;
+  poplogId?: string | number | null;
+  imdbId?: string | null;
+  slug?: string | null;
   mediaType: TitleMediaType;
   initialState?: TitleUserState;
   initialProgress?: TitleSeriesProgress | null;
@@ -68,6 +71,9 @@ function userStateToStatus(
 
 export default function TitleActions({
   tmdbId,
+  poplogId = null,
+  imdbId = null,
+  slug = null,
   mediaType,
   initialState,
   initialProgress,
@@ -95,6 +101,16 @@ export default function TitleActions({
   const [, startTransition] = useTransition();
 
   const id = toPositiveTmdbId(tmdbId);
+  const identityPayload = useMemo(
+    () => ({
+      tmdbId: id,
+      poplogId,
+      imdbId,
+      slug,
+      mediaType,
+    }),
+    [id, poplogId, imdbId, slug, mediaType]
+  );
   const isAuthenticated = initialState?.isAuthenticated === true;
   const isTv = mediaType === "tv";
 
@@ -218,8 +234,7 @@ export default function TitleActions({
               "content-type": "application/json",
             },
             body: JSON.stringify({
-              tmdbId: id,
-              mediaType,
+              ...identityPayload,
             }),
           });
 
@@ -233,8 +248,7 @@ export default function TitleActions({
               "content-type": "application/json",
             },
             body: JSON.stringify({
-              tmdbId: id,
-              mediaType,
+              ...identityPayload,
               status: targetStatus,
             }),
           });
@@ -324,8 +338,7 @@ export default function TitleActions({
           method: "PATCH",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            tmdbId: id,
-            mediaType,
+            ...identityPayload,
             favorite: next,
           }),
         });

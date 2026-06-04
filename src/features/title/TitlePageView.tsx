@@ -135,6 +135,9 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
               <UserRatingWidget
                 mediaType={title.mediaType}
                 tmdbId={title.id}
+                poplogId={title.poplogId ?? null}
+                imdbId={title.externalIds?.imdbId ?? null}
+                slug={title.externalIds?.slug ?? null}
                 userRating={title.userState?.userRating ?? null}
                 communityRating={communityRating}
                 ratings={title.ratings ?? null}

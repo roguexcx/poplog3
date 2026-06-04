@@ -8,6 +8,9 @@ import type { MediaType } from "@/lib/user-title-service";
 
 type Input = {
   tmdbId: number;
+  poplogId?: string | number | null;
+  imdbId?: string | null;
+  slug?: string | null;
   mediaType: MediaType;
   title: string;
   releaseYear?: number | null;
@@ -15,6 +18,9 @@ type Input = {
 
 export function useWatchlistToggle({
   tmdbId,
+  poplogId,
+  imdbId,
+  slug,
   mediaType,
   title,
   releaseYear,
@@ -28,11 +34,11 @@ export function useWatchlistToggle({
   } = useTitleToggle(
     false,
     {
-      checkFn: (userId) => isTitleInWatchlist(userId, tmdbId, mediaType),
+      checkFn: (userId) => isTitleInWatchlist(userId, tmdbId, mediaType, { poplogId, imdbId, slug }),
       toggleFn: (userId) =>
-        toggleWatchlist({ userId, tmdbId, mediaType, title, releaseYear }),
+        toggleWatchlist({ userId, tmdbId, poplogId, imdbId, slug, mediaType, title, releaseYear }),
     },
-    [tmdbId, mediaType],
+    [tmdbId, poplogId, imdbId, slug, mediaType],
   );
 
   const toggleAndNotify = useCallback(async () => {

@@ -7,6 +7,9 @@ import { IconBookmark, IconCheck } from "@/components/ui/icons";
 
 type Props = {
   tmdbId: number;
+  poplogId?: string | number | null;
+  imdbId?: string | null;
+  slug?: string | null;
   mediaType: "movie" | "tv";
   title: string;
   releaseYear: number | null;
@@ -14,11 +17,14 @@ type Props = {
 
 export default function FeaturedCardActions({
   tmdbId,
+  poplogId = null,
+  imdbId = null,
+  slug = null,
   mediaType,
   title,
   releaseYear,
 }: Props) {
-  const shared = { tmdbId, mediaType, title, releaseYear };
+  const shared = { tmdbId, poplogId, imdbId, slug, mediaType, title, releaseYear };
   const watchlist = useWatchlistToggle(shared);
   const watched = useWatchedToggle(shared);
 

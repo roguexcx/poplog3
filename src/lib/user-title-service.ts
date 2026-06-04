@@ -5,10 +5,30 @@ export type { MediaType, UserTitle };
 type TitleInput = {
   userId: string;
   tmdbId: number;
+  poplogId?: string | number | null;
+  imdbId?: string | null;
+  slug?: string | null;
   mediaType: MediaType;
   title: string;
   releaseYear?: number | null;
 };
+
+type IdentityInput = Pick<TitleInput, "poplogId" | "imdbId" | "slug">;
+
+function titleIdentityParams(
+  tmdbId: number,
+  mediaType: MediaType,
+  identity?: IdentityInput,
+) {
+  const params = new URLSearchParams({
+    tmdbId: String(tmdbId),
+    mediaType,
+  });
+  if (identity?.poplogId) params.set("poplogId", String(identity.poplogId));
+  if (identity?.imdbId) params.set("imdbId", identity.imdbId);
+  if (identity?.slug) params.set("slug", identity.slug);
+  return params.toString();
+}
 
 export async function getUserTitles(_userId: string): Promise<UserTitle[]> {
   const res = await fetch("/api/library", { cache: "no-store" });
@@ -21,9 +41,10 @@ export async function isTitleInWatchlist(
   _userId: string,
   tmdbId: number,
   mediaType: MediaType,
+  identity?: IdentityInput,
 ): Promise<boolean> {
   const res = await fetch(
-    `/api/library/title?tmdbId=${tmdbId}&mediaType=${mediaType}`,
+    `/api/library/title?${titleIdentityParams(tmdbId, mediaType, identity)}`,
     { cache: "no-store" },
   );
   if (!res.ok) return false;
@@ -34,17 +55,21 @@ export async function isTitleInWatchlist(
 export async function toggleWatchlist({
   userId,
   tmdbId,
+  poplogId,
+  imdbId,
+  slug,
   mediaType,
   title,
   releaseYear,
 }: TitleInput): Promise<boolean> {
-  const inWatchlist = await isTitleInWatchlist(userId, tmdbId, mediaType);
+  const identity = { poplogId, imdbId, slug };
+  const inWatchlist = await isTitleInWatchlist(userId, tmdbId, mediaType, identity);
 
   if (inWatchlist) {
     const res = await fetch("/api/library/title", {
       method: "DELETE",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ tmdbId, mediaType }),
+      body: JSON.stringify({ tmdbId, poplogId, imdbId, slug, mediaType }),
     });
     if (!res.ok && res.status !== 401) throw new Error(`DELETE ${res.status}`);
     return false;
@@ -53,7 +78,7 @@ export async function toggleWatchlist({
   const res = await fetch("/api/library/title", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ tmdbId, mediaType, status: "watchlist", title, releaseYear }),
+    body: JSON.stringify({ tmdbId, poplogId, imdbId, slug, mediaType, status: "watchlist", title, releaseYear }),
   });
   if (!res.ok) throw new Error(`POST ${res.status}`);
   return true;
@@ -63,9 +88,10 @@ export async function isTitleWatched(
   _userId: string,
   tmdbId: number,
   mediaType: MediaType,
+  identity?: IdentityInput,
 ): Promise<boolean> {
   const res = await fetch(
-    `/api/library/title?tmdbId=${tmdbId}&mediaType=${mediaType}`,
+    `/api/library/title?${titleIdentityParams(tmdbId, mediaType, identity)}`,
     { cache: "no-store" },
   );
   if (!res.ok) return false;
@@ -76,17 +102,21 @@ export async function isTitleWatched(
 export async function toggleWatched({
   userId,
   tmdbId,
+  poplogId,
+  imdbId,
+  slug,
   mediaType,
   title,
   releaseYear,
 }: TitleInput): Promise<boolean> {
-  const isWatched = await isTitleWatched(userId, tmdbId, mediaType);
+  const identity = { poplogId, imdbId, slug };
+  const isWatched = await isTitleWatched(userId, tmdbId, mediaType, identity);
 
   if (isWatched) {
     const res = await fetch("/api/library/title", {
       method: "DELETE",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ tmdbId, mediaType }),
+      body: JSON.stringify({ tmdbId, poplogId, imdbId, slug, mediaType }),
     });
     if (!res.ok && res.status !== 401) throw new Error(`DELETE ${res.status}`);
     return false;
@@ -95,7 +125,7 @@ export async function toggleWatched({
   const res = await fetch("/api/library/title", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ tmdbId, mediaType, status: "watched", title, releaseYear }),
+    body: JSON.stringify({ tmdbId, poplogId, imdbId, slug, mediaType, status: "watched", title, releaseYear }),
   });
   if (!res.ok) throw new Error(`POST ${res.status}`);
   return true;
