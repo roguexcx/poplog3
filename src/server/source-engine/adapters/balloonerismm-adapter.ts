@@ -18,7 +18,7 @@ import type {
   BalloonerismShow,
   BalloonerismSearchResult,
   BalloonerismPopularItem,
-  BalloonerismPeopleResponse,
+  BalloonerismCreditsResponse,
 } from "@/server/api-clients/balloonerismm/types";
 
 import type { CatalogAdapter } from "./catalog-adapter";
@@ -176,14 +176,12 @@ export const balloonerismAdapter: CatalogAdapter = {
   // ── Busca ──────────────────────────────────────────────────────────────────
 
   async searchTitles(params: SearchParams): Promise<CatalogSearchResult[]> {
-    const type = params.mediaType === "movie" ? "movie" : params.mediaType === "show" ? "show" : undefined;
-    const data = await balloonerismGet<BalloonerismSearchResult[]>("/search", {
-      params: {
-        q: params.query,
-        ...(type ? { type } : {}),
-        page: params.page ?? 1,
-        limit: 20,
-      },
+    const path =
+      params.mediaType === "movie" ? "/search/movie"
+      : params.mediaType === "show" ? "/search/tv"
+      : "/search/multi";
+    const data = await balloonerismGet<BalloonerismSearchResult[]>(path, {
+      params: { query: params.query, page: params.page ?? 1 },
       ttlSeconds: 3600,
     });
     if (!data) return [];
@@ -195,7 +193,7 @@ export const balloonerismAdapter: CatalogAdapter = {
   async getMovie(params: GetTitleParams): Promise<CatalogTitle | null> {
     const id = resolveId(params);
     if (!id) return null;
-    const data = await balloonerismGet<BalloonerismMovie>(`/movies/${id}`, { ttlSeconds: 604800 });
+    const data = await balloonerismGet<BalloonerismMovie>(`/movie/${id}`, { ttlSeconds: 604800 });
     if (!data) return null;
     return balloonerismMovieToTitle(data);
   },
@@ -205,7 +203,7 @@ export const balloonerismAdapter: CatalogAdapter = {
   async getShow(params: GetTitleParams): Promise<CatalogTitle | null> {
     const id = resolveId(params);
     if (!id) return null;
-    const data = await balloonerismGet<BalloonerismShow>(`/shows/${id}`, { ttlSeconds: 86400 });
+    const data = await balloonerismGet<BalloonerismShow>(`/tv/${id}`, { ttlSeconds: 86400 });
     if (!data) return null;
     return balloonerismShowToTitle(data);
   },
@@ -225,8 +223,8 @@ export const balloonerismAdapter: CatalogAdapter = {
   // ── Trending ───────────────────────────────────────────────────────────────
 
   async getTrending(params: TrendingParams): Promise<CatalogSearchResult[]> {
-    const type = params.mediaType === "movie" ? "movies" : "shows";
-    const data = await balloonerismGet<BalloonerismPopularItem[]>(`/${type}/trending`, {
+    const path = params.mediaType === "movie" ? "/popular/movie" : "/popular/tv";
+    const data = await balloonerismGet<BalloonerismPopularItem[]>(path, {
       params: { limit: params.limit ?? 20, page: params.page ?? 1 },
       ttlSeconds: 3600,
     });
@@ -237,8 +235,8 @@ export const balloonerismAdapter: CatalogAdapter = {
   // ── Popular ────────────────────────────────────────────────────────────────
 
   async getPopular(params: PopularParams): Promise<CatalogSearchResult[]> {
-    const type = params.mediaType === "movie" ? "movies" : "shows";
-    const data = await balloonerismGet<BalloonerismPopularItem[]>(`/${type}/popular`, {
+    const path = params.mediaType === "movie" ? "/popular/movie" : "/popular/tv";
+    const data = await balloonerismGet<BalloonerismPopularItem[]>(path, {
       params: { limit: params.limit ?? 20, page: params.page ?? 1 },
       ttlSeconds: 21600,
     });
@@ -251,8 +249,8 @@ export const balloonerismAdapter: CatalogAdapter = {
   async getRelated(params: RelatedParams): Promise<CatalogSearchResult[]> {
     const id = resolveId(params);
     if (!id) return [];
-    const type = params.mediaType === "movie" ? "movies" : "shows";
-    const data = await balloonerismGet<BalloonerismSearchResult[]>(`/${type}/${id}/similar`, {
+    const path = params.mediaType === "movie" ? `/movie/${id}/similar` : `/tv/${id}/similar`;
+    const data = await balloonerismGet<BalloonerismSearchResult[]>(path, {
       params: { limit: 10 },
       ttlSeconds: 86400,
     });
@@ -265,8 +263,8 @@ export const balloonerismAdapter: CatalogAdapter = {
   async getRatings(params: RatingParams): Promise<CatalogRatings | null> {
     const id = resolveId(params);
     if (!id) return null;
-    const type = params.mediaType === "movie" ? "movies" : "shows";
-    const data = await balloonerismGet<{ rating?: number; votes?: number }>(`/${type}/${id}/ratings`, {
+    const path = params.mediaType === "movie" ? `/movie/${id}/ratings` : `/tv/${id}/ratings`;
+    const data = await balloonerismGet<{ rating?: number; votes?: number }>(path, {
       ttlSeconds: 3600,
     });
     if (!data?.rating) return null;
@@ -289,30 +287,26 @@ export const balloonerismAdapter: CatalogAdapter = {
   async getPeople(params: PeopleParams): Promise<CatalogPeople | null> {
     const id = resolveId(params);
     if (!id) return null;
-    const type = params.mediaType === "movie" ? "movies" : "shows";
-    const data = await balloonerismGet<BalloonerismPeopleResponse>(`/${type}/${id}/people`, {
+    const path = params.mediaType === "movie" ? `/movie/${id}/credits` : `/tv/${id}/credits`;
+    const data = await balloonerismGet<BalloonerismCreditsResponse>(path, {
       ttlSeconds: 2592000, // 30 dias — pessoas mudam raramente
     });
     if (!data) return null;
 
     const meta = sourceMeta(params.imdbId, 5);
     const cast = (data.cast ?? []).map((c) => ({
-      ids: { imdbId: c.person.imdb_id },
-      name: c.person.name,
+      ids: { imdbId: c.imdb_id },
+      name: c.name,
       character: c.character,
-      profileRemoteUrl: c.person.images?.headshot ?? undefined,
+      profileRemoteUrl: c.profile_path ?? undefined,
     }));
-
-    const crewRaw = data.crew ?? {};
-    const crew = Object.entries(crewRaw).flatMap(([dept, members]) =>
-      (members ?? []).map((m) => ({
-        ids: { imdbId: m.person.imdb_id },
-        name: m.person.name,
-        job: m.job,
-        department: dept,
-        profileRemoteUrl: m.person.images?.headshot ?? undefined,
-      })),
-    );
+    const crew = (data.crew ?? []).map((c) => ({
+      ids: { imdbId: c.imdb_id },
+      name: c.name,
+      job: c.job,
+      department: c.department,
+      profileRemoteUrl: c.profile_path ?? undefined,
+    }));
 
     return normalizePeople(cast, crew, meta);
   },
@@ -322,9 +316,9 @@ export const balloonerismAdapter: CatalogAdapter = {
   async getVideos(params: VideoParams): Promise<CatalogVideo[]> {
     const id = resolveId(params);
     if (!id) return [];
-    const type = params.mediaType === "movie" ? "movies" : "shows";
+    const path = params.mediaType === "movie" ? `/movie/${id}/videos` : `/tv/${id}/videos`;
     const data = await balloonerismGet<Array<{ url: string; name?: string; type?: string }>>(
-      `/${type}/${id}/videos`,
+      path,
       { ttlSeconds: 21600 }, // 6h — URLs de vídeo têm TTL curto
     );
     if (!data) return [];

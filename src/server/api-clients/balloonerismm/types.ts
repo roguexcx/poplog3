@@ -156,6 +156,70 @@ export type BalloonerismPeopleResponse = {
   };
 };
 
+export type BalloonerismCreditPerson = {
+  id?: string;
+  imdb_id?: string;
+  name: string;
+  character?: string;
+  job?: string;
+  department?: string;
+  order?: number;
+  profile_path?: string | null;
+};
+
+export type BalloonerismCreditsResponse = {
+  id?: string;
+  cast?: BalloonerismCreditPerson[];
+  crew?: BalloonerismCreditPerson[];
+};
+
+export type BalloonerismExternalIds = {
+  imdb_id?: string | null;
+  tmdb_id?: number | null;
+  tvdb_id?: number | null;
+  wikidata_id?: string | null;
+  facebook_id?: string | null;
+  instagram_id?: string | null;
+  twitter_id?: string | null;
+};
+
+export type BalloonerismPersonDetails = {
+  imdb_id?: string;
+  name: string;
+  biography?: string | null;
+  birthday?: string | null;
+  deathday?: string | null;
+  place_of_birth?: string | null;
+  profile_path?: string | null;
+  known_for_department?: string | null;
+};
+
+export type BalloonerismPersonCreditItem = {
+  imdb_id?: string;
+  title?: string;
+  name?: string;
+  media_type?: "movie" | "tv";
+  character?: string;
+  job?: string;
+  department?: string;
+  year?: number | null;
+  images?: BalloonerismImages;
+};
+
+export type BalloonerismPersonCombinedCredits = {
+  cast?: BalloonerismPersonCreditItem[];
+  crew?: BalloonerismPersonCreditItem[];
+};
+
+export type BalloonerismGenreItem = {
+  id: number;
+  name: string;
+};
+
+export type BalloonerismGenreList = {
+  genres: BalloonerismGenreItem[];
+};
+
 export type BalloonerismFetchOptions = {
   params?: Record<string, string | number | boolean>;
   cache?: RequestCache;

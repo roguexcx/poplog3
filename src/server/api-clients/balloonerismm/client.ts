@@ -16,9 +16,9 @@ import { logApiCall } from "@/server/engine-logger";
 import type { BalloonerismFetchOptions } from "./types";
 
 export const BALLOONERISMM_BASE_URL =
-  process.env.BALLOONERISMM_BASE_URL ?? "https://api.balloonerismm.com/v1";
+  process.env.BALLOONERISMM_BASE_URL ?? "https://api.balloonerismm.workers.dev";
 
-const DEFAULT_TIMEOUT_MS = 8_000;
+const DEFAULT_TIMEOUT_MS = Number(process.env.BALLOONERISMM_TIMEOUT_MS) || 8_000;
 const DEFAULT_TTL_SECONDS = 3_600; // 1h
 const MAX_RETRIES = 1;
 
