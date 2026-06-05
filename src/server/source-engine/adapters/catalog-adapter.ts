@@ -10,6 +10,7 @@ import type {
   CatalogVideo,
   CalendarParams,
   CommentParams,
+  DiscoverParams,
   GetEpisodesParams,
   GetSeasonsParams,
   GetTitleParams,
@@ -22,6 +23,8 @@ import type {
   VideoParams,
 } from "../types/catalog.types";
 
+export type { DiscoverParams };
+
 export type { CatalogTitle, CatalogSearchResult, CatalogSeason, CatalogEpisode };
 
 export interface CatalogAdapter {
@@ -32,6 +35,7 @@ export interface CatalogAdapter {
   getEpisodes(params: GetEpisodesParams): Promise<CatalogEpisode[]>;
   getTrending(params: TrendingParams): Promise<CatalogSearchResult[]>;
   getPopular(params: PopularParams): Promise<CatalogSearchResult[]>;
+  getDiscover(params: DiscoverParams): Promise<CatalogSearchResult[]>;
   getRelated(params: RelatedParams): Promise<CatalogSearchResult[]>;
   getRatings(params: RatingParams): Promise<CatalogRatings | null>;
   getComments(params: CommentParams): Promise<CatalogComment[]>;

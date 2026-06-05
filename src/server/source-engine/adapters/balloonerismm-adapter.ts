@@ -17,6 +17,7 @@ import type {
   BalloonerismMovie,
   BalloonerismShow,
   BalloonerismCreditsResponse,
+  BalloonerismSeasonResponse,
 } from "@/server/api-clients/balloonerismm/types";
 
 import type { CatalogAdapter } from "./catalog-adapter";
@@ -37,6 +38,7 @@ import type {
   GetEpisodesParams,
   TrendingParams,
   PopularParams,
+  DiscoverParams,
   RelatedParams,
   RatingParams,
   CommentParams,
@@ -372,7 +374,7 @@ export const balloonerismAdapter: CatalogAdapter = {
       : params.mediaType === "show" ? "/search/tv"
       : "/search/multi";
     const raw = await balloonerismGet<unknown>(path, {
-      params: { query: params.query, page: params.page ?? 1 },
+      params: { query: params.query, page: params.page ?? 1, language: "pt-BR" },
       ttlSeconds: 3600,
     });
     if (raw === null) return [];
@@ -386,7 +388,7 @@ export const balloonerismAdapter: CatalogAdapter = {
   async getMovie(params: GetTitleParams): Promise<CatalogTitle | null> {
     const id = resolveId(params);
     if (!id) return null;
-    const data = await balloonerismGet<BalloonerismMovie>(`/movie/${id}`, { ttlSeconds: 604800 });
+    const data = await balloonerismGet<BalloonerismMovie>(`/movie/${id}`, { params: { language: "pt-BR" }, ttlSeconds: 604800 });
     if (!data) return null;
     return balloonerismMovieToTitle(data);
   },
@@ -396,21 +398,47 @@ export const balloonerismAdapter: CatalogAdapter = {
   async getShow(params: GetTitleParams): Promise<CatalogTitle | null> {
     const id = resolveId(params);
     if (!id) return null;
-    const data = await balloonerismGet<BalloonerismShow>(`/tv/${id}`, { ttlSeconds: 86400 });
+    const data = await balloonerismGet<BalloonerismShow>(`/tv/${id}`, { params: { language: "pt-BR" }, ttlSeconds: 86400 });
     if (!data) return null;
     return balloonerismShowToTitle(data);
   },
 
-  // ── Temporadas — Balloonerismm não é fonte preferencial ───────────────────
+  // ── Temporadas e episódios — fallback quando cache e TVDB falham ──────────
 
-  async getSeasons(_params: GetSeasonsParams): Promise<CatalogSeason[]> {
-    // Balloonerismm não é fonte preferencial para temporadas (TheTVDB é superior)
-    return [];
+  async getSeasons(params: GetSeasonsParams): Promise<CatalogSeason[]> {
+    const id = params.imdbId;
+    if (!id || params.season === undefined) return [];
+    const path = `/tv/${id}/season/${params.season}`;
+    const raw = await balloonerismGet<BalloonerismSeasonResponse>(path, { params: { language: "pt-BR" }, ttlSeconds: 86400 });
+    if (!raw) return [];
+    const meta = sourceMeta(params.imdbId);
+    return [{
+      ids: { imdbId: params.imdbId },
+      number: typeof raw.season_number === "number" ? raw.season_number : params.season,
+      title: raw.name ?? undefined,
+      posterPath: raw.poster_path ?? undefined,
+      source: meta,
+    }];
   },
 
-  async getEpisodes(_params: GetEpisodesParams): Promise<CatalogEpisode[]> {
-    // Balloonerismm não é fonte preferencial para episódios
-    return [];
+  async getEpisodes(params: GetEpisodesParams): Promise<CatalogEpisode[]> {
+    const id = params.imdbId;
+    if (!id) return [];
+    const path = `/tv/${id}/season/${params.season}`;
+    const raw = await balloonerismGet<BalloonerismSeasonResponse>(path, { params: { language: "pt-BR" }, ttlSeconds: 86400 });
+    if (!raw?.episodes) return [];
+    const meta = sourceMeta(params.imdbId);
+    return raw.episodes.map((ep) => ({
+      ids: { imdbId: params.imdbId },
+      season: params.season,
+      number: ep.episode_number,
+      title: ep.name ?? undefined,
+      overview: ep.overview ?? undefined,
+      firstAired: ep.air_date ?? undefined,
+      runtime: typeof ep.runtime === "number" ? ep.runtime : undefined,
+      stillPath: ep.still_path ?? undefined,
+      source: meta,
+    }));
   },
 
   // ── Trending ───────────────────────────────────────────────────────────────
@@ -418,7 +446,7 @@ export const balloonerismAdapter: CatalogAdapter = {
   async getTrending(params: TrendingParams): Promise<CatalogSearchResult[]> {
     const path = params.mediaType === "movie" ? "/popular/movie" : "/popular/tv";
     const raw = await balloonerismGet<unknown>(path, {
-      params: { limit: params.limit ?? 20, page: params.page ?? 1 },
+      params: { limit: params.limit ?? 20, page: params.page ?? 1, language: "pt-BR" },
       ttlSeconds: 3600,
     });
     if (raw === null) return [];
@@ -430,11 +458,28 @@ export const balloonerismAdapter: CatalogAdapter = {
   async getPopular(params: PopularParams): Promise<CatalogSearchResult[]> {
     const path = params.mediaType === "movie" ? "/popular/movie" : "/popular/tv";
     const raw = await balloonerismGet<unknown>(path, {
-      params: { limit: params.limit ?? 20, page: params.page ?? 1 },
+      params: { limit: params.limit ?? 20, page: params.page ?? 1, language: "pt-BR" },
       ttlSeconds: 21600,
     });
     if (raw === null) return [];
     return extractArray<BalloonerismSearchLike>(raw, path).map(searchItemToResult);
+  },
+
+  // ── Discover por gênero ────────────────────────────────────────────────────
+
+  async getDiscover(params: DiscoverParams): Promise<CatalogSearchResult[]> {
+    const path = params.mediaType === "movie" ? "/discover/movie" : "/discover/tv";
+    const raw = await balloonerismGet<unknown>(path, {
+      params: { with_genres: params.genreId, language: "pt-BR", region: "BR", page: params.page ?? 1 },
+      ttlSeconds: 7200,
+    });
+    if (raw === null) {
+      console.warn(`[balloonerismm] getDiscover returned null — path=${path} genre=${params.genreId}`);
+      return [];
+    }
+    const items = extractArray<BalloonerismSearchLike>(raw, path);
+    console.log(`[balloonerismm] getDiscover path=${path} genre=${params.genreId} count=${items.length}`);
+    return items.map(searchItemToResult);
   },
 
   // ── Relacionados ───────────────────────────────────────────────────────────
@@ -444,7 +489,7 @@ export const balloonerismAdapter: CatalogAdapter = {
     if (!id) return [];
     const path = params.mediaType === "movie" ? `/movie/${id}/similar` : `/tv/${id}/similar`;
     const raw = await balloonerismGet<unknown>(path, {
-      params: { limit: 10 },
+      params: { limit: 10, language: "pt-BR" },
       ttlSeconds: 86400,
     });
     if (raw === null) return [];
@@ -482,6 +527,7 @@ export const balloonerismAdapter: CatalogAdapter = {
     if (!id) return null;
     const path = params.mediaType === "movie" ? `/movie/${id}/credits` : `/tv/${id}/credits`;
     const data = await balloonerismGet<BalloonerismCreditsResponse>(path, {
+      params: { language: "pt-BR" },
       ttlSeconds: 2592000, // 30 dias — pessoas mudam raramente
     });
     if (!data) return null;
@@ -513,7 +559,7 @@ export const balloonerismAdapter: CatalogAdapter = {
     // A API retorna { id, results: [...] } — não um array direto.
     const raw = await balloonerismGet<unknown>(
       path,
-      { ttlSeconds: 21600 }, // 6h — URLs de vídeo têm TTL curto
+      { params: { language: "pt-BR" }, ttlSeconds: 21600 }, // 6h — URLs de vídeo têm TTL curto
     );
     if (!raw) return [];
     type VideoEntry = {

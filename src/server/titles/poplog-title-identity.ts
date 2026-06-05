@@ -106,6 +106,14 @@ function identityFromRow(
   confidence: number,
   externalIds: PoplogTitleExternalIds = {},
 ): PoplogTitleIdentity {
+  // Títulos Balloonerismm-only têm tmdbId sintético negativo derivado do imdbId.
+  // Derivar o imdbId aqui garante que detailLookupId encontre o ID para busca
+  // de cast, trailer, metadata e relacionados via Balloonerismm.
+  const derivedImdbId =
+    row.tmdbId < 0 && !externalIds.imdbId
+      ? (imdbIdFromSyntheticTmdbId(row.tmdbId) ?? undefined)
+      : undefined;
+
   return {
     poplogId: row.id,
     mediaType: row.mediaType,
@@ -113,6 +121,7 @@ function identityFromRow(
     year: row.year ?? undefined,
     externalIds: {
       tmdbId: row.tmdbId,
+      ...(derivedImdbId ? { imdbId: derivedImdbId, balloonerismmId: derivedImdbId } : {}),
       ...externalIds,
     },
     resolvedFrom,

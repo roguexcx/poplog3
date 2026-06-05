@@ -174,6 +174,12 @@ export type PopularParams = {
   page?: number;
 };
 
+export type DiscoverParams = {
+  mediaType: "movie" | "show";
+  genreId: number;
+  page?: number;
+};
+
 export type RelatedParams = {
   mediaType: "movie" | "show";
   tmdbId?: number;

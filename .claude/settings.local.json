@@ -182,7 +182,27 @@
       "Bash(Remove-Item \"I:\\\\poplog-v3\\\\src\\\\components\\\\images\\\\TmdbImage.tsx.testonly\" -Force)",
       "Bash(Write-Output \"deleted\")",
       "Bash(echo \"TSC_EXIT:$?\")",
-      "Bash(echo \"TSC:$?\")"
+      "Bash(echo \"TSC:$?\")",
+      "Bash(grep -E \"\\\\.\\(tsx|ts\\)$\")",
+      "Bash(git checkout *)",
+      "Read(//c/Users/Philipe/Documents/poplog/APIs Detalhadas/NOVOS TESTES/**)",
+      "Bash(extract-text \"balloonerismm-api-mapeamento-completo.docx\")",
+      "Bash(python \"C:\\\\Users\\\\Philipe\\\\AppData\\\\Roaming\\\\Claude\\\\local-agent-mode-sessions\\\\skills-plugin\\\\7e5d42b2-f66f-4eb0-b626-58a7eeadbf65\\\\cbd8d4a1-7d82-469a-b533-bd33bdf4d4c1\\\\skills\\\\docx\\\\scripts\\\\office\\\\unpack.py\" \"C:\\\\Users\\\\Philipe\\\\Documents\\\\poplog\\\\APIs Detalhadas\\\\NOVOS TESTES\\\\balloonerismm-api-mapeamento-completo.docx\" \"C:\\\\Users\\\\Philipe\\\\AppData\\\\Local\\\\Temp\\\\balloonerismm-docx-unpacked\")",
+      "PowerShell(python3 \"C:\\\\Users\\\\Philipe\\\\AppData\\\\Roaming\\\\Claude\\\\local-agent-mode-sessions\\\\skills-plugin\\\\7e5d42b2-f66f-4eb0-b626-58a7eeadbf65\\\\cbd8d4a1-7d82-469a-b533-bd33bdf4d4c1\\\\skills\\\\docx\\\\scripts\\\\office\\\\unpack.py\" \"C:\\\\Users\\\\Philipe\\\\Documents\\\\poplog\\\\APIs Detalhadas\\\\NOVOS TESTES\\\\balloonerismm-api-mapeamento-completo.docx\" \"C:\\\\Users\\\\Philipe\\\\AppData\\\\Local\\\\Temp\\\\balloonerismm-docx-unpacked\" 2>&1)",
+      "Bash(mkdir -p I:/poplog-v3/src/lib/discovery && mkdir -p \"I:/poplog-v3/src/app/api/poplog3/discovery/shortcut/[slug]\" && mkdir -p I:/poplog-v3/src/app/api/poplog3/discovery/shortcuts && echo \"dirs ok\")",
+      "Read(//c/Users/Philipe/AppData/Roaming/Claude/local-agent-mode-sessions/skills-plugin/7e5d42b2-f66f-4eb0-b626-58a7eeadbf65/cbd8d4a1-7d82-469a-b533-bd33bdf4d4c1/skills/docx/**)",
+      "Bash(python scripts/office/unpack.py \"C:\\\\Users\\\\Philipe\\\\Documents\\\\poplog\\\\1 de Junho\\\\balloonerismm\\\\balloonerismm-api-mapeamento-completo.docx\" unpacked_balloonerismm/)",
+      "Bash(py --version)",
+      "Bash(python3 scripts/office/unpack.py \"C:\\\\Users\\\\Philipe\\\\Documents\\\\poplog\\\\1 de Junho\\\\balloonerismm\\\\balloonerismm-api-mapeamento-completo.docx\" unpacked_balloonerismm/)",
+      "Bash(where python3 *)",
+      "Bash(where py *)",
+      "Bash(where python *)",
+      "Bash('C:\\\\Users\\\\Philipe\\\\AppData\\\\Local\\\\Programs\\\\Python\\\\Python313\\\\python.exe' 'C:\\\\Users\\\\Philipe\\\\AppData\\\\Roaming\\\\Claude\\\\local-agent-mode-sessions\\\\skills-plugin\\\\7e5d42b2-f66f-4eb0-b626-58a7eeadbf65\\\\cbd8d4a1-7d82-469a-b533-bd33bdf4d4c1\\\\skills\\\\docx/scripts/office/unpack.py' 'C:\\\\Users\\\\Philipe\\\\Documents\\\\poplog\\\\1 de Junho\\\\balloonerismm\\\\balloonerismm-api-mapeamento-completo.docx' 'C:\\\\Users\\\\Philipe\\\\AppData\\\\Roaming\\\\Claude\\\\local-agent-mode-sessions\\\\skills-plugin\\\\7e5d42b2-f66f-4eb0-b626-58a7eeadbf65\\\\cbd8d4a1-7d82-469a-b533-bd33bdf4d4c1\\\\skills\\\\docx/unpacked_balloonerismm/')",
+      "Bash(grep -A 50 \"CREATE TABLE \\\\`title_seasons\\\\`\" /i/poplog-v3/prisma/migrations/00000000000000_init/migration.sql)",
+      "Bash(xargs grep -l \"BalloonerismSeasonResponse\\\\|BalloonerismSeasonEpisode\")",
+      "Bash(xargs grep -l \"tvdbId.*season\\\\|tvdbId.*episode\")",
+      "Bash(xargs grep -l \"TvdbSeason\\\\|TvdbEpisode\")",
+      "Bash(npx eslint *)"
     ]
   }
 }

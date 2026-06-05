@@ -3,6 +3,7 @@ import { catalogGetTrending } from "@/server/source-engine/engine";
 import { hydrateCatalogResultsWithDebug } from "@/server/source-engine/hydrate-catalog-results";
 import { filterValidTitles } from "@/server/utils/filter-valid-titles";
 import { db } from "@/server/db/client";
+import { balloonerismGet } from "@/server/api-clients/balloonerismm/client";
 
 export type { TMDBDetails };
 
@@ -26,32 +27,37 @@ async function localPopularQuery(mediaType: "movie" | "tv", limit: number): Prom
       year: true,
       voteAverage: true,
       popularity: true,
+      tmdbPayload: true,
     },
   });
 
   return rows
     .filter((row) => row.title ?? row.originalTitle)
-    .map((row): TMDBItem => ({
-      id: row.tmdbId,
-      media_type: row.mediaType as "movie" | "tv",
-      title: row.title ?? row.originalTitle ?? "",
-      original_title: row.originalTitle ?? undefined,
-      overview: row.overview ?? undefined,
-      poster_path: row.posterPath,
-      backdrop_path: row.backdropPath ?? undefined,
-      release_date: row.mediaType === "movie" ? (row.releaseDate?.toISOString().slice(0, 10) ?? undefined) : undefined,
-      first_air_date: row.mediaType === "tv" ? (row.firstAirDate?.toISOString().slice(0, 10) ?? undefined) : undefined,
-      last_air_date: row.mediaType === "tv" ? (row.lastAirDate?.toISOString().slice(0, 10) ?? undefined) : undefined,
-      vote_average: row.voteAverage != null ? Number(row.voteAverage) : undefined,
-      popularity: row.popularity != null ? Number(row.popularity) : undefined,
-      poplogId: row.id,
-      externalIds: { tmdbId: row.tmdbId },
-      identityUsed: "poplog_id",
-      linkIdUsed: row.id,
-      hasPoplogId: true,
-      normalizedFrom: "legacy",
-      legacyCompatibilityUsed: false,
-    }));
+    .map((row): TMDBItem => {
+      const payload = row.tmdbPayload as { imdb_id?: string | null } | null;
+      const imdbId = payload?.imdb_id ?? undefined;
+      return {
+        id: row.tmdbId,
+        media_type: row.mediaType as "movie" | "tv",
+        title: row.title ?? row.originalTitle ?? "",
+        original_title: row.originalTitle ?? undefined,
+        overview: row.overview ?? undefined,
+        poster_path: row.posterPath,
+        backdrop_path: row.backdropPath ?? undefined,
+        release_date: row.mediaType === "movie" ? (row.releaseDate?.toISOString().slice(0, 10) ?? undefined) : undefined,
+        first_air_date: row.mediaType === "tv" ? (row.firstAirDate?.toISOString().slice(0, 10) ?? undefined) : undefined,
+        last_air_date: row.mediaType === "tv" ? (row.lastAirDate?.toISOString().slice(0, 10) ?? undefined) : undefined,
+        vote_average: row.voteAverage != null ? Number(row.voteAverage) : undefined,
+        popularity: row.popularity != null ? Number(row.popularity) : undefined,
+        poplogId: row.id,
+        externalIds: { tmdbId: row.tmdbId, ...(imdbId ? { imdbId } : {}) },
+        identityUsed: "poplog_id",
+        linkIdUsed: row.id,
+        hasPoplogId: true,
+        normalizedFrom: "legacy",
+        legacyCompatibilityUsed: false,
+      };
+    });
 }
 
 export async function getTrending(): Promise<TMDBItem[]> {
@@ -122,9 +128,52 @@ export async function getPopularTV(): Promise<TMDBItem[]> {
   }
 }
 
+// Busca overview em pt-BR para o item em destaque do hero.
+// Usa o endpoint TMDB-proxied do Balloonerismm (/discover/movie ou /tv com filtro de ID),
+// ou o endpoint de detalhe com language=pt-BR.
+// Não afeta trending — é uma chamada única apenas para o item featured.
 export async function getFeaturedDetails(
-  _mediaType: "movie" | "tv",
-  _id: number,
+  mediaType: "movie" | "tv",
+  item: TMDBItem,
 ): Promise<TMDBDetails | null> {
-  return null;
+  const imdbId = item.externalIds?.imdbId;
+  if (!imdbId) return null;
+
+  try {
+    const path = mediaType === "tv" ? `/tv/${imdbId}` : `/movie/${imdbId}`;
+    const data = await balloonerismGet<{
+      overview?: string | null;
+      title?: string | null;
+      name?: string | null;
+      number_of_seasons?: number | null;
+      runtime?: number | null;
+      episode_run_time?: number[] | null;
+      genres?: string[] | null;
+      release_date?: string | null;
+      first_air_date?: string | null;
+      last_air_date?: string | null;
+    }>(path, {
+      params: { language: "pt-BR" },
+      ttlSeconds: 86400,
+    });
+
+    if (!data) return null;
+
+    const genres = data.genres
+      ? data.genres.map((name, i) => ({ id: -(i + 1), name }))
+      : undefined;
+
+    return {
+      id: item.id,
+      overview: data.overview ?? undefined,
+      genres,
+      number_of_seasons: data.number_of_seasons ?? undefined,
+      runtime: data.runtime ?? undefined,
+      episode_run_time: data.episode_run_time ?? undefined,
+      release_date: data.release_date ?? item.release_date,
+      first_air_date: data.first_air_date ?? item.first_air_date,
+    };
+  } catch {
+    return null;
+  }
 }

@@ -21,6 +21,18 @@ const providers = [googleProvider()].filter(
   (provider): provider is NonNullable<typeof provider> => provider !== null,
 );
 
+function isDbConnectivityError(error: Error): boolean {
+  const parts = [
+    error?.message ?? "",
+    String((error as { cause?: unknown })?.cause ?? ""),
+  ].join(" ");
+  return (
+    parts.includes("PrismaClientInitializationError") ||
+    parts.includes("Can't reach database") ||
+    parts.includes("ECONNREFUSED")
+  );
+}
+
 export const authOptions = {
   adapter: PrismaAdapter(db),
   providers,
@@ -30,6 +42,12 @@ export const authOptions = {
   trustHost: true,
   pages: {
     signIn: "/",
+  },
+  logger: {
+    error(error: Error) {
+      if (isDbConnectivityError(error)) return;
+      console.error("[auth]", error);
+    },
   },
   callbacks: {
     session({ session, user }) {

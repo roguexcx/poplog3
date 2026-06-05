@@ -28,6 +28,7 @@ import type {
   GetTitleParams,
   PopularParams,
   TrendingParams,
+  DiscoverParams,
   RelatedParams,
   RatingParams,
   PeopleParams,
@@ -122,6 +123,13 @@ export async function catalogGetTrending(
 ): Promise<CatalogSearchResult[]> {
   if (!balloonerismEnabled()) return [];
   return balloonerismAdapter.getTrending(params);
+}
+
+export async function catalogGetByGenre(
+  params: DiscoverParams,
+): Promise<CatalogSearchResult[]> {
+  if (!balloonerismEnabled()) return [];
+  return balloonerismAdapter.getDiscover(params);
 }
 
 // ─── Related ─────────────────────────────────────────────────────────────────

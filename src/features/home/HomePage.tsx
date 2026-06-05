@@ -12,6 +12,7 @@ import {
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { buildTmdbUrlLoose } from "@/lib/images";
 import { getMediaType, getTitle } from "@/lib/tmdb-utils";
+import { translateToPtBr } from "@/server/translate/translate-to-pt-br";
 
 export const dynamic = "force-dynamic";
 
@@ -46,7 +47,7 @@ export default async function HomePage() {
   const featuredTypeLabel = featuredType === "tv" ? "as séries" : "os filmes";
 
   const [featuredDetails] = await Promise.all([
-    featuredItem ? getFeaturedDetails(featuredType, featuredItem.id) : null,
+    featuredItem ? getFeaturedDetails(featuredType, featuredItem) : null,
   ]);
 
   const featuredTitle = featuredItem
@@ -79,7 +80,10 @@ export default async function HomePage() {
   const seasons =
     featuredType === "tv" ? featuredDetails?.number_of_seasons ?? null : null;
 
-  const overview = featuredDetails?.overview ?? featuredItem?.overview ?? null;
+  const rawOverview = featuredDetails?.overview ?? featuredItem?.overview ?? null;
+  const overview = rawOverview
+    ? (await translateToPtBr(rawOverview).catch(() => ({ translatedText: rawOverview }))).translatedText
+    : null;
 
   return (
     <>

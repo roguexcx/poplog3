@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { buildFinancialBadgeInsight } from "@/lib/editorial-finance";
 import { getGeneralIndex } from "@/lib/ratings/general-index";
+import { syntheticTmdbFromImdbId } from "@/lib/ids/synthetic-tmdb-id";
 
 import TitleCast from "./TitleCast";
 import TitleCommunityHighlights from "./TitleCommunityHighlights";
@@ -63,10 +64,27 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
 
   const seasons = title.seasons ?? [];
 
-  // Episode browser requires real TMDB season data in the DB.
-  // Synthetic (negative) IDs have no TMDB rows, so seasons are stubs only.
-  const hasRealTmdbId = typeof title.externalIds?.tmdbId === "number";
-  const showEpisodeBrowser = title.mediaType === "tv" && seasons.length > 0 && hasRealTmdbId;
+  // Prefer a positive TMDB ID; fall back to IMDb ID or poplogId for Balloonerismm-only titles.
+  // Synthetic negative IDs (etapa 22) must NOT be passed as the season fetch ID — the season API
+  // resolves identities via resolvePoplogTitleIdentity which handles imdbId/poplogId directly.
+  const positiveTmdbId =
+    typeof title.externalIds?.tmdbId === "number" && title.externalIds.tmdbId > 0
+      ? title.externalIds.tmdbId
+      : null;
+  const seriesIdentifier: number | string | null =
+    positiveTmdbId ??
+    title.externalIds?.imdbId ??
+    (title.poplogId != null ? title.poplogId : null);
+
+  // Numeric ID used by the episode progress API (accepts positive or synthetic-negative integers).
+  const seriesProgressId: number | null =
+    positiveTmdbId ??
+    (title.externalIds?.imdbId ? syntheticTmdbFromImdbId(title.externalIds.imdbId) : null) ??
+    (typeof title.externalIds?.tmdbId === "number" && title.externalIds.tmdbId < 0
+      ? title.externalIds.tmdbId
+      : null);
+
+  const showEpisodeBrowser = title.mediaType === "tv" && seasons.length > 0 && seriesIdentifier !== null;
 
   const seasonNumbers = new Set(seasons.map((s) => s.seasonNumber));
 
@@ -102,13 +120,8 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
 
             {showEpisodeBrowser && (
               <TitleEpisodeBrowser
-                seriesTmdbId={
-                  title.externalIds?.tmdbId ??
-                  (typeof title.id === "number" && title.id > 0 ? title.id : null) ??
-                  title.externalIds?.imdbId ??
-                  title.poplogId ??
-                  title.id
-                }
+                seriesTmdbId={seriesIdentifier!}
+                progressSeriesId={seriesProgressId}
                 seriesName={title.title}
                 seasons={seasons}
                 initialSeason={initialSeason}

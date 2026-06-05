@@ -50,7 +50,10 @@ type SeasonDto = {
 };
 
 type TitleEpisodeBrowserProps = {
+  /** ID used to fetch season/episode data from the season API. Accepts positive tmdbId, imdbId string, or poplogId. */
   seriesTmdbId: number | string;
+  /** Numeric ID used for episode progress tracking (positive tmdbId or synthetic negative). Falls back to seriesTmdbId if numeric. */
+  progressSeriesId?: number | null;
   seriesName?: string | null;
   seasons: TitleSeasonInfo[];
   initialSeason?: number | null;
@@ -120,6 +123,7 @@ function getOriginalTmdbImageUrl(url: string | null) {
 
 export default function TitleEpisodeBrowser({
   seriesTmdbId,
+  progressSeriesId,
   seriesName,
   seasons,
   initialSeason,
@@ -127,8 +131,14 @@ export default function TitleEpisodeBrowser({
   isAuthenticated = false,
   onSeriesCommunityRatingChange,
 }: TitleEpisodeBrowserProps) {
-  // Numeric tmdbId for hooks/dispatch that require number; 0 means "unavailable"
-  const numericSeriesId = typeof seriesTmdbId === "number" ? seriesTmdbId : 0;
+  // Numeric ID for dispatch/progress. Prefer explicit progressSeriesId (incl. synthetic negatives),
+  // fall back to seriesTmdbId when it's already a number, or 0 when only a string is available.
+  const numericSeriesId =
+    typeof progressSeriesId === "number" && progressSeriesId !== 0
+      ? progressSeriesId
+      : typeof seriesTmdbId === "number"
+        ? seriesTmdbId
+        : 0;
 
   const seasonNumbers = useMemo(
     () => seasons.map((s) => s.seasonNumber),
@@ -265,10 +275,10 @@ export default function TitleEpisodeBrowser({
         seriesTmdbId?: number | string;
       }>;
 
-      if (customEvent.detail?.seriesTmdbId !== seriesTmdbId) return;
+      if (customEvent.detail?.seriesTmdbId !== numericSeriesId) return;
 
       try {
-        const res = await fetch(`/api/poplog3/series/${seriesTmdbId}/progress`);
+        const res = await fetch(`/api/poplog3/series/${numericSeriesId}/progress`);
 
         if (!res.ok) {
           throw new Error(`HTTP ${res.status}`);
@@ -298,7 +308,7 @@ export default function TitleEpisodeBrowser({
         refreshProgress,
       );
     };
-  }, [seriesTmdbId]);
+  }, [seriesTmdbId, numericSeriesId]);
 
   useEffect(() => {
     if (!activeEpisode) return;
@@ -360,7 +370,7 @@ export default function TitleEpisodeBrowser({
     startTransition(async () => {
       try {
         const body = await postEpisodeProgress({
-          seriesTmdbId,
+          seriesTmdbId: numericSeriesId,
           seasonNumber,
           episodeNumber,
           watched: nextWatched,
@@ -403,7 +413,7 @@ export default function TitleEpisodeBrowser({
     startTransition(async () => {
       try {
         const body = await postEpisodeProgress({
-          seriesTmdbId,
+          seriesTmdbId: numericSeriesId,
           bulk: episodes,
         });
 
@@ -483,7 +493,7 @@ export default function TitleEpisodeBrowser({
 
     try {
       const body = await postEpisodeProgress({
-        seriesTmdbId,
+        seriesTmdbId: numericSeriesId,
         bulk: episodesToMark.map((ep) => ({
           seasonNumber,
           episodeNumber: ep.episodeNumber,
@@ -514,10 +524,58 @@ export default function TitleEpisodeBrowser({
     setSeasonSaving(true);
 
     try {
-      const body = await postEpisodeProgress({
-        seriesTmdbId,
-        markAllAired: true,
-      });
+      // Carrega todas as temporadas não cacheadas para garantir que os episódios
+      // estejam disponíveis no cliente e sejam persistidos no DB via write-through.
+      await Promise.all(
+        seasons.map(async (s) => {
+          if (seasonCacheRef.current.has(s.seasonNumber)) return;
+          try {
+            const res = await fetch(`/api/poplog3/tv/${seriesTmdbId}/seasons/${s.seasonNumber}`);
+            if (!res.ok) return;
+            const data = (await res.json()) as SeasonDto;
+            seasonCacheRef.current.set(s.seasonNumber, data);
+          } catch {
+            // Temporada não carregável — ignora sem bloquear o fluxo
+          }
+        }),
+      );
+
+      const now = Date.now();
+      const episodesToMark: Array<{
+        seasonNumber: number;
+        episodeNumber: number;
+        runtimeMinutes: number | null;
+      }> = [];
+
+      for (const s of seasons) {
+        const cachedSeason = seasonCacheRef.current.get(s.seasonNumber);
+        if (!cachedSeason) continue;
+        for (const ep of cachedSeason.episodes) {
+          if (
+            ep.episodeNumber > 0 &&
+            ep.airDate &&
+            new Date(ep.airDate).getTime() <= now
+          ) {
+            episodesToMark.push({
+              seasonNumber: cachedSeason.seasonNumber,
+              episodeNumber: ep.episodeNumber,
+              runtimeMinutes: ep.runtime ?? null,
+            });
+          }
+        }
+      }
+
+      const body =
+        episodesToMark.length > 0
+          ? await postEpisodeProgress({
+              seriesTmdbId: numericSeriesId,
+              bulk: episodesToMark,
+            })
+          : // Fallback: DB pode já ter os episódios (série com cache TMDB)
+            await postEpisodeProgress({
+              seriesTmdbId: numericSeriesId,
+              markAllAired: true,
+            });
 
       if (body.ok && body.progress?.watchedKeys) {
         setWatchedKeys(new Set(body.progress.watchedKeys));
@@ -548,7 +606,7 @@ export default function TitleEpisodeBrowser({
 
     try {
       const body = await postEpisodeProgress({
-        seriesTmdbId,
+        seriesTmdbId: numericSeriesId,
         clearSeason: seasonNumber,
       });
 
@@ -928,8 +986,8 @@ function UpcomingSeasonNotice({
 
         <p className="text-[13px] leading-6 text-white/55">
           {airDate
-            ? `Esta temporada estreia em ${airDate}. Os episódios são publicados no TMDB conforme se aproximam da estreia.`
-            : "A produção ainda não divulgou episódios desta temporada. Tudo aparece aqui assim que o TMDB liberar."}
+            ? `Esta temporada estreia em ${airDate}. Os episódios aparecem aqui conforme se aproximam da estreia.`
+            : "A produção ainda não divulgou episódios desta temporada. Tudo aparece aqui assim que os dados forem publicados."}
         </p>
       </div>
     </div>

@@ -7,18 +7,22 @@ import { getPoplogTitleDetails } from "@/server/titles/poplog-title-details";
 import { normalizeSearchTerm } from "@/server/search/fuzzy-title-search";
 import { db } from "@/server/db/client";
 import { tvdbAdapter } from "@/server/source-engine/adapters/tvdb-adapter";
+import { balloonerismGet } from "@/server/api-clients/balloonerismm/client";
+import { imdbIdFromSyntheticTmdbId } from "@/lib/ids/synthetic-tmdb-id";
 import type { CatalogEpisode, CatalogSeason } from "@/server/source-engine/types/catalog.types";
 import type { PoplogTitleExternalIds } from "@/server/titles/poplog-title-identity";
 import type { PoplogSeason } from "@/server/types/season";
+import type { BalloonerismSeasonResponse } from "@/server/api-clients/balloonerismm/types";
 import { resolveCatalogImage } from "@/lib/images/resolve";
+import { upsertSeason } from "@/server/cache/season-cache";
 
 type SeasonDebugSource = {
   poplogId: string | number | null;
   externalIds: PoplogTitleExternalIds;
   seriesIdentityUsed: string;
   seasonAliasLookupSource: string | null;
-  seasonSource: "cache" | "tvdb" | "unavailable";
-  episodeSource: "cache" | "tvdb" | "unavailable";
+  seasonSource: "cache" | "tvdb" | "balloonerismm" | "unavailable";
+  episodeSource: "cache" | "tvdb" | "balloonerismm" | "unavailable";
   usedTmdbApi: false;
   usedLegacy: false;
   fallbackUsed: boolean;
@@ -111,6 +115,51 @@ function tvdbSeasonPayload(input: {
         voteAverage: null,
         voteCount: null,
         episodeType: null,
+      })),
+    poplogId: input.poplogId,
+    externalIds: input.externalIds,
+    ...(input.debugSource ? { debugSource: input.debugSource } : {}),
+  };
+}
+
+// IMDb cria episódios placeholder com nome "Episode #S.E" para temporadas anunciadas sem dados reais.
+const PLACEHOLDER_EP_REGEX = /^Episode #\d+\.\d+$/i;
+
+function balloonerismSeasonPayload(input: {
+  seriesTmdbId: number | null;
+  seasonNumber: number;
+  raw: BalloonerismSeasonResponse;
+  poplogId: string | number | null;
+  externalIds: PoplogTitleExternalIds;
+  debugSource?: SeasonDebugSource;
+}) {
+  const episodes = (input.raw.episodes ?? [])
+    .filter((ep) => ep.episode_number > 0)
+    .filter((ep) => !ep.name || !PLACEHOLDER_EP_REGEX.test(ep.name));
+  return {
+    ok: true,
+    seriesTmdbId: input.seriesTmdbId,
+    seasonNumber: input.seasonNumber,
+    name: input.raw.name ?? `Temporada ${input.seasonNumber}`,
+    overview: input.raw.overview || null,
+    posterUrl: input.raw.poster_path ?? null,
+    airDate: input.raw.air_date ?? null,
+    episodeCount: episodes.length || null,
+    voteAverage: null,
+    lastSyncedAt: null,
+    episodes: episodes
+      .sort((a, b) => a.episode_number - b.episode_number)
+      .map((ep) => ({
+        episodeNumber: ep.episode_number,
+        name: ep.name || null,
+        overview: ep.overview || null,
+        stillUrl: ep.still_path ?? null,
+        airDate: ep.air_date ?? null,
+        // Balloonerismm retorna runtime em segundos; converter para minutos
+        runtime: ep.runtime ? Math.round(ep.runtime / 60) : null,
+        voteAverage: ep.vote_average ?? null,
+        voteCount: ep.vote_count ?? null,
+        episodeType: ep.episode_type ?? null,
       })),
     poplogId: input.poplogId,
     externalIds: input.externalIds,
@@ -349,6 +398,34 @@ export async function GET(
           alternativeSourceUnavailable: false,
         });
 
+        const filteredEps = episodes.filter((ep) => ep.season === seasonNumber && ep.number > 0);
+        // Persiste no DB para que markAllAiredEpisodes e computeUserSeriesProgress funcionem
+        void upsertSeason({
+          seriesTmdbId,
+          seasonNumber,
+          tmdbSeasonId: null,
+          name: season?.title ?? null,
+          overview: null,
+          posterPath: season?.posterPath ?? null,
+          airDate: filteredEps.find((ep) => ep.firstAired)?.firstAired ?? null,
+          episodeCount: filteredEps.length || null,
+          voteAverage: null,
+          tmdbPayload: null,
+          episodes: filteredEps.map((ep) => ({
+            episodeNumber: ep.number,
+            tmdbEpisodeId: null,
+            name: ep.title ?? null,
+            overview: ep.overview ?? null,
+            stillPath: ep.stillPath ?? null,
+            airDate: ep.firstAired ?? null,
+            runtime: ep.runtime ?? null,
+            voteAverage: null,
+            voteCount: null,
+            productionCode: null,
+            episodeType: null,
+          })),
+        }).catch((err) => console.warn("[season route] upsertSeason tvdb falhou", err));
+
         return NextResponse.json(
           tvdbSeasonPayload({
             seriesTmdbId,
@@ -362,6 +439,88 @@ export async function GET(
           {
             headers: {
               "x-poplog-source": "tvdb",
+              "x-poplog-cache": "external_no_persist",
+            },
+          },
+        );
+      }
+    }
+
+    // Fallback 3: Balloonerismm (IMDb-first — usado quando cache e TVDB falham)
+    // Para títulos com tmdbId sintético negativo, o imdbId pode não estar em externalIds
+    // porque title_external_ids não tem entrada para IDs negativos.
+    const balloonerismImdbId =
+      externalIds.imdbId ??
+      (typeof seriesTmdbId === "number" && seriesTmdbId < 0
+        ? imdbIdFromSyntheticTmdbId(seriesTmdbId)
+        : null);
+
+    if (balloonerismImdbId) {
+      const rawSeason = await balloonerismGet<BalloonerismSeasonResponse>(
+        `/tv/${balloonerismImdbId}/season/${seasonNumber}`,
+        { params: { language: "pt-BR" }, ttlSeconds: 86400 },
+      ).catch(() => null);
+
+      if (rawSeason?.episodes && rawSeason.episodes.length > 0) {
+        const debug = createSeasonDebug({
+          poplogId: resolvedPoplogId,
+          externalIds,
+          seriesIdentityUsed,
+          seasonAliasLookupSource,
+          seasonSource: "balloonerismm",
+          episodeSource: "balloonerismm",
+          fallbackUsed: true,
+          fallbackReason: externalIds.tvdbId ? "tvdb_no_data" : "no_tvdb_id",
+          incompleteSeasonData: false,
+          missingSeasonCache: true,
+          alternativeSourceUnavailable: false,
+        });
+
+        const episodesForCache = (rawSeason.episodes ?? [])
+          .filter((ep) => ep.episode_number > 0)
+          .filter((ep) => !ep.name || !PLACEHOLDER_EP_REGEX.test(ep.name));
+
+        // Persiste no DB para que markAllAiredEpisodes e computeUserSeriesProgress funcionem
+        if (seriesTmdbId) {
+          void upsertSeason({
+            seriesTmdbId,
+            seasonNumber,
+            tmdbSeasonId: null,
+            name: rawSeason.name ?? null,
+            overview: rawSeason.overview ?? null,
+            posterPath: rawSeason.poster_path ?? null,
+            airDate: rawSeason.air_date ?? null,
+            episodeCount: episodesForCache.length || null,
+            voteAverage: null,
+            tmdbPayload: null,
+            episodes: episodesForCache.map((ep) => ({
+              episodeNumber: ep.episode_number,
+              tmdbEpisodeId: null,
+              name: ep.name ?? null,
+              overview: ep.overview ?? null,
+              stillPath: ep.still_path ?? null,
+              airDate: ep.air_date ?? null,
+              runtime: ep.runtime ? Math.round(ep.runtime / 60) : null,
+              voteAverage: ep.vote_average ?? null,
+              voteCount: ep.vote_count ?? null,
+              productionCode: null,
+              episodeType: ep.episode_type ?? null,
+            })),
+          }).catch((err) => console.warn("[season route] upsertSeason balloonerismm falhou", err));
+        }
+
+        return NextResponse.json(
+          balloonerismSeasonPayload({
+            seriesTmdbId: seriesTmdbId ?? null,
+            seasonNumber,
+            raw: rawSeason,
+            poplogId: resolvedPoplogId,
+            externalIds,
+            debugSource: debugSource ? debug : undefined,
+          }),
+          {
+            headers: {
+              "x-poplog-source": "balloonerismm",
               "x-poplog-cache": "external_no_persist",
             },
           },

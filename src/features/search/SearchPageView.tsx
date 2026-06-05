@@ -4,15 +4,27 @@ import Image from "next/image";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
-import { ChevronDown, ChevronLeft, ChevronRight, Film, Search, Sparkles, Tv, UserRound, X } from "lucide-react";
+import { ChevronLeft, ChevronRight, Film, Search, Sparkles, Tv, UserRound, X } from "lucide-react";
 
 import PageShell from "@/components/layout/PageShell";
 import InteractivePosterCard from "@/components/ui/InteractivePosterCard";
 import EmptyState from "@/components/ui/EmptyState";
 import SectionHeader from "@/components/ui/SectionHeader";
+import ExploreShortcuts from "./ExploreShortcuts";
+import { findShortcut } from "@/lib/discovery/shortcuts-config";
 import { resolveCatalogImage } from "@/lib/images/resolve";
 
 type SearchMediaType = "all" | "movie" | "tv";
+
+type ShortcutResultResponse = {
+  ok: boolean;
+  slug: string;
+  title: string;
+  description: string;
+  popularMovies?: SearchResult[];
+  popularSeries?: SearchResult[];
+  results: SearchResult[];
+};
 
 type SearchResult = {
   tmdb_id: number;
@@ -62,50 +74,18 @@ type SearchResponse = {
   people?: SearchPerson[];
 };
 
-type DiscoveryGenre = {
-  id: number;
-  name: string;
-};
-
 type DiscoveryResponse = {
   ok: boolean;
   trending: SearchResult[];
   popularMovies: SearchResult[];
   popularSeries: SearchResult[];
-  genres: DiscoveryGenre[];
-};
-
-type SpecialFilter = {
-  id: string;
-  label: string;
-};
-
-type SpecialDiscoverResponse = {
-  ok: boolean;
-  special: string;
-  label: string;
-  popular?: SearchResult[];
-  popularMovies?: SearchResult[];
-  popularSeries?: SearchResult[];
-  topRated?: SearchResult[];
-  results: SearchResult[];
-};
-
-type GenreDiscoverResponse = {
-  ok: boolean;
-  type: SearchMediaType;
-  genre?: number;
-  popular?: SearchResult[];
-  topRated?: SearchResult[];
-  popularMovies?: SearchResult[];
-  popularSeries?: SearchResult[];
-  results: SearchResult[];
 };
 
 type SearchPageViewProps = {
   initialQuery: string;
   initialType: string;
   initialPage: number;
+  initialShortcut?: string;
 };
 
 type SearchMeta = {
@@ -217,19 +197,13 @@ function PeopleGrid({ people }: { people: SearchPerson[] }) {
   );
 }
 
-const SPECIAL_FILTERS: SpecialFilter[] = [
-  { id: "anime", label: "Animes" },
-  { id: "plot-twist", label: "Plot Twist" },
-];
-
-export default function SearchPageView({ initialQuery, initialType, initialPage }: SearchPageViewProps) {
+export default function SearchPageView({ initialQuery, initialType, initialPage, initialShortcut = "" }: SearchPageViewProps) {
   const router = useRouter();
   const pathname = usePathname();
   const [query, setQuery] = useState(initialQuery);
   const [type, setType] = useState<SearchMediaType>(normalizeMediaType(initialType));
   const [page, setPage] = useState(() => normalizePage(initialPage));
-  const [selectedGenre, setSelectedGenre] = useState<DiscoveryGenre | null>(null);
-  const [selectedSpecial, setSelectedSpecial] = useState<SpecialFilter | null>(null);
+  const [selectedShortcut, setSelectedShortcut] = useState(initialShortcut);
   const [loading, setLoading] = useState(false);
   const [results, setResults] = useState<SearchResult[]>([]);
   const [people, setPeople] = useState<SearchPerson[]>([]);
@@ -238,44 +212,30 @@ export default function SearchPageView({ initialQuery, initialType, initialPage 
   const [searchMeta, setSearchMeta] = useState<SearchMeta | null>(null);
   const [discoveryLoading, setDiscoveryLoading] = useState(false);
   const [discovery, setDiscovery] = useState<DiscoveryResponse | null>(null);
-  const [genreLoading, setGenreLoading] = useState(false);
-  const [genreDiscover, setGenreDiscover] = useState<GenreDiscoverResponse | null>(null);
-  const [specialLoading, setSpecialLoading] = useState(false);
-  const [specialDiscover, setSpecialDiscover] = useState<SpecialDiscoverResponse | null>(null);
-  const [showAllGenres, setShowAllGenres] = useState(false);
+  const [shortcutLoading, setShortcutLoading] = useState(false);
+  const [shortcutData, setShortcutData] = useState<ShortcutResultResponse | null>(null);
 
   useEffect(() => {
     setQuery(initialQuery);
     setType(normalizeMediaType(initialType));
     setPage(normalizePage(initialPage));
-  }, [initialQuery, initialType, initialPage]);
+    setSelectedShortcut(initialShortcut ?? "");
+  }, [initialQuery, initialType, initialPage, initialShortcut]);
 
   const trimmedQuery = useMemo(() => query.trim(), [query]);
   const maxSearchPage = Math.max(1, Math.min(searchMeta?.totalPages ?? page, 500));
   const searchSubtitle = useMemo(() => {
-    if (!searchMeta) return selectedGenre ? `${results.length} títulos em ${selectedGenre.name}` : `${results.length} títulos encontrados`;
-
+    if (!searchMeta) return `${results.length} títulos encontrados`;
     const total = searchMeta.totalResults.toLocaleString("pt-BR");
     const pageText = searchMeta.totalPages > 1 ? ` - pagina ${searchMeta.page} de ${searchMeta.totalPages}` : "";
-
-    return selectedGenre ? `${total} resultados em ${selectedGenre.name}${pageText}` : `${total} resultados${pageText}`;
-  }, [results.length, searchMeta, selectedGenre]);
-  const mobileGenres = useMemo(() => {
-    const genres = discovery?.genres ?? [];
-    const primary = genres.slice(0, 6);
-
-    if (showAllGenres || !selectedGenre) return showAllGenres ? genres : primary;
-    if (primary.some((genre) => genre.id === selectedGenre.id)) return primary;
-
-    return [...primary.slice(0, 5), selectedGenre];
-  }, [discovery?.genres, selectedGenre, showAllGenres]);
+    return `${total} resultados${pageText}`;
+  }, [results.length, searchMeta]);
   const activeFiltersCount = useMemo(() => {
     let count = 0;
     if (type !== "all") count += 1;
-    if (selectedGenre) count += 1;
-    if (selectedSpecial) count += 1;
+    if (selectedShortcut) count += 1;
     return count;
-  }, [type, selectedGenre, selectedSpecial]);
+  }, [type, selectedShortcut]);
 
   function handleQueryChange(value: string) {
     setQuery(value);
@@ -287,24 +247,14 @@ export default function SearchPageView({ initialQuery, initialType, initialPage 
     setPage(1);
   }
 
-  function handleGenreChange(genre: DiscoveryGenre) {
-    const active = selectedGenre?.id === genre.id;
-    setSelectedSpecial(null);
-    setSelectedGenre(active ? null : genre);
-    setPage(1);
-  }
-
-  function handleSpecialChange(filter: SpecialFilter) {
-    const active = selectedSpecial?.id === filter.id;
-    setSelectedGenre(null);
-    setSelectedSpecial(active ? null : filter);
+  function handleShortcutSelect(slug: string) {
+    setSelectedShortcut((current) => current === slug ? "" : slug);
     setPage(1);
   }
 
   function clearFilters() {
     setType("all");
-    setSelectedGenre(null);
-    setSelectedSpecial(null);
+    setSelectedShortcut("");
     setPage(1);
   }
 
@@ -315,7 +265,7 @@ export default function SearchPageView({ initialQuery, initialType, initialPage 
       if (trimmedQuery) params.set("q", trimmedQuery);
       if (type !== "all") params.set("type", type);
       if (trimmedQuery && page > 1) params.set("page", String(page));
-      if (trimmedQuery && selectedGenre) params.set("genre", String(selectedGenre.id));
+      if (!trimmedQuery && selectedShortcut) params.set("atalho", selectedShortcut);
 
       const queryString = params.toString();
       const nextUrl = queryString ? `${pathname}?${queryString}` : pathname;
@@ -327,10 +277,10 @@ export default function SearchPageView({ initialQuery, initialType, initialPage 
     }, SEARCH_DEBOUNCE_MS);
 
     return () => clearTimeout(timeout);
-  }, [page, pathname, router, selectedGenre, trimmedQuery, type]);
+  }, [page, pathname, router, selectedShortcut, trimmedQuery, type]);
 
   useEffect(() => {
-    if (trimmedQuery || selectedGenre || selectedSpecial || discovery) return;
+    if (trimmedQuery || selectedShortcut || discovery) return;
     const controller = new AbortController();
     async function load() {
       try {
@@ -346,47 +296,26 @@ export default function SearchPageView({ initialQuery, initialType, initialPage 
     }
     load();
     return () => controller.abort();
-  }, [trimmedQuery, selectedGenre, selectedSpecial, discovery]);
+  }, [trimmedQuery, selectedShortcut, discovery]);
 
   useEffect(() => {
-    if (trimmedQuery || !selectedGenre) { setGenreDiscover(null); return; }
+    if (trimmedQuery || !selectedShortcut) { setShortcutData(null); return; }
     const controller = new AbortController();
     async function load() {
       try {
-        setGenreLoading(true);
-        const params = new URLSearchParams({ genre: String(selectedGenre!.id), type });
-        const res = await fetch(`/api/poplog3/discover?${params}`, { signal: controller.signal });
-        const data: GenreDiscoverResponse = await res.json();
-        if (data.ok) setGenreDiscover(data);
+        setShortcutLoading(true);
+        const res = await fetch(`/api/poplog3/discovery/shortcut/${encodeURIComponent(selectedShortcut)}`, { signal: controller.signal });
+        const data: ShortcutResultResponse = await res.json();
+        if (data.ok) setShortcutData(data);
       } catch (e) {
-        if ((e as Error).name !== "AbortError") console.error("[genre-discover]", e);
+        if ((e as Error).name !== "AbortError") console.error("[shortcut-discover]", e);
       } finally {
-        setGenreLoading(false);
+        setShortcutLoading(false);
       }
     }
     load();
     return () => controller.abort();
-  }, [trimmedQuery, selectedGenre, type]);
-
-  useEffect(() => {
-    if (trimmedQuery || !selectedSpecial) { setSpecialDiscover(null); return; }
-    const controller = new AbortController();
-    async function load() {
-      try {
-        setSpecialLoading(true);
-        const params = new URLSearchParams({ special: selectedSpecial!.id });
-        const res = await fetch(`/api/poplog3/discover/special?${params}`, { signal: controller.signal });
-        const data: SpecialDiscoverResponse = await res.json();
-        if (data.ok) setSpecialDiscover(data);
-      } catch (e) {
-        if ((e as Error).name !== "AbortError") console.error("[special-discover]", e);
-      } finally {
-        setSpecialLoading(false);
-      }
-    }
-    load();
-    return () => controller.abort();
-  }, [trimmedQuery, selectedSpecial]);
+  }, [trimmedQuery, selectedShortcut]);
 
   useEffect(() => {
     if (!trimmedQuery) {
@@ -405,7 +334,6 @@ export default function SearchPageView({ initialQuery, initialType, initialPage 
         setLoading(true);
         setSearchError(null);
         const params = new URLSearchParams({ q: trimmedQuery, type, page: String(page) });
-        if (selectedGenre) params.set("genre", String(selectedGenre.id));
         const res = await fetch(`/api/poplog3/search?${params}`, { signal: controller.signal });
         const data: SearchResponse = await res.json();
         if (!res.ok || !data.ok) {
@@ -439,7 +367,7 @@ export default function SearchPageView({ initialQuery, initialType, initialPage 
       }
     }, SEARCH_DEBOUNCE_MS);
     return () => { controller.abort(); clearTimeout(timeout); };
-  }, [page, trimmedQuery, type, selectedGenre]);
+  }, [page, trimmedQuery, type]);
 
   return (
     <PageShell variant="wide">
@@ -501,70 +429,13 @@ export default function SearchPageView({ initialQuery, initialType, initialPage 
           </div>
         </section>
 
-        {/* Genre pills + special filter pills */}
-        {discovery?.genres?.length ? (
-          <>
-            <div className="flex flex-wrap gap-1.5 rounded-2xl border border-white/[0.06] bg-white/[0.025] p-2.5 sm:hidden">
-              {mobileGenres.map((genre) => {
-                const active = selectedGenre?.id === genre.id;
-                return (
-                  <button key={genre.id}
-                    onClick={() => handleGenreChange(genre)}
-                    className={`rounded-full border px-2.5 py-1.5 text-[10.5px] font-semibold transition ${active ? "border-indigo-400/40 bg-indigo-500/15 text-indigo-300" : "border-white/[0.08] bg-black/20 text-white/55 hover:bg-white/[0.07] hover:text-white/80"}`}>
-                    {genre.name}
-                  </button>
-                );
-              })}
-              {SPECIAL_FILTERS.map((sf) => {
-                const active = selectedSpecial?.id === sf.id;
-                return (
-                  <button key={sf.id}
-                    onClick={() => handleSpecialChange(sf)}
-                    className={`rounded-full border px-2.5 py-1.5 text-[10.5px] font-semibold transition ${active ? "border-violet-400/40 bg-violet-500/15 text-violet-300" : "border-white/[0.08] bg-black/20 text-white/55 hover:bg-white/[0.07] hover:text-white/80"}`}>
-                    {sf.label}
-                  </button>
-                );
-              })}
-              {discovery.genres.length > 6 ? (
-                <button
-                  type="button"
-                  onClick={() => setShowAllGenres((value) => !value)}
-                  className="flex items-center gap-1 rounded-full border border-white/[0.10] bg-white/[0.055] px-2.5 py-1.5 text-[10.5px] font-black uppercase tracking-[0.08em] text-white/60 transition hover:bg-white/[0.09] hover:text-white/80"
-                >
-                  {showAllGenres ? "Menos" : `Mais ${discovery.genres.length - mobileGenres.length}`}
-                  <ChevronDown className={`size-3 transition ${showAllGenres ? "rotate-180" : ""}`} />
-                </button>
-              ) : null}
-            </div>
-
-            <div className="hidden flex-wrap gap-2 rounded-2xl border border-white/[0.055] bg-white/[0.018] p-3 sm:flex lg:gap-2.5 lg:p-3.5">
-              {discovery.genres.map((genre) => {
-                const active = selectedGenre?.id === genre.id;
-                return (
-                  <button key={genre.id}
-                    onClick={() => handleGenreChange(genre)}
-                    className={`rounded-full border px-3.5 py-1.5 text-[11px] font-semibold transition lg:px-4 lg:py-2 ${active ? "border-indigo-400/40 bg-indigo-500/15 text-indigo-300" : "border-white/[0.08] bg-black/15 text-white/55 hover:bg-white/[0.07] hover:text-white/80"}`}>
-                    {genre.name}
-                  </button>
-                );
-              })}
-              <div className="mx-1 my-auto h-4 w-px bg-white/[0.10]" />
-              {SPECIAL_FILTERS.map((sf) => {
-                const active = selectedSpecial?.id === sf.id;
-                return (
-                  <button key={sf.id}
-                    onClick={() => handleSpecialChange(sf)}
-                    className={`rounded-full border px-3.5 py-1.5 text-[11px] font-semibold transition lg:px-4 lg:py-2 ${active ? "border-violet-400/40 bg-violet-500/15 text-violet-300" : "border-white/[0.08] bg-black/15 text-white/55 hover:bg-white/[0.07] hover:text-white/80"}`}>
-                    {sf.label}
-                  </button>
-                );
-              })}
-            </div>
-          </>
+        {/* Explore por vibe — always visible when no active search query */}
+        {!trimmedQuery ? (
+          <ExploreShortcuts activeSlug={selectedShortcut} onSelect={handleShortcutSelect} />
         ) : null}
 
-        {/* Skeleton */}
-        {(loading || genreLoading || discoveryLoading || specialLoading) && !hasSearched ? (
+        {/* Skeleton — initial load */}
+        {(loading || shortcutLoading || discoveryLoading) && !hasSearched ? (
           <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-6">
             {Array.from({ length: 12 }).map((_, i) => (
               <div key={i} className="aspect-[2/3] animate-pulse rounded-[1.35rem] border border-white/[0.06] bg-white/[0.04]" />
@@ -627,102 +498,71 @@ export default function SearchPageView({ initialQuery, initialType, initialPage 
 
         {/* Empty search */}
         {!searchError && !loading && hasSearched && results.length === 0 && people.length === 0 ? (
-          <EmptyState kicker="Busca vazia" title="Nenhum resultado encontrado." description="Tente outro termo, tipo ou gênero." accent="neutral" />
+          <EmptyState kicker="Busca vazia" title="Nenhum resultado encontrado." description="Tente outro termo, tipo ou vibe." accent="neutral" />
         ) : null}
 
-        {/* Special filter results (Animes / Plot Twist) */}
-        {!trimmedQuery && selectedSpecial && !specialLoading && specialDiscover ? (
-          <div className="flex flex-col gap-10">
-            {selectedSpecial.id === "anime" ? (
-              <div className="flex flex-col gap-10">
-                {specialDiscover.popularSeries?.length ? (
-                  <section className="space-y-5">
-                    <SectionHeader eyebrow="Tendencias da semana" title="Animes em alta" subtitle="Series de animacao japonesa aparecendo entre as tendencias da semana." accent="indigo" />
-                    <TitleGrid titles={specialDiscover.popularSeries} />
-                  </section>
-                ) : null}
-                {specialDiscover.popularSeries?.length && specialDiscover.popularMovies?.length ? <SectionDivider /> : null}
-                {specialDiscover.popularMovies?.length ? (
-                  <section className="space-y-5">
-                    <SectionHeader eyebrow="Tendencias da semana" title="Filmes de anime em alta" subtitle="Filmes de animacao japonesa aparecendo entre as tendencias da semana." accent="indigo" />
-                    <TitleGrid titles={specialDiscover.popularMovies} />
-                  </section>
-                ) : null}
-              </div>
-            ) : (
-              <div className="flex flex-col gap-10">
-                {specialDiscover.popular?.length ? (
-                  <section className="space-y-5">
-                    <SectionHeader eyebrow="Tendencias da semana" title="Plot twists em alta" subtitle="Misterio, thriller e viradas narrativas entre os titulos que estao em tendencia esta semana." accent="indigo" />
-                    <TitleGrid titles={specialDiscover.popular} />
-                  </section>
-                ) : null}
-              </div>
-            )}
+        {/* Shortcut results */}
+        {!trimmedQuery && selectedShortcut && !shortcutLoading && shortcutData ? (() => {
+          const sc = findShortcut(selectedShortcut);
+          const eyebrow = sc?.group.label ?? "Descoberta";
+          return (
+            <div className="flex flex-col gap-10">
+              {shortcutData.popularMovies?.length ? (
+                <section className="space-y-5">
+                  <SectionHeader
+                    eyebrow={eyebrow}
+                    title={shortcutData.popularSeries?.length ? `Filmes — ${shortcutData.title}` : shortcutData.title}
+                    subtitle={shortcutData.description}
+                    accent="indigo"
+                  />
+                  <TitleGrid titles={shortcutData.popularMovies} />
+                </section>
+              ) : null}
+              {shortcutData.popularMovies?.length && shortcutData.popularSeries?.length ? <SectionDivider /> : null}
+              {shortcutData.popularSeries?.length ? (
+                <section className="space-y-5">
+                  <SectionHeader
+                    eyebrow={eyebrow}
+                    title={shortcutData.popularMovies?.length ? `Séries — ${shortcutData.title}` : shortcutData.title}
+                    subtitle={shortcutData.popularMovies?.length ? "" : shortcutData.description}
+                    accent="indigo"
+                  />
+                  <TitleGrid titles={shortcutData.popularSeries} />
+                </section>
+              ) : null}
+              {!shortcutData.popularMovies?.length && !shortcutData.popularSeries?.length ? (
+                <EmptyState kicker={sc?.label ?? selectedShortcut} title="Sem títulos disponíveis." description="Nenhum resultado encontrado para essa categoria no momento." accent="neutral" />
+              ) : null}
+            </div>
+          );
+        })() : null}
+
+        {/* Shortcut loading skeleton */}
+        {!trimmedQuery && selectedShortcut && shortcutLoading ? (
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-6">
+            {Array.from({ length: 12 }).map((_, i) => (
+              <div key={i} className="aspect-[2/3] animate-pulse rounded-[1.35rem] border border-white/[0.06] bg-white/[0.04]" />
+            ))}
           </div>
         ) : null}
 
-        {/* Genre discover results */}
-        {!trimmedQuery && selectedGenre && !genreLoading && genreDiscover ? (
-          <div className="flex flex-col gap-10">
-            {genreDiscover.popular?.length ? (
-              <section className="space-y-5">
-                <SectionHeader eyebrow={selectedGenre.name} title={`${selectedGenre.name} em destaque`} subtitle="Filmes e series populares desse genero." accent="indigo" />
-                <TitleGrid titles={genreDiscover.popular} />
-              </section>
-            ) : null}
-            {genreDiscover.topRated?.length ? (
-              <div className="flex flex-col gap-10">
-                {genreDiscover.popular?.length ? <SectionDivider /> : null}
-                <section className="space-y-5">
-                  <SectionHeader eyebrow="Mais bem avaliados" title={`Melhores de ${selectedGenre.name}`} subtitle="Titulos com melhor recepcao dentro do genero." accent="indigo" />
-                  <TitleGrid titles={genreDiscover.topRated} />
-                </section>
-              </div>
-            ) : null}
-            {genreDiscover.popularMovies?.length ? (
-              <div className="flex flex-col gap-10">
-                {(genreDiscover.popular?.length || genreDiscover.topRated?.length) ? <SectionDivider /> : null}
-                <section className="space-y-5">
-                  <SectionHeader eyebrow="Filmes" title={`Filmes de ${selectedGenre.name}`} subtitle="Filmes populares para explorar." accent="indigo" />
-                  <TitleGrid titles={genreDiscover.popularMovies} />
-                </section>
-              </div>
-            ) : null}
-            {genreDiscover.popularSeries?.length ? (
-              <div className="flex flex-col gap-10">
-                {(genreDiscover.popular?.length || genreDiscover.topRated?.length || genreDiscover.popularMovies?.length) ? <SectionDivider /> : null}
-                <section className="space-y-5">
-                  <SectionHeader eyebrow="Series" title={`Series de ${selectedGenre.name}`} subtitle="Series populares para acompanhar." accent="indigo" />
-                  <TitleGrid titles={genreDiscover.popularSeries} />
-                </section>
-              </div>
-            ) : null}
-          </div>
-        ) : null}
-
-        {/* Default discovery (no query, no genre, no special) */}
-        {!trimmedQuery && !selectedGenre && !selectedSpecial && !hasSearched ? (
+        {/* Default discovery (no query, no shortcut) */}
+        {!trimmedQuery && !selectedShortcut && !hasSearched ? (
           <div className="flex flex-col gap-10">
             {!discoveryLoading && discovery ? (
               <div className="flex flex-col gap-10">
-                {type === "movie" ? (
-                  <div className="flex flex-col gap-10">
-                    {discovery.trending?.filter((t) => t.media_type === "movie").length ? (
-                      <section className="space-y-5">
-                        <SectionHeader eyebrow="Tendencias" title="Filmes em alta" subtitle="Filmes ganhando atencao agora." accent="indigo" />
-                        <TitleGrid titles={discovery.trending.filter((t) => t.media_type === "movie")} />
-                      </section>
-                    ) : null}
-                    {discovery.trending?.filter((t) => t.media_type === "movie").length && discovery.popularMovies?.length ? <SectionDivider /> : null}
-                    {discovery.popularMovies?.length ? (
-                      <section className="space-y-5">
-                        <SectionHeader eyebrow="Populares" title="Filmes populares" subtitle="Os filmes mais assistidos agora." accent="indigo" />
-                        <TitleGrid titles={discovery.popularMovies} />
-                      </section>
-                    ) : null}
-                  </div>
-                ) : null}
+                {type === "movie" ? (() => {
+                  const trendingMovies = discovery.trending?.filter((t) => t.media_type === "movie") ?? [];
+                  const seen = new Set(trendingMovies.map((t) => t.tmdb_id));
+                  const extra = (discovery.popularMovies ?? []).filter((t) => !seen.has(t.tmdb_id));
+                  const merged = [...trendingMovies, ...extra];
+                  return merged.length ? (
+                    <section className="space-y-5">
+                      <SectionHeader eyebrow="Em destaque" title="Filmes em alta e populares" subtitle="Filmes ganhando atenção e os mais assistidos agora." accent="indigo" />
+                      <TitleGrid titles={merged} />
+                    </section>
+                  ) : null;
+                })() : null}
 
                 {type === "tv" ? (
                   <div className="flex flex-col gap-10">
@@ -753,10 +593,6 @@ export default function SearchPageView({ initialQuery, initialType, initialPage 
                   </div>
                 ) : null}
               </div>
-            ) : null}
-
-            {!discoveryLoading && !discovery ? (
-              <EmptyState kicker="Comece por aqui" title="Comece sua busca." description="Pesquise filmes, series, pessoas ou explore por genero." accent="indigo" />
             ) : null}
           </div>
         ) : null}

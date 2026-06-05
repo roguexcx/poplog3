@@ -151,10 +151,6 @@ export async function GET(request: NextRequest) {
             movies.length >= DISCOVER_MIN_RESULTS &&
             series.length >= DISCOVER_MIN_RESULTS
           ) {
-            const allResults = toBalloonerismDiscoverSection(
-              [...movies, ...series].slice(0, 24)
-            );
-
             console.log(
               `[poplog3/discover] source=balloonerismm type=all movies=${movies.length} series=${series.length}`
             );
@@ -163,11 +159,9 @@ export async function GET(request: NextRequest) {
               ok: true,
               type,
               genre,
-              popular: allResults.results,
-              topRated: allResults.results,
               popularMovies: movies,
               popularSeries: series,
-              results: allResults.results,
+              results: [...movies, ...series].slice(0, 24),
               page: 1,
               totalPages: 1,
               totalResults: movies.length + series.length,

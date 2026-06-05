@@ -37,6 +37,7 @@ import type {
   GetEpisodesParams,
   TrendingParams,
   PopularParams,
+  DiscoverParams,
   RelatedParams,
   RatingParams,
   CommentParams,
@@ -225,13 +226,23 @@ export const tvdbAdapter: CatalogAdapter = {
 
     type EpisodesPage = { series?: TvdbSeriesExtended; episodes?: TvdbEpisode[] };
 
-    const data = await tvdbGet<EpisodesPage>(
-      `/series/${tvdbId}/episodes/official`,
+    // Tenta primeiro com português (por); se vier vazio, cai no inglês padrão
+    const dataWithLang = await tvdbGet<EpisodesPage>(
+      `/series/${tvdbId}/episodes/official/por`,
       {
         params: { season: params.season, page: 0 },
         ttlSeconds: 86400,
       },
     );
+    const data = dataWithLang?.episodes?.length
+      ? dataWithLang
+      : await tvdbGet<EpisodesPage>(
+          `/series/${tvdbId}/episodes/official`,
+          {
+            params: { season: params.season, page: 0 },
+            ttlSeconds: 86400,
+          },
+        );
     if (!data?.episodes) return [];
 
     return data.episodes.map((ep) =>
@@ -244,6 +255,7 @@ export const tvdbAdapter: CatalogAdapter = {
           overview: ep.overview ?? undefined,
           firstAired: ep.aired ?? undefined,
           runtime: ep.runtime ?? undefined,
+          stillRemoteUrl: ep.image ?? undefined,
         },
         HIGH,
       ),
@@ -257,6 +269,10 @@ export const tvdbAdapter: CatalogAdapter = {
   },
 
   async getPopular(_params: PopularParams): Promise<CatalogSearchResult[]> {
+    return [];
+  },
+
+  async getDiscover(_params: DiscoverParams): Promise<CatalogSearchResult[]> {
     return [];
   },
 

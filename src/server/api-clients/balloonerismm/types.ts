@@ -278,6 +278,28 @@ export type BalloonerismGenreList = {
   genres: BalloonerismGenreItem[];
 };
 
+export type BalloonerismSeasonEpisode = {
+  episode_number: number;
+  name?: string | null;
+  overview?: string | null;
+  air_date?: string | null;
+  runtime?: number | null;
+  still_path?: string | null;
+  vote_average?: number | null;
+  vote_count?: number | null;
+  episode_type?: string | null;
+};
+
+export type BalloonerismSeasonResponse = {
+  id?: string | null;
+  season_number?: number | null;
+  name?: string | null;
+  overview?: string | null;
+  poster_path?: string | null;
+  air_date?: string | null;
+  episodes?: BalloonerismSeasonEpisode[] | null;
+};
+
 export type BalloonerismFetchOptions = {
   params?: Record<string, string | number | boolean>;
   cache?: RequestCache;

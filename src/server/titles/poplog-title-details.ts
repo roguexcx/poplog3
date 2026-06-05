@@ -237,7 +237,7 @@ function balloonerismmToDetails(
     mediaType: title.mediaType === "show" ? "tv" : "movie",
     title: title.title || identity.title || "Sem titulo",
     originalTitle: undefined,
-    overview: title.overview ?? null,
+    overview: title.overview || null,
     year: title.year ?? null,
     releaseDate: title.year ? `${title.year}-01-01` : null,
     posterUrl: imageUrl(title.posterPath, "w500"),
