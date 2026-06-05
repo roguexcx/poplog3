@@ -124,14 +124,14 @@ const VALID_SIGNALS: SignalType[] = [
 ];
 
 function parseContentId(contentId: string): ParsedContentId | null {
-  const match = /^tmdb-(movie|tv)-(\d+)$/.exec(contentId);
+  const match = /^tmdb-(movie|tv)-(-?\d+)$/.exec(contentId);
 
   if (!match) return null;
 
   const mediaType = match[1] as MediaType;
   const tmdbId = Number(match[2]);
 
-  if (!Number.isFinite(tmdbId) || tmdbId <= 0) return null;
+  if (!Number.isFinite(tmdbId) || tmdbId === 0) return null;
 
   return {
     contentId,

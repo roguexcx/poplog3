@@ -10,6 +10,7 @@ import { tvdbAdapter } from "@/server/source-engine/adapters/tvdb-adapter";
 import type { CatalogEpisode, CatalogSeason } from "@/server/source-engine/types/catalog.types";
 import type { PoplogTitleExternalIds } from "@/server/titles/poplog-title-identity";
 import type { PoplogSeason } from "@/server/types/season";
+import { resolveCatalogImage } from "@/lib/images/resolve";
 
 type SeasonDebugSource = {
   poplogId: string | number | null;
@@ -40,12 +41,7 @@ function seasonPayload(season: PoplogSeason, options?: {
   externalIds?: PoplogTitleExternalIds;
   debugSource?: SeasonDebugSource;
 }) {
-  const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
-  const tmdbImage = (path: string | null, size: string) => {
-    if (!path) return null;
-    const normalized = path.startsWith("/") ? path : `/${path}`;
-    return `${TMDB_IMAGE_BASE}/${size}${normalized}`;
-  };
+  const tmdbImage = (path: string | null, size: string) => resolveCatalogImage(path, size);
 
   return {
     ok: true,

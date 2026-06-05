@@ -2,7 +2,7 @@
 
 import type { NewEpisodeItem } from "@/features/acompanhando/NewEpisodeCard";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
-import { buildTmdbRawUrl } from "@/lib/images/url";
+import { resolveCatalogImage } from "@/lib/images/resolve";
 import TmdbImage from "@/components/images/TmdbImage";
 
 export type { NewEpisodeItem };
@@ -35,10 +35,10 @@ function temporalBadge(
 export default function AgendaNewEpisodeCard({ item, onClick }: Props) {
   const { mainTitle } = useRandomizedTitleDisplay(item.title, item.original_title);
   const backdropUrl =
-    buildTmdbRawUrl("w780", item.next_episode_still_path) ??
-    buildTmdbRawUrl("w780", item.backdrop_path);
+    resolveCatalogImage(item.next_episode_still_path, "w780") ??
+    resolveCatalogImage(item.backdrop_path, "w780");
 
-  const posterUrl = buildTmdbRawUrl("w92", item.poster_path);
+  const posterUrl = resolveCatalogImage(item.poster_path, "w92");
 
   const tag = epTag(item.next_season, item.next_episode);
   const badge = temporalBadge(item.days_since_new_episode, item.next_episode_air_date);

@@ -12,7 +12,7 @@ import {
   markEpisodesUntil,
   markSeasonProgress as markSeasonEpisodeProgress,
   postEpisodeProgress,
-  toPositiveTmdbId,
+  toAnyTmdbId,
 } from "./episodeProgressClient";
 import type { TitleMediaType, TitleSeriesProgress, TitleUserState } from "./types";
 
@@ -100,7 +100,7 @@ export default function TitleActions({
 
   const [, startTransition] = useTransition();
 
-  const id = toPositiveTmdbId(tmdbId);
+  const id = toAnyTmdbId(tmdbId);
   const identityPayload = useMemo(
     () => ({
       tmdbId: id,
@@ -369,7 +369,7 @@ export default function TitleActions({
     setProgressModalOpen(false);
 
     try {
-      if (id <= 0) {
+      if (id === 0) {
         throw new Error("ID TMDB invalido");
       }
 
@@ -407,7 +407,7 @@ export default function TitleActions({
     setProgressModalOpen(false);
 
     try {
-      if (id <= 0) {
+      if (id === 0) {
         throw new Error("ID TMDB invalido");
       }
 
@@ -438,7 +438,7 @@ export default function TitleActions({
     setProgressModalOpen(false);
 
     try {
-      if (id <= 0) {
+      if (id === 0) {
         throw new Error("ID TMDB invalido");
       }
 
@@ -467,7 +467,7 @@ export default function TitleActions({
     setProgressModalOpen(false);
 
     try {
-      if (id <= 0) {
+      if (id === 0) {
         throw new Error("ID TMDB invalido");
       }
 

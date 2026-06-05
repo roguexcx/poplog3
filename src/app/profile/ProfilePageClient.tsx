@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { resolveCatalogImage } from "@/lib/images/resolve";
 import { Reorder, useDragControls } from "framer-motion";
 import { signOut as signOutAuthJs } from "next-auth/react";
 import {
@@ -238,9 +239,7 @@ function toTitleCase(str: string): string {
 }
 
 function getLogoUrl(logoUrl: string | null | undefined): string | null {
-  if (!logoUrl) return null;
-  if (logoUrl.startsWith("http")) return logoUrl;
-  return `https://image.tmdb.org/t/p/w200${logoUrl}`;
+  return resolveCatalogImage(logoUrl, "w200");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

@@ -28,6 +28,8 @@ export type Poplog3UserLibraryItem = Poplog3UserTitle & {
   best_provider_name?: string | null;
   best_provider_type?: string | null;
   best_provider_logo?: string | null;
+  /** IMDb ID derivado quando tmdb_id é sintético negativo — usado para links e display. */
+  imdb_id?: string | null;
   title: {
     tmdb_id: number;
     media_type: "movie" | "tv";

@@ -17,6 +17,7 @@ import {
   getLocalTitlesBatch,
   getLocalEpisodeRuntimesMap,
   getLocalTitleRatingsBatch,
+  enrichSyntheticTitlesBatch,
 } from "@/server/local-services/continuity-local.service";
 
 /**
@@ -538,6 +539,20 @@ async function buildLocalWatchlistPicks(
     const titleMap = new Map<string, TitleRow>(
       titlesRaw.map((t) => [`${t.media_type}-${t.tmdb_id}`, t as unknown as TitleRow]),
     );
+
+    // Enrich synthetic (negative) IDs not found in DB
+    const missingIds = tmdbIds.filter((id) => !titlesRaw.some((t) => t.tmdb_id === id));
+    if (missingIds.length > 0) {
+      const movieMissingIds = enrichable.filter((s) => s.media_type === "movie" && missingIds.includes(s.tmdb_id)).map((s) => s.tmdb_id);
+      const tvMissingIds = enrichable.filter((s) => s.media_type === "tv" && missingIds.includes(s.tmdb_id)).map((s) => s.tmdb_id);
+      const [enrichedMovies, enrichedTv] = await Promise.all([
+        movieMissingIds.length > 0 ? enrichSyntheticTitlesBatch(movieMissingIds, "movie") : Promise.resolve([]),
+        tvMissingIds.length > 0 ? enrichSyntheticTitlesBatch(tvMissingIds, "tv") : Promise.resolve([]),
+      ]);
+      for (const t of [...enrichedMovies, ...enrichedTv]) {
+        titleMap.set(`${t.media_type}-${t.tmdb_id}`, t as unknown as TitleRow);
+      }
+    }
     markStage("titles_read");
 
     type ScoredEntry = { state: StateRow; title: TitleRow; score: number };

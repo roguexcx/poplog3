@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { buildTmdbRawUrl } from "@/lib/images/url";
+import { resolveCatalogImage } from "@/lib/images/resolve";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
 import {
   ArrowRight,
@@ -55,9 +55,7 @@ const GENRES: Record<number, string> = {
 };
 
 function IMG(path: string | null | undefined, size: string): string | null {
-  if (!path) return null;
-  if (path.startsWith("http")) return path;
-  return buildTmdbRawUrl(size, path);
+  return resolveCatalogImage(path, size);
 }
 
 function releaseYear(item: AgendaItem): string | null {

@@ -7,6 +7,9 @@ export {
 
 export { buildTmdbUrl, buildTmdbUrlLoose } from "./url";
 
+/** Helper canônico para resolver qualquer campo de imagem. Seguro para server + client. */
+export { resolveCatalogImage, resolveCatalogImageUrl, type CatalogImageSize } from "./resolve";
+
 export { fetchTitleImages } from "./fetch";
 
 export {

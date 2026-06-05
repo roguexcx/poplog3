@@ -37,7 +37,7 @@ type EpisodeDto = {
 };
 
 type SeasonDto = {
-  seriesTmdbId: number;
+  seriesTmdbId: number | string;
   seasonNumber: number;
   name: string | null;
   overview: string | null;
@@ -50,7 +50,7 @@ type SeasonDto = {
 };
 
 type TitleEpisodeBrowserProps = {
-  seriesTmdbId: number;
+  seriesTmdbId: number | string;
   seriesName?: string | null;
   seasons: TitleSeasonInfo[];
   initialSeason?: number | null;
@@ -127,6 +127,9 @@ export default function TitleEpisodeBrowser({
   isAuthenticated = false,
   onSeriesCommunityRatingChange,
 }: TitleEpisodeBrowserProps) {
+  // Numeric tmdbId for hooks/dispatch that require number; 0 means "unavailable"
+  const numericSeriesId = typeof seriesTmdbId === "number" ? seriesTmdbId : 0;
+
   const seasonNumbers = useMemo(
     () => seasons.map((s) => s.seasonNumber),
     [seasons],
@@ -191,8 +194,8 @@ export default function TitleEpisodeBrowser({
   useEffect(() => {
     if (selected === null) return;
 
-    // Validação defensiva: seriesTmdbId deve ser um número positivo válido
-    if (!Number.isFinite(seriesTmdbId) || seriesTmdbId <= 0) {
+    // Validação defensiva: aceita string (imdbId/slug) ou número positivo
+    if (typeof seriesTmdbId === "number" && (!Number.isFinite(seriesTmdbId) || seriesTmdbId <= 0)) {
       console.error("[TitleEpisodeBrowser] Invalid seriesTmdbId", {
         seriesTmdbId,
         type: typeof seriesTmdbId,
@@ -259,7 +262,7 @@ export default function TitleEpisodeBrowser({
   useEffect(() => {
     async function refreshProgress(event: Event) {
       const customEvent = event as CustomEvent<{
-        seriesTmdbId?: number;
+        seriesTmdbId?: number | string;
       }>;
 
       if (customEvent.detail?.seriesTmdbId !== seriesTmdbId) return;
@@ -334,7 +337,7 @@ export default function TitleEpisodeBrowser({
     Boolean(season) && visibleCount < (season?.episodes.length ?? 0);
 
   function dispatchLibraryStatusChanged(status: string) {
-    dispatchGlobalLibraryStatusChanged(seriesTmdbId, status);
+    dispatchGlobalLibraryStatusChanged(numericSeriesId, status);
   }
 
   async function doToggleEpisode(
@@ -521,7 +524,7 @@ export default function TitleEpisodeBrowser({
       }
 
       dispatchLibraryStatusChanged("watching");
-      dispatchSeriesProgressRefresh(seriesTmdbId);
+      dispatchSeriesProgressRefresh(numericSeriesId);
     } catch (err) {
       console.warn("[series mark all aired] erro:", err);
     } finally {
@@ -1118,7 +1121,7 @@ function EpisodeCard({
 }
 
 type EpisodeModalProps = {
-  seriesTmdbId: number;
+  seriesTmdbId: number | string;
   seriesName?: string | null;
   episode: EpisodeDto;
   seasonNumber: number;
@@ -1154,9 +1157,10 @@ function EpisodeModal({
   const commentCacheKey = episodeKey(seasonNumber, episode.episodeNumber);
 
   // ── Avaliação pessoal do episódio ─────────────────────────────────────────
+  const numericId = typeof seriesTmdbId === "number" ? seriesTmdbId : 0;
   const episodeRating = useUserRating({
     mediaType: "episode",
-    tmdbId: seriesTmdbId,
+    tmdbId: numericId,
     seasonNumber,
     episodeNumber: episode.episodeNumber,
     isAuthenticated,

@@ -2,6 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
+import { resolveCatalogImage } from "@/lib/images/resolve";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";
 
 const STATUS_BADGE: Record<string, string> = {
@@ -39,8 +40,11 @@ export default function LibraryPosterCard({
   const subtitle = getPosterSubtitle(item);
   const runtimeLabels = getRuntimeLabels(item);
 
+  // Prefer imdbId for links when tmdb_id is synthetic (negative), gives cleaner URLs
+  const linkId = item.imdb_id ?? item.tmdb_id;
+
   return (
-    <Link href={`/title/${item.media_type}/${item.tmdb_id}`} className="group block">
+    <Link href={`/title/${item.media_type}/${linkId}`} className="group block">
       <article className="relative">
         <div
           className={[
@@ -102,13 +106,14 @@ export default function LibraryPosterCard({
               ) : null}
             </div>
 
-            {hasProvider && (
+            {hasProvider && resolveCatalogImage(item.best_provider_logo, "original") && (
               <div className="absolute bottom-2 right-2 overflow-hidden rounded-md border border-white/[0.14] bg-black/55 shadow-[0_4px_14px_rgba(0,0,0,0.45)] backdrop-blur-md sm:bottom-3 sm:right-3 sm:rounded-lg">
                 <Image
-                  src={`https://image.tmdb.org/t/p/original${item.best_provider_logo}`}
+                  src={resolveCatalogImage(item.best_provider_logo, "original")!}
                   alt={item.best_provider_name ?? "Provider"}
                   width={28}
                   height={28}
+                  unoptimized
                   className="h-6 w-6 object-cover sm:h-7 sm:w-7"
                 />
               </div>

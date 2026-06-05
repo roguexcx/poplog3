@@ -32,6 +32,23 @@ export function toPositiveTmdbId(value: unknown): number {
   return 0;
 }
 
+/** Like toPositiveTmdbId but also accepts negative synthetic IDs (imdbId-based). */
+export function toAnyTmdbId(value: unknown): number {
+  if (typeof value === "number" && Number.isFinite(value) && value !== 0) {
+    return Math.floor(value);
+  }
+
+  if (typeof value === "string") {
+    const parsed = Number(value);
+
+    if (Number.isFinite(parsed) && parsed !== 0) {
+      return Math.floor(parsed);
+    }
+  }
+
+  return 0;
+}
+
 export function episodeKey(season: number, episode: number) {
   return `S${String(season).padStart(2, "0")}E${String(episode).padStart(2, "0")}`;
 }

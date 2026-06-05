@@ -1,6 +1,13 @@
 import { db } from "@/server/db/client";
 import type { ContinuityStateRow } from "@/server/continuity/continuity-state-cache";
 import type { EpisodeRuntimeInput } from "@/lib/runtime";
+import {
+  isSyntheticTmdbId,
+  imdbIdFromSyntheticTmdbId,
+} from "@/lib/ids/synthetic-tmdb-id";
+import {
+  upsertCachedTitleRow,
+} from "@/server/repositories";
 
 // ── Public types ───────────────────────────────────────────────────────────────
 
@@ -396,6 +403,80 @@ export async function getLocalTitleAvailabilityBatch(
   } catch (err) {
     console.error("[continuity-local] getLocalTitleAvailabilityBatch error", err);
   }
+  return results;
+}
+
+// ── Synthetic ID enrichment ───────────────────────────────────────────────────
+
+/**
+ * Para IDs sintéticos negativos ausentes no DB: busca dados via Balloonerismm,
+ * persiste em poplog3Title e retorna como LocalTitleData.
+ *
+ * Uso: pós-processamento após getLocalTitlesBatch para garantir que títulos
+ * IMDb-first apareçam na Biblioteca e no Acompanhando.
+ */
+export async function enrichSyntheticTitlesBatch(
+  missingIds: number[],
+  mediaType: "tv" | "movie",
+): Promise<LocalTitleData[]> {
+  const synthetic = missingIds.filter((id) => isSyntheticTmdbId(id));
+  if (synthetic.length === 0) return [];
+
+  const { getPoplogTitleDetails } = await import("@/server/titles/poplog-title-details");
+
+  const results: LocalTitleData[] = [];
+
+  await Promise.allSettled(
+    synthetic.map(async (syntheticTmdbId) => {
+      const imdbId = imdbIdFromSyntheticTmdbId(syntheticTmdbId);
+      if (!imdbId) return;
+
+      const details = await getPoplogTitleDetails({ mediaType, id: imdbId, sourceHint: "imdb" }).catch(() => null);
+      if (!details?.title) return;
+
+      await upsertCachedTitleRow({
+        tmdbId: syntheticTmdbId,
+        mediaType,
+        title: details.title,
+        originalTitle: details.originalTitle ?? null,
+        overview: details.overview ?? null,
+        posterPath: details.posterUrl ?? null,
+        backdropPath: details.backdropUrl ?? null,
+        year: details.year ?? null,
+        runtime: details.runtime ?? null,
+        voteAverage: details.voteAverage ?? null,
+        voteCount: details.voteCount ?? null,
+        numberOfSeasons: details.numberOfSeasons ?? null,
+        numberOfEpisodes: details.numberOfEpisodes ?? null,
+        releaseDate: mediaType === "movie" ? (details.releaseDate ?? null) : null,
+        firstAirDate: mediaType === "tv" ? (details.releaseDate ?? null) : null,
+        lastAirDate: details.lastAirDate ?? null,
+      }).catch(() => {});
+
+      results.push({
+        tmdb_id: syntheticTmdbId,
+        media_type: mediaType,
+        title: details.title,
+        original_title: details.originalTitle ?? null,
+        overview: details.overview ?? null,
+        poster_path: details.posterUrl ?? null,
+        backdrop_path: details.backdropUrl ?? null,
+        release_date: mediaType === "movie" ? (details.releaseDate ?? null) : null,
+        first_air_date: mediaType === "tv" ? (details.releaseDate ?? null) : null,
+        last_air_date: details.lastAirDate ?? null,
+        runtime: details.runtime ?? null,
+        episode_run_time: null,
+        genres: null,
+        popularity: null,
+        vote_average: details.voteAverage ?? null,
+        vote_count: details.voteCount ?? null,
+        number_of_episodes: details.numberOfEpisodes ?? null,
+        number_of_seasons: details.numberOfSeasons ?? null,
+        last_synced_at: null,
+      });
+    }),
+  );
+
   return results;
 }
 

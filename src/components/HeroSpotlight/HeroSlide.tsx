@@ -5,7 +5,7 @@ import Image from "next/image";
 import type { ScoredItem } from "./types";
 import HeroCTA from "./HeroCTA";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
-import { buildTmdbUrl } from "@/lib/images/url";
+import { resolveCatalogImage } from "@/lib/images/resolve";
 
 interface HeroSlideProps {
   item: ScoredItem;
@@ -132,9 +132,9 @@ export default function HeroSlide({
   const cta = (item as any).serverCta ?? { primary: "Assistir agora", icon: "play" };
   const { mainTitle } = useRandomizedTitleDisplay(item.title, item.original_title);
 
-  const backdropUrl = buildTmdbUrl("backdrop", "full", item.backdrop_path);
-  const episodeStillUrl = buildTmdbUrl("still", "full", item.next_episode_still_path);
-  const alternateBackdropUrl = buildTmdbUrl("backdrop", "full", item.alternate_backdrop_path);
+  const backdropUrl = resolveCatalogImage(item.backdrop_path, "original");
+  const episodeStillUrl = resolveCatalogImage(item.next_episode_still_path, "original");
+  const alternateBackdropUrl = resolveCatalogImage(item.alternate_backdrop_path, "original");
   const secondaryUrl = episodeStillUrl ?? (alternateBackdropUrl !== backdropUrl ? alternateBackdropUrl : null);
   const dominantColor = item.dominant_color ?? "#1a1a2e";
   const glowRgb = hexToRgb(dominantColor);

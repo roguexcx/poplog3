@@ -39,7 +39,7 @@ export async function GET(request: NextRequest) {
       slug: request.nextUrl.searchParams.get("slug"),
     });
 
-    if (!identity?.tmdbId) {
+    if (identity?.tmdbId == null) {
       return NextResponse.json({
         error: "Unable to resolve legacy user-state alias",
         ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),
@@ -94,7 +94,7 @@ export async function POST(request: NextRequest) {
       year: body.releaseYear,
     });
 
-    if (!identity?.tmdbId) {
+    if (identity?.tmdbId == null) {
       return NextResponse.json({
         error: "Unable to resolve legacy user-state alias",
         ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),
@@ -161,7 +161,7 @@ export async function PATCH(request: NextRequest) {
       year: body.releaseYear,
     });
 
-    if (!identity?.tmdbId) {
+    if (identity?.tmdbId == null) {
       return NextResponse.json({
         error: "Unable to resolve legacy user-state alias",
         ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),
@@ -228,7 +228,7 @@ export async function DELETE(request: NextRequest) {
       slug: body.slug,
     });
 
-    if (!identity?.tmdbId) {
+    if (identity?.tmdbId == null) {
       return NextResponse.json({
         error: "Unable to resolve legacy user-state alias",
         ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),

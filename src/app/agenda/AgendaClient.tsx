@@ -9,12 +9,12 @@ import PageShell from "@/components/layout/PageShell";
 import type { IcsSeriesGroup, MovieGroup, ContentCategory } from "@/lib/ics-engine";
 import { CATEGORY_PRIORITY, ALL_BLOCKED_CATEGORIES } from "@/lib/ics-engine";
 import type { IcsAgendaResponse } from "@/app/api/ics/agenda/route";
-import { buildTmdbRawUrl } from "@/lib/images/url";
+import { resolveCatalogImage } from "@/lib/images/resolve";
 
 // ── Constantes ─────────────────────────────────────────────────────────────────
 
-const TMDB_IMG = (path: string | null, size: string) =>
-  buildTmdbRawUrl(size, path);
+const TMDB_IMG = (path: string | null | undefined, size: string) =>
+  resolveCatalogImage(path, size);
 
 // Idiomas com texto não-latino nos posters — preferir backdrop nesses casos
 const POSTER_TEXT_LANGS = new Set(["ja","ko","zh","th","hi","ar","he","ru","uk","vi","id"]);
@@ -150,10 +150,15 @@ function activeWindow(): { start: string; end: string } {
   return { start, end: toLocalDateStr(end30) };
 }
 
-// ── Filtro: só mostra grupos com poster + nome TMDB ───────────────────────────
+// ── Filtro de exibição: aceita grupos com título (rawTitle ou tmdb.name).
+// Grupos sem imagem aparecem como cards compactos de texto.
+// hasValidTmdb (legado) mantido para spots que exigem imagem (spotlight, hero).
+
+function hasDisplayableData(g: IcsSeriesGroup): boolean {
+  return !!(g.tmdb?.name ?? g.rawTitle);
+}
 
 function hasValidTmdb(g: IcsSeriesGroup): boolean {
-  // Precisa ter nome E pelo menos uma imagem (poster ou backdrop)
   return !!(g.tmdb?.name && (g.tmdb?.poster_path || g.tmdb?.backdrop_path));
 }
 
@@ -378,7 +383,7 @@ function buildEditorialGroups(
 
   // ── Séries ──────────────────────────────────────────────────────────────────
   for (const group of sourceGroups) {
-    if (!hasValidTmdb(group)) continue;
+    if (!hasDisplayableData(group)) continue;
     const ep = group.episodes
       .filter((item) => {
         const day = item.startAt.slice(0, 10);
@@ -443,7 +448,7 @@ function buildEditorialGroups(
 function buildDayMap(groups: IcsSeriesGroup[]): Map<string, IcsSeriesGroup[]> {
   const map = new Map<string, IcsSeriesGroup[]>();
   for (const g of groups) {
-    if (!hasValidTmdb(g)) continue;
+    if (!hasDisplayableData(g)) continue;
     for (const ep of g.episodes) {
       const day = ep.startAt.slice(0, 10);
       const arr = map.get(day) ?? [];
@@ -2275,7 +2280,8 @@ export default function AgendaClient({ initialData }: { initialData: IcsAgendaRe
   }, [initialData]);
 
   // Só mostra grupos com poster + nome TMDB
-  const visibleFeatured = useMemo(() => featuredGroups.filter(hasValidTmdb), [featuredGroups]);
+  // Grupos displayáveis: aceita com ou sem imagem TMDB (rawTitle como fallback)
+  const visibleFeatured = useMemo(() => featuredGroups.filter(hasDisplayableData), [featuredGroups]);
 
   // Mapa dia → grupos (para MonthView, WeekView, DayView)
   const byDay = useMemo(() => buildDayMap([...featuredGroups, ...groups]), [featuredGroups, groups]);

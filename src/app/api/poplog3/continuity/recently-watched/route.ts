@@ -6,6 +6,7 @@ import {
   getLocalTitlesBatch,
   getLocalUserEpisodesBatch,
   getLocalEpisodesBatch,
+  enrichSyntheticTitlesBatch,
 } from "@/server/local-services/continuity-local.service";
 
 const MAX_ITEMS = 6;
@@ -116,6 +117,20 @@ async function buildLocalRecentlyWatched(userId: string): Promise<NextResponse> 
     const titleMap = new Map<string, TitleRow>(
       titlesRaw.map((t) => [`${t.media_type}-${t.tmdb_id}`, t as unknown as TitleRow]),
     );
+
+    // Enrich synthetic (negative) IDs not found in DB via Balloonerismm
+    const missingIds = allTmdbIds.filter((id) => !titlesRaw.some((t) => t.tmdb_id === id));
+    if (missingIds.length > 0) {
+      const movieMissing = states.filter((s) => s.media_type === "movie" && missingIds.includes(s.tmdb_id)).map((s) => s.tmdb_id);
+      const tvMissing = states.filter((s) => s.media_type === "tv" && missingIds.includes(s.tmdb_id)).map((s) => s.tmdb_id);
+      const [enrichedMovies, enrichedTv] = await Promise.all([
+        movieMissing.length > 0 ? enrichSyntheticTitlesBatch(movieMissing, "movie") : Promise.resolve([]),
+        tvMissing.length > 0 ? enrichSyntheticTitlesBatch(tvMissing, "tv") : Promise.resolve([]),
+      ]);
+      for (const t of [...enrichedMovies, ...enrichedTv]) {
+        titleMap.set(`${t.media_type}-${t.tmdb_id}`, t as unknown as TitleRow);
+      }
+    }
     markStage("titles_read");
 
     const tvIds = states.filter((s) => s.media_type === "tv").map((s) => s.tmdb_id);

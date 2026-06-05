@@ -2,7 +2,7 @@
 
 import type { RecentlyWatchedItem } from "@/app/api/poplog3/continuity/recently-watched/route";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
-import { buildTmdbRawUrl } from "@/lib/images/url";
+import { resolveCatalogImage } from "@/lib/images/resolve";
 
 export type { RecentlyWatchedItem };
 
@@ -29,9 +29,9 @@ export default function RecentlyWatchedCard({ item, onClick }: Props) {
   const { mainTitle } = useRandomizedTitleDisplay(item.title, item.original_title);
   // Prioridade: still do episódio → backdrop da série → vazio
   const stillUrl =
-    buildTmdbRawUrl("w300", item.last_episode_still_path) ??
-    buildTmdbRawUrl("w300", item.backdrop_path) ??
-    buildTmdbRawUrl("w185", item.poster_path);
+    resolveCatalogImage(item.last_episode_still_path, "w300") ??
+    resolveCatalogImage(item.backdrop_path, "w300") ??
+    resolveCatalogImage(item.poster_path, "w185");
 
   const relDate = formatRelativeDate(item.watched_at);
   const episodeLabel =

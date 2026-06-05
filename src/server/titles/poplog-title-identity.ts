@@ -4,6 +4,7 @@ import {
   resolveAndMergeExternalIdsForPoplogTitle,
   type PoplogTitleAliasResolution,
 } from "./poplog-title-aliases";
+import { imdbIdFromSyntheticTmdbId } from "@/lib/ids/synthetic-tmdb-id";
 
 type MediaType = "movie" | "tv";
 
@@ -218,6 +219,16 @@ export async function resolvePoplogTitleIdentity({
   year,
 }: ResolveInput): Promise<PoplogTitleIdentity> {
   const cleanId = id.trim();
+
+  // Synthetic tmdbId (negative integer from imdbId) — re-resolve as imdbId.
+  if (/^-\d+$/.test(cleanId)) {
+    const n = parseInt(cleanId, 10);
+    const derivedImdbId = Number.isInteger(n) && n < 0 ? imdbIdFromSyntheticTmdbId(n) : null;
+    if (derivedImdbId) {
+      return resolvePoplogTitleIdentity({ mediaType, id: derivedImdbId, sourceHint: "imdb", title, year });
+    }
+  }
+
   const numericId = toPositiveNumber(cleanId);
   const isImdbId = /^tt\d+$/i.test(cleanId);
 

@@ -25,6 +25,20 @@ function asPositiveInteger(value: unknown): number | null {
   return null;
 }
 
+/** Accepts positive real IDs and negative synthetic IDs (from imdbId). */
+function asNonZeroInteger(value: unknown): number | null {
+  if (typeof value === "number" && Number.isFinite(value) && value !== 0) {
+    return Math.floor(value);
+  }
+
+  if (typeof value === "string") {
+    const n = Number(value);
+    if (Number.isFinite(n) && n !== 0) return Math.floor(n);
+  }
+
+  return null;
+}
+
 function asNonNegativeInteger(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value) && value >= 0) {
     return Math.floor(value);
@@ -84,7 +98,7 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const seriesTmdbId = asPositiveInteger(body.seriesTmdbId);
+  const seriesTmdbId = asNonZeroInteger(body.seriesTmdbId);
 
   if (!seriesTmdbId) {
     return NextResponse.json(

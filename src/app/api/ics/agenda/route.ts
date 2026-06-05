@@ -20,9 +20,10 @@ import {
   runIcsEngine, computeStats, FEATURED_CATEGORIES, ALL_BLOCKED_CATEGORIES,
   classifyTitle,
 } from "@/lib/ics-engine";
-import type { IcsSeriesGroup, IcsEngineStats, MovieGroup, CinemaReleaseGroup } from "@/lib/ics-engine";
+import type { IcsSeriesGroup, IcsEngineStats, MovieGroup, CinemaReleaseGroup, TmdbEnrichment, TmdbNetwork, TmdbProductionCompany } from "@/lib/ics-engine";
 import { enrichSeriesGroups } from "@/lib/ics-enricher";
 import { refineCategoryFromTmdb } from "@/lib/radar/categories";
+import { db } from "@/server/db/client";
 import { classifyRealityBySignals } from "@/lib/radar/reality-classifier";
 import { applyRetrofill } from "@/lib/radar/tmdb-retrofill";
 import {
@@ -84,8 +85,155 @@ const MOVIE_GENRE_NAMES: Record<number, string> = {
   53: "Thriller", 10752: "Guerra", 37: "Faroeste",
 };
 
-// Supress unused import warnings — TV_GENRE_NAMES referenced in future enrichment
-void TV_GENRE_NAMES;
+// TV_GENRE_NAMES now used by local-db enrichment
+void MOVIE_GENRE_NAMES;
+
+// ── Helpers de extração de gêneros (JSON do DB local) ─────────────────────────
+
+function extractLocalGenreIds(genres: unknown): number[] {
+  if (!Array.isArray(genres)) return [];
+  return genres.flatMap((g) => {
+    if (typeof g === "number") return [g];
+    if (g && typeof g === "object" && typeof (g as { id?: unknown }).id === "number") {
+      return [(g as { id: number }).id];
+    }
+    return [];
+  });
+}
+
+function extractLocalGenreNames(genres: unknown): string[] {
+  if (!Array.isArray(genres)) return [];
+  return genres.flatMap((g) => {
+    if (g && typeof g === "object") {
+      const obj = g as { name?: unknown; id?: unknown };
+      if (typeof obj.name === "string") return [obj.name];
+      if (typeof obj.id === "number") return [TV_GENRE_NAMES[obj.id] ?? ""].filter(Boolean);
+    }
+    return [];
+  });
+}
+
+// Normaliza título para matching case-insensitive e sem pontuação
+function normalizeForMatch(s: string | null | undefined): string {
+  return (s ?? "")
+    .toLowerCase()
+    .replace(/[''`]/g, "'")
+    .replace(/[^\w\s']/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+// Converte linha do Poplog3Title em TmdbEnrichment compatível com o pipeline ICS.
+// Mantém nomes de campos snake_case para compatibilidade com código existente.
+function poplogRowToEnrichment(
+  row: Awaited<ReturnType<typeof db.poplog3Title.findMany>>[number],
+  fallbackTitle: string,
+): TmdbEnrichment {
+  const payload = (row.tmdbPayload ?? {}) as Record<string, unknown>;
+
+  const originCountry: string[] = Array.isArray(payload.origin_country)
+    ? (payload.origin_country as unknown[]).filter((c): c is string => typeof c === "string")
+    : [];
+
+  const networks: TmdbNetwork[] = Array.isArray(payload.networks)
+    ? (payload.networks as unknown[]).flatMap((n) => {
+        const obj = n as Record<string, unknown>;
+        if (typeof obj.id === "number" && typeof obj.name === "string") {
+          return [{
+            id: obj.id,
+            name: obj.name,
+            logo_path: typeof obj.logo_path === "string" ? obj.logo_path : null,
+            origin_country: typeof obj.origin_country === "string" ? obj.origin_country : "",
+          }];
+        }
+        return [];
+      })
+    : [];
+
+  const productionCompanies: TmdbProductionCompany[] = Array.isArray(payload.production_companies)
+    ? (payload.production_companies as unknown[]).flatMap((c) => {
+        const obj = c as Record<string, unknown>;
+        if (typeof obj.id === "number" && typeof obj.name === "string") {
+          return [{
+            id: obj.id,
+            name: obj.name,
+            logo_path: typeof obj.logo_path === "string" ? obj.logo_path : null,
+            origin_country: typeof obj.origin_country === "string" ? obj.origin_country : "",
+          }];
+        }
+        return [];
+      })
+    : [];
+
+  const genreIds = extractLocalGenreIds(row.genres);
+  const genreNames = extractLocalGenreNames(row.genres);
+
+  return {
+    tmdb_id: row.tmdbId,
+    name: row.title ?? row.originalTitle ?? fallbackTitle,
+    original_name: row.originalTitle ?? row.title ?? fallbackTitle,
+    overview: row.overview ?? null,
+    poster_path: row.posterPath ?? null,
+    backdrop_path: row.backdropPath ?? null,
+    genre_ids: genreIds,
+    genres: genreNames,
+    popularity: row.popularity ? Number(row.popularity) : 0,
+    vote_average: row.voteAverage ? Number(row.voteAverage) : 0,
+    vote_count: row.voteCount ?? 0,
+    number_of_seasons: row.numberOfSeasons ?? null,
+    origin_country: originCountry,
+    original_language: row.originalLanguage ?? "en",
+    first_air_date: row.firstAirDate ? row.firstAirDate.toISOString().slice(0, 10) : null,
+    status: typeof payload.status === "string" ? payload.status : null,
+    networks,
+    production_companies: productionCompanies,
+  };
+}
+
+// Enriquece grupos ICS sem tmdb usando Poplog3Title local (in-memory matching).
+async function localDbEnrichGroups(groups: IcsSeriesGroup[]): Promise<void> {
+  const unenriched = groups.filter((g) => !g.tmdb);
+  if (unenriched.length === 0) return;
+
+  try {
+    const rows = await db.poplog3Title.findMany({
+      where: { mediaType: "tv" },
+    });
+
+    const byTitle = new Map<string, typeof rows[0]>();
+    for (const row of rows) {
+      if (row.title) byTitle.set(normalizeForMatch(row.title), row);
+      if (row.originalTitle) byTitle.set(normalizeForMatch(row.originalTitle), row);
+    }
+
+    let enriched = 0;
+    for (const group of unenriched) {
+      const key = normalizeForMatch(group.rawTitle);
+      const row = byTitle.get(key);
+      if (!row) continue;
+
+      group.tmdb = poplogRowToEnrichment(row, group.rawTitle);
+
+      const refined = refineCategoryFromTmdb(
+        group.category,
+        group.tmdb.genre_ids,
+        group.tmdb.tmdb_type ?? null,
+      );
+      if (refined !== group.category) {
+        group.tmdb.refined_category = refined;
+        group.category = refined;
+      }
+
+      enriched++;
+    }
+
+    if (enriched > 0) {
+      console.log(`[ics-agenda] local-db-enrich: ${enriched}/${unenriched.length} grupos enriquecidos do Poplog3Title`);
+    }
+  } catch (err) {
+    console.warn("[ics-agenda] local-db-enrich error:", err);
+  }
+}
 
 function shouldDebugTitle(title: string | null | undefined): boolean {
   if (!title) return false;
@@ -363,6 +511,11 @@ async function buildAgendaPayload(): Promise<IcsAgendaResponse> {
 
   // Serie TMDB ativas: ZERO. Log permanente de conformidade.
   console.log(`[radar-source] ics=${groups.length} tmdbSeries=0 cinema=0 (tmdb_disabled)`);
+
+  // 5. Enriquecimento local: popula group.tmdb a partir de Poplog3Title (local DB).
+  //    Substitui o enriquecimento TMDB desativado. Usa matching de título normalizado.
+  //    Silencioso em falha — grupos sem match ficam com tmdb=null (mostrados com rawTitle).
+  await localDbEnrichGroups(groups);
 
   // 6. Pos-enriquecimento: reclassificacao de reality.
   //    Sem score editorial — relevanceScore nao e mais calculado nem usado para ordenacao.

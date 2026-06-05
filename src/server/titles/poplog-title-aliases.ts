@@ -153,6 +153,34 @@ async function findLocalTitle(input: ResolveAliasesInput): Promise<TitleRow | nu
   }).catch(() => null) as Promise<TitleRow | null>;
 }
 
+async function findByImdbIdInPayload(
+  mediaType: MediaType,
+  imdbId: string,
+): Promise<TitleRow | null> {
+  try {
+    // Prisma MySQL JSON path filter — looks inside tmdbPayload.imdb_id
+    const rows = await db.poplog3Title.findMany({
+      where: {
+        mediaType: mediaType as "movie" | "tv",
+        tmdbPayload: { path: "$.imdb_id", equals: imdbId },
+      },
+      select: {
+        id: true,
+        tmdbId: true,
+        mediaType: true,
+        title: true,
+        originalTitle: true,
+        year: true,
+        tmdbPayload: true,
+      },
+      take: 1,
+    });
+    return (rows[0] as TitleRow) ?? null;
+  } catch {
+    return null;
+  }
+}
+
 async function findExternalIds(
   mediaType: MediaType,
   ids: PoplogTitleExternalIds,
@@ -228,6 +256,16 @@ export async function resolveAndMergeExternalIdsForPoplogTitle(
     aliasLookupSource.push("titleExternalIds:input");
     aliasSources.titleExternalIds = true;
     aliasSources.cache = true;
+  }
+
+  // Last resort: scan tmdbPayload.imdb_id when titleExternalId has no mapping
+  if (!localTitle && !externalRow && before.imdbId) {
+    const payloadMatch = await findByImdbIdInPayload(input.mediaType, before.imdbId);
+    if (payloadMatch) {
+      localTitle = payloadMatch;
+      aliasLookupSource.push("localTitle:tmdbPayload:imdbId");
+      aliasSources.localTitle = true;
+    }
   }
 
   if (!localTitle && externalRow) {

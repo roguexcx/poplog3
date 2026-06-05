@@ -15,6 +15,7 @@ import {
   getLocalTitlesBatch,
   getLocalSeasonsBatch,
   getLocalEpisodesBatch,
+  enrichSyntheticTitlesBatch,
 } from "@/server/local-services/continuity-local.service";
 
 const NEW_EPISODE_DAYS = 30;
@@ -142,6 +143,15 @@ async function buildLocalContinueItems(userId: string): Promise<NextResponse> {
     const titleMap = new Map<number, TitleRow>(
       titlesRaw.map((t) => [t.tmdb_id, t as unknown as TitleRow]),
     );
+
+    // Enrich any synthetic (negative) IDs not found in DB via Balloonerismm
+    const missingIds = tmdbIds.filter((id) => !titleMap.has(id));
+    if (missingIds.length > 0) {
+      const enriched = await enrichSyntheticTitlesBatch(missingIds, "tv");
+      for (const t of enriched) {
+        titleMap.set(t.tmdb_id, t as unknown as TitleRow);
+      }
+    }
     markStage("titles_read");
 
     const seasonsRaw = await getLocalSeasonsBatch(tmdbIds);

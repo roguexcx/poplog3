@@ -20,6 +20,15 @@ type NormalizeTitleInput = {
   backdropRemoteUrl?: string | null;
   numberOfSeasons?: number | null;
   numberOfEpisodes?: number | null;
+  budget?: number | null;
+  revenue?: number | null;
+  domesticGross?: number | null;
+  metacriticScore?: number | null;
+  productionCompanies?: Array<{ name: string }>;
+  productionCountries?: Array<{ code: string; name: string }>;
+  spokenLanguages?: Array<{ code: string; name: string }>;
+  inProduction?: boolean | null;
+  seriesType?: string | null;
 };
 
 export function normalizeTitle(input: NormalizeTitleInput, meta: SourceMeta): CatalogTitle {
@@ -42,6 +51,15 @@ export function normalizeTitle(input: NormalizeTitleInput, meta: SourceMeta): Ca
     backdropPath: input.backdropRemoteUrl ?? undefined,
     numberOfSeasons: input.numberOfSeasons ?? undefined,
     numberOfEpisodes: input.numberOfEpisodes ?? undefined,
+    budget: input.budget ?? undefined,
+    revenue: input.revenue ?? undefined,
+    domesticGross: input.domesticGross ?? undefined,
+    metacriticScore: input.metacriticScore ?? undefined,
+    productionCompanies: input.productionCompanies,
+    productionCountries: input.productionCountries,
+    spokenLanguages: input.spokenLanguages,
+    inProduction: input.inProduction ?? undefined,
+    seriesType: input.seriesType ?? undefined,
     source: { ...meta, fetchedAt: meta.fetchedAt ?? new Date().toISOString() },
   };
 }

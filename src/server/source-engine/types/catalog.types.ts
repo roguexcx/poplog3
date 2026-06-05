@@ -29,6 +29,24 @@ export type CatalogTitle = {
   backdropPath?: string;
   numberOfSeasons?: number | null;
   numberOfEpisodes?: number | null;
+  /** Orçamento de produção em USD. */
+  budget?: number | null;
+  /** Bilheteria total mundial em USD (worldwide_gross). */
+  revenue?: number | null;
+  /** Bilheteria doméstica (EUA) em USD. */
+  domesticGross?: number | null;
+  /** Pontuação Metacritic (0–100). */
+  metacriticScore?: number | null;
+  /** Empresas de produção (apenas category="Production Companies", sem distribuidoras). */
+  productionCompanies?: Array<{ name: string }>;
+  /** Países de produção. */
+  productionCountries?: Array<{ code: string; name: string }>;
+  /** Idiomas falados. */
+  spokenLanguages?: Array<{ code: string; name: string }>;
+  /** Série ainda em produção? */
+  inProduction?: boolean | null;
+  /** Tipo de série: "TV Series", "TV Mini Series", etc. */
+  seriesType?: string | null;
   source: SourceMeta;
 };
 
@@ -102,6 +120,8 @@ export type CatalogVideo = {
   title: string;
   url: string;
   type: string;
+  /** URL de thumbnail da capa do vídeo (IMDb ou YouTube). */
+  thumbnailUrl?: string | null;
   source: SourceMeta;
 };
 

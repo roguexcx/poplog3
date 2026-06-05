@@ -14,6 +14,33 @@ function getYoutubeId(url: string): string | null {
   return url.match(/embed\/([^?&]+)/)?.[1] ?? null;
 }
 
+function isEmbeddable(embedUrl: string): boolean {
+  return embedUrl.includes("youtube.com/embed/");
+}
+
+const PREVIEW_CLASSES =
+  "group relative w-full overflow-hidden rounded-[1.25rem] border border-white/[0.1] bg-black shadow-[0_18px_60px_rgba(0,0,0,0.26)] transition hover:border-white/[0.22]";
+
+function PreviewMedia({ thumbnailUrl }: { thumbnailUrl: string | null | undefined }) {
+  return (
+    <div className="relative aspect-video w-full overflow-hidden">
+      {thumbnailUrl ? (
+        <img
+          src={thumbnailUrl}
+          alt=""
+          className="absolute inset-0 h-full w-full object-cover opacity-90 transition duration-300 group-hover:opacity-100"
+        />
+      ) : (
+        <div className="absolute inset-0 bg-black" />
+      )}
+      <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-black/5 to-transparent" />
+      <div className="absolute left-1/2 top-1/2 grid h-12 w-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-white/70 bg-white/25 text-white shadow-xl transition group-hover:scale-105 group-hover:bg-white group-hover:text-black sm:h-14 sm:w-14">
+        <span className="ml-0.5 text-lg sm:text-xl">▶</span>
+      </div>
+    </div>
+  );
+}
+
 export default function TitleTrailer({
   trailer,
   title,
@@ -26,9 +53,11 @@ export default function TitleTrailer({
     [trailer.embedUrl],
   );
 
+  const embeddable = useMemo(() => isEmbeddable(trailer.embedUrl), [trailer.embedUrl]);
+
   const thumbnailUrl = youtubeId
     ? `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`
-    : null;
+    : (trailer.thumbnailUrl ?? null);
 
   const displayTitle = trailer.name?.trim() || title || "Trailer";
 
@@ -43,31 +72,27 @@ export default function TitleTrailer({
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
 
-  const preview = (
+  // Embed (YouTube): abre modal inline
+  // Link externo (IMDb, outros): abre em nova aba
+  const preview = embeddable ? (
     <button
       type="button"
       onClick={() => setOpen(true)}
       aria-label={`Assistir trailer: ${displayTitle}`}
-      className="group relative w-full overflow-hidden rounded-[1.25rem] border border-white/[0.1] bg-black text-left shadow-[0_18px_60px_rgba(0,0,0,0.26)] transition hover:border-white/[0.22]"
+      className={`${PREVIEW_CLASSES} text-left`}
     >
-      <div className="relative aspect-video w-full overflow-hidden">
-        {thumbnailUrl ? (
-          <img
-            src={thumbnailUrl}
-            alt=""
-            className="absolute inset-0 h-full w-full object-cover opacity-90 transition duration-300 group-hover:opacity-100"
-          />
-        ) : (
-          <div className="absolute inset-0 bg-black" />
-        )}
-
-        <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-black/5 to-transparent" />
-
-        <div className="absolute left-1/2 top-1/2 grid h-12 w-12 -translate-x-1/2 -translate-y-1/2 place-items-center rounded-full border border-white/70 bg-white/25 text-white shadow-xl transition group-hover:scale-105 group-hover:bg-white group-hover:text-black sm:h-14 sm:w-14">
-          <span className="ml-0.5 text-lg sm:text-xl">▶</span>
-        </div>
-      </div>
+      <PreviewMedia thumbnailUrl={thumbnailUrl} />
     </button>
+  ) : (
+    <a
+      href={trailer.url}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={`Assistir trailer: ${displayTitle}`}
+      className={`${PREVIEW_CLASSES} block`}
+    >
+      <PreviewMedia thumbnailUrl={thumbnailUrl} />
+    </a>
   );
 
   return (
@@ -93,7 +118,7 @@ export default function TitleTrailer({
         <div className="w-full max-w-sm">{preview}</div>
       )}
 
-      {open && (
+      {open && embeddable && (
         <div
           role="dialog"
           aria-modal="true"

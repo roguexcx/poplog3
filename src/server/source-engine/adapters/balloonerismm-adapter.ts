@@ -168,6 +168,20 @@ function countFields(obj: Record<string, unknown>): number {
   return Object.values(obj).filter((v) => v !== null && v !== undefined).length;
 }
 
+/**
+ * Extrai empresas de produção (filtra para apenas "Production Companies",
+ * excluindo distribuidoras e outros tipos).
+ */
+function productionCompaniesFrom(
+  companies: Array<{ name: string; category?: string | null }> | null | undefined,
+): Array<{ name: string }> | undefined {
+  if (!companies || companies.length === 0) return undefined;
+  const filtered = companies
+    .filter((c) => !c.category || c.category === "Production Companies")
+    .map((c) => ({ name: c.name }));
+  return filtered.length > 0 ? filtered : undefined;
+}
+
 // ─── Array extraction helper ─────────────────────────────────────────────────
 
 /**
@@ -209,11 +223,22 @@ function balloonerismMovieToTitle(movie: BalloonerismMovie): CatalogTitle {
       genres: genresFrom(detail),
       country: detail.country,
       language: detail.language,
-      certification: detail.certification,
+      certification: movie.certificate?.rating ?? detail.certification,
       rating: numberFrom(detail.rating ?? detail.vote_average),
       votes: numberFrom(detail.votes ?? detail.vote_count),
       posterRemoteUrl: detail.poster_path ?? detail.images?.poster,
       backdropRemoteUrl: detail.backdrop_path ?? detail.images?.backdrop,
+      budget: typeof movie.budget === "number" ? movie.budget : undefined,
+      revenue: typeof movie.worldwide_gross === "number" ? movie.worldwide_gross : undefined,
+      domesticGross: typeof movie.domestic_gross === "number" ? movie.domestic_gross : undefined,
+      metacriticScore: typeof movie.metascore === "number" ? movie.metascore : undefined,
+      productionCompanies: productionCompaniesFrom(movie.production_companies),
+      productionCountries: movie.production_countries
+        ?.filter((c) => c.name)
+        .map((c) => ({ code: c.iso_3166_1 ?? "", name: c.name })),
+      spokenLanguages: movie.spoken_languages
+        ?.filter((l) => l.name)
+        .map((l) => ({ code: l.iso_639_1 ?? "", name: l.name })),
     },
     meta,
   );
@@ -222,6 +247,9 @@ function balloonerismMovieToTitle(movie: BalloonerismMovie): CatalogTitle {
 function balloonerismShowToTitle(show: BalloonerismShow): CatalogTitle {
   const detail = show as BalloonerismTitleLike;
   const meta = sourceMeta(imdbIdFrom(detail), countFields(show as unknown as Record<string, unknown>));
+  const episodeRunTime = Array.isArray(show.episode_run_time)
+    ? (show.episode_run_time[0] ?? null)
+    : null;
   return normalizeTitle(
     {
       ids: showIds(show),
@@ -230,18 +258,27 @@ function balloonerismShowToTitle(show: BalloonerismShow): CatalogTitle {
       year: yearFrom(detail.year, detail.first_air_date, detail.release_date),
       overview: detail.overview,
       tagline: detail.tagline,
-      runtime: numberFrom(detail.runtime),
+      runtime: numberFrom(episodeRunTime ?? detail.runtime),
       status: detail.status,
       genres: genresFrom(detail),
       country: detail.country,
       language: detail.language,
-      certification: detail.certification,
+      certification: show.certificate?.rating ?? detail.certification,
       rating: numberFrom(detail.rating ?? detail.vote_average),
       votes: numberFrom(detail.votes ?? detail.vote_count),
       posterRemoteUrl: detail.poster_path ?? detail.images?.poster,
       backdropRemoteUrl: detail.backdrop_path ?? detail.images?.backdrop,
       numberOfSeasons: show.number_of_seasons ?? null,
       numberOfEpisodes: show.number_of_episodes ?? null,
+      productionCompanies: productionCompaniesFrom(show.production_companies),
+      productionCountries: show.production_countries
+        ?.filter((c) => c.name)
+        .map((c) => ({ code: c.iso_3166_1 ?? "", name: c.name })),
+      spokenLanguages: show.spoken_languages
+        ?.filter((l) => l.name)
+        .map((l) => ({ code: l.iso_639_1 ?? "", name: l.name })),
+      inProduction: show.in_production ?? null,
+      seriesType: show.type ?? null,
     },
     meta,
   );
@@ -473,19 +510,34 @@ export const balloonerismAdapter: CatalogAdapter = {
     const id = resolveId(params);
     if (!id) return [];
     const path = params.mediaType === "movie" ? `/movie/${id}/videos` : `/tv/${id}/videos`;
-    const data = await balloonerismGet<Array<{ url: string; name?: string; type?: string }>>(
+    // A API retorna { id, results: [...] } — não um array direto.
+    const raw = await balloonerismGet<unknown>(
       path,
       { ttlSeconds: 21600 }, // 6h — URLs de vídeo têm TTL curto
     );
-    if (!data) return [];
+    if (!raw) return [];
+    type VideoEntry = {
+      id?: number | string;
+      url?: string;
+      name?: string;
+      site?: string;
+      type?: string;
+      thumbnail?: string | null;
+    };
+    const results = extractArray<VideoEntry>(raw, path);
     const meta = sourceMeta(params.imdbId, 2);
-    return data.map((v, i) => ({
-      id: i,
-      title: v.name ?? "Trailer",
-      url: v.url,
-      type: v.type ?? "trailer",
-      source: meta,
-    }));
+    // Retorna todos os vídeos com URL (YouTube e IMDb).
+    // O componente TitleTrailer decide como exibir com base no site.
+    return results
+      .filter((v) => Boolean(v.url))
+      .map((v, i) => ({
+        id: typeof v.id === "number" ? v.id : i,
+        title: v.name ?? "Trailer",
+        url: v.url!,
+        type: (v.type?.toLowerCase() ?? "trailer"),
+        thumbnailUrl: v.thumbnail ?? null,
+        source: meta,
+      }));
   },
 
   // ── Calendário — Balloonerismm não é fonte de calendário ──────────────────

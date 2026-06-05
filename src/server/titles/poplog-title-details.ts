@@ -40,6 +40,8 @@ export type PoplogTitleDetailsResult = {
   externalIds: PoplogTitleExternalIds;
   numberOfSeasons?: number | null;
   numberOfEpisodes?: number | null;
+  status?: string | null;
+  lastAirDate?: string | null;
   cast?: Array<{
     id: string | number;
     name: string;
@@ -58,7 +60,21 @@ export type PoplogTitleDetailsResult = {
     title: string;
     url: string;
     type: string;
+    thumbnailUrl?: string | null;
   }>;
+  /** Orçamento em USD. */
+  budget?: number | null;
+  /** Bilheteria total mundial em USD. */
+  revenue?: number | null;
+  /** Bilheteria doméstica (EUA) em USD. */
+  domesticGross?: number | null;
+  /** Pontuação Metacritic (0–100). */
+  metacriticScore?: number | null;
+  productionCompanies?: Array<{ name: string }>;
+  productionCountries?: Array<{ code: string; name: string }>;
+  spokenLanguages?: Array<{ code: string; name: string }>;
+  inProduction?: boolean | null;
+  seriesType?: string | null;
   sourceMeta: {
     primarySource: PoplogTitleDetailsSource;
     fallbackUsed?: boolean;
@@ -107,12 +123,15 @@ type LocalTitleRow = {
   backdropPath: string | null;
   releaseDate: Date | null;
   firstAirDate: Date | null;
+  lastAirDate: Date | null;
   year: number | null;
   runtime: number | null;
   episodeRunTime: unknown;
   genres: unknown;
   voteAverage: unknown;
   voteCount: number | null;
+  numberOfSeasons: number | null;
+  numberOfEpisodes: number | null;
 };
 
 function dateString(value: Date | null | undefined): string | null {
@@ -183,6 +202,9 @@ function localToDetails(
     overview: row.overview,
     year: row.year,
     releaseDate,
+    lastAirDate: row.mediaType === "tv" ? dateString(row.lastAirDate) : null,
+    numberOfSeasons: row.numberOfSeasons ?? null,
+    numberOfEpisodes: row.numberOfEpisodes ?? null,
     posterUrl: imageUrl(row.posterPath, "w500"),
     backdropUrl: imageUrl(row.backdropPath, "w1280"),
     genres: localGenres(row.genres),
@@ -222,6 +244,7 @@ function balloonerismmToDetails(
     backdropUrl: imageUrl(title.backdropPath, "w1280"),
     genres: remoteGenres(title.genres),
     runtime: title.runtime ?? null,
+    status: title.status ?? null,
     voteAverage: title.rating ?? null,
     voteCount: title.votes ?? null,
     numberOfSeasons: title.numberOfSeasons ?? null,
@@ -253,7 +276,17 @@ function balloonerismmToDetails(
       title: video.title,
       url: video.url,
       type: video.type,
+      thumbnailUrl: video.thumbnailUrl ?? null,
     })),
+    budget: title.budget ?? null,
+    revenue: title.revenue ?? null,
+    domesticGross: title.domesticGross ?? null,
+    metacriticScore: title.metacriticScore ?? null,
+    productionCompanies: title.productionCompanies,
+    productionCountries: title.productionCountries,
+    spokenLanguages: title.spokenLanguages,
+    inProduction: title.inProduction ?? null,
+    seriesType: title.seriesType ?? null,
     sourceMeta: {
       primarySource: "balloonerismm",
       confidence: identity.confidence,
@@ -356,6 +389,10 @@ export async function getPoplogTitleDetails({
       return {
         ...details,
         poplogId: details.poplogId ?? local?.id,
+        // Fields Balloonerismm doesn't provide — fall back to local DB
+        lastAirDate: details.lastAirDate ?? (local?.lastAirDate ? dateString(local.lastAirDate) : null),
+        numberOfSeasons: details.numberOfSeasons ?? local?.numberOfSeasons ?? null,
+        numberOfEpisodes: details.numberOfEpisodes ?? local?.numberOfEpisodes ?? null,
         externalIds: {
           ...mergeExternalIds(identity, local),
           ...details.externalIds,

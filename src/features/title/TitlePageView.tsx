@@ -63,7 +63,10 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
 
   const seasons = title.seasons ?? [];
 
-  const showEpisodeBrowser = title.mediaType === "tv" && seasons.length > 0;
+  // Episode browser requires real TMDB season data in the DB.
+  // Synthetic (negative) IDs have no TMDB rows, so seasons are stubs only.
+  const hasRealTmdbId = typeof title.externalIds?.tmdbId === "number";
+  const showEpisodeBrowser = title.mediaType === "tv" && seasons.length > 0 && hasRealTmdbId;
 
   const seasonNumbers = new Set(seasons.map((s) => s.seasonNumber));
 
@@ -97,9 +100,15 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
           <div className="flex min-w-0 flex-col gap-8 sm:gap-10 lg:gap-12">
             {hasSeasonsBlock && <TitleSeasonsCard title={title} />}
 
-            {showEpisodeBrowser && typeof title.id === "number" && title.id > 0 && (
+            {showEpisodeBrowser && (
               <TitleEpisodeBrowser
-                seriesTmdbId={title.id}
+                seriesTmdbId={
+                  title.externalIds?.tmdbId ??
+                  (typeof title.id === "number" && title.id > 0 ? title.id : null) ??
+                  title.externalIds?.imdbId ??
+                  title.poplogId ??
+                  title.id
+                }
                 seriesName={title.title}
                 seasons={seasons}
                 initialSeason={initialSeason}
@@ -111,9 +120,9 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
 
             {isMovie && <TitleFinancialBadge insight={financialInsight} />}
 
-            {isMovie && (
+            {isMovie && (title.externalIds?.tmdbId ?? (typeof title.id === "number" ? title.id : 0)) > 0 && (
               <TitleCommunityHighlights
-                movieTmdbId={Number(title.id)}
+                movieTmdbId={title.externalIds?.tmdbId ?? (typeof title.id === "number" ? title.id : 0)}
                 movieTitle={title.title}
                 onOpenAll={() => setMovieSocialOpen(true)}
               />
@@ -123,7 +132,10 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
 
             <TitleCollectionSection
               collection={title.metadata?.collection ?? null}
-              currentTitleId={typeof title.id === "number" ? title.id : null}
+              currentTitleId={
+                title.externalIds?.tmdbId ??
+                (typeof title.id === "number" ? title.id : null)
+              }
             />
 
             <TitleRecommendations recommendations={title.recommendations} />
@@ -131,20 +143,21 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
 
           <aside className="flex min-w-0 flex-col gap-5 sm:gap-6 lg:sticky lg:top-6 lg:self-start">
             {/* Avaliação POPLOG */}
-            {typeof title.id === "number" && (
-              <UserRatingWidget
-                mediaType={title.mediaType}
-                tmdbId={title.id}
-                poplogId={title.poplogId ?? null}
-                imdbId={title.externalIds?.imdbId ?? null}
-                slug={title.externalIds?.slug ?? null}
-                userRating={title.userState?.userRating ?? null}
-                communityRating={communityRating}
-                ratings={title.ratings ?? null}
-                isAuthenticated={Boolean(title.userState?.isAuthenticated)}
-                onCommunityRatingChange={setCommunityRating}
-              />
-            )}
+            <UserRatingWidget
+              mediaType={title.mediaType}
+              tmdbId={
+                title.externalIds?.tmdbId ??
+                (typeof title.id === "number" && title.id !== 0 ? title.id : 0)
+              }
+              poplogId={title.poplogId ?? null}
+              imdbId={title.externalIds?.imdbId ?? null}
+              slug={title.externalIds?.slug ?? null}
+              userRating={title.userState?.userRating ?? null}
+              communityRating={communityRating}
+              ratings={title.ratings ?? null}
+              isAuthenticated={Boolean(title.userState?.isAuthenticated)}
+              onCommunityRatingChange={setCommunityRating}
+            />
 
             <TitleProviders providers={title.providers} />
 
@@ -162,9 +175,9 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
         </div>
       </section>
 
-      {isMovie && movieSocialOpen && typeof title.id === "number" && (
+      {isMovie && movieSocialOpen && (title.externalIds?.tmdbId ?? (typeof title.id === "number" ? title.id : 0)) > 0 && (
         <MovieSocialModal
-          movieTmdbId={Number(title.id)}
+          movieTmdbId={title.externalIds?.tmdbId ?? (typeof title.id === "number" ? title.id : 0)}
           movieTitle={title.title}
           overview={title.overview ?? null}
           backdropUrl={title.backdropUrl ?? null}

@@ -22,12 +22,73 @@ import {
   resolveCatalogIdentityFields,
 } from "@/server/source-engine/hydrate-catalog-results";
 import type { PoplogTitle } from "@/server/types/title";
+import { db } from "@/server/db/client";
 
 const TRENDING_CACHE_TTL_MS = 30 * 60_000;
 const TRENDING_DB_TIMEOUT_MS = 1_500;
 const TRENDING_AUTH_TIMEOUT_MS = 500;
 const TRENDING_BALLOONERISMM_LIMIT = 15;
 const TRENDING_MIN_RESULTS = 5;
+const TRENDING_LOCAL_FALLBACK_LIMIT = 20;
+
+async function fetchLocalTrending(): Promise<PoplogTitle[]> {
+  try {
+    const rows = await db.poplog3Title.findMany({
+      where: { posterPath: { not: null } },
+      orderBy: { popularity: "desc" },
+      take: TRENDING_LOCAL_FALLBACK_LIMIT,
+      select: {
+        id: true,
+        tmdbId: true,
+        mediaType: true,
+        title: true,
+        originalTitle: true,
+        overview: true,
+        posterPath: true,
+        backdropPath: true,
+        releaseDate: true,
+        firstAirDate: true,
+        lastAirDate: true,
+        year: true,
+        runtime: true,
+        episodeRunTime: true,
+        genres: true,
+        popularity: true,
+        voteAverage: true,
+        voteCount: true,
+        originalLanguage: true,
+      },
+    });
+
+    return rows.map((row) => ({
+      tmdb_id: row.tmdbId,
+      media_type: row.mediaType as "movie" | "tv",
+      title: row.title ?? row.originalTitle ?? "",
+      original_title: row.originalTitle ?? null,
+      overview: row.overview ?? null,
+      poster_path: row.posterPath ?? null,
+      backdrop_path: row.backdropPath ?? null,
+      release_date: row.mediaType === "movie" ? (row.releaseDate?.toISOString().slice(0, 10) ?? null) : null,
+      first_air_date: row.mediaType === "tv" ? (row.firstAirDate?.toISOString().slice(0, 10) ?? null) : null,
+      last_air_date: row.mediaType === "tv" ? (row.lastAirDate?.toISOString().slice(0, 10) ?? null) : null,
+      year: row.year ?? null,
+      runtime: row.mediaType === "movie" ? row.runtime ?? null : null,
+      episode_run_time: row.mediaType === "tv" ? (Array.isArray(row.episodeRunTime) ? row.episodeRunTime as number[] : null) : null,
+      genres: Array.isArray(row.genres) ? (row.genres as number[]) : [],
+      popularity: row.popularity != null ? Number(row.popularity) : null,
+      vote_average: row.voteAverage != null ? Number(row.voteAverage) : null,
+      vote_count: row.voteCount ?? null,
+      original_language: row.originalLanguage ?? null,
+      imdb_id: undefined,
+      poplogId: row.id,
+      externalIds: { tmdbId: row.tmdbId },
+      ...resolveCatalogIdentityFields({ tmdb_id: row.tmdbId, media_type: row.mediaType as "movie" | "tv", poplogId: row.id }, "legacy"),
+      normalizedFrom: "legacy" as const,
+    }));
+  } catch {
+    return [];
+  }
+}
 
 type TrendingCachePayload = {
   results: unknown[];
@@ -288,10 +349,56 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // ── Local DB fallback ─────────────────────────────────────────────────────
+    const localTitles = await withTimeout(
+      fetchLocalTrending(),
+      TRENDING_DB_TIMEOUT_MS,
+      [],
+    );
+    const localValid = filterValidTitles(localTitles);
+    markStage(perf, stageRef, "local_fallback");
+
+    if (localValid.length > 0) {
+      const withRuntime = await enrichWithRuntime(localValid);
+      const results = applyUserFeedbackScoring(withRuntime, {
+        userId,
+        feedbackMap,
+        context: "trending",
+      });
+      markStage(perf, stageRef, "response_build");
+
+      console.log("[trending/perf]", {
+        cacheStatus: "local_db_fallback",
+        returned: results.length,
+        ...perf,
+        total: Date.now() - totalStartedAt,
+      });
+
+      return NextResponse.json({
+        ok: true,
+        count: results.length,
+        results,
+        ...(debugSource
+          ? {
+              debugSource: {
+                source: "local_db",
+                fallbackUsed: true,
+                fallbackReason: "balloonerismm_insufficient_or_failed",
+                usedTmdbApi: false,
+                usedLegacy: false,
+                normalizedFrom: "legacy",
+                identityUsed: "poplog_id",
+                legacyCompatibilityUsed: true,
+              },
+            }
+          : {}),
+      });
+    }
+
     markStage(perf, stageRef, "response_build");
 
     console.log("[trending/perf]", {
-      cacheStatus: "tmdb_fallback_blocked",
+      cacheStatus: "all_sources_empty",
       returned: 0,
       ...perf,
       total: Date.now() - totalStartedAt,
@@ -306,7 +413,7 @@ export async function GET(request: NextRequest) {
             debugSource: {
               source: "unavailable",
               fallbackUsed: true,
-              fallbackReason: "tmdb_fallback_blocked",
+              fallbackReason: "all_sources_empty",
               usedTmdbApi: false,
               usedLegacy: false,
               normalizedFrom: "none",

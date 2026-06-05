@@ -5,6 +5,7 @@ import {
   catalogGetPopular,
 } from "@/server/source-engine/engine";
 import type { CatalogSearchResult } from "@/server/source-engine/types/catalog.types";
+import { syntheticTmdbFromImdbId } from "@/lib/ids/synthetic-tmdb-id";
 
 type MediaType = "movie" | "tv";
 export type SorteioMode = "discovery" | "watchlist";
@@ -89,13 +90,22 @@ function itemDate(item: SorteioItem) {
 }
 
 function normalizeCatalogResult(item: CatalogSearchResult, source: string): SorteioItem | null {
-  const tmdbId = item.ids.tmdbId;
-  if (!tmdbId) return null;
-
   const mediaType: MediaType = item.mediaType === "show" ? "tv" : "movie";
   const date = mediaType === "movie" ? item.releaseDate : item.firstAirDate;
 
   if (!item.title?.trim() || !item.posterPath || !isPastOrToday(date)) return null;
+
+  // Prefer real tmdbId; fall back to synthetic from imdbId; finally a stable hash
+  const tmdbId =
+    item.ids.tmdbId ??
+    (item.ids.imdbId ? syntheticTmdbFromImdbId(item.ids.imdbId) : null) ??
+    (() => {
+      // Stable positive hash for titles with no tmdbId and no imdbId
+      const key = `${mediaType}|${item.title}|${item.releaseDate ?? item.firstAirDate ?? ""}`;
+      let h = 0;
+      for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+      return 1_800_000_000 + (h % 100_000_000);
+    })();
 
   return {
     id: tmdbId,

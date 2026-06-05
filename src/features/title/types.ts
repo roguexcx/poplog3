@@ -115,6 +115,8 @@ export type TitleTrailer = {
   name: string;
   url: string;
   embedUrl: string;
+  /** Thumbnail do vídeo (IMDb ou YouTube). Usado quando não há YouTube ID. */
+  thumbnailUrl?: string | null;
 };
 
 export type TitleEpisodeStub = {
@@ -130,6 +132,7 @@ export type TitleSeasonInfo = {
   name: string | null;
   airDate: string | null;
   episodeCount: number | null;
+  posterUrl?: string | null;
 };
 
 export type TitleRatings = {

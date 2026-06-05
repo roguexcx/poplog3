@@ -35,10 +35,12 @@ function getTmdbId(item: ScoredItem) {
     id?: number | string | null;
   };
 
-  return String(source.tmdbId ?? source.content_id ?? source.id ?? "").replace(
-    /\D/g,
-    "",
-  );
+  const raw = source.tmdbId ?? source.content_id ?? source.id ?? "";
+  const str = String(raw);
+  // Preserve sign for synthetic negative IDs (e.g. -137523); only strip for "tv-1396" patterns
+  const n = Number(str);
+  if (Number.isInteger(n) && n !== 0) return str;
+  return str.replace(/\D/g, "");
 }
 
 async function postCuradoriaAction(body: unknown) {

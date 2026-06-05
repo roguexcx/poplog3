@@ -7,6 +7,8 @@ import {
   removeUserTitle as removeUserTitleRow,
   upsertUserTitle,
   upsertUserTitleState,
+  upsertCachedTitleRow,
+  type TitleCacheRow,
 } from "@/server/repositories";
 import type {
   Poplog3LibraryStatus,
@@ -14,6 +16,10 @@ import type {
   UpsertUserTitleInput,
 } from "@/server/library/types";
 import type { MediaType, UserTitle } from "@prisma/client";
+import {
+  isSyntheticTmdbId,
+  imdbIdFromSyntheticTmdbId,
+} from "@/lib/ids/synthetic-tmdb-id";
 
 export type Poplog3UserLibraryItem = Poplog3UserTitle & {
   computed_state?: string | null;
@@ -26,6 +32,8 @@ export type Poplog3UserLibraryItem = Poplog3UserTitle & {
   best_provider_name?: string | null;
   best_provider_type?: string | null;
   best_provider_logo?: string | null;
+  /** IMDb ID derivado quando tmdb_id é sintético negativo — usado para links e display. */
+  imdb_id?: string | null;
   title: {
     tmdb_id: number;
     media_type: "movie" | "tv";
@@ -83,36 +91,89 @@ function mapUserTitle(row: UserTitle): Poplog3UserTitle {
   };
 }
 
+function titleRowToLibraryTitle(title: TitleCacheRow): Poplog3UserLibraryItem["title"] {
+  return {
+    tmdb_id: title.tmdbId,
+    media_type: title.mediaType,
+    title: title.title,
+    original_title: title.originalTitle,
+    poster_path: title.posterPath,
+    backdrop_path: title.backdropPath,
+    year: title.year,
+    release_date: dateOnly(title.releaseDate),
+    first_air_date: dateOnly(title.firstAirDate),
+    last_air_date: dateOnly(title.lastAirDate),
+    runtime: title.runtime,
+    episode_run_time: readNumberArray(title.episodeRunTime),
+    runtime_minutes: title.runtime,
+    runtime_estimated: false,
+    total_runtime_minutes: title.runtime,
+    total_runtime_estimated: false,
+    vote_average: title.voteAverage === null ? null : Number(title.voteAverage),
+    popularity: title.popularity === null ? null : Number(title.popularity),
+    number_of_episodes: title.numberOfEpisodes,
+    number_of_seasons: title.numberOfSeasons,
+  };
+}
+
+/**
+ * Para IDs sintéticos negativos: busca dados via Balloonerismm, persiste em poplog3Title
+ * com o ID sintético como chave, e retorna o row cacheado para uso imediato.
+ *
+ * A próxima requisição de biblioteca encontrará os dados direto no DB via getCachedTitleRow.
+ */
+async function fetchAndCacheSyntheticTitle(
+  mediaType: MediaType,
+  syntheticTmdbId: number,
+  imdbId: string,
+): Promise<TitleCacheRow | null> {
+  try {
+    const { getPoplogTitleDetails } = await import("@/server/titles/poplog-title-details");
+    const details = await getPoplogTitleDetails({ mediaType, id: imdbId, sourceHint: "imdb" });
+    if (!details?.title) return null;
+
+    await upsertCachedTitleRow({
+      tmdbId: syntheticTmdbId,
+      mediaType,
+      title: details.title,
+      originalTitle: details.originalTitle ?? null,
+      overview: details.overview ?? null,
+      posterPath: details.posterUrl ?? null,
+      backdropPath: details.backdropUrl ?? null,
+      year: details.year ?? null,
+      runtime: details.runtime ?? null,
+      voteAverage: details.voteAverage ?? null,
+      voteCount: details.voteCount ?? null,
+      numberOfSeasons: details.numberOfSeasons ?? null,
+      numberOfEpisodes: details.numberOfEpisodes ?? null,
+      releaseDate: mediaType === "movie" ? (details.releaseDate ?? null) : null,
+      firstAirDate: mediaType === "tv" ? (details.releaseDate ?? null) : null,
+      lastAirDate: details.lastAirDate ?? null,
+    });
+
+    return getCachedTitleRow(mediaType, syntheticTmdbId);
+  } catch {
+    return null;
+  }
+}
+
 async function enrichLibraryItem(row: UserTitle): Promise<Poplog3UserLibraryItem> {
   const base = mapUserTitle(row);
-  const title = await getCachedTitleRow(row.mediaType, row.tmdbId);
+  let titleRow = await getCachedTitleRow(row.mediaType, row.tmdbId);
+  let imdbId: string | null = null;
+
+  // Synthetic negative IDs (IMDb-first titles): enrich via Balloonerismm + cache
+  if (!titleRow && isSyntheticTmdbId(row.tmdbId)) {
+    imdbId = imdbIdFromSyntheticTmdbId(row.tmdbId);
+    if (imdbId) {
+      titleRow = await fetchAndCacheSyntheticTitle(row.mediaType, row.tmdbId, imdbId);
+    }
+  }
 
   return {
     ...base,
-    title: title
-      ? {
-          tmdb_id: title.tmdbId,
-          media_type: title.mediaType,
-          title: title.title,
-          original_title: title.originalTitle,
-          poster_path: title.posterPath,
-          backdrop_path: title.backdropPath,
-          year: title.year,
-          release_date: dateOnly(title.releaseDate),
-          first_air_date: dateOnly(title.firstAirDate),
-          last_air_date: dateOnly(title.lastAirDate),
-          runtime: title.runtime,
-          episode_run_time: readNumberArray(title.episodeRunTime),
-          runtime_minutes: title.runtime,
-          runtime_estimated: false,
-          total_runtime_minutes: title.runtime,
-          total_runtime_estimated: false,
-          vote_average: title.voteAverage === null ? null : Number(title.voteAverage),
-          popularity: title.popularity === null ? null : Number(title.popularity),
-          number_of_episodes: title.numberOfEpisodes,
-          number_of_seasons: title.numberOfSeasons,
-        }
-      : null,
+    imdb_id: imdbId,
+    title: titleRow ? titleRowToLibraryTitle(titleRow) : null,
   };
 }
 

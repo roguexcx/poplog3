@@ -9,10 +9,48 @@ import {
 } from "@/server/source-engine/engine";
 import {
   hydrateCatalogResultsWithDebug,
+  resolveCatalogIdentityFields,
 } from "@/server/source-engine/hydrate-catalog-results";
+import { db } from "@/server/db/client";
 
 type MediaType = "movie" | "tv";
 const DISCOVER_MIN_RESULTS = 5;
+const DISCOVER_LOCAL_FALLBACK_LIMIT = 20;
+
+async function fetchLocalPopular(mediaType: MediaType) {
+  const rows = await db.poplog3Title.findMany({
+    where: { mediaType, posterPath: { not: null } },
+    orderBy: { popularity: "desc" },
+    take: DISCOVER_LOCAL_FALLBACK_LIMIT,
+    select: {
+      id: true, tmdbId: true, mediaType: true, title: true, originalTitle: true,
+      overview: true, posterPath: true, backdropPath: true,
+      releaseDate: true, firstAirDate: true, year: true,
+      voteAverage: true, popularity: true,
+    },
+  }).catch(() => []);
+
+  return rows
+    .filter((row) => row.title ?? row.originalTitle)
+    .map((row) => ({
+      tmdb_id: row.tmdbId,
+      id: row.tmdbId,
+      media_type: mediaType,
+      title: row.title ?? row.originalTitle ?? "",
+      original_title: row.originalTitle ?? null,
+      overview: row.overview ?? null,
+      poster_path: row.posterPath!,
+      backdrop_path: row.backdropPath ?? null,
+      release_date: mediaType === "movie" ? (row.releaseDate?.toISOString().slice(0, 10) ?? null) : null,
+      first_air_date: mediaType === "tv" ? (row.firstAirDate?.toISOString().slice(0, 10) ?? null) : null,
+      year: row.year ?? null,
+      vote_average: row.voteAverage != null ? Number(row.voteAverage) : null,
+      popularity: row.popularity != null ? Number(row.popularity) : null,
+      poplogId: row.id,
+      externalIds: { tmdbId: row.tmdbId },
+      ...resolveCatalogIdentityFields({ tmdb_id: row.tmdbId, media_type: mediaType, poplogId: row.id }, "legacy"),
+    }));
+}
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
@@ -87,6 +125,27 @@ export async function GET(request: NextRequest) {
       }
     }
 
+    // ── Local DB fallback ─────────────────────────────────────────────────────
+    try {
+      const localTitles = await fetchLocalPopular(mediaType);
+      if (localTitles.length >= DISCOVER_MIN_RESULTS) {
+        const scoredTitles = applyUserFeedbackScoring(
+          localTitles,
+          { userId, feedbackMap, context: "discovery", mediaType },
+        );
+        console.log(`[discover] source=local_db mediaType=${mediaType} count=${scoredTitles.length}`);
+        return NextResponse.json({
+          ok: true,
+          mediaType,
+          count: scoredTitles.length,
+          results: scoredTitles,
+          ...(debugSource ? { debugSource: { source: "local_db", fallbackUsed: true, fallbackReason: "balloonerismm_insufficient_or_failed", usedTmdbApi: false, usedLegacy: false } } : {}),
+        });
+      }
+    } catch {
+      // ignore local fallback failure
+    }
+
     return NextResponse.json({
       ok: true,
       mediaType,
@@ -97,7 +156,7 @@ export async function GET(request: NextRequest) {
             debugSource: {
               source: "unavailable",
               fallbackUsed: true,
-              fallbackReason: "tmdb_fallback_blocked",
+              fallbackReason: "all_sources_empty",
               usedTmdbApi: false,
               usedLegacy: false,
               normalizedFrom: "none",

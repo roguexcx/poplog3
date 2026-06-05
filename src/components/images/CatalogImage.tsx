@@ -7,11 +7,6 @@
  * Aceita URLs completas (Trakt, TheTVDB, Balloonerismm, CDN próprio)
  * ou paths TMDB legados (/abc.jpg) para compatibilidade histórica.
  *
- * Não usa image.tmdb.org como fallback ativo — image.tmdb.org só é
- * servido quando o path legado TMDB for o único disponível, e mesmo
- * assim apenas se TMDB_ALLOW_IMAGE_FALLBACK estiver habilitado via
- * controle na rota de servidor.
- *
  * Fluxo recomendado:
  *   posterUrl (da Source Engine) → fallbackUrl → fallbackNode
  */
@@ -19,39 +14,14 @@
 import Image, { type ImageProps } from "next/image";
 import { useState, type ReactNode } from "react";
 
-// ─── Resolução de URL ─────────────────────────────────────────────────────────
+// Importa o helper canônico — seguro server + client
+import { resolveCatalogImage, type CatalogImageSize } from "@/lib/images/resolve";
 
-const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
-
-/**
- * Resolve a URL final da imagem de forma agnóstica.
- *
- * Prioridade:
- *   1. URL completa (Trakt, TheTVDB, Balloonerismm, CDN próprio) → passthrough
- *   2. Path TMDB legado (/abc.jpg) → prepend TMDB CDN
- *   3. null/undefined → null
- */
-export function resolveCatalogImageUrl(
-  src: string | null | undefined,
-  size: string = "w500",
-): string | null {
-  if (!src) return null;
-  if (src.startsWith("http://") || src.startsWith("https://")) return src;
-  // Path legado TMDB
-  const normalized = src.startsWith("/") ? src : `/${src}`;
-  return `${TMDB_IMAGE_BASE}/${size}${normalized}`;
-}
+// Re-exporta para compatibilidade com código que importava daqui
+export { resolveCatalogImage as resolveCatalogImageUrl, resolveCatalogImage } from "@/lib/images/resolve";
+export type { CatalogImageSize } from "@/lib/images/resolve";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
-
-export type CatalogImageSize =
-  | "w185"
-  | "w300"
-  | "w342"
-  | "w500"
-  | "w780"
-  | "w1280"
-  | "original";
 
 export type CatalogImageProps = Omit<ImageProps, "src" | "alt"> & {
   /** URL completa ou path legado TMDB */
@@ -81,8 +51,8 @@ export default function CatalogImage({
 }: CatalogImageProps) {
   const [errorCount, setErrorCount] = useState(0);
 
-  const primary = resolveCatalogImageUrl(src, size);
-  const secondary = resolveCatalogImageUrl(fallbackSrc, size);
+  const primary = resolveCatalogImage(src, size);
+  const secondary = resolveCatalogImage(fallbackSrc, size);
 
   const resolved =
     errorCount === 0 ? primary :
@@ -128,8 +98,8 @@ export function CatalogImageInline({
 }: CatalogImageInlineProps) {
   const [errorCount, setErrorCount] = useState(0);
 
-  const primary = resolveCatalogImageUrl(src, size);
-  const secondary = resolveCatalogImageUrl(fallbackSrc, size);
+  const primary = resolveCatalogImage(src, size);
+  const secondary = resolveCatalogImage(fallbackSrc, size);
   const resolved =
     errorCount === 0 ? primary :
     errorCount === 1 ? secondary :

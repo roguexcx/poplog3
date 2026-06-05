@@ -5,7 +5,7 @@ import { useState, useTransition } from "react";
 import {
   dispatchSeriesProgressRefresh,
   markEpisodesUntil,
-  toPositiveTmdbId,
+  toAnyTmdbId,
 } from "./episodeProgressClient";
 import type { TitleSeriesProgress } from "./types";
 
@@ -24,13 +24,13 @@ export default function SeriesProgressChip({
   progress,
   hasSeasons,
 }: SeriesProgressChipProps) {
-  const id = toPositiveTmdbId(tmdbId);
+  const id = toAnyTmdbId(tmdbId);
 
   const [pending, setPending] = useState(false);
   const [done, setDone] = useState(false);
   const [, startTransition] = useTransition();
 
-  if (id <= 0) return null;
+  if (id === 0) return null;
 
   const watchedCount = progress?.watchedCount ?? 0;
   const nextEp = progress?.nextEpisode ?? null;

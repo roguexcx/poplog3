@@ -10,7 +10,7 @@ import PageShell from "@/components/layout/PageShell";
 import InteractivePosterCard from "@/components/ui/InteractivePosterCard";
 import EmptyState from "@/components/ui/EmptyState";
 import SectionHeader from "@/components/ui/SectionHeader";
-import { buildTmdbRawUrl } from "@/lib/images/url";
+import { resolveCatalogImage } from "@/lib/images/resolve";
 
 type SearchMediaType = "all" | "movie" | "tv";
 
@@ -132,8 +132,8 @@ function getYear(title: SearchResult) {
   return Number.isFinite(year) ? year : undefined;
 }
 
-function imageUrl(path: string | null, size = "w185") {
-  return buildTmdbRawUrl(size, path);
+function imageUrl(path: string | null | undefined, size = "w185") {
+  return resolveCatalogImage(path, size);
 }
 
 function titleLinkId(title: SearchResult) {

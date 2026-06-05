@@ -12,6 +12,7 @@ import {
   getLocalTitlesBatch,
   getLocalSeasonsBatch,
   getLocalEpisodesBatch,
+  enrichSyntheticTitlesBatch,
 } from "@/server/local-services/continuity-local.service";
 
 // Séries com mais de N episódios por assistir são ignoradas (backlog pesado)
@@ -138,6 +139,13 @@ async function buildLocalNewEpisodes(userId: string): Promise<NextResponse> {
     const tmdbIds = prefilteredStates.map((s) => s.tmdb_id);
     const titlesRaw = await getLocalTitlesBatch(tmdbIds, "tv");
     const titleMap = new Map<number, TitleRow>(titlesRaw.map((t) => [t.tmdb_id, t as unknown as TitleRow]));
+
+    // Enrich synthetic (negative) IDs not found in DB
+    const missingIds = tmdbIds.filter((id) => !titleMap.has(id));
+    if (missingIds.length > 0) {
+      const enriched = await enrichSyntheticTitlesBatch(missingIds, "tv");
+      for (const t of enriched) titleMap.set(t.tmdb_id, t as unknown as TitleRow);
+    }
     markStage("titles_read");
 
     const seasonsRaw = await getLocalSeasonsBatch(tmdbIds);

@@ -11,6 +11,7 @@ import {
 } from "lucide-react";
 
 import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
+import { resolveCatalogImage } from "@/lib/images/resolve";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import SectionHeader from "@/components/ui/SectionHeader";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";
@@ -128,7 +129,8 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
 
   // Spotlight: escolha pseudoaleatória, mas determinística para evitar mismatch de hidratação.
   const spotlightItem = useMemo<Poplog3UserLibraryItem | null>(() => {
-    const candidates = library.filter((i) => !!i.title?.backdrop_path);
+    // Aceita poster como fallback para spotlight (para títulos sem backdrop)
+    const candidates = library.filter((i) => !!(i.title?.backdrop_path ?? i.title?.poster_path));
     if (candidates.length === 0) return null;
     const seed = library.reduce((acc, item) => {
       const id = typeof item.tmdb_id === "number" ? item.tmdb_id : Number(item.tmdb_id) || 0;
@@ -791,14 +793,15 @@ function ComingSoonCard({
       : title?.release_date  ?? title?.first_air_date;
 
   const releaseLabel = rawDate ? formatComingSoonDate(rawDate) : null;
+  const linkId = item.imdb_id ?? item.tmdb_id;
 
   return (
-    <Link href={`/title/${item.media_type}/${item.tmdb_id}`} className="group block">
+    <Link href={`/title/${item.media_type}/${linkId}`} className="group block">
       <div className="relative overflow-hidden rounded-[1.35rem] border border-white/[0.07] bg-[#07080f] shadow-[0_12px_40px_rgba(0,0,0,0.52)] transition duration-300 group-hover:border-amber-300/[0.18] group-hover:shadow-[0_20px_60px_rgba(0,0,0,0.68)]" style={{ aspectRatio: "16/9" }}>
-        {title?.backdrop_path && (
+        {(title?.backdrop_path ?? title?.poster_path) && (
           <TmdbImage
-            path={title.backdrop_path}
-            fallbackPath={title.poster_path ?? null}
+            path={title.backdrop_path ?? title.poster_path ?? null}
+            fallbackPath={title.backdrop_path ? (title.poster_path ?? null) : null}
             size="w780"
             alt={displayTitle}
             fallbackLabel={displayTitle}
@@ -867,14 +870,16 @@ function SpotlightCard({ item }: { item: Poplog3UserLibraryItem }) {
       : "",
   ].filter(Boolean);
 
+  const linkId = item.imdb_id ?? item.tmdb_id;
+
   return (
-    <Link href={`/title/${item.media_type}/${item.tmdb_id}`} className="group block h-full">
+    <Link href={`/title/${item.media_type}/${linkId}`} className="group block h-full">
       <div className="relative min-h-[300px] overflow-hidden rounded-[1.5rem] border border-white/[0.08] bg-black/40 shadow-[0_24px_80px_rgba(0,0,0,0.55)] transition duration-300 group-hover:border-white/[0.16] sm:min-h-[380px] sm:rounded-[1.75rem]">
         {/* Backdrop */}
-        {title?.backdrop_path && (
+        {(title?.backdrop_path ?? title?.poster_path) && (
           <TmdbImage
-            path={title.backdrop_path}
-            fallbackPath={title.poster_path ?? null}
+            path={title.backdrop_path ?? title.poster_path ?? null}
+            fallbackPath={title.backdrop_path ? (title.poster_path ?? null) : null}
             size="w1280"
             alt={displayTitle}
             fallbackLabel={displayTitle}
@@ -896,13 +901,14 @@ function SpotlightCard({ item }: { item: Poplog3UserLibraryItem }) {
         </div>
 
         {/* Provider — top right */}
-        {item.best_provider_logo && (
+        {resolveCatalogImage(item.best_provider_logo, "original") && (
           <div className="absolute right-3 top-3 overflow-hidden rounded-lg border border-white/[0.14] bg-black/55 shadow-[0_4px_14px_rgba(0,0,0,0.45)] backdrop-blur-md sm:right-4 sm:top-4">
             <Image
-              src={`https://image.tmdb.org/t/p/original${item.best_provider_logo}`}
+              src={resolveCatalogImage(item.best_provider_logo, "original")!}
               alt={item.best_provider_name ?? ""}
               width={28}
               height={28}
+              unoptimized
               className="h-7 w-7 object-cover"
             />
           </div>

@@ -2,6 +2,7 @@ import {
   resolvePoplogTitleIdentity,
   type PoplogTitleExternalIds,
 } from "@/server/titles/poplog-title-identity";
+import { syntheticTmdbFromImdbId, isSyntheticTmdbId } from "@/lib/ids/synthetic-tmdb-id";
 import type { MediaType, RatingMediaType } from "@/types/user";
 
 export type UserStateIdentityInput = {
@@ -48,6 +49,15 @@ function positiveInteger(value: unknown): number | null {
   return Number.isInteger(parsed) && parsed > 0 ? parsed : null;
 }
 
+/** Accepts both positive real tmdbIds and negative synthetic ones from imdbId. */
+function anyTmdbId(value: unknown): number | null {
+  const parsed =
+    typeof value === "number" || typeof value === "string"
+      ? Number(value)
+      : NaN;
+  return Number.isInteger(parsed) && parsed !== 0 ? parsed : null;
+}
+
 function stringValue(value: unknown): string | null {
   return typeof value === "string" && value.trim().length > 0
     ? value.trim()
@@ -69,15 +79,18 @@ export async function resolveUserStateIdentity(
     typeof input.poplogId === "number"
       ? String(input.poplogId)
       : stringValue(input.poplogId);
-  const tmdbId = positiveInteger(input.tmdbId);
+  const tmdbId = anyTmdbId(input.tmdbId); // accepts negative synthetic IDs
   const imdbId = stringValue(input.imdbId);
   const slug = stringValue(input.slug);
   const title = stringValue(input.title) ?? undefined;
   const year = yearValue(input.year);
 
+  // Positive tmdbId or imdbId for the identity resolution lookup
+  const positiveTmdbId = tmdbId && tmdbId > 0 ? tmdbId : null;
+
   const inputId =
     explicitPoplogId ??
-    tmdbId ??
+    positiveTmdbId ??
     imdbId ??
     slug ??
     null;
@@ -85,7 +98,7 @@ export async function resolveUserStateIdentity(
   const inputIdType: UserStateIdentityResolution["inputIdType"] =
     explicitPoplogId
       ? "poplog_id"
-      : tmdbId
+      : positiveTmdbId
         ? "tmdb_id"
         : imdbId
           ? "imdb_id"
@@ -114,8 +127,16 @@ export async function resolveUserStateIdentity(
     year,
   });
 
-  const resolvedTmdbId = identity.externalIds.tmdbId ?? tmdbId ?? null;
+  // Prefer resolved tmdbId from DB; fall back to input synthetic; last resort: synthesise from imdbId
+  const resolvedImdbId = identity.externalIds.imdbId ?? imdbId ?? null;
+  const resolvedTmdbId =
+    identity.externalIds.tmdbId ??
+    (tmdbId && isSyntheticTmdbId(tmdbId) ? tmdbId : null) ??
+    (resolvedImdbId ? syntheticTmdbFromImdbId(resolvedImdbId) : null) ??
+    null;
+
   const resolvedPoplogId = identity.poplogId ?? explicitPoplogId ?? null;
+  const isSynthetic = Boolean(resolvedTmdbId && isSyntheticTmdbId(resolvedTmdbId));
 
   return {
     mediaType,
@@ -123,17 +144,23 @@ export async function resolveUserStateIdentity(
     inputIdType,
     resolvedPoplogId,
     tmdbId: resolvedTmdbId,
-    externalIds: identity.externalIds,
-    legacyUserStateMatched: Boolean(resolvedTmdbId),
+    externalIds: {
+      ...identity.externalIds,
+      ...(resolvedImdbId ? { imdbId: resolvedImdbId } : {}),
+    },
+    legacyUserStateMatched: Boolean(resolvedTmdbId && !isSynthetic),
     userStateSource: "poplog_identity_resolver",
     usedTmdbApi: false,
-    migrationNeeded: Boolean(resolvedTmdbId && resolvedPoplogId),
+    migrationNeeded: Boolean(resolvedTmdbId && resolvedPoplogId && !isSynthetic),
     duplicatePrevented: Boolean(
       resolvedTmdbId &&
+        !isSynthetic &&
         resolvedPoplogId &&
         (inputIdType === "poplog_id" || inputIdType === "imdb_id" || inputIdType === "slug"),
     ),
-    fallbackReason: resolvedTmdbId ? null : "missing_tmdb_alias_for_legacy_user_state_schema",
+    fallbackReason: resolvedTmdbId
+      ? (isSynthetic ? "synthetic_tmdb_from_imdb_id" : null)
+      : "missing_tmdb_alias_for_legacy_user_state_schema",
   };
 }
 

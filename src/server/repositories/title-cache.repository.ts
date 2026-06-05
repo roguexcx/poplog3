@@ -42,6 +42,9 @@ function normalizeImagePath(path: string | null | undefined): string | null {
   if (!path) return null;
   const trimmed = path.trim();
   if (!trimmed) return null;
+  // Full URLs (Balloonerismm, IMDb, CDN) — pass through as-is
+  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+  // TMDB paths — normalize leading slash
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
 

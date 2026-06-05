@@ -79,9 +79,36 @@ export async function GET(request: NextRequest) {
             ? "slug"
             : "input";
 
-  const rows = identity.externalIds.tmdbId
-    ? await getAvailability(mediaType, identity.externalIds.tmdbId, region).catch(() => [])
-    : [];
+  let rows: Awaited<ReturnType<typeof getAvailability>> = [];
+  if (identity.externalIds.tmdbId) {
+    rows = await getAvailability(mediaType, identity.externalIds.tmdbId, region).catch(() => []);
+  } else if (identity.externalIds.imdbId) {
+    try {
+      const local = await import("@/server/local-services/catalog-availability-local.service");
+      const localRows = await local.listAvailability({
+        imdbId: identity.externalIds.imdbId,
+        mediaType: mediaType as "movie" | "tv",
+        providerRegion: region,
+      });
+      rows = localRows.map((r) => ({
+        tmdb_id: 0,
+        media_type: mediaType,
+        provider_id: null,
+        provider_name: r.provider_name,
+        provider_logo_path: r.provider_logo_url ?? null,
+        tmdb_provider_id: null,
+        country: region,
+        availability_type: (r.provider_type === "subscription" ? "streaming" : r.provider_type) as "streaming" | "rent" | "buy" | "ads" | "free",
+        source: r.source as "tmdb" | "watchmode" | "motn",
+        deep_link: r.provider_url ?? null,
+        quality: null,
+        last_synced_at: r.checked_at ?? null,
+      }));
+    } catch {
+      rows = [];
+    }
+  }
+
   const grouped = groupProviders(rows);
   const cacheStatus = rows.length > 0 ? "local_hit" : "local_miss";
 
@@ -93,7 +120,7 @@ export async function GET(request: NextRequest) {
     region,
     media_type: mediaType,
     dataSource: rows.length > 0 ? "local_cache" : "source_engine_unavailable",
-    ...AVAILABILITY_UNAVAILABLE,
+    ...(rows.length === 0 ? AVAILABILITY_UNAVAILABLE : { available: true }),
     providers: grouped,
     providerSource: rows.length > 0 ? rows[0]?.source ?? "local" : "not_configured",
     usedTmdbApi: false,

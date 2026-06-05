@@ -24,6 +24,8 @@ export type OmdbTitleResponse = {
   imdbVotes?: string;
   imdbID?: string;
   Type?: string;
+  /** Bilheteria doméstica (EUA), ex: "$37,834,891". Disponível para filmes. */
+  BoxOffice?: string;
   Response?: "True" | "False";
   Error?: string;
 };

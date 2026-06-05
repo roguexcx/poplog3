@@ -27,6 +27,7 @@ import {
   resolveUserStateIdentity,
   userStateIdentityDebug,
 } from "@/server/user-state/poplog-user-state-identity";
+import { isSyntheticTmdbId } from "@/lib/ids/synthetic-tmdb-id";
 
 // ── Validators ────────────────────────────────────────────────────────────────
 
@@ -40,14 +41,18 @@ const VALID_SOURCES = new Set<string>([
 
 function revalidateRatingConsumers(
   mediaType: RatingMediaType,
-  tmdbId: number
+  tmdbId: number,
+  imdbId?: string | null,
 ) {
+  // For synthetic IDs, revalidate using imdbId path; for real IDs, use tmdbId
+  const pathId = isSyntheticTmdbId(tmdbId) ? (imdbId ?? tmdbId) : tmdbId;
+
   if (mediaType === "episode" || mediaType === "season" || mediaType === "tv") {
-    revalidatePath(`/title/tv/${tmdbId}`);
+    revalidatePath(`/title/tv/${pathId}`);
     return;
   }
 
-  revalidatePath(`/title/${mediaType}/${tmdbId}`);
+  revalidatePath(`/title/${mediaType}/${pathId}`);
 }
 
 async function getMutationRatings(
@@ -180,7 +185,7 @@ export async function POST(request: NextRequest) {
     });
     const tmdbIdN = identity?.tmdbId;
 
-    if (!tmdbIdN || tmdbIdN <= 0) {
+    if (!tmdbIdN) {
       return NextResponse.json(
         {
           error: "Campo tmdbId/poplogId inválido",
@@ -219,7 +224,7 @@ export async function POST(request: NextRequest) {
       episodeNumber ?? null
     );
 
-    revalidateRatingConsumers(mediaType, tmdbIdN);
+    revalidateRatingConsumers(mediaType, tmdbIdN, identity?.externalIds?.imdbId);
 
     return NextResponse.json({
       success: true,
@@ -265,7 +270,7 @@ export async function DELETE(request: NextRequest) {
     });
     const tmdbIdN = identity?.tmdbId;
 
-    if (!tmdbIdN || tmdbIdN <= 0) {
+    if (!tmdbIdN) {
       return NextResponse.json(
         {
           error: "Campo tmdbId/poplogId inválido",
@@ -290,7 +295,7 @@ export async function DELETE(request: NextRequest) {
       episodeNumber ?? null
     );
 
-    revalidateRatingConsumers(mediaType, tmdbIdN);
+    revalidateRatingConsumers(mediaType, tmdbIdN, identity?.externalIds?.imdbId);
 
     return NextResponse.json({
       success: true,

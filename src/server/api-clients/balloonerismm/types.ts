@@ -18,6 +18,31 @@ export type BalloonerismImages = {
   logo?: string | null;
 };
 
+/** Empresa de produção ou distribuidora retornada pela API Balloonerismm. */
+export type BalloonerismCompany = {
+  id?: string | null;
+  name: string;
+  /** "Production Companies" | "Distributors" | outros */
+  category?: string | null;
+  origin_country?: string | null;
+  logo_path?: string | null;
+};
+
+export type BalloonerismCountry = {
+  iso_3166_1?: string | null;
+  name: string;
+};
+
+export type BalloonerismLanguage = {
+  iso_639_1?: string | null;
+  name: string;
+};
+
+export type BalloonerismCertificate = {
+  rating?: string | null;
+  body?: string | null;
+};
+
 export type BalloonerismMovie = {
   imdb_id: string;
   title: string;
@@ -29,9 +54,27 @@ export type BalloonerismMovie = {
   genres?: string[] | null;
   country?: string | null;
   language?: string | null;
+  /** @deprecated Use certificate.rating instead */
   certification?: string | null;
+  certificate?: BalloonerismCertificate | null;
+  /** @deprecated Use vote_average instead (IMDb) */
   rating?: number | null;
+  /** @deprecated Use vote_count instead */
   votes?: number | null;
+  /** Nota IMDb (0–10) */
+  vote_average?: number | null;
+  vote_count?: number | null;
+  /** Orçamento de produção em USD */
+  budget?: number | null;
+  /** Bilheteria doméstica (EUA) em USD */
+  domestic_gross?: number | null;
+  /** Bilheteria total mundial em USD */
+  worldwide_gross?: number | null;
+  /** Pontuação Metacritic (0–100) */
+  metascore?: number | null;
+  production_companies?: BalloonerismCompany[] | null;
+  production_countries?: BalloonerismCountry[] | null;
+  spoken_languages?: BalloonerismLanguage[] | null;
   ids?: BalloonerismIds;
   images?: BalloonerismImages;
   awards?: BalloonerismAward[] | null;
@@ -53,15 +96,28 @@ export type BalloonerismShow = {
   overview?: string | null;
   tagline?: string | null;
   runtime?: number | null;
+  episode_run_time?: number[] | null;
   status?: string | null;
+  /** "TV Series" | "TV Mini Series" | etc */
+  type?: string | null;
+  in_production?: boolean | null;
   genres?: string[] | null;
   country?: string | null;
   language?: string | null;
+  /** @deprecated Use certificate.rating instead */
   certification?: string | null;
+  certificate?: BalloonerismCertificate | null;
+  /** @deprecated Use vote_average instead (IMDb) */
   rating?: number | null;
+  /** @deprecated Use vote_count instead */
   votes?: number | null;
+  vote_average?: number | null;
+  vote_count?: number | null;
   number_of_seasons?: number | null;
   number_of_episodes?: number | null;
+  production_companies?: BalloonerismCompany[] | null;
+  production_countries?: BalloonerismCountry[] | null;
+  spoken_languages?: BalloonerismLanguage[] | null;
   ids?: BalloonerismIds;
   images?: BalloonerismImages;
   trailers?: BalloonerismVideo[] | null;

@@ -49,12 +49,12 @@ import type {
   LegacyAgendaTv,
   LegacyAgendaMovie,
 } from "@/server/agenda/types";
-import { buildTmdbRawUrl } from "@/lib/images/url";
+import { resolveCatalogImage } from "@/lib/images/resolve";
 
 // ── Constantes ─────────────────────────────────────────────────────────────────
 
 const TMDB_IMG = (path: string | null | undefined, size: string) =>
-  buildTmdbRawUrl(size, path);
+  resolveCatalogImage(path, size);
 
 const POSTER_TEXT_LANGS = new Set([
   "ja",
@@ -189,6 +189,10 @@ function daysUntilDate(dateStr: string): number {
   const today = new Date(`${todayStr()}T12:00:00`);
   return Math.ceil((date.getTime() - today.getTime()) / 86_400_000);
 }
+function hasDisplayableData(g: IcsSeriesGroup): boolean {
+  return !!(g.tmdb?.name ?? g.rawTitle);
+}
+
 function hasValidTmdb(g: IcsSeriesGroup): boolean {
   return !!(g.tmdb?.name && (g.tmdb?.poster_path || g.tmdb?.backdrop_path));
 }
@@ -840,10 +844,10 @@ function buildEditorialGroups(
 
     const fallbackDate = group.sectionMeta?.episodeDate ?? today;
 
-    // Filtro obrigatório: TMDB indexado + backdrop disponível
-    if (!group.tmdb) continue;
-    const hasBackdrop = !!(group.tmdb.backdrop_path || group.tmdb.clean_backdrop_path);
-    if (!hasBackdrop) continue;
+    // Filtro mínimo: precisa ter pelo menos um título exibível
+    if (!hasDisplayableData(group)) continue;
+    // Grupos sem backdrop/poster recebem penalidade de imagem no score (-60),
+    // mas não são descartados — aparecem como cards de texto compactos.
 
     if (useSectionGroups) {
       const dateStr =
