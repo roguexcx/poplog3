@@ -21,6 +21,9 @@ type NormalizeEpisodeInput = {
   textLanguage?: string;
   firstAired?: string;
   runtime?: number;
+  episodeType?: string;
+  voteAverage?: number;
+  voteCount?: number;
   stillRemoteUrl?: string;
   stillSource?: EpisodeImageCandidate["source"];
   stillWidth?: number;
@@ -129,6 +132,9 @@ export function normalizeEpisode(input: NormalizeEpisodeInput, meta: SourceMeta)
     originalOverview: compactText(input.originalOverview),
     firstAired: input.firstAired,
     runtime: input.runtime,
+    episodeType: input.episodeType,
+    voteAverage: input.voteAverage,
+    voteCount: input.voteCount,
     stillPath: stillUrl ?? input.stillRemoteUrl,
     stillUrl,
     stillSource,

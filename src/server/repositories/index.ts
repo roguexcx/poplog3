@@ -17,4 +17,5 @@ export * from "./user-curadoria-state.repository";
 export * from "./user-preferences.repository";
 export * from "./user-ratings.repository";
 export * from "./user-title-state.repository";
+export * from "./title-consolidation.repository";
 export * from "./types";

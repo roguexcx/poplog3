@@ -30,9 +30,10 @@ export function useUserFeedbackToggle({
   const [notInterested, setNotInterested] = useState(initialNotInterested);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const hasUsableIdentity = tmdbId !== 0 || Boolean(poplogId) || Boolean(imdbId) || Boolean(slug);
 
   useEffect(() => {
-    if (authLoading || !user) return;
+    if (authLoading || !user || !hasUsableIdentity || tmdbId <= 0) return;
 
     const controller = new AbortController();
 
@@ -47,10 +48,10 @@ export function useUserFeedbackToggle({
       });
 
     return () => controller.abort();
-  }, [authLoading, mediaType, tmdbId, user]);
+  }, [authLoading, hasUsableIdentity, mediaType, tmdbId, user]);
 
   const toggleNotInterested = useCallback(async () => {
-    if (!user || saving) return;
+    if (!user || saving || !hasUsableIdentity) return;
 
     const next = !notInterested;
     setNotInterested(next);
@@ -87,7 +88,7 @@ export function useUserFeedbackToggle({
     } finally {
       setSaving(false);
     }
-  }, [mediaType, notInterested, saving, source, tmdbId, poplogId, imdbId, slug, user]);
+  }, [hasUsableIdentity, mediaType, notInterested, saving, source, tmdbId, poplogId, imdbId, slug, user]);
 
   return {
     notInterested,

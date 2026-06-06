@@ -7,6 +7,9 @@ import {
 } from "@/server/source-engine/engine";
 import { hydrateCatalogResultsWithDebug } from "@/server/source-engine/hydrate-catalog-results";
 import { filterValidTitles } from "@/server/utils/filter-valid-titles";
+import { isTraktIndexEnabled } from "@/lib/trakt-index/engine";
+import { getPoplogDailyTrendingIndex } from "@/lib/trakt-index/canonical";
+import type { TraktIndexItem } from "@/lib/trakt-index/types";
 
 const STATIC_GENRES = [
   { id: 28,  name: "Ação" },
@@ -25,8 +28,60 @@ const STATIC_GENRES = [
   { id: 53,  name: "Suspense" },
 ];
 
+function traktItemsToDiscovery(items: TraktIndexItem[]) {
+  return items.map((item) => ({
+    tmdb_id: item.tmdb_id,
+    media_type: item.media_type,
+    title: item.title,
+    original_title: item.original_title,
+    overview: item.overview,
+    poster_path: item.poster_path,
+    backdrop_path: item.backdrop_path,
+    release_date: item.release_date,
+    first_air_date: item.first_air_date,
+    vote_average: item.vote_average,
+    popularity: item.popularity,
+    poplogId: null,
+    externalIds: item.externalIds,
+    identityUsed: item.identityUsed,
+    linkIdUsed: item.linkIdUsed,
+    hasPoplogId: false,
+    normalizedFrom: item.normalizedFrom,
+    legacyCompatibilityUsed: true,
+  }));
+}
+
 export async function GET() {
   try {
+    // ── Trakt Index como fonte primária de trending ──────────────────────────
+    let trendingRaw: ReturnType<typeof traktItemsToDiscovery> = [];
+    let popularMovies: ReturnType<typeof traktItemsToDiscovery> = [];
+    let popularSeries: ReturnType<typeof traktItemsToDiscovery> = [];
+
+    if (isTraktIndexEnabled()) {
+      try {
+        const traktItems: TraktIndexItem[] = await getPoplogDailyTrendingIndex();
+
+        if (traktItems.length >= 3) {
+          const converted = traktItemsToDiscovery(traktItems);
+          trendingRaw = converted.slice(0, 20);
+          popularMovies = converted.filter((i) => i.media_type === "movie").slice(0, 12);
+          popularSeries = converted.filter((i) => i.media_type === "tv").slice(0, 12);
+
+          return NextResponse.json({
+            ok: true,
+            trending: trendingRaw,
+            popularMovies,
+            popularSeries,
+            genres: STATIC_GENRES,
+          });
+        }
+      } catch (err) {
+        console.warn("[search/discovery] trakt_index failed", err instanceof Error ? err.message : err);
+      }
+    }
+
+    // ── Balloonerismm fallback ────────────────────────────────────────────────
     const [movieTrending, tvTrending, moviePopular, tvPopular] = await Promise.allSettled([
       isBalloonerismTrendingEnabled()
         ? catalogGetTrending({ mediaType: "movie", limit: 12 })
@@ -54,13 +109,13 @@ export async function GET() {
       hydrateCatalogResultsWithDebug(safeTvPopular),
     ]);
 
-    const trendingRaw = [
+    trendingRaw = [
       ...filterValidTitles(mTrendHydrated.titles),
       ...filterValidTitles(tvTrendHydrated.titles),
-    ].slice(0, 20);
+    ].slice(0, 20) as ReturnType<typeof traktItemsToDiscovery>;
 
-    const popularMovies = filterValidTitles(mPopHydrated.titles).slice(0, 12);
-    const popularSeries = filterValidTitles(tvPopHydrated.titles).slice(0, 12);
+    popularMovies = filterValidTitles(mPopHydrated.titles).slice(0, 12) as ReturnType<typeof traktItemsToDiscovery>;
+    popularSeries = filterValidTitles(tvPopHydrated.titles).slice(0, 12) as ReturnType<typeof traktItemsToDiscovery>;
 
     return NextResponse.json({
       ok: true,

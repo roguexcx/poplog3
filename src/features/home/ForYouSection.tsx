@@ -20,17 +20,18 @@ import SectionHeader from "@/components/ui/SectionHeader";
 
 type ForYouItem = {
   id: number;
-  title_label: string;
-  original_title_label?: string | null;
+  /** ID canônico para o href do link — pode ser tmdbId numérico (string) ou imdbId ("tt...") */
+  linkId?: string;
+  title: string;
+  originalTitle?: string | null;
   overview?: string;
-  poster_path?: string | null;
-  backdrop_path?: string | null;
-  clean_poster_path?: string | null;
-  vote_average?: number;
+  posterUrl?: string | null;
+  backdropUrl?: string | null;
+  rating?: number;
   year?: string | null;
-  media_type: "movie" | "tv";
-  media_label?: string;
-  genre_label?: string | null;
+  mediaType: "movie" | "tv";
+  mediaLabel?: string;
+  genreLabel?: string | null;
   reason?: string;
   userFeedback?: { notInterested?: boolean };
 };
@@ -50,8 +51,8 @@ function parseReleaseYear(year?: string | null): number | null {
 function ForYouActions({ item }: { item: ForYouItem }) {
   const shared = {
     tmdbId: item.id,
-    mediaType: item.media_type,
-    title: item.title_label,
+    mediaType: item.mediaType,
+    title: item.title,
     releaseYear: parseReleaseYear(item.year),
   };
 
@@ -59,7 +60,7 @@ function ForYouActions({ item }: { item: ForYouItem }) {
   const watched = useWatchedToggle(shared);
   const feedback = useUserFeedbackToggle({
     tmdbId: item.id,
-    mediaType: item.media_type,
+    mediaType: item.mediaType,
     source: "for_you",
     initialNotInterested: Boolean(item.userFeedback?.notInterested),
   });
@@ -105,26 +106,25 @@ function ForYouActions({ item }: { item: ForYouItem }) {
 // ─── FeaturedCard ─────────────────────────────────────────────────────────────
 
 function FeaturedForYouCard({ item }: { item: ForYouItem }) {
-  const backdropPath = item.backdrop_path ?? null;
-  const rating = formatRating(item.vote_average);
-  const isLongTitle = item.title_label.length > 24;
+  const rating = formatRating(item.rating);
+  const isLongTitle = item.title.length > 24;
   const isLongOverview = (item.overview?.length ?? 0) > 140;
-  const slug = `/title/${item.media_type}/${item.id}`;
+  const slug = `/title/${item.mediaType}/${item.linkId ?? item.id}`;
 
   return (
     <article className="group relative h-[320px] overflow-hidden rounded-[1.65rem] border border-white/10 bg-white/[0.04] shadow-[0_20px_80px_rgba(0,0,0,0.42)] transition duration-300 hover:-translate-y-1 hover:border-sky-300/40 hover:shadow-[0_24px_90px_rgba(56,189,248,0.16)]">
-      <Link href={slug} className="absolute inset-0 z-[5]" aria-label={`Abrir ${item.title_label}`} />
+      <Link href={slug} className="absolute inset-0 z-[5]" aria-label={`Abrir ${item.title}`} />
 
       <ForYouActions item={item} />
 
-      {backdropPath && (
+      {item.backdropUrl && (
         <div className="absolute inset-0 overflow-hidden">
           <div className="absolute inset-y-0 -left-[0%] right-50 w-[120%] aspect-video lg:aspect-auto">
             <TmdbImage
-              path={backdropPath}
+              path={item.backdropUrl}
               kind="backdrop"
               size="medium"
-              alt={item.title_label}
+              alt={item.title}
               fill
               sizes="(max-width: 1024px) 100vw, 65vw"
               className="object-cover object-right"
@@ -146,7 +146,7 @@ function FeaturedForYouCard({ item }: { item: ForYouItem }) {
         <div className="mb-3 flex items-center gap-3 text-[11px] font-black uppercase tracking-[0.24em] text-sky-300">
           <span>
             {item.year ? `${item.year} · ` : ""}
-            {item.media_label ?? "Título"}
+            {item.mediaLabel ?? "Título"}
           </span>
           {rating && (
             <span className="flex items-center gap-1 tracking-normal text-amber-400">
@@ -158,14 +158,14 @@ function FeaturedForYouCard({ item }: { item: ForYouItem }) {
 
         <LocalizedTitle
           as="h3"
-          title={item.title_label}
-          originalTitle={item.original_title_label}
+          title={item.title}
+          originalTitle={item.originalTitle}
           variant="large"
           className="max-w-[360px] drop-shadow-[0_4px_18px_rgba(0,0,0,0.75)] transition group-hover:text-sky-100"
         />
 
-        {item.genre_label && (
-          <p className="mt-2 text-[12px] font-semibold text-zinc-300">{item.genre_label}</p>
+        {item.genreLabel && (
+          <p className="mt-2 text-[12px] font-semibold text-zinc-300">{item.genreLabel}</p>
         )}
 
         <SynopsisText text={item.overview ?? null} collapsedLines={3} className="mt-3 max-w-[420px]" />
@@ -181,38 +181,28 @@ function FeaturedForYouCard({ item }: { item: ForYouItem }) {
 // ─── SmallCard ────────────────────────────────────────────────────────────────
 
 function SmallForYouCard({ item }: { item: ForYouItem }) {
-  type ImagePick =
-    | { kind: "poster"; size: "card"; path: string }
-    | { kind: "backdrop"; size: "card"; path: string }
-    | null;
-
-  const pick: ImagePick =
-    item.clean_poster_path
-      ? { kind: "poster", size: "card", path: item.clean_poster_path }
-      : item.poster_path
-        ? { kind: "poster", size: "card", path: item.poster_path }
-        : item.backdrop_path
-          ? { kind: "backdrop", size: "card", path: item.backdrop_path }
-          : null;
-
-  const rating = formatRating(item.vote_average);
+  // posterUrl and backdropUrl can be either TMDB relative paths ("/xxx.jpg")
+  // or full CDN URLs ("https://...") — TmdbImage handles both via normalizeAbsoluteImageUrl
+  const imagePath = item.posterUrl ?? item.backdropUrl ?? null;
+  const imageKind: "poster" | "backdrop" = item.posterUrl ? "poster" : "backdrop";
+  const rating = formatRating(item.rating);
 
   return (
     <article className="group relative h-[320px] overflow-hidden rounded-[1.35rem] border border-white/10 bg-white/[0.04] shadow-[0_16px_55px_rgba(0,0,0,0.38)] transition duration-300 hover:-translate-y-1 hover:border-sky-300/40 hover:shadow-[0_20px_75px_rgba(56,189,248,0.14)]">
       <Link
-        href={`/title/${item.media_type}/${item.id}`}
+        href={`/title/${item.mediaType}/${item.linkId ?? item.id}`}
         className="absolute inset-0 z-10"
-        aria-label={`Abrir ${item.title_label}`}
+        aria-label={`Abrir ${item.title}`}
       />
 
       <ForYouActions item={item} />
 
-      {pick && (
+      {imagePath && (
         <TmdbImage
-          path={pick.path}
-          kind={pick.kind}
-          size={pick.size}
-          alt={item.title_label}
+          path={imagePath}
+          kind={imageKind}
+          size="card"
+          alt={item.title}
           fill
           sizes="220px"
           className="object-cover transition duration-700 group-hover:scale-110"
@@ -233,12 +223,12 @@ function SmallForYouCard({ item }: { item: ForYouItem }) {
 
         <LocalizedTitle
           as="h3"
-          title={item.title_label}
-          originalTitle={item.original_title_label}
+          title={item.title}
+          originalTitle={item.originalTitle}
           variant="poster"
           className={[
             "min-h-[2.35rem] line-clamp-2 leading-tight tracking-tight text-white",
-            item.title_label.length > 22
+            item.title.length > 22
               ? "text-[0.9rem] font-extrabold"
               : "text-[1.05rem] font-black",
           ].join(" ")}
@@ -246,7 +236,7 @@ function SmallForYouCard({ item }: { item: ForYouItem }) {
 
         <p className="mt-2 line-clamp-1 text-xs font-semibold text-zinc-300">
           {item.year ? `${item.year} · ` : ""}
-          {item.media_label ?? "Título"}
+          {item.mediaLabel ?? "Título"}
         </p>
 
         <p className="mt-2 min-h-[1.65rem] line-clamp-2 text-[9px] font-bold leading-snug text-sky-300">
@@ -295,7 +285,11 @@ export default function ForYouSection() {
   const didInitRef = useRef(false);
   const [refreshCount, setRefreshCount] = useState(0);
 
-  const fetchForYou = useCallback((titlesSnapshot: typeof titles) => {
+  // Session history: tracks shown item keys ("mediaType:id") across Sorteio rounds
+  const shownHistoryRef = useRef<string[]>([]);
+  const SHOWN_HISTORY_CAP = 40;
+
+  const fetchForYou = useCallback((titlesSnapshot: typeof titles, exclude: string[]) => {
     if (titlesSnapshot.length === 0) {
       setLoading(false);
       return;
@@ -304,13 +298,23 @@ export default function ForYouSection() {
     fetch("/api/user/for-you", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ titles: titlesSnapshot }),
+      body: JSON.stringify({ titles: titlesSnapshot, exclude }),
     })
       .then((res) => (res.ok ? res.json() : null))
       .then((json) => {
         if (json) {
           setFeatured(json.featured ?? null);
           setItems(json.items ?? []);
+
+          // Accumulate shown items in session history for next Sorteio round
+          const newKeys: string[] = [];
+          if (json.featured) newKeys.push(`${json.featured.mediaType}:${json.featured.id}`);
+          for (const it of json.items ?? []) newKeys.push(`${it.mediaType}:${it.id}`);
+
+          shownHistoryRef.current = [
+            ...shownHistoryRef.current,
+            ...newKeys,
+          ].slice(-SHOWN_HISTORY_CAP);
         }
       })
       .catch(() => {
@@ -318,14 +322,15 @@ export default function ForYouSection() {
         setItems([]);
       })
       .finally(() => setLoading(false));
-   
   }, []);
 
   useEffect(() => {
     if (titlesLoading) return;
     if (didInitRef.current && refreshCount === 0) return;
     didInitRef.current = true;
-    fetchForYou(titles);
+    // First load: no exclusions; subsequent Sorteio rounds: pass history
+    const exclude = refreshCount > 0 ? shownHistoryRef.current : [];
+    fetchForYou(titles, exclude);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [titlesLoading, refreshCount]);
 
@@ -364,7 +369,7 @@ export default function ForYouSection() {
               Novos títulos
             </button>
             <Link
-              href="/profile?tab=recommendations"
+              href="/para-voce"
               className="hidden text-xs font-bold text-sky-300 transition hover:text-white md:block"
             >
               Ver todos →
@@ -392,7 +397,7 @@ export default function ForYouSection() {
               </div>
             )}
             {items.map((item) => (
-              <div key={`${item.media_type}-${item.id}`} className="w-[180px] shrink-0">
+              <div key={`${item.mediaType}-${item.id}`} className="w-[180px] shrink-0">
                 <SmallForYouCard item={item} />
               </div>
             ))}
@@ -401,7 +406,7 @@ export default function ForYouSection() {
           <div className="hidden gap-5 lg:grid lg:grid-cols-[2.05fr_repeat(4,0.72fr)]">
             {featured && <FeaturedForYouCard item={featured} />}
             {items.map((item) => (
-              <SmallForYouCard key={`${item.media_type}-${item.id}`} item={item} />
+              <SmallForYouCard key={`${item.mediaType}-${item.id}`} item={item} />
             ))}
           </div>
         </>

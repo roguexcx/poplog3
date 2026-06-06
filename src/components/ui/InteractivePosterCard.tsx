@@ -10,7 +10,8 @@ import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
 import type { ReactNode } from "react";
 
 type InteractivePosterCardProps = {
-  id: number;
+  id: number | string;
+  tmdbId?: number | null;
   poplogId?: string | number | null;
   imdbId?: string | null;
   slug?: string | null;
@@ -32,6 +33,7 @@ type InteractivePosterCardProps = {
 
 function ActionButtons({
   id,
+  tmdbId,
   poplogId,
   imdbId,
   slug,
@@ -40,7 +42,8 @@ function ActionButtons({
   year,
   source = "card",
 }: {
-  id: number;
+  id: number | string;
+  tmdbId?: number | null;
   poplogId?: string | number | null;
   imdbId?: string | null;
   slug?: string | null;
@@ -51,9 +54,18 @@ function ActionButtons({
 }) {
   const releaseYear =
     year != null ? Number(String(year).slice(0, 4)) || undefined : undefined;
+  const numericId = typeof id === "number" ? id : Number(id);
+  const actionTmdbId =
+    typeof tmdbId === "number" && Number.isInteger(tmdbId) && tmdbId !== 0
+      ? tmdbId
+      : Number.isInteger(numericId) && numericId !== 0
+        ? numericId
+        : 0;
+  const hasUsableIdentity =
+    actionTmdbId !== 0 || Boolean(poplogId) || Boolean(imdbId) || Boolean(slug);
 
   const watchlist = useWatchlistToggle({
-    tmdbId: id,
+    tmdbId: actionTmdbId,
     poplogId,
     imdbId,
     slug,
@@ -63,7 +75,7 @@ function ActionButtons({
   });
 
   const watched = useWatchedToggle({
-    tmdbId: id,
+    tmdbId: actionTmdbId,
     poplogId,
     imdbId,
     slug,
@@ -72,7 +84,7 @@ function ActionButtons({
     releaseYear,
   });
 
-  const feedback = useUserFeedbackToggle({ tmdbId: id, poplogId, imdbId, slug, mediaType, source });
+  const feedback = useUserFeedbackToggle({ tmdbId: actionTmdbId, poplogId, imdbId, slug, mediaType, source });
 
   return (
     <div
@@ -81,7 +93,7 @@ function ActionButtons({
     >
       <CardActionButton
         onClick={watchlist.toggle}
-        disabled={watchlist.loading || !watchlist.isLoggedIn}
+        disabled={!hasUsableIdentity || watchlist.loading || !watchlist.isLoggedIn}
         title={watchlist.inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
         active={watchlist.inWatchlist}
         saving={watchlist.saving}
@@ -92,7 +104,7 @@ function ActionButtons({
 
       <CardActionButton
         onClick={watched.toggle}
-        disabled={watched.loading || !watched.isLoggedIn}
+        disabled={!hasUsableIdentity || watched.loading || !watched.isLoggedIn}
         title={watched.isWatched ? "Desmarcar como assistido" : "Já vi"}
         active={watched.isWatched}
         saving={watched.saving}
@@ -103,7 +115,7 @@ function ActionButtons({
 
       <CardActionButton
         onClick={feedback.toggleNotInterested}
-        disabled={feedback.loading || !feedback.isLoggedIn}
+        disabled={!hasUsableIdentity || feedback.loading || !feedback.isLoggedIn}
         title={feedback.notInterested ? "Remover sem interesse" : "Não tenho interesse"}
         active={feedback.notInterested}
         saving={feedback.saving}
@@ -117,6 +129,7 @@ function ActionButtons({
 
 export default function InteractivePosterCard({
   id,
+  tmdbId,
   poplogId,
   imdbId,
   slug,
@@ -153,6 +166,7 @@ export default function InteractivePosterCard({
       bottomOverlay={
         <ActionButtons
           id={id}
+          tmdbId={tmdbId}
           poplogId={poplogId}
           imdbId={imdbId}
           slug={slug}

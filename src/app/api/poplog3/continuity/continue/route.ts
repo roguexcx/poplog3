@@ -16,6 +16,8 @@ import {
   getLocalSeasonsBatch,
   getLocalEpisodesBatch,
   enrichSyntheticTitlesBatch,
+  enrichNullTitlesBatch,
+  type LocalTitleData,
 } from "@/server/local-services/continuity-local.service";
 
 const NEW_EPISODE_DAYS = 30;
@@ -152,6 +154,12 @@ async function buildLocalContinueItems(userId: string): Promise<NextResponse> {
         titleMap.set(t.tmdb_id, t as unknown as TitleRow);
       }
     }
+
+    // Re-enrich real IDs that exist in DB but have null title
+    const nullTitleEnriched = await enrichNullTitlesBatch(tmdbIds, "tv", titleMap as unknown as Map<number, LocalTitleData>);
+    for (const t of nullTitleEnriched) {
+      titleMap.set(t.tmdb_id, t as unknown as TitleRow);
+    }
     markStage("titles_read");
 
     const seasonsRaw = await getLocalSeasonsBatch(tmdbIds);
@@ -211,7 +219,7 @@ async function buildLocalContinueItems(userId: string): Promise<NextResponse> {
       return {
         content_id: `tv-${state.tmdb_id}`,
         tmdb_id: state.tmdb_id,
-        title: title.title ?? `Série ${state.tmdb_id}`,
+        title: title.title ?? title.original_title ?? `Série ${state.tmdb_id}`,
         original_title: title.original_title ?? null,
         poster_path: title.poster_path ?? null,
         backdrop_path: title.backdrop_path ?? null,

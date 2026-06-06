@@ -4,8 +4,8 @@
 // Componente principal da página /radar.
 //
 // Dois modos de visualização, alternáveis com um clique:
-//   • Geral   — feed ICS + TMDB, descoberta ampla, sem personalização
-//   • Personalizado — AgendaEngine com watchlist, histórico e preferências do usuário
+//   • Geral   — engine Trakt Calendar/Releases, descoberta ampla
+//   • Personalizado — mesma engine Trakt, filtrada pela biblioteca do usuário
 //
 // MODO BRUTO (ativo agora):
 //   Sem filtros editoriais de idioma, gênero, popularidade ou plataforma.
@@ -38,7 +38,6 @@ import {
   type ContentFilterKey,
   type ContentTypeResult,
 } from "@/lib/radar/content-type-filter";
-import { ALL_BLOCKED_CATEGORIES } from "@/lib/radar/categories";
 import type {
   IcsAgendaResponse,
   RadarSections,
@@ -98,8 +97,6 @@ function bestVerticalImg(tmdb: {
   return TMDB_IMG(tmdb.poster_path, "w500") || TMDB_IMG(cleanBd, "w1280");
 }
 
-const ENRICH_BATCH = 10;
-const ENRICH_PAUSE = 700;
 const SPOTLIGHT_MS = 6000;
 
 // ── Fases do carregamento ──────────────────────────────────────────────────────
@@ -114,7 +111,7 @@ type Phase =
 
 const PHASE_LABELS: Record<Phase, string> = {
   idle: "Iniciando radar…",
-  fetching_ics: "Lendo sinais…",
+  fetching_ics: "Lendo Trakt…",
   grouping: "Agrupando séries…",
   cache_check: "Consultando cache…",
   enriching: "Enriquecendo dados…",
@@ -794,6 +791,40 @@ function itemPopularity(item: EditorialGroup): number {
   return item.group.tmdb?.popularity ?? 0;
 }
 
+function itemEventText(item: EditorialGroup): string {
+  return [
+    item.group.sectionMeta?.reason,
+    item.group.sectionMeta?.episodeLabel,
+    item.group.sectionMeta?.clusterLabel,
+    item.group.sectionMeta?.releasePattern,
+    item.movie?.sourceTag,
+    item.group.sourceTag,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
+function itemMatchesRadarFilter(item: EditorialGroup, filter: ContentFilterKey): boolean {
+  if (filter === "all") return true;
+  const text = itemEventText(item);
+  const diff = daysUntilDate(item.dateStr);
+  if (filter === "today") return diff === 0;
+  if (filter === "week") return diff >= 0 && diff <= 10;
+  if (filter === "streaming") return text.includes("streaming") || text.includes("digital") || text.includes("movie_streaming") || text.includes("movie_digital");
+  if (filter === "premieres") return text.includes("estreia") || text.includes("premiere") || text.includes("new_show") || text.includes("season_premiere");
+  if (filter === "finales") return text.includes("final");
+  if (filter === "recent") return diff < 0 || text.includes("ainda em tempo");
+  if (filter === "cinema") return text.includes("cinema") || text.includes("theatrical") || text.includes("movie_theatrical");
+  if (filter === "physical") return text.includes("physical") || text.includes("mídia física") || text.includes("midia fisica");
+  if (filter === "season_drop") return text.includes("temporada completa") || text.includes("season_drop");
+  if (filter === "talk_news") return item.group.category === "NEWS" || item.group.category === "VARIETY";
+  if (filter === "sports") return item.group.category === "SPORTS";
+  if (filter === "live") return item.group.category === "LIVE_EVENT";
+  if (filter === "kids") return item.group.category === "KIDS";
+  return itemMatchesFilter(item.contentType, filter);
+}
+
 function buildEditorialGroups(
   sourceGroups: IcsSeriesGroup[],
   sourceMovies: MovieGroup[],
@@ -1435,6 +1466,7 @@ function buildSpotlightItems(
         ep.startAt.slice(0, 10) <= nextWeekStr,
     );
     if (!upcomingEp) continue;
+    if (!bestHorizontalImg(g.tmdb ?? { backdrop_path: null, poster_path: null }, "w1280")) continue;
     const dateStr = upcomingEp.startAt.slice(0, 10);
     const daysUntil = Math.ceil(
       (new Date(dateStr + "T12:00:00").getTime() - Date.now()) / 86_400_000,
@@ -1458,6 +1490,22 @@ function buildSpotlightItems(
     const maxEp = Math.max(...seasonEps.map((e) => e.episode));
     const isFinale =
       upcomingEp.episode === maxEp && maxEp > 1 && upcomingEp.season > 0;
+    const eventLabel = String(g.sectionMeta?.reason ?? g.sectionMeta?.episodeLabel ?? "").toLowerCase();
+    const hasStrongLabel =
+      isPremiere ||
+      isFinale ||
+      eventLabel.includes("estreia") ||
+      eventLabel.includes("final") ||
+      eventLabel.includes("temporada completa") ||
+      eventLabel.includes("streaming") ||
+      eventLabel.includes("cinema");
+    const recurringCommon =
+      g.category === "NEWS" ||
+      g.category === "SPORTS" ||
+      g.category === "DAILY_SOAP" ||
+      g.category === "VARIETY";
+    if (!hasStrongLabel && (g.relevanceScore ?? 0) < 62) continue;
+    if (recurringCommon && !isTrendingDay && (g.relevanceScore ?? 0) < 72) continue;
     items.push({
       group: g,
       dateStr,
@@ -2111,6 +2159,7 @@ function AgendaEditorialFeed({
   trendingDay,
   trendingWeek,
   radarMode: feedRadarMode,
+  contentFilter,
 }: {
   items: EditorialGroup[];
   mode: ViewMode;
@@ -2118,6 +2167,7 @@ function AgendaEditorialFeed({
   trendingDay: Set<number>;
   trendingWeek: Set<number>;
   radarMode?: RadarMode;
+  contentFilter: ContentFilterKey;
 }) {
   const rows = getRows(mode);
   const isPersonal = feedRadarMode === "personal";
@@ -2132,7 +2182,8 @@ function AgendaEditorialFeed({
     : items.filter((i) => i.visualWeight !== "compact").sort((a, b) => b.score - a.score);
 
   // Personal: splitAt = total (tudo no grid). Geral: top 50%.
-  const splitAt    = isPersonal ? allNonCmp.length : Math.ceil(allNonCmp.length / 2);
+  const initialShowcaseLimit = !isPersonal && mode === "all" && contentFilter === "all" ? 18 : Number.POSITIVE_INFINITY;
+  const splitAt    = isPersonal ? allNonCmp.length : Math.min(Math.ceil(allNonCmp.length / 2), initialShowcaseLimit);
   const nonCmp     = allNonCmp.slice(0, splitAt);
   const bottomHalf = isPersonal ? [] : allNonCmp.slice(splitAt);
   const capSpill: EditorialGroup[] = [];
@@ -2248,8 +2299,11 @@ function AgendaEditorialFeed({
 
   // Seção "Também relevantes": bottom 50% não-compact + todos os compacts + spillover do grid.
   // Tudo reordenado por score desc — direto para AgendaCompactCluster (sem grid intermediário).
-  const compactPool = [...bottomHalf, ...capSpill, ...allCompact, ...topSpill]
+  const rawCompactPool = [...bottomHalf, ...capSpill, ...allCompact, ...topSpill]
     .sort((a, b) => b.score - a.score);
+  const compactLimit = !isPersonal && contentFilter === "all" ? 18 : rawCompactPool.length;
+  const compactPool = rawCompactPool.slice(0, compactLimit);
+  const hiddenCompactCount = rawCompactPool.length - compactPool.length;
 
   const hasSecondSection = compactPool.length > 0;
 
@@ -2269,6 +2323,11 @@ function AgendaEditorialFeed({
             <div className="h-px flex-1 bg-white/[0.06]" />
           </div>
           <AgendaCompactCluster items={compactPool} />
+          {hiddenCompactCount > 0 && (
+            <div className="-mt-1 rounded-2xl border border-white/[0.06] bg-white/[0.025] px-4 py-3 text-center text-[11px] font-semibold text-white/30">
+              Mais {hiddenCompactCount} eventos disponíveis nos filtros.
+            </div>
+          )}
         </>
       )}
     </div>
@@ -3338,6 +3397,19 @@ export default function RadarClient({
     [viewMode],
   );
 
+  const [generalSnapshot, setGeneralSnapshot] = useState<IcsAgendaResponse | null>(initialData);
+
+  function applyAgendaPayload(data: IcsAgendaResponse) {
+    trendingDayRef.current = new Set(data.trendingDay ?? []);
+    trendingWeekRef.current = new Set(data.trendingWeek ?? []);
+    const hydratedGroups = hydrate(data.groups ?? []);
+    const hydratedFeatured = hydrate(data.featuredGroups ?? []);
+    setGroups(hydratedGroups);
+    setFeatured(hydratedFeatured);
+    setSections(hydrateSections(data.sections));
+    setMovies(data.movies ?? []);
+  }
+
   // ── Carregamento inicial do modo geral (cache frio) ───────────────────────
   useEffect(() => {
     if (initialData) return; // cache quente — sem fetch necessário
@@ -3346,63 +3418,18 @@ export default function RadarClient({
     async function load() {
       setPhase("fetching_ics");
       try {
-        const res = await fetch("/api/ics/agenda");
+        const res = await fetch("/api/radar?mode=general", { cache: "no-store" });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         setPhase("grouping");
-        const data = (await res.json()) as IcsAgendaResponse;
+        const data = (await res.json()) as { general?: IcsAgendaResponse };
+        const agenda = data.general;
+        if (!agenda) throw new Error("Payload do Radar vazio");
         if (cancelled) return;
         setPhase("cache_check");
-        trendingDayRef.current = new Set(data.trendingDay ?? []);
-        trendingWeekRef.current = new Set(data.trendingWeek ?? []);
-        const hydratedGroups = hydrate(data.groups ?? []);
-        const hydratedFeatured = hydrate(data.featuredGroups ?? []);
-        setGroups(hydratedGroups);
-        setFeatured(hydratedFeatured);
-        setSections(hydrateSections(data.sections));
-        setMovies(data.movies ?? []);
-        const needsEnrich = hydratedFeatured.filter((g) => !g.tmdb);
-        if (needsEnrich.length === 0) {
-          setPhase("done");
-          return;
-        }
-        setPhase("enriching");
-        const batches: IcsSeriesGroup[][] = [];
-        for (let i = 0; i < needsEnrich.length; i += ENRICH_BATCH)
-          batches.push(needsEnrich.slice(i, i + ENRICH_BATCH));
-        let done = 0;
-        for (const batch of batches) {
-          if (cancelled) break;
-          try {
-            const enrichRes = await fetch("/api/ics/enrich", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ titles: batch.map((g) => g.rawTitle) }),
-            });
-            if (enrichRes.ok) {
-              const { results } = (await enrichRes.json()) as {
-                results: Record<
-                  string,
-                  import("@/lib/ics-engine").TmdbEnrichment | null
-                >;
-              };
-              const apply = (prev: IcsSeriesGroup[]) =>
-                prev.map((g) =>
-                  results[g.rawTitle] !== undefined && !g.tmdb
-                    ? { ...g, tmdb: results[g.rawTitle] ?? undefined }
-                    : g,
-                );
-              setFeatured(apply);
-              setGroups(apply);
-            }
-          } catch (e) {
-            console.warn("[radar] enrich batch error:", e);
-          }
-          done += batch.length;
-          setEnrichProgress((done / needsEnrich.length) * 100);
-          if (done < needsEnrich.length)
-            await new Promise((r) => setTimeout(r, ENRICH_PAUSE));
-        }
-        if (!cancelled) setPhase("done");
+        setGeneralSnapshot(agenda);
+        applyAgendaPayload(agenda);
+        setEnrichProgress(100);
+        setPhase("done");
       } catch (err) {
         if (!cancelled) {
           setError(err instanceof Error ? err.message : "Erro");
@@ -3425,71 +3452,47 @@ export default function RadarClient({
 
       if (newMode === "personal") {
         try {
-          // Busca só os tmdb_ids da biblioteca do usuário
           const res = await fetch(`/api/radar?mode=personal&t=${Date.now()}`, { cache: "no-store" });
           if (!res.ok) throw new Error(`HTTP ${res.status}`);
           const data = (await res.json()) as {
             general?: IcsAgendaResponse;
             libraryFiltered?: boolean;
             librarySize?: number;
-            libraryMovieIds?: number[];
+            matchedCount?: number;
           };
 
-          // tmdb_ids de séries da biblioteca (vindos do payload filtrado)
-          const libraryIds = new Set(
-            (data.general?.groups ?? [])
-              .map(g => g.tmdb?.tmdb_id)
-              .filter((id): id is number => id != null)
-          );
-          // tmdb_ids de filmes da biblioteca (vindos do servidor)
-          const libraryMovieIds = new Set<number>(data.libraryMovieIds ?? []);
-
-          if (libraryIds.size === 0) {
+          const agenda = data.general;
+          if (!agenda || (data.matchedCount ?? agenda.featuredGroups?.length ?? 0) === 0) {
             setPersonalEmpty(true);
-            setPersonalLibrarySize(0);
+            setPersonalLibrarySize(data.librarySize ?? 0);
             setIsLoadingMode(false);
             return;
           }
 
-          // Filtra os grupos do Geral (já carregados) pelos tmdb_ids da biblioteca.
-          // featured = mesmo pool de groups filtrado — sem grupos extras do featured geral
-          // que poderiam introduzir "intrusos" não pertencentes à biblioteca.
-          const filterByLibrary = (gs: IcsSeriesGroup[]) =>
-            gs.filter(g => g.tmdb?.tmdb_id != null && libraryIds.has(g.tmdb.tmdb_id));
-
-          const filteredGroups   = filterByLibrary(groups);
-          // Filmes de cinema: filtra pelos tmdb_ids de filmes da biblioteca do usuário
-          const filterCinema = (cs: CinemaReleaseGroup[]) =>
-            cs.filter(c => libraryMovieIds.has(c.movie.tmdb_id));
-
-          const filteredSections = sections ? {
-            ...sections,
-            today:          filterByLibrary(sections.today ?? []),
-            thisWeek:       filterByLibrary(sections.thisWeek ?? []),
-            next30Days:     filterByLibrary(sections.next30Days ?? []),
-            cinemaToday:    filterCinema(sections.cinemaToday ?? []),
-            cinemaThisWeek: filterCinema(sections.cinemaThisWeek ?? []),
-            cinemaNext:     filterCinema(sections.cinemaNext ?? []),
-          } : null;
-
-          setGroups(filteredGroups);
-          setFeatured(filteredGroups);
-          setSections(filteredSections);
-          setMovies([]); // movies legado — não usado no pipeline unificado
-          setPersonalEmpty(filteredGroups.length === 0);
-          setPersonalLibrarySize(data.librarySize ?? libraryIds.size);
+          applyAgendaPayload(agenda);
+          setPersonalEmpty((agenda.featuredGroups?.length ?? 0) === 0);
+          setPersonalLibrarySize(data.librarySize ?? null);
         } catch (err) {
           console.warn("[radar] erro ao carregar modo personalizado:", err);
           setPersonalEmpty(true);
           setPersonalLibrarySize(0);
         }
       } else {
-        // Voltando para Geral — restaura dados originais
-        if (initialData) {
-          setGroups(hydrate(initialData.groups ?? []));
-          setFeatured(hydrate(initialData.featuredGroups ?? []));
-          setSections(hydrateSections(initialData.sections));
-          setMovies(initialData.movies ?? []);
+        if (generalSnapshot) {
+          applyAgendaPayload(generalSnapshot);
+        } else {
+          try {
+            const res = await fetch(`/api/radar?mode=general&t=${Date.now()}`, { cache: "no-store" });
+            if (res.ok) {
+              const data = (await res.json()) as { general?: IcsAgendaResponse };
+              if (data.general) {
+                setGeneralSnapshot(data.general);
+                applyAgendaPayload(data.general);
+              }
+            }
+          } catch (err) {
+            console.warn("[radar] erro ao restaurar modo geral:", err);
+          }
         }
         setPersonalEmpty(false);
         setPersonalLibrarySize(null);
@@ -3497,18 +3500,12 @@ export default function RadarClient({
 
       setIsLoadingMode(false);
     },
-    [radarMode, isLoadingMode, groups, featuredGroups, sections, initialData],
+    [radarMode, isLoadingMode, generalSnapshot],
   );
 
   // ── Dados visíveis ────────────────────────────────────────────────────────
-  // Descarta categorias estruturalmente bloqueadas (KIDS, SPORTS, NEWS, etc.)
-  // Usa refined_category quando disponível — o enricher TMDB pode reclassificar
-  // um grupo (ex: SERIES → KIDS via genre 10751/10762) após enriquecimento.
   const visibleFeatured = useMemo(
-    () => featuredGroups.filter((g) => {
-      const cat = g.tmdb?.refined_category ?? g.category;
-      return !ALL_BLOCKED_CATEGORIES.has(cat);
-    }),
+    () => featuredGroups,
     [featuredGroups],
   );
 
@@ -3578,12 +3575,32 @@ export default function RadarClient({
 
   // ── Contagens por filtro e lista filtrada ─────────────────────────────────
   const filterCounts = useMemo((): FilterCount[] => {
-    const keys: ContentFilterKey[] = ["all", "series", "movies", "anime"];
+    const keys: ContentFilterKey[] = [
+      "all",
+      "today",
+      "week",
+      "series",
+      "movies",
+      "streaming",
+      "premieres",
+      "finales",
+      "recent",
+      "animation",
+      "anime",
+      "reality",
+      "talk_news",
+      "sports",
+      "kids",
+      "cinema",
+      "physical",
+      "season_drop",
+      "live",
+    ];
     return keys.map((key) => ({
       key,
       count: key === "all"
         ? editorialItems.length
-        : editorialItems.filter((item) => itemMatchesFilter(item.contentType, key)).length,
+        : editorialItems.filter((item) => itemMatchesRadarFilter(item, key)).length,
     }));
   }, [editorialItems]);
 
@@ -3591,7 +3608,7 @@ export default function RadarClient({
     const filtered =
       contentFilter === "all"
         ? editorialItems
-        : editorialItems.filter((item) => itemMatchesFilter(item.contentType, contentFilter));
+        : editorialItems.filter((item) => itemMatchesRadarFilter(item, contentFilter));
 
     // Bug #3: quando o filtro é um subtipo específico (anime, reality, documentary),
     // itens que foram marcados "compact" pelo applyLanguageCap devem ser promovidos
@@ -3662,6 +3679,7 @@ export default function RadarClient({
             trendingDay={trendingDayRef.current}
             trendingWeek={trendingWeekRef.current}
             radarMode={radarMode}
+            contentFilter={contentFilter}
           />
         )}
       </section>
@@ -3672,7 +3690,7 @@ export default function RadarClient({
         />
         <ContextualAttribution
           context="calendar"
-          sourcesUsed={["bancodeseries", "tmdb"]}
+          sourcesUsed={["trakt"]}
         />
       </div>
     </PageShell>

@@ -30,6 +30,8 @@ export interface TMDBItem {
   vote_average?: number;
   popularity?: number;
   genre_ids?: number[];
+  /** Nomes de gênero em string (vindo do Trakt Index ou similar; não usar junto com genre_ids). */
+  genres?: string[];
   number_of_seasons?: number | null;
   personalScore?: number;
   feedbackPenaltyApplied?: number;

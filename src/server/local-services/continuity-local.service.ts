@@ -543,6 +543,66 @@ export async function enrichSyntheticTitlesBatch(
   return results;
 }
 
+/**
+ * Re-enriches real (positive) tmdbIds that exist in the DB but have a null title.
+ * Looks up their imdbId from the titleMap and fetches from Balloonerismm.
+ * Updates the DB row so subsequent requests don't need to re-enrich.
+ */
+export async function enrichNullTitlesBatch(
+  tmdbIds: number[],
+  mediaType: "tv" | "movie",
+  titleMap: Map<number, LocalTitleData>,
+): Promise<LocalTitleData[]> {
+  const candidates = tmdbIds.filter((id) => {
+    const t = titleMap.get(id);
+    return t && !t.title && id > 0 && typeof t.externalIds?.imdbId === "string";
+  });
+  if (candidates.length === 0) return [];
+
+  const { getPoplogTitleDetails } = await import("@/server/titles/poplog-title-details");
+  const results: LocalTitleData[] = [];
+
+  await Promise.allSettled(
+    candidates.map(async (tmdbId) => {
+      const existing = titleMap.get(tmdbId)!;
+      const imdbId = existing.externalIds?.imdbId as string;
+
+      const details = await getPoplogTitleDetails({ mediaType, id: imdbId, sourceHint: "imdb" }).catch(() => null);
+      if (!details?.title) return;
+
+      await upsertCachedTitleRow({
+        tmdbId,
+        mediaType,
+        title: details.title,
+        originalTitle: details.originalTitle ?? null,
+        overview: details.overview ?? null,
+        posterPath: details.posterUrl ?? null,
+        backdropPath: details.backdropUrl ?? null,
+        year: details.year ?? null,
+        runtime: details.runtime ?? null,
+        voteAverage: details.voteAverage ?? null,
+        voteCount: details.voteCount ?? null,
+        numberOfSeasons: details.numberOfSeasons ?? null,
+        numberOfEpisodes: details.numberOfEpisodes ?? null,
+        releaseDate: mediaType === "movie" ? (details.releaseDate ?? null) : null,
+        firstAirDate: mediaType === "tv" ? (details.releaseDate ?? null) : null,
+        lastAirDate: details.lastAirDate ?? null,
+      }).catch(() => {});
+
+      results.push({
+        ...existing,
+        title: details.title,
+        original_title: details.originalTitle ?? existing.original_title,
+        overview: details.overview ?? existing.overview,
+        poster_path: details.posterUrl ?? existing.poster_path,
+        backdrop_path: details.backdropUrl ?? existing.backdrop_path,
+      });
+    }),
+  );
+
+  return results;
+}
+
 // ── User state for agenda enrichment ──────────────────────────────────────────
 
 export async function getLocalAgendaStateBatch(

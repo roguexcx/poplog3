@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { adminUnauthorizedResponse, isAdminRequest } from "@/server/auth/admin-guard";
+import { getTraktClientStatus } from "@/server/api-clients/trakt/client";
 
 export async function GET(request: Request) {
   if (!isAdminRequest(request)) return adminUnauthorizedResponse();
@@ -12,6 +13,7 @@ export async function GET(request: Request) {
       omdb: Boolean(process.env.OMDB_API_KEY),
       watchmode: Boolean(process.env.WATCHMODE_API_KEY),
       movieofthenight: Boolean(process.env.MOVIEOFTHENIGHT_API_KEY),
+      trakt: getTraktClientStatus(),
       databaseUrl: Boolean(process.env.DATABASE_URL),
       authSecret: Boolean(process.env.AUTH_SECRET),
       authGoogleId: Boolean(process.env.AUTH_GOOGLE_ID),

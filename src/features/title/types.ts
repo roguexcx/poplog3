@@ -102,6 +102,11 @@ export type TitleCrewMember = {
 
 export type TitleRecommendation = {
   id: number | string;
+  tmdbId?: number | null;
+  poplogId?: string | number | null;
+  imdbId?: string | null;
+  slug?: string | null;
+  traktId?: number | string | null;
   mediaType: TitleMediaType;
   title: string;
   originalTitle?: string | null;

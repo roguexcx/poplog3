@@ -1,20 +1,13 @@
 /**
- * Canonical season resolver — fetches season/episode data from TVDB + Trakt in
- * parallel, merges the results, and falls back to Balloonerismm only when both fail.
+ * Canonical season resolver — Trakt.tv como única fonte de episódios/temporadas.
+ * Retorna dados em pt-BR via extended=full,translations&translations=pt do Trakt.
  *
- * This replaces the sequential TVDB → Trakt → Balloonerismm fallback chain with a
- * parallel merge strategy: no source's data is discarded because another source
- * responded first. TVDB contributes stills and episode structure; Trakt contributes
- * precise air dates and cross-IDs; Balloonerismm covers titles with no TVDB/Trakt data.
- *
- * Entry point: resolveCanonicalSeason({ tvdbId, imdbId, seasonNumber })
+ * Entry point: resolveCanonicalSeason({ imdbId, seasonNumber })
  */
 
-import { tvdbAdapter, findTvdbSeriesByRemoteId } from "./adapters/tvdb-adapter";
 import { traktAdapter } from "./adapters/trakt-adapter";
 import type { CatalogEpisode, CatalogSeason } from "./types/catalog.types";
 import { mergeEpisodeSources, type MergedCatalogEpisode } from "./merge/episode-merge";
-import { balloonerismAdapter } from "./adapters/balloonerismm-adapter";
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
@@ -61,12 +54,16 @@ function buildSeasonMeta(
   number: number,
   episodes: MergedCatalogEpisode[],
 ): CanonicalSeasonMeta {
+  // Trakt's episode_count is the authoritative total — it knows about all episodes including
+  // ones not yet in TVDB or Balloonerismm. Use it so the DB stores the correct count and
+  // cachedSeasonProblem can detect episode_count_mismatch on future re-fetches.
+  const episodeCount = trakt?.episodeCount ?? tvdb?.episodeCount ?? (episodes.length || null);
   return {
     number,
     title: tvdb?.title ?? trakt?.title ?? null,
     posterPath: tvdb?.posterPath ?? null, // Trakt never has season posters
     airDate: episodes.find((ep) => ep.firstAired)?.firstAired ?? null,
-    episodeCount: episodes.length || null,
+    episodeCount,
   };
 }
 
@@ -152,191 +149,56 @@ export async function resolveCanonicalSeason(params: {
   year?: number | null;
 }): Promise<CanonicalSeasonResult> {
   const { seasonNumber } = params;
-  let { imdbId } = params;
-  let tvdbId = params.tvdbId ?? null;
+  const { imdbId } = params;
 
-  // ── ID discovery: tenta resolver imdbId + tvdbId quando ausentes ──────────
-  //
-  // Ordem de tentativas:
-  //   1. TVDB remoteid lookup (rápido, se imdbId já disponível)
-  //   2. Trakt /search/tmdb cross-reference (se tmdbId ou title disponível, via aliases)
-  //      → já foi feito no caller (resolveAndMergeExternalIdsForPoplogTitle)
-  //   3. TVDB text search por título (último recurso, só se imdbId ainda null)
-  //
-  // O caller (season route, hydrate route) já passou pelos passos 1-2 via
-  // resolveAndMergeExternalIdsForPoplogTitle. O passo 3 é exclusivo do resolver.
-
-  let tvdbIdResolutionMethod: "known" | "remoteid" | "title_search" | "none" =
-    tvdbId ? "known" : "none";
-
-  // Step 1: TVDB remoteid lookup usando imdbId
-  if (!tvdbId && imdbId) {
-    try {
-      const discovered = await findTvdbSeriesByRemoteId(imdbId);
-      if (discovered) {
-        tvdbId = discovered;
-        tvdbIdResolutionMethod = "remoteid";
-        console.log("[canonical-season] TVDB ID via remoteid", { imdbId, tvdbId, seasonNumber });
-      }
-    } catch (err) {
-      console.warn("[canonical-season] TVDB remoteid falhou", {
-        imdbId,
-        error: (err as Error)?.message,
-      });
-    }
-  }
-
-  // Step 3: TVDB + Trakt text search — último recurso quando TUDO falta
-  if (!tvdbId && !imdbId && params.title) {
-    try {
-      const { discoverTvSeriesIdsByTitle } = await import("@/server/titles/discover-series-ids");
-      const found = await discoverTvSeriesIdsByTitle(params.title, params.year);
-      if (found?.tvdbId || found?.imdbId) {
-        tvdbId = found.tvdbId ?? tvdbId;
-        imdbId = found.imdbId ?? imdbId;
-        tvdbIdResolutionMethod = "title_search";
-        console.log("[canonical-season] IDs descobertos via title search", {
-          title: params.title,
-          year: params.year,
-          tvdbId,
-          imdbId,
-        });
-      }
-    } catch (err) {
-      console.warn("[canonical-season] title search falhou", {
-        title: params.title,
-        error: (err as Error)?.message,
-      });
-    }
-  }
-
-  console.log("[canonical-season] resolvendo temporada", {
+  console.log("[canonical-season] resolvendo temporada via Trakt", {
     seasonNumber,
-    tvdbId,
-    tvdbIdResolutionMethod,
     imdbId: imdbId ? `${imdbId.slice(0, 4)}...` : null,
   });
 
-  // ── Phase 1: TVDB + Trakt in parallel ─────────────────────────────────────
+  // ── Phase 1: Trakt only (canonical source for season/episode data) ───────────
+  // TVDB and Balloonerismm are disabled — Trakt is authoritative for episodes/seasons.
+  // Trakt provides pt-BR translations inline via extended=full,translations&translations=pt.
 
-  const [tvdbSeasons, tvdbEpisodes, traktSeasons, traktEpisodes, balloonSeasons, balloonEpisodes] = await Promise.all([
-    tvdbId
-      ? tvdbAdapter.getSeasons({ tvdbId, season: seasonNumber }).catch((err) => {
-          console.warn("[canonical-season] TVDB getSeasons erro:", (err as Error)?.message);
-          return [] as CatalogSeason[];
-        })
-      : Promise.resolve([] as CatalogSeason[]),
+  const traktEpisodes = imdbId
+    ? await traktAdapter.getEpisodes({ imdbId, season: seasonNumber }).catch((err) => {
+        console.warn("[canonical-season] Trakt getEpisodes erro:", (err as Error)?.message);
+        return [] as CatalogEpisode[];
+      })
+    : [];
 
-    tvdbId
-      ? tvdbAdapter.getEpisodes({ tvdbId, season: seasonNumber }).catch((err) => {
-          console.warn("[canonical-season] TVDB getEpisodes erro:", (err as Error)?.message);
-          return [] as CatalogEpisode[];
-        })
-      : Promise.resolve([] as CatalogEpisode[]),
-
-    imdbId
-      ? traktAdapter.getSeasons({ imdbId, season: seasonNumber }).catch((err) => {
-          console.warn("[canonical-season] Trakt getSeasons erro:", (err as Error)?.message);
-          return [] as CatalogSeason[];
-        })
-      : Promise.resolve([] as CatalogSeason[]),
-
-    imdbId
-      ? traktAdapter.getEpisodes({ imdbId, season: seasonNumber }).catch((err) => {
-          console.warn("[canonical-season] Trakt getEpisodes erro:", (err as Error)?.message);
-          return [] as CatalogEpisode[];
-        })
-      : Promise.resolve([] as CatalogEpisode[]),
-
-    imdbId
-      ? balloonerismAdapter.getSeasons({ imdbId, season: seasonNumber }).catch((err) => {
-          console.warn("[canonical-season] Balloonerismm getSeasons erro real:", {
-            seasonNumber,
-            imdbId,
-            error: (err as Error)?.message,
-          });
-          return [] as CatalogSeason[];
-        })
-      : Promise.resolve([] as CatalogSeason[]),
-
-    imdbId
-      ? balloonerismAdapter.getEpisodes({ imdbId, season: seasonNumber }).catch((err) => {
-          console.warn("[canonical-season] Balloonerismm getEpisodes erro real:", {
-            seasonNumber,
-            imdbId,
-            error: (err as Error)?.message,
-          });
-          return [] as CatalogEpisode[];
-        })
-      : Promise.resolve([] as CatalogEpisode[]),
-  ]);
-
-  const tvdbSeason = tvdbSeasons.find((s) => s.number === seasonNumber) ?? null;
-  const traktSeason = traktSeasons.find((s) => s.number === seasonNumber) ?? null;
-  const balloonSeason = balloonSeasons.find((s) => s.number === seasonNumber) ?? null;
-
-  const filteredTvdb = tvdbEpisodes.filter((ep) => ep.season === seasonNumber && ep.number > 0);
   const filteredTrakt = traktEpisodes.filter((ep) => ep.season === seasonNumber && ep.number > 0);
-  const filteredBalloon = balloonEpisodes.filter((ep) => ep.season === seasonNumber && ep.number > 0);
+  const hasTrakt = filteredTrakt.length > 0;
 
-  const hasTvdb = Boolean(tvdbSeason || filteredTvdb.length > 0);
-  const hasTrakt = Boolean(traktSeason || filteredTrakt.length > 0);
-  const hasBalloon = Boolean(balloonSeason || filteredBalloon.length > 0);
+  if (hasTrakt) {
+    const merged = localizeMergedEpisodes(mergeEpisodeSources([], filteredTrakt, []));
+    const seasonMeta = buildSeasonMeta(null, null, seasonNumber, merged);
 
-  if (hasTvdb || hasTrakt || hasBalloon) {
-    // TVDB = priority 0 (official stills, episode structure)
-    // Trakt = priority 1 (fills gaps, better air dates, cross-IDs, images when available)
-    // Balloonerismm = priority 2 for structure, but its pt-BR text can win in resolveEpisodeText.
-    const merged = localizeMergedEpisodes(mergeEpisodeSources(filteredTvdb, filteredTrakt, filteredBalloon));
-    const seasonMeta = buildSeasonMeta(tvdbSeason, traktSeason, seasonNumber, merged);
-    if (!seasonMeta.title && balloonSeason?.title) seasonMeta.title = balloonSeason.title;
-    if (!seasonMeta.posterPath && balloonSeason?.posterPath) seasonMeta.posterPath = balloonSeason.posterPath;
+    const mergedFrom = ["trakt"];
 
-    const mergedFrom = [
-      ...(filteredTvdb.length > 0 || tvdbSeason ? ["tvdb"] : []),
-      ...(filteredTrakt.length > 0 || traktSeason ? ["trakt"] : []),
-      ...(filteredBalloon.length > 0 || balloonSeason ? ["balloonerismm"] : []),
-    ];
-
-    console.log("[canonical-season] fase 1 completa", {
+    console.log("[canonical-season] trakt completo", {
       seasonNumber,
-      tvdbId,
       imdbId,
-      tvdbEps: filteredTvdb.length,
       traktEps: filteredTrakt.length,
-      balloonEps: filteredBalloon.length,
       mergedEps: merged.length,
-      stillsBySource: {
-        tvdb: filteredTvdb.filter((ep) => ep.stillUrl || ep.stillPath).length,
-        trakt: filteredTrakt.filter((ep) => ep.stillUrl || ep.stillPath).length,
-        balloonerismm: filteredBalloon.filter((ep) => ep.stillUrl || ep.stillPath).length,
-      },
-      ptBrTextsBySource: {
-        tvdb: filteredTvdb.filter((ep) => /^(pt|por)/i.test(ep.textLanguage ?? "")).length,
-        trakt: filteredTrakt.filter((ep) => /^(pt|por)/i.test(ep.textLanguage ?? "")).length,
-        balloonerismm: filteredBalloon.filter((ep) => /^(pt|por)/i.test(ep.textLanguage ?? "")).length,
-      },
-      mergedFrom,
+      epNums: merged.map((ep) => ep.number),
+      ptBrEps: filteredTrakt.filter((ep) => /^(pt|por)/i.test(ep.textLanguage ?? "")).length,
     });
 
     return {
       season: seasonMeta,
       episodes: merged,
-      sources: { tvdb: hasTvdb, trakt: hasTrakt, balloonerismm: hasBalloon },
+      sources: { tvdb: false, trakt: true, balloonerismm: false },
       mergedFrom,
       hasData: true,
-      resolvedTvdbId: tvdbId,
-      tvdbIdResolutionMethod,
+      resolvedTvdbId: null,
+      tvdbIdResolutionMethod: "none",
     };
   }
 
   // ── No data ────────────────────────────────────────────────────────────────
 
-  console.warn("[canonical-season] sem dados em nenhuma fonte", {
-    seasonNumber,
-    tvdbId,
-    imdbId,
-  });
+  console.warn("[canonical-season] Trakt sem dados", { seasonNumber, imdbId });
 
   return {
     season: { number: seasonNumber, title: null, posterPath: null, airDate: null, episodeCount: null },
@@ -344,7 +206,7 @@ export async function resolveCanonicalSeason(params: {
     sources: { tvdb: false, trakt: false, balloonerismm: false },
     mergedFrom: [],
     hasData: false,
-    resolvedTvdbId: tvdbId,
-    tvdbIdResolutionMethod,
+    resolvedTvdbId: null,
+    tvdbIdResolutionMethod: "none",
   };
 }

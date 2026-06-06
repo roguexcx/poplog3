@@ -129,15 +129,21 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
 
   // Spotlight: escolha pseudoaleatória, mas determinística para evitar mismatch de hidratação.
   const spotlightItem = useMemo<Poplog3UserLibraryItem | null>(() => {
-    // Aceita poster como fallback para spotlight (para títulos sem backdrop)
-    const candidates = library.filter((i) => !!(i.title?.backdrop_path ?? i.title?.poster_path));
+    const candidates = library.filter((i) => !!(i.title?.backdrop_path || i.title?.poster_path));
     if (candidates.length === 0) return null;
     const seed = library.reduce((acc, item) => {
-      const id = typeof item.tmdb_id === "number" ? item.tmdb_id : Number(item.tmdb_id) || 0;
-      return (acc + id * 31 + item.media_type.length * 17) % 1_000_003;
+      const id = typeof item.tmdb_id === "number" && Number.isFinite(item.tmdb_id) ? item.tmdb_id : 0;
+      return (acc + id * 31 + (item.media_type?.length ?? 0) * 17) % 1_000_003;
     }, library.length * 97);
-    return candidates[seed % candidates.length];
+    const idx = Number.isFinite(seed) ? seed % candidates.length : 0;
+    return candidates[idx] ?? null;
   }, [library]);
+
+  useEffect(() => {
+    if (spotlightItem === null)      console.warn("[spotlight] null — candidates vazio");
+    else if (spotlightItem === undefined) console.warn("[spotlight] undefined — useMemo sem return");
+    else console.log("[spotlight] ok —", spotlightItem.title?.title ?? spotlightItem.title?.original_title ?? `tmdb:${spotlightItem.tmdb_id}`);
+  }, [spotlightItem]);
 
   // Editorial rails
   const watchlistItems = useMemo(() =>
@@ -256,11 +262,11 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
       <LibraryStatsRow stats={extendedStats} onStatClick={scrollToGrid} />
 
       {/* ── 3. Spotlight + Watchlist ── */}
-      {(spotlightItem !== null || watchlistItems.length > 0) && (
+      {(spotlightItem != null || watchlistItems.length > 0) && (
         <section className="relative grid gap-8 lg:grid-cols-[1.15fr_0.85fr] lg:gap-6">
 
           {/* Spotlight */}
-          {spotlightItem !== null && (
+          {spotlightItem != null && (
             <div className="flex min-w-0 flex-col gap-3">
               <RailLabel label="Em destaque no seu acervo" />
               <SpotlightCard item={spotlightItem} />
@@ -883,6 +889,7 @@ function SpotlightCard({ item }: { item: Poplog3UserLibraryItem }) {
             size="w1280"
             alt={displayTitle}
             fallbackLabel={displayTitle}
+            priority
             className="absolute inset-0 h-full w-full object-cover opacity-55 transition duration-500 group-hover:scale-[1.03] group-hover:opacity-65"
           />
         )}

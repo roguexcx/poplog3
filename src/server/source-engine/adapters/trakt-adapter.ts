@@ -21,6 +21,10 @@ import type {
   TraktSeasonFull,
   TraktEpisodeFull,
   TraktSearchResult,
+  TraktPeople,
+  TraktVideoItem,
+  TraktStudio,
+  TraktEpisodeSummary,
 } from "@/server/api-clients/trakt/types";
 
 import type { CatalogAdapter } from "./catalog-adapter";
@@ -79,6 +83,16 @@ function mapTraktStatus(status?: string | null): string | undefined {
     "planned": "planned",
   };
   return map[status.toLowerCase()] ?? status.toLowerCase();
+}
+
+function ptBrTranslationTitle(entry: TraktShowFull | TraktMovieFull): string | null {
+  const translations = entry.translations;
+  if (!Array.isArray(translations)) return null;
+  return (
+    translations.find((t) => t.language === "pt" && t.country === "br" && t.title)?.title ??
+    translations.find((t) => t.language === "pt" && t.title)?.title ??
+    null
+  );
 }
 
 // ─── Adapter ──────────────────────────────────────────────────────────────────
@@ -225,6 +239,7 @@ export const traktAdapter: CatalogAdapter = {
             number: s.number,
             title: s.title,
             posterRemoteUrl: s.images?.poster?.[0] ?? s.images?.thumb?.[0],
+            episodeCount: s.episode_count,
           },
           HIGH,
         ),
@@ -237,10 +252,13 @@ export const traktAdapter: CatalogAdapter = {
     const id = params.imdbId;
     if (!id) return [];
 
+    // Trakt API: GET /shows/{id}/seasons/{n} returns episode array for that season.
+    // (No "/episodes" suffix — that path doesn't exist; would return 405.)
     const episodes = await traktGet<TraktEpisodeFull[]>(
-      `/shows/${id}/seasons/${params.season}/episodes`,
+      `/shows/${id}/seasons/${params.season}`,
       {
-        params: { extended: "full,images,translations" },
+        // extended=full: full data; images: episode stills; translations=pt: pt-BR inline
+        params: { extended: "full,images,translations", translations: "pt" },
         ttlSeconds: 86400,
       },
     );
@@ -281,6 +299,9 @@ export const traktAdapter: CatalogAdapter = {
             textLanguage: titleLanguage,
             firstAired: ep.first_aired ?? undefined,
             runtime: ep.runtime ?? undefined,
+            episodeType: ep.episode_type ?? undefined,
+            voteAverage: ep.rating ?? undefined,
+            voteCount: ep.votes ?? undefined,
             stillRemoteUrl: ep.images?.screenshot?.[0] ?? ep.images?.thumb?.[0] ?? ep.images?.fanart?.[0],
             stillSource: "trakt",
             imageCandidates: [
@@ -350,13 +371,14 @@ export const traktAdapter: CatalogAdapter = {
 
     const type = params.mediaType === "movie" ? "movies" : "shows";
     const results = await traktGet<Array<TraktShowFull | TraktMovieFull>>(`/${type}/${id}/related`, {
-      params: { limit: 12 },
+      params: { limit: 24, extended: "full,images,translations" },
       ttlSeconds: 86400,
     });
     if (!results) return [];
 
-    return results.map((entry) =>
-      normalizeSearchResult(
+    return results.map((entry) => {
+      const localizedTitle = ptBrTranslationTitle(entry);
+      return normalizeSearchResult(
         {
           ids: {
             traktId: entry.ids.trakt,
@@ -365,12 +387,15 @@ export const traktAdapter: CatalogAdapter = {
             tmdbId: entry.ids.tmdb,
           },
           mediaType: params.mediaType,
-          title: entry.title,
+          title: localizedTitle ?? entry.title,
+          originalTitle: localizedTitle ? entry.title : undefined,
           year: entry.year,
+          posterRemoteUrl: entry.images?.poster?.[0] ?? null,
+          backdropRemoteUrl: entry.images?.fanart?.[0] ?? entry.images?.thumb?.[0] ?? null,
         },
         MED,
-      ),
-    );
+      );
+    });
   },
 
   async getRatings(params: RatingParams): Promise<CatalogRatings | null> {
@@ -392,15 +417,123 @@ export const traktAdapter: CatalogAdapter = {
     return [];
   },
 
-  async getPeople(_params: PeopleParams): Promise<CatalogPeople | null> {
-    return null;
+  async getPeople(params: PeopleParams): Promise<CatalogPeople | null> {
+    const id = params.imdbId ?? params.traktSlug ?? (params.traktId ? String(params.traktId) : null);
+    if (!id) return null;
+    const type = params.mediaType === "movie" ? "movies" : "shows";
+
+    const data = await traktGet<TraktPeople>(`/${type}/${id}/people`, {
+      params: { extended: "full" },
+      ttlSeconds: 86400 * 7,
+    });
+    if (!data) return null;
+
+    const cast = (data.cast ?? []).slice(0, 20).map((entry) => ({
+      ids: { traktId: entry.person.ids.trakt, imdbId: entry.person.ids.imdb, tmdbId: entry.person.ids.tmdb },
+      name: entry.person.name,
+      character: entry.characters?.[0] ?? entry.character ?? undefined,
+      profileRemoteUrl: entry.person.images?.headshot?.[0] ?? undefined,
+    }));
+
+    const crew: CatalogPeople["crew"] = [];
+    const crewDepts = data.crew ?? {};
+    for (const [dept, entries] of Object.entries(crewDepts)) {
+      if (!Array.isArray(entries)) continue;
+      for (const entry of entries.slice(0, 5)) {
+        crew.push({
+          ids: { traktId: entry.person.ids.trakt, imdbId: entry.person.ids.imdb, tmdbId: entry.person.ids.tmdb },
+          name: entry.person.name,
+          job: entry.jobs?.[0] ?? entry.job ?? dept,
+          department: dept,
+          profileRemoteUrl: entry.person.images?.headshot?.[0] ?? undefined,
+        });
+      }
+    }
+
+    return { cast, crew, source: MED };
   },
 
-  async getVideos(_params: VideoParams): Promise<CatalogVideo[]> {
-    return [];
+  async getVideos(params: VideoParams): Promise<CatalogVideo[]> {
+    const id = params.imdbId;
+    if (!id) return [];
+    const type = params.mediaType === "movie" ? "movies" : "shows";
+
+    const data = await traktGet<TraktVideoItem[]>(`/${type}/${id}/videos`, {
+      ttlSeconds: 86400 * 3,
+    });
+    if (!data || !Array.isArray(data)) return [];
+
+    return data.slice(0, 5).map((video, index) => ({
+      id: index + 1,
+      title: video.name,
+      url: video.site === "YouTube" ? `https://www.youtube.com/watch?v=${video.key}` : video.key,
+      type: video.type.toLowerCase(),
+      thumbnailUrl: video.thumbnail ?? (video.site === "YouTube" ? `https://img.youtube.com/vi/${video.key}/hqdefault.jpg` : null),
+      source: MED,
+    }));
   },
 
   async getCalendar(_params: CalendarParams): Promise<CatalogCalendarItem[]> {
     return [];
   },
 };
+
+// ── Trakt show enrichment helpers (exported for use in title page) ─────────────
+
+export type TraktShowEnrichment = {
+  studios?: Array<{ name: string; country?: string }>;
+  certifications?: Record<string, string>;
+  nextEpisode?: {
+    season: number;
+    number: number;
+    title?: string | null;
+    firstAired?: string | null;
+    episodeType?: string | null;
+  } | null;
+  lastEpisode?: {
+    season: number;
+    number: number;
+    title?: string | null;
+    firstAired?: string | null;
+    episodeType?: string | null;
+  } | null;
+};
+
+export async function getTraktShowEnrichment(imdbId: string): Promise<TraktShowEnrichment> {
+  const [studiosRaw, nextRaw, lastRaw, summaryRaw] = await Promise.all([
+    traktGet<TraktStudio[]>(`/shows/${imdbId}/studios`, { ttlSeconds: 86400 * 7 }).catch(() => null),
+    traktGet<TraktEpisodeSummary>(`/shows/${imdbId}/next_episode`, { params: { extended: "full" }, ttlSeconds: 3600 }).catch(() => null),
+    traktGet<TraktEpisodeSummary>(`/shows/${imdbId}/last_episode`, { params: { extended: "full" }, ttlSeconds: 86400 }).catch(() => null),
+    traktGet<TraktShowFull>(`/shows/${imdbId}`, { params: { extended: "full" }, ttlSeconds: 86400 }).catch(() => null),
+  ]);
+
+  return {
+    studios: Array.isArray(studiosRaw)
+      ? studiosRaw.map((s) => ({ name: s.name, country: s.country }))
+      : undefined,
+    certifications: summaryRaw?.certification ? { us: summaryRaw.certification } : undefined,
+    nextEpisode: nextRaw
+      ? { season: nextRaw.season, number: nextRaw.number, title: nextRaw.title, firstAired: nextRaw.first_aired, episodeType: nextRaw.episode_type }
+      : null,
+    lastEpisode: lastRaw
+      ? { season: lastRaw.season, number: lastRaw.number, title: lastRaw.title, firstAired: lastRaw.first_aired, episodeType: lastRaw.episode_type }
+      : null,
+  };
+}
+
+export async function getTraktMovieEnrichment(imdbId: string): Promise<{
+  studios?: Array<{ name: string; country?: string }>;
+  certifications?: Record<string, string>;
+}> {
+  const [studiosRaw, summaryRaw] = await Promise.all([
+    traktGet<TraktStudio[]>(`/movies/${imdbId}/studios`, { ttlSeconds: 86400 * 7 }).catch(() => null),
+    traktGet<TraktMovieFull>(`/movies/${imdbId}`, { params: { extended: "full" }, ttlSeconds: 86400 }).catch(() => null),
+  ]);
+
+  return {
+    studios: Array.isArray(studiosRaw)
+      ? studiosRaw.map((s) => ({ name: s.name, country: s.country }))
+      : undefined,
+    certifications: summaryRaw?.certification ? { us: summaryRaw.certification } : undefined,
+  };
+}

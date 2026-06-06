@@ -158,6 +158,15 @@ function buildContextPool(title: string, mediaType: MediaType): string[] {
   ];
 }
 
+function extractTitleStr(raw: unknown): string | null {
+  if (typeof raw === "string") return raw.trim() || null;
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    if (typeof obj.title === "string") return obj.title.trim() || null;
+  }
+  return null;
+}
+
 function buildInputKey(rows: WatchlistRow[]) {
   const normalized = rows
     .map((row) => ({
@@ -357,7 +366,12 @@ export async function POST(request: Request) {
           ...perf,
           total: Date.now() - totalStartedAt,
         });
-        return NextResponse.json({ titles: cached.payload.titles });
+        // Sanitize: stale cache may have nested title objects from pre-fix data
+        const sanitized = cached.payload.titles.map((t) => ({
+          ...t,
+          title: extractTitleStr(t.title) ?? "Sem título",
+        }));
+        return NextResponse.json({ titles: sanitized });
       }
     } else {
       perf.cache_read = 0;
@@ -457,7 +471,7 @@ export async function POST(request: Request) {
                 estimated: runtimeResolution.estimated,
               });
         const streamStatus = inferStreamStatus(releaseDate, row, availabilityStatus);
-        const title = details.title ?? row.title ?? "Sem título";
+        const title = details.title ?? extractTitleStr(row.title) ?? "Sem título";
 
         return {
           id: row.id,

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { redirect } from "next/navigation";
 
 import ActionButton from "@/components/ui/ActionButton";
 import EmptyState from "@/components/ui/EmptyState";
@@ -70,6 +71,21 @@ export default async function TitlePage({ params, searchParams }: PageProps) {
     sourceHint: (sourceHint ?? "auto") as PoplogTitleSourceHint,
     force: refresh,
   });
+
+  // Redireciona ID sintético (negativo) para o ID canônico real quando disponível.
+  // Garante que a URL canônica seja sempre usada, independente de por onde o usuário acessou.
+  const requestedNumeric = parseInt(id, 10);
+  const canonicalTmdbId = title?.externalIds?.tmdbId;
+  if (
+    title &&
+    typeof canonicalTmdbId === "number" &&
+    canonicalTmdbId > 0 &&
+    Number.isInteger(requestedNumeric) &&
+    requestedNumeric < 0 &&
+    canonicalTmdbId !== requestedNumeric
+  ) {
+    redirect(`/title/${mediaType}/${canonicalTmdbId}`);
+  }
 
   if (!title) {
     logger.warn(`[PAGE] /title/${mediaType}/${id} | failed | ${formatDuration(Date.now() - startedAt)}`);

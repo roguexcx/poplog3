@@ -50,20 +50,51 @@ export interface ContentTypeResult {
 
 export type ContentFilterKey =
   | "all"
+  | "today"
+  | "week"
   | "series"
   | "movies"
-  | "anime";
+  | "streaming"
+  | "premieres"
+  | "finales"
+  | "recent"
+  | "animation"
+  | "anime"
+  | "reality"
+  | "talk_news"
+  | "sports"
+  | "kids"
+  | "cinema"
+  | "physical"
+  | "season_drop"
+  | "live";
 
 export const CONTENT_FILTER_LABELS: Record<ContentFilterKey, string> = {
-  all:    "Todos",
-  series: "Séries",
-  movies: "Filmes",
-  anime:  "Animação",
+  all:         "Tudo",
+  today:       "Hoje",
+  week:        "Semana",
+  series:      "Séries",
+  movies:      "Filmes",
+  streaming:   "Streaming",
+  premieres:   "Estreias",
+  finales:     "Finais",
+  recent:      "Ainda em tempo",
+  animation:   "Animação",
+  anime:       "Anime",
+  reality:     "Reality",
+  talk_news:   "Talk/News",
+  sports:      "Esportes",
+  kids:        "Infantil",
+  cinema:      "Cinema",
+  physical:    "Mídia física",
+  season_drop: "Temp. completas",
+  live:        "Ao vivo",
 };
 
 // Subtitulo exibido abaixo do label no filtro (opcional na UI)
 export const CONTENT_FILTER_SUBLABELS: Partial<Record<ContentFilterKey, string>> = {
-  anime: "Anime e animação",
+  anime: "Anime",
+  animation: "Cartoons",
 };
 
 export interface ContentTypeInput {
@@ -323,7 +354,10 @@ export function itemMatchesFilter(
 ): boolean {
   if (filter === "all")    return true;
   if (filter === "movies") return result.mediaType === "movie";
-  if (filter === "anime")  return result.editorialType === "anime" || result.editorialType === "animation";
+  if (filter === "anime")  return result.editorialType === "anime";
+  if (filter === "animation") return result.editorialType === "animation";
+  if (filter === "reality") return result.editorialType === "reality";
+  if (filter === "kids") return result.editorialType === "special";
 
   if (filter === "series") {
     // Cobre tudo que e TV mas nao tem aba propria (anime/animation ja tem "Animacao")

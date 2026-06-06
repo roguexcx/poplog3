@@ -20,7 +20,7 @@ import {
   getUserKnownTitleIds,
   readTitleState,
 } from "@/server/state/user-title-state";
-import { getUserTitleStatus } from "@/server/library/library-service";
+import { getUserLibrary } from "@/server/library/library-service";
 import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
 import { getAvailabilityForDisplay } from "@/server/streaming/title-availability";
 import { withOrigin } from "@/server/engine-logger";
@@ -44,6 +44,10 @@ import {
 } from "@/server/titles/poplog-title-details";
 import type { PoplogTitleSourceHint } from "@/server/titles/poplog-title-identity";
 import { catalogGetRelated } from "@/server/source-engine/engine";
+import { traktAdapter, getTraktShowEnrichment, getTraktMovieEnrichment } from "@/server/source-engine/adapters/trakt-adapter";
+import { traktGet } from "@/server/api-clients/trakt/client";
+import type { TraktTranslation } from "@/server/api-clients/trakt/types";
+import type { CatalogSearchResult } from "@/server/source-engine/types/catalog.types";
 import type { TitleRecommendation } from "@/features/title/types";
 import { db } from "@/server/db/client";
 import { syntheticTmdbFromImdbId } from "@/lib/ids/synthetic-tmdb-id";
@@ -512,6 +516,196 @@ function poplogDetailsToTitlePageData(
   };
 }
 
+async function getTraktRelatedWithFallback({
+  mediaType,
+  imdbId,
+  traktId,
+  traktSlug,
+}: {
+  mediaType: "movie" | "show";
+  imdbId?: string | null;
+  traktId?: number | string | null;
+  traktSlug?: string | null;
+}): Promise<CatalogSearchResult[]> {
+  const numericTraktId =
+    typeof traktId === "number"
+      ? traktId
+      : typeof traktId === "string" && /^\d+$/.test(traktId)
+        ? Number(traktId)
+        : undefined;
+
+  if (imdbId || numericTraktId || traktSlug) {
+    const traktRelated = await traktAdapter.getRelated({
+      mediaType,
+      imdbId: imdbId ?? undefined,
+      traktId: numericTraktId,
+      traktSlug: traktSlug ?? undefined,
+    }).catch((err) => {
+      console.warn("[getTitlePageData] Trakt related erro:", (err as Error)?.message);
+      return [] as CatalogSearchResult[];
+    });
+    if (traktRelated.length > 0) return traktRelated;
+  }
+
+  return imdbId
+    ? catalogGetRelated({ mediaType, imdbId }).catch(() => [])
+    : [];
+}
+
+function recommendationFromCatalogResult(result: CatalogSearchResult): TitleRecommendation {
+  const imdbId = result.ids.imdbId ?? null;
+  const tmdbId = result.ids.tmdbId ?? (imdbId ? syntheticTmdbFromImdbId(imdbId) : null);
+  const linkId =
+    imdbId ??
+    result.ids.traktSlug ??
+    result.ids.slug ??
+    result.ids.traktId ??
+    result.ids.tmdbId ??
+    result.title;
+
+  return {
+    id: linkId,
+    tmdbId,
+    poplogId: result.ids.balloonerismmId ?? null,
+    imdbId,
+    slug: result.ids.traktSlug ?? result.ids.slug ?? null,
+    traktId: result.ids.traktId ?? null,
+    mediaType: result.mediaType === "show" ? "tv" : "movie",
+    title: result.title,
+    originalTitle: result.originalTitle ?? null,
+    year: result.year ?? null,
+    posterPath: result.posterPath ?? null,
+  };
+}
+
+function bestPtBrTitle(translations: TraktTranslation[] | null | undefined): string | null {
+  if (!Array.isArray(translations)) return null;
+  return (
+    translations.find((t) => t.language === "pt" && t.country === "br" && t.title)?.title ??
+    translations.find((t) => t.language === "pt" && t.title)?.title ??
+    null
+  );
+}
+
+async function enrichRelatedWithPtBrTitles(
+  related: CatalogSearchResult[],
+): Promise<CatalogSearchResult[]> {
+  if (related.length === 0) return related;
+
+  const translated = await Promise.all(
+    related.map(async (item) => {
+      const id =
+        item.ids.imdbId ??
+        item.ids.traktSlug ??
+        (item.ids.traktId ? String(item.ids.traktId) : null);
+      if (!id) return item;
+
+      const type = item.mediaType === "movie" ? "movies" : "shows";
+      const translations = await traktGet<TraktTranslation[]>(
+        `/${type}/${encodeURIComponent(id)}/translations/pt`,
+        { ttlSeconds: 86400 },
+      ).catch(() => null);
+      const ptBrTitle = bestPtBrTitle(translations);
+      if (!ptBrTitle || ptBrTitle === item.title) return item;
+
+      return {
+        ...item,
+        title: ptBrTitle,
+        originalTitle: item.originalTitle ?? item.title,
+      };
+    }),
+  );
+
+  return translated;
+}
+
+async function enrichRelatedWithLocalImages(
+  related: CatalogSearchResult[],
+): Promise<CatalogSearchResult[]> {
+  const lookups = related
+    .map((item) => ({
+      tmdbId: item.ids.tmdbId,
+      mediaType: item.mediaType === "show" ? "tv" as const : "movie" as const,
+    }))
+    .filter((item): item is { tmdbId: number; mediaType: "movie" | "tv" } =>
+      typeof item.tmdbId === "number" && Number.isInteger(item.tmdbId) && item.tmdbId > 0,
+    );
+
+  if (lookups.length === 0) return related;
+
+  const rows = await db.poplog3Title.findMany({
+    where: { OR: lookups },
+    select: {
+      tmdbId: true,
+      mediaType: true,
+      title: true,
+      originalTitle: true,
+      posterPath: true,
+      backdropPath: true,
+    },
+  }).catch((err) => {
+    console.warn("[getTitlePageData] local related image enrichment erro:", (err as Error)?.message);
+    return [];
+  });
+
+  const imageByKey = new Map(
+    rows.map((row) => [
+      `${row.mediaType}:${row.tmdbId}`,
+      {
+        title: row.title,
+        originalTitle: row.originalTitle,
+        posterPath: row.posterPath,
+        backdropPath: row.backdropPath,
+      },
+    ]),
+  );
+
+  return related.map((item) => {
+    const tmdbId = item.ids.tmdbId;
+    if (!tmdbId) return item;
+    const mediaType = item.mediaType === "show" ? "tv" : "movie";
+    const local = imageByKey.get(`${mediaType}:${tmdbId}`);
+    if (!local) return item;
+    const title = item.originalTitle ? item.title : local.title ?? item.title;
+
+    return {
+      ...item,
+      title,
+      originalTitle: item.originalTitle ?? local.originalTitle ?? undefined,
+      posterPath: item.posterPath ?? local.posterPath ?? undefined,
+      backdropPath: item.backdropPath ?? local.backdropPath ?? null,
+    };
+  });
+}
+
+async function filterRelatedOutsideUserLibrary(
+  related: CatalogSearchResult[],
+  userId: string | null | undefined,
+): Promise<CatalogSearchResult[]> {
+  if (!userId || related.length === 0) return related;
+
+  const library = await getUserLibrary(userId).catch((err) => {
+    console.warn("[getTitlePageData] user library recommendation filter erro:", (err as Error)?.message);
+    return [];
+  });
+  if (library.length === 0) return related;
+
+  const known = new Set(
+    library.map((item) => `${item.media_type}:${item.tmdb_id}`),
+  );
+
+  return related.filter((item) => {
+    const mediaType = item.mediaType === "show" ? "tv" : "movie";
+    const tmdbId = item.ids.tmdbId ?? null;
+    const syntheticId = item.ids.imdbId ? syntheticTmdbFromImdbId(item.ids.imdbId) : null;
+
+    return !(
+      (tmdbId && known.has(`${mediaType}:${tmdbId}`)) ||
+      (syntheticId && known.has(`${mediaType}:${syntheticId}`))
+    );
+  });
+}
+
 function buildTmdbFallbackBlockedPageData({
   details,
   country,
@@ -597,12 +791,15 @@ export async function getTitlePageData(
         const tvdbId = poplogDetails.externalIds.tvdbId;
         const traktId = poplogDetails.externalIds.traktId;
 
-        const [currentUser, providers, relatedRaw, seriesCanonical] = await Promise.all([
+        const [currentUser, providers, relatedRaw, seriesCanonical, traktEnrichment] = await Promise.all([
           getCurrentUser().catch(() => null),
           getProvidersFromCache(resolvedMediaType, tmdbId, imdbId, country),
-          imdbId
-            ? catalogGetRelated({ mediaType: catalogMediaType, imdbId }).catch(() => [])
-            : Promise.resolve([]),
+          getTraktRelatedWithFallback({
+            mediaType: catalogMediaType,
+            imdbId,
+            traktId,
+            traktSlug: poplogDetails.externalIds.slug ?? null,
+          }),
           // Para séries TV: buscar metadados canônicos de todas as fontes em paralelo
           resolvedMediaType === "tv" && (imdbId || tvdbId || traktId)
             ? resolveCanonicalSeriesMeta({
@@ -615,6 +812,12 @@ export async function getTitlePageData(
                 return null as SeriesCanonicalMeta | null;
               })
             : Promise.resolve(null as SeriesCanonicalMeta | null),
+          // Enriquecimento Trakt: studios, certifications, next/last episode
+          imdbId
+            ? (resolvedMediaType === "tv"
+                ? getTraktShowEnrichment(imdbId).catch(() => null)
+                : getTraktMovieEnrichment(imdbId).catch(() => null))
+            : Promise.resolve(null),
         ]);
 
         const isAuthenticated = Boolean(currentUser?.id);
@@ -770,14 +973,16 @@ export async function getTitlePageData(
             }
           : base.ratings;
 
-        const recommendations: TitleRecommendation[] = relatedRaw.slice(0, 12).map((r) => ({
-          id: r.ids.imdbId ?? r.ids.tmdbId ?? r.title,
-          mediaType: r.mediaType === "show" ? "tv" : "movie",
-          title: r.title,
-          originalTitle: r.originalTitle ?? null,
-          year: r.year ?? null,
-          posterPath: r.posterPath ?? null,
-        }));
+        const relatedOutsideLibrary = await filterRelatedOutsideUserLibrary(
+          relatedRaw,
+          currentUser?.id,
+        );
+        const relatedWithPtBrTitles = await enrichRelatedWithPtBrTitles(relatedOutsideLibrary);
+        const relatedWithImages = await enrichRelatedWithLocalImages(relatedWithPtBrTitles);
+
+        const recommendations: TitleRecommendation[] = relatedWithImages
+          .slice(0, 12)
+          .map(recommendationFromCatalogResult);
 
         // Write-through cache para IDs sintéticos (IMDb-first sem TMDB real).
         // Primeira visita à página já popula poplog3Title, então biblioteca/acompanhando
@@ -808,9 +1013,49 @@ export async function getTitlePageData(
           ? buildSeriesEnrichment(base, seriesCanonical)
           : {};
 
+        // Enriquecimento Trakt: studios, certifications, next/last episode
+        const traktEnrichmentPatch: Partial<TitlePageData> = {};
+        if (traktEnrichment) {
+          // studios → productionCompanies se vazio
+          const studios = traktEnrichment.studios;
+          if (studios?.length) {
+            const existingMeta = (seriesEnrichment.metadata ?? base.metadata) ?? {};
+            if (!existingMeta.productionCompanies?.length) {
+              traktEnrichmentPatch.metadata = {
+                ...existingMeta,
+                productionCompanies: studios.map((s) => ({ id: 0 as number, name: s.name })),
+              };
+            }
+          }
+
+          // certification: pick country-specific or fallback to US
+          if ("certifications" in traktEnrichment && traktEnrichment.certifications && !base.certification) {
+            const certs = traktEnrichment.certifications as Record<string, string>;
+            const cert =
+              certs[country.toLowerCase()] ??
+              certs["us"] ??
+              Object.values(certs)[0] ??
+              null;
+            if (cert) traktEnrichmentPatch.certification = cert;
+          }
+
+          // nextEpisode (TV only)
+          if (resolvedMediaType === "tv" && "nextEpisode" in traktEnrichment && (traktEnrichment as { nextEpisode?: unknown }).nextEpisode && !base.nextEpisode) {
+            const ne = (traktEnrichment as { nextEpisode: { season: number; number: number; title?: string | null; firstAired?: string | null; episodeType?: string | null } }).nextEpisode;
+            traktEnrichmentPatch.nextEpisode = {
+              season_number: ne.season,
+              episode_number: ne.number,
+              name: ne.title ?? null,
+              air_date: ne.firstAired ? ne.firstAired.slice(0, 10) : null,
+              episode_type: ne.episodeType ?? null,
+            };
+          }
+        }
+
         return {
           ...base,
           ...seriesEnrichment,
+          ...traktEnrichmentPatch,
           providers,
           seasons,
           userState,

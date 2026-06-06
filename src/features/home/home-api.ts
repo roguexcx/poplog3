@@ -4,6 +4,9 @@ import { hydrateCatalogResultsWithDebug } from "@/server/source-engine/hydrate-c
 import { filterValidTitles } from "@/server/utils/filter-valid-titles";
 import { db } from "@/server/db/client";
 import { balloonerismGet } from "@/server/api-clients/balloonerismm/client";
+import { isTraktIndexEnabled } from "@/lib/trakt-index/engine";
+import { getPoplogDailyTrendingIndex } from "@/lib/trakt-index/canonical";
+import type { TraktIndexItem } from "@/lib/trakt-index/types";
 
 export type { TMDBDetails };
 
@@ -60,7 +63,45 @@ async function localPopularQuery(mediaType: "movie" | "tv", limit: number): Prom
     });
 }
 
+function traktIndexToTMDBItem(item: TraktIndexItem): TMDBItem {
+  return {
+    id: item.tmdb_id,
+    poplogId: null,
+    externalIds: item.externalIds,
+    identityUsed: item.identityUsed,
+    linkIdUsed: item.linkIdUsed,
+    hasPoplogId: false,
+    normalizedFrom: item.normalizedFrom,
+    legacyCompatibilityUsed: true,
+    media_type: item.media_type,
+    title: item.title,
+    original_title: item.original_title ?? undefined,
+    overview: item.overview ?? undefined,
+    poster_path: item.poster_path,
+    backdrop_path: item.backdrop_path ?? undefined,
+    release_date: item.release_date ?? undefined,
+    first_air_date: item.first_air_date ?? undefined,
+    vote_average: item.vote_average ?? undefined,
+    popularity: item.popularity ?? undefined,
+    // Gêneros em string[] do Trakt (ex: ["drama","thriller"]) — usados como fallback no Hero
+    genres: item.genres.length > 0 ? item.genres : undefined,
+  };
+}
+
 export async function getTrending(): Promise<TMDBItem[]> {
+  // ── Trakt Index (fonte primária) ──────────────────────────────────────────
+  if (isTraktIndexEnabled()) {
+    try {
+      const traktItems: TraktIndexItem[] = await getPoplogDailyTrendingIndex();
+      if (traktItems.length >= 3) {
+        return traktItems.map(traktIndexToTMDBItem);
+      }
+    } catch {
+      // fall through to Balloonerismm/local
+    }
+  }
+
+  // ── Balloonerismm fallback ────────────────────────────────────────────────
   try {
     const [movieResults, tvResults] = await Promise.all([
       catalogGetTrending({ mediaType: "movie", limit: 10 }),
@@ -100,7 +141,7 @@ export async function getTrending(): Promise<TMDBItem[]> {
     // fall through to local fallback
   }
 
-  // Local DB fallback
+  // ── Local DB fallback ─────────────────────────────────────────────────────
   try {
     return await localPopularQuery("movie", 10)
       .then(async (movies) => {
@@ -148,7 +189,8 @@ export async function getFeaturedDetails(
       number_of_seasons?: number | null;
       runtime?: number | null;
       episode_run_time?: number[] | null;
-      genres?: string[] | null;
+      // Balloonerismm é proxy TMDB: retorna { id, name }[] — não string[]
+      genres?: Array<{ id?: number; name: string } | string> | null;
       release_date?: string | null;
       first_air_date?: string | null;
       last_air_date?: string | null;
@@ -159,8 +201,11 @@ export async function getFeaturedDetails(
 
     if (!data) return null;
 
-    const genres = data.genres
-      ? data.genres.map((name, i) => ({ id: -(i + 1), name }))
+    const genres = data.genres?.length
+      ? data.genres.map((g, i): { id: number; name: string } => {
+          if (typeof g === "string") return { id: -(i + 1), name: g };
+          return { id: g.id ?? -(i + 1), name: g.name };
+        })
       : undefined;
 
     return {

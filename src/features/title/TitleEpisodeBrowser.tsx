@@ -1015,10 +1015,15 @@ function EpisodeCard({
 }: EpisodeCardProps) {
   const airDate = formatAirDate(episode.airDate);
   const runtime = formatRuntimeLabel(episode.runtime, { spaced: true });
-  const isFinale = episode.episodeType === "finale";
+  const isFinale =
+    episode.episodeType === "finale" ||
+    episode.episodeType === "season_finale" ||
+    episode.episodeType === "series_finale" ||
+    episode.episodeType === "mid_season_finale";
   const isPremiere =
     episode.episodeType === "season_premiere" ||
-    episode.episodeType === "premiere";
+    episode.episodeType === "premiere" ||
+    episode.episodeType === "series_premiere";
 
   const airTime = episode.airDate ? new Date(episode.airDate).getTime() : NaN;
   const aired = Number.isFinite(airTime) && airTime <= Date.now();
@@ -1225,10 +1230,15 @@ function EpisodeModal({
     onParentCommunityRatingChange: onSeriesCommunityRatingChange,
   });
 
-  const isFinale = episode.episodeType === "finale";
+  const isFinale =
+    episode.episodeType === "finale" ||
+    episode.episodeType === "season_finale" ||
+    episode.episodeType === "series_finale" ||
+    episode.episodeType === "mid_season_finale";
   const isPremiere =
     episode.episodeType === "season_premiere" ||
-    episode.episodeType === "premiere";
+    episode.episodeType === "premiere" ||
+    episode.episodeType === "series_premiere";
 
   const modalStillUrl = useMemo(
     () => getOriginalTmdbImageUrl(episode.stillUrl),

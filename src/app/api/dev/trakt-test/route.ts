@@ -1,30 +1,21 @@
 import { NextResponse } from "next/server";
 import { adminUnauthorizedResponse, isAdminRequest } from "@/server/auth/admin-guard";
+import { getTraktClientStatus, traktGet } from "@/server/api-clients/trakt/client";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
   if (!isAdminRequest(request)) return adminUnauthorizedResponse();
 
-  const key = process.env.TRAKT_CLIENT_ID;
-
-  const response = await fetch("https://api.trakt.tv/movies/popular", {
+  const data = await traktGet<unknown[]>("/movies/popular", {
+    ttlSeconds: 300,
     cache: "no-store",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      "User-Agent": "POPLOG/3.0 (contact: local-dev)",
-      "trakt-api-version": "2",
-      "trakt-api-key": key ?? "",
-    },
   });
 
-  const text = await response.text();
-
   return NextResponse.json({
-    hasKey: Boolean(key),
-    keyLength: key?.length ?? 0,
-    status: response.status,
-    body: text.slice(0, 500),
+    ok: Boolean(data),
+    status: getTraktClientStatus(),
+    sampleCount: Array.isArray(data) ? data.length : 0,
+    sample: Array.isArray(data) ? data.slice(0, 2) : null,
   });
 }

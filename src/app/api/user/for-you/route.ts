@@ -1,11 +1,31 @@
+/**
+ * /api/user/for-you
+ *
+ * Engine de recomendações personalizada baseada na biblioteca do usuário.
+ * Fonte de relacionados: Trakt Related (primary).
+ * Resolução de imagens + pt-BR: local DB (canonical) → Trakt images (VIP fallback).
+ * Fallback final de pool: poplog3Title popular quando Trakt não retorna suficientes.
+ */
+
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { db } from "@/server/db/client";
-import { catalogGetRelated } from "@/server/source-engine/engine";
-import { isBalloonerismActive } from "@/server/api-clients/balloonerismm/client";
+import { traktGet, isTraktActive } from "@/server/api-clients/trakt/client";
+import type { TraktTranslation } from "@/server/api-clients/trakt/types"; // used in TraktRelatedItem.translations
+import {
+  isSyntheticTmdbId,
+  imdbIdFromSyntheticTmdbId,
+} from "@/lib/ids/synthetic-tmdb-id";
 import type { UserTitle } from "@/types/user";
 
-// ─── Genre map (TMDB IDs → pt-BR) ────────────────────────────────────────────
+// ─── Config ───────────────────────────────────────────────────────────────────
+
+const MAX_SEEDS           = 10;
+const DEFAULT_FINAL_COUNT = 5;
+const MAX_FINAL_COUNT     = 30;
+const SESSION_EXCLUDE_CAP = 60;
+
+// ─── Genre map (TMDB IDs → pt-BR) ─────────────────────────────────────────────
 
 const GENRE_MAP: Record<number, string> = {
   28: "Ação", 12: "Aventura", 16: "Animação", 35: "Comédia",
@@ -17,475 +37,850 @@ const GENRE_MAP: Record<number, string> = {
   10764: "Reality", 10765: "Sci-Fi & Fantasia", 10768: "Guerra & Política",
 };
 
-// ─── Seed weights ─────────────────────────────────────────────────────────────
+// ─── pt-BR heuristic (mirrors poplog-title-details.ts) ───────────────────────
+// Returns true only when text has strong Portuguese signals unlikely in English:
+// accented chars (ã,õ,â,ê,ô,ç) or common Portuguese prepositions.
 
-function ratingWeight(rating: number): number {
-  if (rating >= 5.0) return 80;
-  if (rating >= 4.5) return 70;
-  if (rating >= 4.0) return 60;
-  if (rating >= 3.5) return 40;
-  if (rating >= 3.0) return 30;
+function looksPortuguese(text: string | null | undefined): boolean {
+  if (!text) return false;
+  if (/[ãõâêôç]/i.test(text)) return true;
+  const t = ` ${text.toLowerCase()} `;
+  return [" de ", " da ", " do ", " dos ", " das ", " em ", " uma ", " para "].some((s) => t.includes(s));
+}
+
+// ─── Safe string extraction ────────────────────────────────────────────────────
+// The library API returns Poplog3UserLibraryItem where .title is a nested object
+// ({ tmdb_id, title, poster_path, ... }), not a plain string. UserTitle types
+// say string | null — but at runtime it is the nested object.
+// This guard extracts the actual string from both shapes.
+
+function safeStr(raw: unknown): string | null {
+  if (typeof raw === "string") return raw.trim() || null;
+  if (raw && typeof raw === "object") {
+    const obj = raw as Record<string, unknown>;
+    if (typeof obj.title === "string") return obj.title.trim() || null;
+  }
+  return null;
+}
+
+// ─── Weight system ─────────────────────────────────────────────────────────────
+//
+// Base weights (highest wins when item is in multiple categories):
+//   Favoritos = 100  |  Em andamento = 85  |  Assistidos = 70
+//   Watchlist = 45   |  Em breve = 35      |  Geladeira = 20
+//
+// Abandonados: completamente ignorados — sem semente, sem penalidade.
+//
+// Bônus de recência (sobre o peso base, nunca como filtro):
+//   ≤ 7 dias = +25  |  ≤ 30 dias = +15  |  ≤ 90 dias = +8  |  mais antigo = +0
+
+function categoryWeight(t: UserTitle): number {
+  if (t.status === "abandoned") return -1;
+
+  const w: number[] = [];
+  if (t.favorite) w.push(100);
+
+  switch (t.status) {
+    case "watching":  w.push(85); break;
+    case "watched":   w.push(70); break;
+    case "watchlist": w.push(45); break;
+    case "fridge":    w.push(20); break;
+  }
+
+  if (t.stream_status && /soon|coming|anticipated/i.test(t.stream_status)) {
+    w.push(35);
+  }
+
+  return w.length > 0 ? Math.max(...w) : 0;
+}
+
+function recencyBonus(t: UserTitle): number {
+  const ts = [t.created_at, t.watched_at]
+    .filter((d): d is string => Boolean(d))
+    .map((d) => new Date(d).getTime())
+    .filter(Number.isFinite);
+
+  if (!ts.length) return 0;
+  const days = (Date.now() - Math.max(...ts)) / 86_400_000;
+
+  if (days <= 7)  return 25;
+  if (days <= 30) return 15;
+  if (days <= 90) return 8;
   return 0;
 }
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-type RecItem = {
-  id: number;
-  title?: string;
-  name?: string;
-  original_title?: string;
-  original_name?: string;
-  overview?: string;
-  poster_path?: string | null;
-  backdrop_path?: string | null;
-  vote_average?: number;
-  release_date?: string;
-  first_air_date?: string;
-  genre_ids?: number[];
-  media_type?: string;
-};
-
-type ForYouItem = {
-  id: number;
-  title_label: string;
-  original_title_label?: string | null;
-  overview?: string;
-  poster_path?: string | null;
-  backdrop_path?: string | null;
-  vote_average?: number;
-  year?: string | null;
-  media_type: "movie" | "tv";
-  media_label?: string;
-  genre_label?: string | null;
-  reason?: string;
-  userFeedback?: { notInterested?: boolean };
-};
-
 type WeightedSeed = {
   title: UserTitle;
-  weight: number;
-  rating: number | null;
-  isFavorite: boolean;
+  baseWeight: number;
+  bonus: number;
+  effectiveWeight: number;
+  label: string; // resolved pt-BR label (step 2)
 };
 
-// ─── Seed selection ───────────────────────────────────────────────────────────
+type RecCandidate = {
+  tmdbId: number;
+  imdbId?: string | null;
+  traktSlug?: string | null;
+  // Pre-enrichment (Trakt): English, no images
+  // Post-enrichment (local DB): pt-BR, TMDB image paths or Trakt image URLs
+  title: string;
+  originalTitle?: string | null;
+  overview?: string | null;
+  posterUrl?: string | null;   // relative TMDB path OR full Trakt CDN URL
+  backdropUrl?: string | null; // relative TMDB path OR full Trakt CDN URL
+  voteAverage?: number | null;
+  voteCount?: number | null;
+  year?: string | null;
+  genreIds?: number[];
+  mediaType: "movie" | "tv";
+  seedEffectiveWeight: number;
+  relationStrength: number; // 0–100 (index 0 in Trakt list = 100)
+  reason: string;
+  // debug
+  _imageSource: string;  // "db:poster" | "db:backdrop" | "trakt:poster" | "trakt:fanart" | "none"
+  _langSource: string;   // "pt-BR" | "en" | "trakt-en"
+  _discardReason?: string;
+  // true quando o título foi encontrado em poplog3_titles sob o tmdbId do Trakt.
+  // Determina qual ID usar no link: tmdbId (in DB) ou imdbId (Balloonerismm-only).
+  _inLocalDb?: boolean;
+};
 
-const EXCLUDED_STATUSES = new Set(["abandoned", "fridge"]);
+// Trakt Related response (extended=full,images,translations)
+type TraktRelatedItem = {
+  title: string;
+  year?: number | null;
+  ids: {
+    trakt?: number | null;
+    slug?: string | null;
+    imdb?: string | null;
+    tmdb?: number | null;
+    tvdb?: number | null;
+  };
+  overview?: string | null;
+  released?: string | null;
+  first_aired?: string | null;
+  runtime?: number | null;
+  rating?: number | null;
+  votes?: number | null;
+  genres?: string[] | null;
+  language?: string | null;
+  available_translations?: string[] | null;
+  certification?: string | null;
+  status?: string | null;
+  // Returned with extended=full,translations
+  translations?: TraktTranslation[] | null;
+  // Returned only with extended=full,images (Trakt VIP)
+  images?: {
+    poster?: string[] | null;   // full CDN URLs — poster[0] is best quality
+    fanart?: string[] | null;   // full CDN URLs — fanart[0] is backdrop
+    logo?: string[] | null;
+    thumb?: string[] | null;
+    clearart?: string[] | null;
+    banner?: string[] | null;
+  } | null;
+};
 
-function buildWeightedSeeds(
-  titles: UserTitle[],
-  ratingMap: Map<string, number>,
-): WeightedSeed[] {
-  const seeds: WeightedSeed[] = [];
+// The canonical payload item returned to the client
+export type ForYouApiItem = {
+  id: number;
+  /** ID canônico para uso em links: imdbId (e.g. "tt6264654") quando o título não está
+   *  cacheado localmente sob o tmdbId, ou String(tmdbId) quando está. Garante que a
+   *  página de títulos sempre consiga carregar o conteúdo independente do estado do cache. */
+  linkId: string;
+  title: string;
+  originalTitle?: string | null;
+  overview?: string;
+  posterUrl?: string | null;
+  backdropUrl?: string | null;
+  rating?: number;
+  year?: string | null;
+  mediaType: "movie" | "tv";
+  mediaLabel: string;
+  genreLabel?: string | null;
+  reason: string;
+  sourceSeed?: string;
+  debug?: string;
+};
+
+// ─── Seed building ─────────────────────────────────────────────────────────────
+
+function buildWeightedSeeds(titles: UserTitle[]): WeightedSeed[] {
+  const map = new Map<string, WeightedSeed>();
 
   for (const t of titles) {
-    if (EXCLUDED_STATUSES.has(t.status)) continue;
+    const base = categoryWeight(t);
+    if (base < 0) continue; // abandoned → ignored
+    if (base === 0) continue;
 
-    const rating = ratingMap.get(`${t.media_type}:${t.tmdb_id}`) ?? null;
+    const bonus = recencyBonus(t);
+    const key   = `${t.media_type}:${t.tmdb_id}`;
+    // safeStr handles the nested Poplog3UserLibraryItem.title object
+    const label = safeStr(t.title) ?? "um título que você gostou";
 
-    // Low ratings block entirely — don't use as seed
-    if (rating !== null && rating <= 2.5) continue;
-
-    let weight = 0;
-    if (t.favorite) weight += 100;
-    if (rating !== null) weight += ratingWeight(rating);
-    if (t.status === "watchlist") weight += 20;
-    if (t.status === "watching") weight += 15;
-    if (t.status === "watched") weight += 10;
-
-    if (weight > 0) {
-      seeds.push({ title: t, weight, rating, isFavorite: t.favorite });
+    const existing = map.get(key);
+    if (!existing || base + bonus > existing.effectiveWeight) {
+      map.set(key, { title: t, baseWeight: base, bonus, effectiveWeight: base + bonus, label });
     }
   }
 
-  return seeds;
+  return Array.from(map.values());
 }
 
-// Picks up to 3 seeds with a random jitter applied to weights so that
-// same-tier seeds rotate between refreshes while strong signals stay on top.
+// Jitter ±20 so equal-weight seeds rotate across Sorteio rounds.
+// Recency is a ranking bonus, never a filter.
 function pickSeeds(seeds: WeightedSeed[]): WeightedSeed[] {
-  if (seeds.length === 0) return [];
+  if (!seeds.length) return [];
+  if (seeds.length <= MAX_SEEDS) return seeds;
 
-  // Add up to 20 pts of jitter — keeps dominant seeds on top but rotates ties
-  const jittered = seeds.map((s) => ({
-    seed: s,
-    effective: s.weight + Math.random() * 20,
-  }));
-  jittered.sort((a, b) => b.effective - a.effective);
-
-  const picks: WeightedSeed[] = [];
-  const seenTypes = new Set<string>();
-
-  // First pass: one of each media type
-  for (const { seed } of jittered) {
-    if (picks.length >= 3) break;
-    if (!seenTypes.has(seed.title.media_type)) {
-      picks.push(seed);
-      seenTypes.add(seed.title.media_type);
-    }
-  }
-
-  // Fill remaining slots (same media type allowed for 3rd seed)
-  for (const { seed } of jittered) {
-    if (picks.length >= 3) break;
-    if (!picks.includes(seed)) picks.push(seed);
-  }
-
-  return picks;
+  return seeds
+    .map((s) => ({ seed: s, score: s.effectiveWeight + Math.random() * 20 }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, MAX_SEEDS)
+    .map((x) => x.seed);
 }
 
-function buildReason(seed: WeightedSeed, titleLabel: string): string {
-  if (seed.isFavorite) {
-    return `Porque você favoritou "${titleLabel}"`;
-  }
-  if (seed.rating !== null && seed.rating >= 3.0) {
-    const stars =
-      seed.rating % 1 === 0
-        ? `${seed.rating.toFixed(0)}`
-        : `${seed.rating.toFixed(1)}`;
-    return `Porque você avaliou "${titleLabel}" com ${stars} estrelas`;
-  }
-  return `Baseado na sua watchlist`;
+// ─── Reason strings ───────────────────────────────────────────────────────────
+
+function buildReason(seed: WeightedSeed): string {
+  if (seed.title.favorite)               return `Porque você favoritou "${seed.label}"`;
+  if (seed.title.status === "watching")  return `Porque você está assistindo "${seed.label}"`;
+  if (seed.title.status === "watched")   return `Baseado em "${seed.label}"`;
+  if (seed.title.status === "watchlist") return `Da sua watchlist: "${seed.label}"`;
+  return `Baseado na sua biblioteca`;
 }
 
-// ─── Weighted random sampler ──────────────────────────────────────────────────
+// ─── External ID resolution ───────────────────────────────────────────────────
 
-// Roulette-wheel selection without replacement.
-function weightedSample<T>(
-  items: T[],
-  getWeight: (item: T) => number,
-  n: number,
-): T[] {
-  const pool = [...items];
-  const result: T[] = [];
+type ExtIds = { imdbId: string | null; traktId: string | null; traktSlug: string | null };
 
-  while (result.length < n && pool.length > 0) {
-    const weights = pool.map((item) => Math.max(0.1, getWeight(item)));
-    const total = weights.reduce((a, b) => a + b, 0);
-    let r = Math.random() * total;
-    let picked = pool.length - 1;
-    for (let i = 0; i < pool.length; i++) {
-      r -= weights[i];
-      if (r <= 0) { picked = i; break; }
-    }
-    result.push(pool[picked]);
-    pool.splice(picked, 1);
+async function resolveExternalIds(seed: WeightedSeed): Promise<ExtIds> {
+  const t = seed.title;
+
+  // 1. Synthetic tmdbId → derive imdbId directly (no DB needed)
+  if (isSyntheticTmdbId(t.tmdb_id)) {
+    const derived = imdbIdFromSyntheticTmdbId(t.tmdb_id);
+    return { imdbId: derived, traktId: null, traktSlug: null };
   }
 
-  return result;
+  // 2. Fast path — already in UserTitle (flat fields)
+  const quickImdb  = safeStr(t.imdb_id) ?? safeStr(t.externalIds?.imdbId) ?? null;
+  const quickTrakt = t.externalIds?.traktId ? String(t.externalIds.traktId) : null;
+
+  if (quickImdb || quickTrakt) {
+    return { imdbId: quickImdb, traktId: quickTrakt, traktSlug: null };
+  }
+
+  // 3. DB lookup
+  try {
+    const row = await db.titleExternalId.findFirst({
+      where:  { tmdbId: t.tmdb_id, mediaType: t.media_type },
+      select: { imdbId: true, traktId: true },
+    });
+    return {
+      imdbId:    row?.imdbId  ?? null,
+      traktId:   row?.traktId ?? null,
+      traktSlug: null,
+    };
+  } catch {
+    return { imdbId: null, traktId: null, traktSlug: null };
+  }
 }
 
-// ─── Recommendations ──────────────────────────────────────────────────────────
+// ─── Trakt Related ─────────────────────────────────────────────────────────────
+// Uses extended=full,images to get images if the account has VIP access.
+// Falls back gracefully when images are absent (free tier).
+// Accepts: imdbId (preferred), traktId (numeric or slug).
 
-async function fetchRecs(
+async function fetchTraktRelated(
   mediaType: "movie" | "tv",
-  imdbId?: string | null,
-): Promise<RecItem[]> {
-  // 1. Try Balloonerismm (IMDb-first, needs imdbId)
-  if (imdbId) {
-    try {
-      const results = await catalogGetRelated({
-        mediaType: mediaType === "tv" ? "show" : "movie",
-        imdbId,
-      });
-      const mapped: RecItem[] = results
-        .filter((r) => typeof r.ids.tmdbId === "number")
-        .map((r) => ({
-          id: r.ids.tmdbId!,
-          title: r.mediaType === "movie" ? r.title : undefined,
-          name: r.mediaType === "show" ? r.title : undefined,
-          original_title: r.originalTitle,
-          overview: r.overview,
-          poster_path: r.posterPath ?? null,
-          backdrop_path: r.backdropPath ?? null,
-          vote_average: r.voteAverage,
-          release_date: r.releaseDate,
-          first_air_date: r.firstAirDate,
-          genre_ids: r.genreIds,
-          media_type: r.mediaType === "show" ? "tv" : "movie",
-        }));
-      if (mapped.length > 0) return mapped;
-    } catch { /* fall through to local DB */ }
-  }
+  id: string | null,
+): Promise<TraktRelatedItem[]> {
+  if (!isTraktActive() || !id) return [];
 
-  // 2. Local DB fallback: popular titles of same media type
+  const endpoint =
+    mediaType === "movie"
+      ? `/movies/${encodeURIComponent(id)}/related`
+      : `/shows/${encodeURIComponent(id)}/related`;
+
+  // translations: inline pt-BR per item — no separate API calls needed
+  // images: VIP-only, free tier returns null (handled gracefully)
+  const result = await traktGet<TraktRelatedItem[]>(endpoint, {
+    params:     { extended: "full,images,translations" },
+    ttlSeconds: 86_400,
+  });
+
+  return Array.isArray(result) ? result : [];
+}
+
+// ─── Local DB pool (fallback when not enough Trakt candidates) ─────────────────
+
+async function fetchLocalDbPool(
+  mediaType: "movie" | "tv",
+  excludeTmdbIds: Set<number>,
+): Promise<RecCandidate[]> {
   try {
     const rows = await db.poplog3Title.findMany({
-      where: { mediaType, voteAverage: { gte: 5 } },
+      where:   { mediaType, voteAverage: { gte: 5 } },
       orderBy: { popularity: "desc" },
-      take: 40,
+      take:    60,
       select: {
-        tmdbId: true,
-        title: true,
-        originalTitle: true,
-        overview: true,
-        posterPath: true,
-        backdropPath: true,
-        voteAverage: true,
-        releaseDate: true,
-        firstAirDate: true,
-        mediaType: true,
+        tmdbId: true, mediaType: true,
+        title: true, originalTitle: true, overview: true,
+        posterPath: true, backdropPath: true,
+        voteAverage: true, voteCount: true,
+        genres: true, releaseDate: true, firstAirDate: true,
       },
     });
-    return rows.map((row) => ({
-      id: row.tmdbId,
-      title: row.mediaType === "movie" ? (row.title ?? undefined) : undefined,
-      name: row.mediaType === "tv" ? (row.title ?? undefined) : undefined,
-      original_title: row.originalTitle ?? undefined,
-      overview: row.overview ?? undefined,
-      poster_path: row.posterPath ?? null,
-      backdrop_path: row.backdropPath ?? null,
-      vote_average: row.voteAverage ? Number(row.voteAverage) : undefined,
-      release_date: row.releaseDate?.toISOString().slice(0, 10),
-      first_air_date: row.firstAirDate?.toISOString().slice(0, 10),
-      genre_ids: [],
-      media_type: row.mediaType,
-    }));
+
+    return rows
+      .filter((r) => r.tmdbId > 0 && !excludeTmdbIds.has(r.tmdbId))
+      .map((row): RecCandidate => {
+        const date = row.releaseDate ?? row.firstAirDate;
+        const hasImg = Boolean(row.posterPath || row.backdropPath);
+        return {
+          tmdbId:              row.tmdbId,
+          title:               row.title ?? "Título",
+          originalTitle:       row.originalTitle ?? null,
+          overview:            row.overview ?? null,
+          posterUrl:           row.posterPath  ?? null,
+          backdropUrl:         row.backdropPath ?? null,
+          voteAverage:         row.voteAverage  ? Number(row.voteAverage)  : null,
+          voteCount:           row.voteCount   ?? null,
+          year:                date ? String(date.getFullYear()) : null,
+          genreIds:            parseGenreIds(row.genres),
+          mediaType:           row.mediaType as "movie" | "tv",
+          seedEffectiveWeight: 0,
+          relationStrength:    0,
+          reason:              "Popular na plataforma",
+          _imageSource:        row.posterPath ? "db:poster" : row.backdropPath ? "db:backdrop" : "none",
+          _langSource:         "pt-BR",
+          _inLocalDb:          true,
+          ...(!hasImg && { _discardReason: "no-image-in-pool" }),
+        };
+      });
   } catch {
     return [];
   }
 }
 
-function yearFrom(r: RecItem): string | null {
-  const d = r.release_date ?? r.first_air_date;
-  if (!d) return null;
-  const y = new Date(d).getFullYear();
-  return Number.isFinite(y) ? String(y) : null;
+function parseGenreIds(raw: unknown): number[] {
+  if (!Array.isArray(raw)) return [];
+  return raw
+    .map((g: unknown) =>
+      g && typeof g === "object" && "id" in g ? (g as { id: number }).id : g,
+    )
+    .filter((id): id is number => typeof id === "number");
 }
 
-function toItem(r: RecItem, mediaType: "movie" | "tv", reason: string): ForYouItem {
-  const titleLabel =
-    (mediaType === "movie" ? r.title : r.name) ?? r.title ?? r.name ?? "Título";
-  const originalTitle =
-    (mediaType === "movie" ? r.original_title : r.original_name) ?? null;
-  const genreLabel = r.genre_ids?.[0] ? (GENRE_MAP[r.genre_ids[0]] ?? null) : null;
+// ─── Canonical enrichment from local DB ───────────────────────────────────────
+// Runs on ALL candidates. Trakt gives: English title/overview, no images (free tier).
+// Local DB gives: pt-BR title/overview, TMDB image paths (always preferred).
+// Strategy: DB data OVERWRITES Trakt data when available.
 
-  return {
-    id: r.id,
-    title_label: titleLabel,
-    original_title_label: originalTitle !== titleLabel ? originalTitle : null,
-    overview: r.overview || undefined,
-    poster_path: r.poster_path ?? null,
-    backdrop_path: r.backdrop_path ?? null,
-    vote_average: r.vote_average || undefined,
-    year: yearFrom(r),
-    media_type: mediaType,
-    media_label: mediaType === "movie" ? "Filme" : "Série",
-    genre_label: genreLabel,
-    reason,
-  };
+async function enrichFromDb(candidates: RecCandidate[]): Promise<void> {
+  if (!candidates.length) return;
+
+  try {
+    const rows = await db.poplog3Title.findMany({
+      where:  { tmdbId: { in: candidates.map((c) => c.tmdbId) } },
+      select: {
+        tmdbId: true, mediaType: true,
+        title: true, originalTitle: true, overview: true,
+        posterPath: true, backdropPath: true,
+        voteAverage: true, voteCount: true, genres: true,
+      },
+    });
+
+    // Key includes mediaType to avoid collisions (TMDB uses separate ID spaces)
+    const byKey = new Map(rows.map((r) => [`${r.mediaType}:${r.tmdbId}`, r]));
+
+    for (const c of candidates) {
+      const row = byKey.get(`${c.mediaType}:${c.tmdbId}`);
+
+      if (!row) {
+        // Not in local DB → keep Trakt data (English, possibly with Trakt image)
+        if (c._imageSource === "pending") c._imageSource = "none";
+        if (c._langSource === "pending")  c._langSource  = "trakt-en";
+        continue;
+      }
+
+      c._inLocalDb = true;
+
+      // Title: only apply DB title when Trakt didn't already provide pt-BR inline.
+      // "pt-BR:trakt" = title came from extended=full,translations — authoritative.
+      // IMPORTANT: row.title is the ORIGINAL (usually English) title from Balloonerismm/IMDb.
+      // Only mark as "pt-BR:db" when looksPortuguese() confirms it. Otherwise "en:db".
+      if (!c._langSource.startsWith("pt-BR")) {
+        if (row.title) {
+          c.originalTitle = row.originalTitle ?? c.originalTitle ?? c.title;
+          c.title         = row.title;
+          c._langSource   = looksPortuguese(row.title) ? "pt-BR:db" : "en:db";
+        } else {
+          if (!c.originalTitle) c.originalTitle = c.title;
+          c._langSource = "en";
+        }
+      }
+      if (row.originalTitle && !c.originalTitle) c.originalTitle = row.originalTitle;
+
+      // Overview: DB overview is also in the original language (English for most titles).
+      // Apply it to fill empty slots — a separate Trakt translation pass will overwrite with pt-BR.
+      if (!c._langSource.startsWith("pt-BR") && row.overview) c.overview = row.overview;
+
+      // Images: DB TMDB paths overwrite Trakt CDN URLs
+      // (both work with TmdbImage which handles relative paths and full URLs)
+      if (row.posterPath) {
+        c.posterUrl    = row.posterPath;
+        c._imageSource = "db:poster";
+      } else if (row.backdropPath) {
+        c.backdropUrl  = row.backdropPath;
+        if (c._imageSource !== "trakt:poster") c._imageSource = "db:backdrop";
+      } else {
+        // DB has no image — keep Trakt image if we got one from extended=full,images
+        if (c._imageSource === "pending") c._imageSource = "none";
+      }
+      if (row.backdropPath && !c.backdropUrl) {
+        c.backdropUrl = row.backdropPath;
+      }
+
+      // Ratings: DB TMDB community ratings preferred
+      if (row.voteAverage) c.voteAverage = Number(row.voteAverage);
+      if (row.voteCount)   c.voteCount   = row.voteCount;
+
+      // Genres
+      if (!c.genreIds?.length) c.genreIds = parseGenreIds(row.genres);
+    }
+  } catch (err) {
+    console.error("[for-you] enrichFromDb error:", err);
+  }
+}
+
+// ─── pt-BR enrichment via Trakt dedicated translations endpoint ───────────────
+// Runs on candidates that still don't have a pt-BR title after inline translations
+// and DB enrichment. Calls /movies/{id}/translations/pt or /shows/{id}/translations/pt.
+// These responses are cached with TTL=86400. NOT a VIP-only feature (unlike images).
+//
+// Log schema per candidate:
+//   titleOriginal : title before localization (English)
+//   titlePtBr     : pt-BR title if found, else "n/a"
+//   overviewPtBr  : "yes" | "no"
+//   source        : where pt-BR came from ("trakt-inline" | "trakt-trans" | "db" | "none")
+//   fallbackReason: why pt-BR was not available, when applicable
+
+async function enrichWithTraktTranslations(candidates: RecCandidate[]): Promise<void> {
+  if (!isTraktActive()) return;
+
+  const needsTranslation = candidates.filter(
+    (c) => !c._langSource.startsWith("pt-BR") && c.imdbId,
+  );
+  if (!needsTranslation.length) return;
+
+  await Promise.allSettled(
+    needsTranslation.map(async (c) => {
+      const imdbId = c.imdbId!;
+      const path =
+        c.mediaType === "movie"
+          ? `/movies/${encodeURIComponent(imdbId)}/translations/pt`
+          : `/shows/${encodeURIComponent(imdbId)}/translations/pt`;
+
+      try {
+        const translations = await traktGet<TraktTranslation[]>(path, {
+          ttlSeconds: 86_400,
+        });
+        if (!Array.isArray(translations)) return;
+
+        const ptBr = translations.find((t) => t.language === "pt" && t.country === "br" && t.title);
+        const pt   = translations.find((t) => t.language === "pt" && t.title);
+        const best = ptBr ?? pt;
+        if (!best?.title) return;
+
+        const titleOriginal = c.title; // save English title before overwriting
+        c.originalTitle = c.originalTitle ?? titleOriginal;
+        c.title         = best.title;
+        c._langSource   = "pt-BR:trakt-trans";
+        if (best.overview) c.overview = best.overview;
+      } catch {
+        // non-fatal — candidate keeps its current (English) title
+      }
+    }),
+  );
+}
+
+// ─── Deduplication ────────────────────────────────────────────────────────────
+
+function normTitle(s: string): string {
+  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
+}
+
+class Deduper {
+  private tmdb  = new Set<string>();
+  private imdb  = new Set<string>();
+  private title = new Set<string>();
+
+  seen(c: RecCandidate): boolean {
+    const k1 = `${c.mediaType}:${c.tmdbId}`;
+    const k2 = c.imdbId ? `${c.mediaType}:${c.imdbId}` : null;
+    const k3 = `${c.mediaType}:${normTitle(c.title)}:${c.year ?? ""}`;
+
+    if (this.tmdb.has(k1))             return true;
+    if (k2 && this.imdb.has(k2))       return true;
+    if (this.title.has(k3))            return true;
+
+    this.tmdb.add(k1);
+    if (k2) this.imdb.add(k2);
+    this.title.add(k3);
+    return false;
+  }
+}
+
+// ─── Scoring ──────────────────────────────────────────────────────────────────
+// Visual quality is heavily weighted — items without images rarely win.
+
+function score(c: RecCandidate): number {
+  const pop    = Math.log10((c.voteCount ?? 0) + 1) * 10;
+  const visual = (c.posterUrl ? 20 : 0) + (c.backdropUrl ? 12 : 0);
+  const meta   = (c.overview ? 3 : 0) + (c.year ? 1 : 0) + ((c.genreIds?.length ?? 0) > 0 ? 1 : 0);
+  const lang   = c._langSource.startsWith("pt-BR") ? 5 : 0;
+  return c.seedEffectiveWeight + c.relationStrength * 0.3 + pop + visual + meta + lang;
+}
+
+// ─── Weighted sampler (roulette-wheel without replacement) ────────────────────
+
+function weightedSample<T>(items: T[], getW: (i: T) => number, n: number): T[] {
+  const pool = [...items];
+  const out: T[] = [];
+
+  while (out.length < n && pool.length > 0) {
+    const ws    = pool.map((i) => Math.max(0.01, getW(i)));
+    const total = ws.reduce((a, b) => a + b, 0);
+    let r = Math.random() * total;
+    let p = pool.length - 1;
+    for (let i = 0; i < pool.length; i++) {
+      r -= ws[i];
+      if (r <= 0) { p = i; break; }
+    }
+    out.push(pool[p]);
+    pool.splice(p, 1);
+  }
+
+  return out;
 }
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
 
 export async function POST(req: NextRequest) {
   try {
-    const body = await req.json().catch(() => null);
+    const body     = await req.json().catch(() => null);
     const titles: UserTitle[] = Array.isArray(body?.titles) ? body.titles : [];
-
-    if (titles.length === 0) {
-      return NextResponse.json({
-        featured: null,
-        items: [],
-        usedTmdbApi: false,
-        recommendationSource: "controlled_empty",
-      });
-    }
-
-    const librarySet = new Set(titles.map((t) => `${t.media_type}:${t.tmdb_id}`));
-
-    // Auth is needed for ratings + not_interested queries
-    const user = await getCurrentUser().catch(() => null);
-
-    // Load user's explicit movie/tv ratings from DB
-    const ratingMap = new Map<string, number>();
-    if (user) {
-      try {
-        const rows = await db.userRating.findMany({
-          where: {
-            userId: user.id,
-            mediaType: { in: ["movie", "tv"] },
-            ratingSource: "explicit",
-          },
-          select: { tmdbId: true, mediaType: true, rating: true },
-        });
-        for (const r of rows) {
-          ratingMap.set(`${r.mediaType}:${r.tmdbId}`, Number(r.rating));
-        }
-      } catch { /* non-fatal */ }
-    }
-
-    // Build weighted seeds and pick up to 3 (with jitter for rotation)
-    const weightedSeeds = buildWeightedSeeds(titles, ratingMap);
-    const picks = pickSeeds(weightedSeeds);
-
-    if (picks.length === 0) {
-      return NextResponse.json({
-        featured: null,
-        items: [],
-        usedTmdbApi: false,
-        recommendationSource: "controlled_empty",
-      });
-    }
-
-    // Resolve seed labels from Prisma cache (for reason strings)
-    const seedLabels = new Map<string, string>();
-    await Promise.all(
-      picks.map(async (seed) => {
-        const cached = await db.poplog3Title
-          .findUnique({
-            where: {
-              tmdbId_mediaType: {
-                tmdbId: seed.title.tmdb_id,
-                mediaType: seed.title.media_type,
-              },
-            },
-            select: { title: true },
-          })
-          .catch(() => null);
-        const label =
-          cached?.title ?? seed.title.title ?? "um título que você gostou";
-        seedLabels.set(`${seed.title.media_type}:${seed.title.tmdb_id}`, label);
-      }),
+    const excludeKeys = new Set<string>(
+      Array.isArray(body?.exclude)
+        ? (body.exclude as string[]).slice(0, SESSION_EXCLUDE_CAP)
+        : [],
+    );
+    const FINAL_COUNT = Math.min(
+      typeof body?.limit === "number" && body.limit > 0 ? body.limit : DEFAULT_FINAL_COUNT,
+      MAX_FINAL_COUNT,
     );
 
-    // Resolve imdbId for Balloonerismm (if active)
-    const imdbIdMap = new Map<string, string>();
-    if (isBalloonerismActive()) {
-      await Promise.all(
-        picks.map(async (seed) => {
-          const key = `${seed.title.media_type}:${seed.title.tmdb_id}`;
-          const ext = await db.titleExternalId
-            .findFirst({
-              where: {
-                tmdbId: seed.title.tmdb_id,
-                mediaType: seed.title.media_type,
-                imdbId: { not: null },
-              },
-              select: { imdbId: true },
-            })
-            .catch(() => null);
-          if (ext?.imdbId) imdbIdMap.set(key, ext.imdbId);
-        }),
+    if (!titles.length) {
+      return NextResponse.json({ featured: null, items: [], recommendationSource: "empty" });
+    }
+
+    const libraryKeys = new Set(titles.map((t) => `${t.media_type}:${t.tmdb_id}`));
+    const libraryTmdbIds = new Set(titles.map((t) => t.tmdb_id));
+
+    // ── Expande exclusão para cobrir IDs reais de títulos com ID sintético na biblioteca ──
+    // Cenário: usuário salvou um título via Balloonerismm (tmdb_id negativo, e.g. -5788792).
+    // O Trakt retorna o mesmo título com o ID real (e.g. 257994). Sem essa expansão, o
+    // filtro de biblioteca falha e o título aparece em "Para você" mesmo já estando salvo.
+    const syntheticInLibrary = titles
+      .filter((t) => isSyntheticTmdbId(t.tmdb_id))
+      .flatMap((t) => {
+        const imdbId = imdbIdFromSyntheticTmdbId(t.tmdb_id);
+        return imdbId ? [{ tmdb_id: t.tmdb_id, media_type: t.media_type, imdbId }] : [];
+      });
+
+    if (syntheticInLibrary.length > 0) {
+      const realIdRows = await db.titleExternalId.findMany({
+        where: { imdbId: { in: syntheticInLibrary.map((x) => x.imdbId) }, tmdbId: { gt: 0 } },
+        select: { tmdbId: true, mediaType: true, imdbId: true },
+      }).catch(() => [] as { tmdbId: number; mediaType: string; imdbId: string | null }[]);
+
+      // imdbId → realTmdbId (por mediaType para segurança)
+      const imdbKeyToReal = new Map(
+        realIdRows.map((r) => [`${r.mediaType}:${r.imdbId}`, r.tmdbId]),
       );
-    }
 
-    // Fetch recommendations for all picks in parallel
-    const recArrays = await Promise.all(
-      picks.map((s) => {
-        const key = `${s.title.media_type}:${s.title.tmdb_id}`;
-        return fetchRecs(s.title.media_type, imdbIdMap.get(key));
-      }),
-    );
-
-    // Aggregate, deduplicate, filter library items
-    type Candidate = { rec: RecItem; mediaType: "movie" | "tv"; reason: string };
-    const seen = new Set<string>();
-    const candidates: Candidate[] = [];
-
-    for (let i = 0; i < picks.length; i++) {
-      const seed = picks[i];
-      const key = `${seed.title.media_type}:${seed.title.tmdb_id}`;
-      const label = seedLabels.get(key) ?? "um título que você gostou";
-      const reason = buildReason(seed, label);
-
-      for (const rec of recArrays[i]) {
-        const mt = (rec.media_type as "movie" | "tv") ?? seed.title.media_type;
-        const recKey = `${mt}:${rec.id}`;
-        if (seen.has(recKey) || librarySet.has(recKey)) continue;
-        seen.add(recKey);
-        candidates.push({ rec, mediaType: mt, reason });
+      for (const x of syntheticInLibrary) {
+        const realTmdbId = imdbKeyToReal.get(`${x.media_type}:${x.imdbId}`);
+        if (realTmdbId) {
+          libraryKeys.add(`${x.media_type}:${realTmdbId}`);
+          libraryTmdbIds.add(realTmdbId);
+        }
       }
     }
 
-    if (candidates.length === 0) {
-      return NextResponse.json({
-        featured: null,
-        items: [],
-        usedTmdbApi: false,
-        recommendationSource: "controlled_empty",
-      });
+    const user = await getCurrentUser().catch(() => null);
+
+    // ── FASE 1 — SEMENTES ────────────────────────────────────────────────────
+    const allSeeds = buildWeightedSeeds(titles);
+    const picks    = pickSeeds(allSeeds);
+
+    if (!picks.length) {
+      return NextResponse.json({ featured: null, items: [], recommendationSource: "empty" });
     }
 
-    // Query not_interested feedback for all candidates — block completely
-    const notInterestedSet = new Set<string>();
-    if (user) {
+    // ── FASE 2 — LABELS pt-BR das sementes (via local DB) ─────────────────────
+    // Crítico: previne [object Object] quando t.title é o objeto aninhado
+    // e garante que o reason mostre sempre o título pt-BR legível.
+    await Promise.all(
+      picks.map(async (seed) => {
+        try {
+          const row = await db.poplog3Title.findFirst({
+            where:  { tmdbId: seed.title.tmdb_id, mediaType: seed.title.media_type },
+            select: { title: true },
+          });
+          if (row?.title) seed.label = row.title;
+        } catch { /* keep defensively-extracted label */ }
+      }),
+    );
+
+    // ── FASE 3 — IDs externos para chamadas Trakt ──────────────────────────────
+    const extIds = new Map<string, ExtIds>();
+    await Promise.all(
+      picks.map(async (seed) => {
+        const key = `${seed.title.media_type}:${seed.title.tmdb_id}`;
+        extIds.set(key, await resolveExternalIds(seed));
+      }),
+    );
+
+    // ── FASE 4 — Trakt Related (em paralelo para todas as sementes) ───────────
+    const traktSources: string[] = [];
+    const recArrays = await Promise.all(
+      picks.map(async (seed): Promise<RecCandidate[]> => {
+        const key      = `${seed.title.media_type}:${seed.title.tmdb_id}`;
+        const ext      = extIds.get(key)!;
+        const reason   = buildReason(seed);
+        const lookupId = ext.imdbId ?? ext.traktId ?? ext.traktSlug;
+
+        console.log(
+          `[for-you:seed] "${seed.label}" tmdb=${seed.title.tmdb_id} ` +
+          `w=${seed.baseWeight}+${seed.bonus} id_used=${lookupId ?? "none"} ` +
+          `endpoint=${seed.title.media_type === "movie" ? "/movies" : "/shows"}/${lookupId ?? "?"}/related`,
+        );
+
+        const traktItems = await fetchTraktRelated(seed.title.media_type, lookupId);
+
+        console.log(
+          `[for-you:seed] "${seed.label}" → ${traktItems.length} Trakt candidates ` +
+          `(${traktItems.filter((r) => r.images?.poster?.length).length} with Trakt images)`,
+        );
+
+        if (!traktItems.length) {
+          traktSources.push("none");
+          return [];
+        }
+
+        traktSources.push("trakt");
+        return traktItems
+          .filter((r) => typeof r.ids.tmdb === "number")
+          .map((r, idx): RecCandidate => {
+            // pt-BR from inline translations (extended=full,images,translations)
+            // Prefer country=br, fallback to any pt entry
+            const ptBr =
+              r.translations?.find((t) => t.country === "br" && t.title) ??
+              r.translations?.find((t) => t.language === "pt" && t.title) ??
+              null;
+
+            const traktPoster = r.images?.poster?.[0] ?? null;
+            const traktFanart = r.images?.fanart?.[0] ?? null;
+
+            return {
+              tmdbId:              r.ids.tmdb!,
+              imdbId:              r.ids.imdb  ?? null,
+              traktSlug:           r.ids.slug  ?? null,
+              title:               ptBr?.title ?? r.title,
+              originalTitle:       ptBr ? r.title : null,
+              year:                r.year != null ? String(r.year) : null,
+              overview:            ptBr?.overview ?? r.overview ?? null,
+              posterUrl:           traktPoster,
+              backdropUrl:         traktFanart,
+              voteAverage:         r.rating ?? null,
+              voteCount:           r.votes  ?? null,
+              mediaType:           seed.title.media_type,
+              seedEffectiveWeight: seed.effectiveWeight,
+              relationStrength:    Math.round(((traktItems.length - idx) / traktItems.length) * 100),
+              reason,
+              _imageSource:        traktPoster ? "trakt:poster" : traktFanart ? "trakt:fanart" : "pending",
+              _langSource:         ptBr ? "pt-BR:trakt" : "pending",
+            };
+          });
+      }),
+    );
+
+    // ── FASE 5 — Agregação + deduplicação ─────────────────────────────────────
+    let libRemoved = 0;
+    let excluded   = 0;
+    let deduped    = 0;
+    const deduper     = new Deduper();
+    const candidates: RecCandidate[] = [];
+
+    for (const recs of recArrays) {
+      for (const rec of recs) {
+        const k = `${rec.mediaType}:${rec.tmdbId}`;
+        if (libraryKeys.has(k))  { libRemoved++; rec._discardReason = "in-library"; continue; }
+        if (excludeKeys.has(k))  { excluded++;   rec._discardReason = "session-exclude"; continue; }
+        if (deduper.seen(rec))   { deduped++;    rec._discardReason = "dedup"; continue; }
+        candidates.push(rec);
+      }
+    }
+
+    const hadTraktCandidates = candidates.length > 0;
+
+    // ── FASE 6 — Enriquecimento canônico com local DB ─────────────────────────
+    // Aplica: imagens TMDB (sobre Trakt se necessário), ratings, gêneros.
+    // NOTA: row.title da DB é o título original (inglês). Não é pt-BR.
+    // Fase 6b busca pt-BR via endpoint dedicado do Trakt.
+    await enrichFromDb(candidates);
+
+    // ── FASE 6b — Localização pt-BR via endpoint dedicado Trakt ───────────────
+    // Para candidatos ainda sem pt-BR (inline Trakt não retornou ou DB não tinha),
+    // busca /translations/pt separadamente. Resposta em cache TTL=86400.
+    await enrichWithTraktTranslations(candidates);
+
+    // ── FASE 7 — Filtro not_interested ────────────────────────────────────────
+    const notIntSet = new Set<string>();
+    if (user && candidates.length > 0) {
       try {
         const rows = await db.userTitleFeedback.findMany({
           where: {
-            userId: user.id,
+            userId:       user.id,
             feedbackType: "not_interested",
-            active: true,
-            tmdbId: { in: candidates.map((c) => c.rec.id) },
+            active:       true,
+            tmdbId:       { in: candidates.map((c) => c.tmdbId) },
           },
           select: { tmdbId: true, mediaType: true },
         });
-        for (const row of rows) {
-          notInterestedSet.add(`${row.mediaType}:${row.tmdbId}`);
-        }
+        for (const r of rows) notIntSet.add(`${r.mediaType}:${r.tmdbId}`);
       } catch { /* non-fatal */ }
     }
 
-    // Quality pool: remove not_interested and very low-rated titles
-    const pool = candidates
-      .filter((c) => !notInterestedSet.has(`${c.mediaType}:${c.rec.id}`))
-      .filter((c) => (c.rec.vote_average ?? 0) >= 4)
-      .sort((a, b) => (b.rec.vote_average ?? 0) - (a.rec.vote_average ?? 0))
-      .slice(0, 20);
+    const eligible = candidates.filter(
+      (c) => !notIntSet.has(`${c.mediaType}:${c.tmdbId}`),
+    );
 
-    if (pool.length === 0) {
-      return NextResponse.json({
-        featured: null,
-        items: [],
-        usedTmdbApi: false,
-        recommendationSource: "controlled_empty",
-      });
+    // ── FASE 8 — Pool com preferência por imagens ─────────────────────────────
+    const withImages = eligible.filter((c) => c.posterUrl || c.backdropUrl);
+
+    let pool = withImages.length >= FINAL_COUNT ? withImages : eligible;
+
+    // ── FASE 9 — Suplementação com local DB se não temos suficientes ──────────
+    // Garante que sempre tenhamos FINAL_COUNT candidatos com imagem.
+    if (withImages.length < FINAL_COUNT) {
+      const allExcludedTmdbIds = new Set([
+        ...libraryTmdbIds,
+        ...candidates.map((c) => c.tmdbId),
+      ]);
+
+      const [moviePool, tvPool] = await Promise.all([
+        fetchLocalDbPool("movie", allExcludedTmdbIds),
+        fetchLocalDbPool("tv", allExcludedTmdbIds),
+      ]);
+
+      // Interleave movies and tv for variety, filter by session exclude
+      const supplement: RecCandidate[] = [];
+      for (const rec of [...moviePool, ...tvPool]) {
+        if (excludeKeys.has(`${rec.mediaType}:${rec.tmdbId}`)) continue;
+        if (deduper.seen(rec)) continue;
+        if (rec.posterUrl || rec.backdropUrl) supplement.push(rec);
+      }
+
+      pool = [...withImages, ...supplement.slice(0, FINAL_COUNT - withImages.length)];
+      if (!pool.length) pool = eligible; // ultimate fallback
     }
 
-    // Determine recommendation source for debug
-    const hadBalloonerismm = isBalloonerismActive() && imdbIdMap.size > 0;
-    const recommendationSource = hadBalloonerismm ? "balloonerismm" : "local_db";
-
-    // Weighted random sample of 5 from the pool
-    const selected = weightedSample(
-      pool,
-      (c) => (c.rec.vote_average ?? 5) - 4,
-      Math.min(5, pool.length),
+    // ── LOG SUMMARY ───────────────────────────────────────────────────────────
+    const source = traktSources.includes("trakt") ? "trakt_related" : "local_db";
+    console.log(
+      `[for-you] seeds=${picks.length} traktCandidates=${hadTraktCandidates ? candidates.length : 0} ` +
+      `lib_removed=${libRemoved} excluded=${excluded} deduped=${deduped} ` +
+      `with_images=${withImages.length} pool=${pool.length} source=${source}`,
     );
 
-    const items: ForYouItem[] = selected.map(({ rec, mediaType, reason }) =>
-      toItem(rec, mediaType, reason),
-    );
+    if (!pool.length) {
+      return NextResponse.json({ featured: null, items: [], recommendationSource: source });
+    }
 
-    // Featured = highest vote_average among items with a backdrop
-    const withBackdrop = items
-      .map((it, i) => ({ it, i }))
-      .filter(({ it }) => it.backdrop_path);
+    // ── FASE 10 — Seleção ponderada ───────────────────────────────────────────
+    const selected = weightedSample(pool, score, Math.min(FINAL_COUNT, pool.length));
 
-    const pickedIdx =
-      withBackdrop.length > 0
-        ? withBackdrop.sort(
-            (a, b) => (b.it.vote_average ?? 0) - (a.it.vote_average ?? 0),
-          )[0].i
-        : 0;
+    // ── FASE 11 — Payload canônico (campos finais, sem dados brutos) ──────────
+    const items: ForYouApiItem[] = selected.map((c) => {
+      const genreLabel = c.genreIds?.[0] ? (GENRE_MAP[c.genreIds[0]] ?? null) : null;
 
-    const featured = items[pickedIdx] ?? null;
-    const rest = items.filter((_, i) => i !== pickedIdx);
+      const isPtBr       = c._langSource.startsWith("pt-BR");
+      const titleOriginal = isPtBr ? (c.originalTitle ?? c.title) : c.title;
+      const titlePtBr     = isPtBr ? c.title : "n/a";
+      const overviewPtBr  = isPtBr && Boolean(c.overview) ? "yes" : "no";
+      const transSource   =
+        c._langSource === "pt-BR:trakt"       ? "trakt-inline" :
+        c._langSource === "pt-BR:trakt-trans" ? "trakt-trans"  :
+        c._langSource === "pt-BR:db"          ? "db"           : "none";
+      const fallbackReason = isPtBr ? "—" : `no-pt-BR-translation (${c._langSource})`;
+
+      console.log(
+        `[for-you:item] tmdb=${c.tmdbId} ` +
+        `titleOriginal="${titleOriginal}" titlePtBr="${titlePtBr}" ` +
+        `overviewPtBr=${overviewPtBr} source=${transSource} ` +
+        `fallbackReason=${fallbackReason} ` +
+        `image=${c._imageSource} ` +
+        `${!c.posterUrl && !c.backdropUrl ? "⚠ sem-imagem " : ""}` +
+        `reason="${c.reason}"`,
+      );
+
+      // linkId canônico:
+      // - título está no DB local sob o tmdbId do Trakt → usa tmdbId numérico (link direto, sem round-trip)
+      // - título não está no DB → usa imdbId do Trakt se disponível (a página carrega via Balloonerismm)
+      // - fallback final: String(tmdbId) (raro: Trakt sem imdbId + não está no DB)
+      const linkId = c._inLocalDb ? String(c.tmdbId) : (c.imdbId ?? String(c.tmdbId));
+
+      return {
+        id:           c.tmdbId,
+        linkId,
+        title:        c.title,
+        originalTitle: c.originalTitle !== c.title ? (c.originalTitle ?? null) : null,
+        overview:     c.overview ?? undefined,
+        posterUrl:    c.posterUrl   ?? null,
+        backdropUrl:  c.backdropUrl ?? null,
+        rating:       c.voteAverage ?? undefined,
+        year:         c.year,
+        mediaType:    c.mediaType,
+        mediaLabel:   c.mediaType === "movie" ? "Filme" : "Série",
+        genreLabel,
+        reason:       c.reason,
+        sourceSeed:   c.seedEffectiveWeight > 0 ? undefined : "popular",
+        debug:        `${c._imageSource}|${c._langSource}|w=${c.seedEffectiveWeight}+${c.relationStrength}`,
+      };
+    });
+
+    // Featured = highest rating with backdrop; else first item
+    const withBackdrop = items.filter((it) => it.backdropUrl);
+    const featured     = withBackdrop.length > 0
+      ? [...withBackdrop].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))[0]
+      : (items[0] ?? null);
+    const rest = featured ? items.filter((it) => it !== featured) : items;
+
+    console.log(`[for-you] final=${selected.length} featured="${featured?.title ?? "none"}" source=${source}`);
 
     return NextResponse.json({
       featured,
-      items: rest,
-      usedTmdbApi: false,
-      recommendationSource,
+      items:                rest,
+      recommendationSource: source,
     });
+
   } catch (err) {
-    console.error("[/api/user/for-you]", err);
-    return NextResponse.json({
-      featured: null,
-      items: [],
-      usedTmdbApi: false,
-      recommendationSource: "controlled_empty",
-    });
+    console.error("[for-you]", err);
+    return NextResponse.json({ featured: null, items: [], recommendationSource: "error" });
   }
 }

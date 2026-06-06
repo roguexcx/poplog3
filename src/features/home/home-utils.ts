@@ -53,12 +53,15 @@ export function getHeroHeadline(): [string, string, string] {
 }
 
 export function translateGenres(
-  genres: { name: string }[],
+  genres: Array<string | { name: string }>,
   limit = 2
 ): string {
   return genres
     .slice(0, limit)
-    .map((g) => translateGenreName(g.name) ?? g.name)
+    .map((g) => {
+      const name = typeof g === "string" ? g : (typeof g === "object" && g !== null ? g.name : String(g));
+      return translateGenreName(name) ?? name;
+    })
     .join(" • ");
 }
 

@@ -55,8 +55,11 @@ type TmdbImageV3Props = {
 
 function normalizePath(path: string | null | undefined) {
   if (!path) return null;
-  if (path.startsWith("http://") || path.startsWith("https://")) return path;
-  return path.startsWith("/") ? path : `/${path}`;
+  const value = path.trim();
+  if (!value) return null;
+  if (value.startsWith("http://") || value.startsWith("https://")) return value;
+  if (/^[a-z0-9.-]+\.[a-z]{2,}\//i.test(value)) return `https://${value}`;
+  return value.startsWith("/") ? value : `/${value}`;
 }
 
 function buildImageSrc(path: string, size: string): string {

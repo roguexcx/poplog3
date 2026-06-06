@@ -6,6 +6,7 @@ type NormalizeSeasonInput = {
   number: number;
   title?: string;
   posterRemoteUrl?: string;
+  episodeCount?: number;
 };
 
 export function normalizeSeason(input: NormalizeSeasonInput, meta: SourceMeta): CatalogSeason {
@@ -14,6 +15,7 @@ export function normalizeSeason(input: NormalizeSeasonInput, meta: SourceMeta): 
     number: input.number,
     title: input.title,
     posterPath: input.posterRemoteUrl,
+    episodeCount: input.episodeCount,
     source: { ...meta, fetchedAt: meta.fetchedAt ?? new Date().toISOString() },
   };
 }

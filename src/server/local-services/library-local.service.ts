@@ -223,7 +223,25 @@ export async function getUserLibrary(
     status: status as Poplog3LibraryStatus | undefined,
   });
   if (!result.ok) throw new Error(result.error);
-  return Promise.all(result.data.map(enrichLibraryItem));
+
+  const items = await Promise.all(result.data.map(enrichLibraryItem));
+
+  const withTitle  = items.filter((i) => i.title !== null).length;
+  const noTitle    = items.length - withTitle;
+  const withImages = items.filter((i) => !!(i.title?.backdrop_path || i.title?.poster_path)).length;
+  const uid = userId.slice(0, 8);
+  console.log(
+    `[library] loaded | uid=${uid} total=${items.length} with-title=${withTitle} no-title=${noTitle} with-images=${withImages}${status ? ` status=${status}` : ""}`,
+  );
+  if (noTitle > 0) {
+    const missing = items
+      .filter((i) => i.title === null)
+      .map((i) => `${i.media_type}:${i.tmdb_id}`)
+      .join(", ");
+    console.warn(`[library] sem cache de título | ${missing}`);
+  }
+
+  return items;
 }
 
 export async function getUserLibraryState(

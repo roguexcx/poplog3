@@ -1,10 +1,9 @@
 import { NextResponse } from "next/server";
+import { traktGet } from "@/server/api-clients/trakt/client";
 import { translateToPtBr } from "@/server/translate/translate-to-pt-br";
 import { adminUnauthorizedResponse, isAdminRequest } from "@/server/auth/admin-guard";
 
 export const dynamic = "force-dynamic";
-
-const TRAKT_API_BASE = "https://api.trakt.tv";
 
 type TraktUser = {
   username?: string;
@@ -22,10 +21,6 @@ type TraktComment = {
   user?: TraktUser;
 };
 
-function getTraktClientId() {
-  return process.env.TRAKT_CLIENT_ID || "";
-}
-
 function parsePositiveNumber(value: string | null) {
   if (!value) return null;
   const parsed = Number(value);
@@ -33,47 +28,15 @@ function parsePositiveNumber(value: string | null) {
   return parsed;
 }
 
-async function traktFetch(path: string) {
-  const clientId = getTraktClientId();
-
-  if (!clientId) {
-    throw new Error("TRAKT_CLIENT_ID não configurado no .env.local");
-  }
-
-  const response = await fetch(`${TRAKT_API_BASE}${path}`, {
-    cache: "no-store",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      "User-Agent": "POPLOG/3.0 (contact: local-dev)",
-      "trakt-api-version": "2",
-      "trakt-api-key": clientId,
-    },
-  });
-
-  const text = await response.text();
-
-  let body: any = null;
-
-  try {
-    body = text ? JSON.parse(text) : null;
-  } catch {
-    body = text;
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      `Erro Trakt HTTP ${response.status} em ${path}: ${
-        typeof body === "string" ? body.slice(0, 300) : JSON.stringify(body)
-      }`,
-    );
-  }
-
-  return body;
-}
-
 async function findTraktMovieIdFromTmdb(tmdbId: number) {
-  const results = await traktFetch(`/search/tmdb/${tmdbId}?type=movie`);
+  const results = await traktGet<Array<{ movie?: { ids?: { slug?: string; trakt?: number } } }>>(
+    `/search/tmdb/${tmdbId}`,
+    {
+      params: { type: "movie" },
+      ttlSeconds: 3600,
+      cache: "no-store",
+    },
+  );
 
   if (!Array.isArray(results) || results.length === 0) {
     return null;
@@ -142,8 +105,9 @@ export async function GET(request: Request) {
       });
     }
 
-    const rawComments = await traktFetch(
+    const rawComments = await traktGet<TraktComment[]>(
       `/movies/${encodeURIComponent(String(traktMovieId))}/comments/newest`,
+      { ttlSeconds: 900, cache: "no-store" },
     );
 
     const comments = Array.isArray(rawComments)

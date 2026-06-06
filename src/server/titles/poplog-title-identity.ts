@@ -230,11 +230,21 @@ export async function resolvePoplogTitleIdentity({
   const cleanId = id.trim();
 
   // Synthetic tmdbId (negative integer from imdbId) — re-resolve as imdbId.
+  // Se a resolução retornar um tmdbId real (positivo), dispara consolidação em background.
   if (/^-\d+$/.test(cleanId)) {
     const n = parseInt(cleanId, 10);
     const derivedImdbId = Number.isInteger(n) && n < 0 ? imdbIdFromSyntheticTmdbId(n) : null;
     if (derivedImdbId) {
-      return resolvePoplogTitleIdentity({ mediaType, id: derivedImdbId, sourceHint: "imdb", title, year });
+      const resolved = await resolvePoplogTitleIdentity({ mediaType, id: derivedImdbId, sourceHint: "imdb", title, year });
+      const realTmdbId = resolved.externalIds.tmdbId;
+      if (realTmdbId !== undefined && realTmdbId > 0 && realTmdbId !== n) {
+        void import("@/server/repositories/title-consolidation.repository")
+          .then(({ consolidateSyntheticToReal }) =>
+            consolidateSyntheticToReal(n, realTmdbId, mediaType),
+          )
+          .catch(() => {});
+      }
+      return resolved;
     }
   }
 

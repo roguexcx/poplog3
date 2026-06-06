@@ -305,6 +305,13 @@ function mergePair(hi: CatalogEpisode, lo: CatalogEpisode): MergedCatalogEpisode
   const hiMergedFrom = (hi as MergedCatalogEpisode).mergedFrom ?? [hiSrc];
   const loMergedFrom = (lo as MergedCatalogEpisode).mergedFrom ?? [loSrc];
 
+  // episodeType: Trakt is the authoritative source for episode type classification
+  const episodeType = traktEpForMerge?.episodeType ?? hi.episodeType ?? lo.episodeType;
+
+  // voteAverage/voteCount: prefer Trakt (community ratings), then any source
+  const voteAverage = traktEpForMerge?.voteAverage ?? hi.voteAverage ?? lo.voteAverage;
+  const voteCount = traktEpForMerge?.voteCount ?? hi.voteCount ?? lo.voteCount;
+
   return {
     ids: {
       ...lo.ids,
@@ -323,6 +330,9 @@ function mergePair(hi: CatalogEpisode, lo: CatalogEpisode): MergedCatalogEpisode
     originalOverview: text.originalOverview ?? hi.originalOverview ?? lo.originalOverview,
     firstAired,
     runtime: hi.runtime ?? lo.runtime,
+    episodeType,
+    voteAverage,
+    voteCount,
     stillPath: still.stillPath,
     stillUrl: still.stillUrl,
     stillSource: still.stillSource,

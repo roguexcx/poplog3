@@ -67,9 +67,11 @@ export default async function HomePage() {
     featuredDetails?.first_air_date,
   );
 
-  const genres = featuredDetails?.genres
+  const genres = featuredDetails?.genres?.length
     ? translateGenres(featuredDetails.genres)
-    : null;
+    : (featuredItem?.genres?.length
+        ? translateGenres(featuredItem.genres)
+        : null);
 
   const runtime = formatRuntime(
     featuredType,

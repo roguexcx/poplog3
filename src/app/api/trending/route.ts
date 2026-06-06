@@ -23,6 +23,12 @@ import {
 } from "@/server/source-engine/hydrate-catalog-results";
 import type { PoplogTitle } from "@/server/types/title";
 import { db } from "@/server/db/client";
+import { isTraktIndexEnabled } from "@/lib/trakt-index/engine";
+import {
+  getPoplogDailyTrendingIndex,
+  traktIndexCacheKey,
+} from "@/lib/trakt-index/canonical";
+import type { TraktIndexItem } from "@/lib/trakt-index/types";
 
 const TRENDING_CACHE_TTL_MS = 30 * 60_000;
 const TRENDING_DB_TIMEOUT_MS = 1_500;
@@ -30,6 +36,35 @@ const TRENDING_AUTH_TIMEOUT_MS = 500;
 const TRENDING_BALLOONERISMM_LIMIT = 15;
 const TRENDING_MIN_RESULTS = 5;
 const TRENDING_LOCAL_FALLBACK_LIMIT = 20;
+const TRAKT_INDEX_TIMEOUT_MS = 14_000;
+
+/** Converte TraktIndexItem para o formato PoplogTitle esperado pela UI. */
+function traktIndexToPoplogTitle(item: TraktIndexItem): PoplogTitle {
+  return {
+    tmdb_id: item.tmdb_id,
+    media_type: item.media_type,
+    poplogId: null,
+    externalIds: item.externalIds,
+    identityUsed: item.identityUsed,
+    linkIdUsed: item.linkIdUsed,
+    hasPoplogId: false,
+    normalizedFrom: item.normalizedFrom,
+    legacyCompatibilityUsed: true,
+    title: item.title,
+    original_title: item.original_title,
+    overview: item.overview,
+    poster_path: item.poster_path,
+    backdrop_path: item.backdrop_path,
+    release_date: item.release_date,
+    first_air_date: item.first_air_date,
+    year: item.year,
+    runtime: item.runtime,
+    genres: [],
+    popularity: item.popularity,
+    vote_average: item.vote_average,
+    vote_count: item.vote_count,
+  };
+}
 
 async function fetchLocalTrending(): Promise<PoplogTitle[]> {
   try {
@@ -160,10 +195,15 @@ async function enrichWithRuntime(titles: PoplogTitle[]) {
             estimated: runtimeResolution.estimated,
           });
 
+    // Itens do Trakt Index já têm identity resolvida — não sobrescrever com resolveCatalogIdentityFields
+    const identityOverride = title.normalizedFrom === "trakt_index"
+      ? {}
+      : resolveCatalogIdentityFields(title, title.normalizedFrom === "cache-fuzzy" ? "cache-fuzzy" : "balloonerismm");
+
     return {
       ...title,
       id: title.tmdb_id,
-      ...resolveCatalogIdentityFields(title, title.normalizedFrom === "cache-fuzzy" ? "cache-fuzzy" : "balloonerismm"),
+      ...identityOverride,
       runtime: runtimeResolution.minutes,
       runtime_label: runtimeLabel,
     };
@@ -195,10 +235,16 @@ export async function GET(request: NextRequest) {
     const { userId, feedbackMap } = await resolveUserFeedback();
     markStage(perf, stageRef, "auth");
 
-    const cached = await readContinuitySectionCache<TrendingCachePayload>(sectionKey, {
-      region: "BR",
-      language: "pt-BR",
-    });
+    // Quando Trakt Index está ativo, o cache `home_trending` genérico é ignorado para evitar
+    // servir resultados antigos do Balloonerismm (30 itens) no lugar dos 50 do Trakt Index.
+    // O cache específico `trakt_index_top50_daily` é lido dentro do bloco Trakt Index abaixo.
+    const useGeneralCache = !isTraktIndexEnabled();
+    const cached = useGeneralCache
+      ? await readContinuitySectionCache<TrendingCachePayload>(sectionKey, {
+          region: "BR",
+          language: "pt-BR",
+        })
+      : null;
     markStage(perf, stageRef, "cache_read");
 
     if (cached?.payload.results?.length && (cached.status === "hit" || cached.status === "stale")) {
@@ -240,6 +286,57 @@ export async function GET(request: NextRequest) {
             }
           : {}),
       });
+    }
+
+    // ── Trakt Index primary path ──────────────────────────────────────────────
+    if (isTraktIndexEnabled()) {
+      try {
+        const traktItems = await withTimeout(
+          getPoplogDailyTrendingIndex(),
+          TRAKT_INDEX_TIMEOUT_MS,
+          [] as TraktIndexItem[],
+        );
+        markStage(perf, stageRef, "external_fetch");
+
+        if (traktItems.length >= TRENDING_MIN_RESULTS) {
+          const titles = traktItems.map(traktIndexToPoplogTitle);
+          const withRuntime = await enrichWithRuntime(titles);
+          markStage(perf, stageRef, "cache_tables_read");
+
+          const results = applyUserFeedbackScoring(withRuntime, { userId, feedbackMap, context: "trending" });
+          markStage(perf, stageRef, "response_build");
+
+          void writeContinuitySectionCache({
+            sectionKey,
+            region: "BR",
+            language: "pt-BR",
+            ttlMs: TRENDING_CACHE_TTL_MS,
+            payload: { results: withRuntime, generatedAt: new Date().toISOString() } satisfies TrendingCachePayload,
+          });
+
+          console.log("[trending/perf]", {
+            cacheStatus: "trakt_index_primary",
+            period: "daily",
+            returned: results.length,
+            ...perf,
+            total: Date.now() - totalStartedAt,
+          });
+
+          return NextResponse.json({
+            ok: true,
+            count: results.length,
+            results,
+            ...(debugSource ? { debugSource: { source: "trakt_index", period: "daily", fallbackUsed: false } } : {}),
+          });
+        }
+
+        console.log("[trending] source=trakt_index_fallback reason=%s",
+          traktItems.length === 0 ? "empty" : "insufficient");
+      } catch (err) {
+        console.warn("[trending] source=trakt_index_fallback reason=error",
+          err instanceof Error ? err.message : err);
+        markStage(perf, stageRef, "external_fetch");
+      }
     }
 
     // ── Balloonerismm primary path ────────────────────────────────────────────

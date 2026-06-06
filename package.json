@@ -32,6 +32,7 @@
     "db:smoke:auth": "tsx -r tsconfig-paths/register scripts/smoke-test-auth.ts",
     "db:smoke:streaming-preferences": "tsx -r tsconfig-paths/register scripts/smoke-test-streaming-preferences.ts",
     "db:smoke:local-full": "tsx -r tsconfig-paths/register scripts/smoke-test-local-full.ts",
+    "smoke:trakt-client": "tsx -r tsconfig-paths/register scripts/smoke-test-trakt-client.ts",
     "db:reset": "prisma migrate reset",
     "db:studio": "prisma studio",
     "check:feedback-engine": "npx tsx scripts/check-feedback-engine.ts",

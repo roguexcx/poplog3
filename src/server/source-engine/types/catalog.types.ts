@@ -74,6 +74,8 @@ export type CatalogSeason = {
   number: number;
   title?: string;
   posterPath?: string;
+  /** Total de episódios desta temporada segundo a fonte (Trakt: episode_count). */
+  episodeCount?: number;
   source: SourceMeta;
 };
 
@@ -88,6 +90,10 @@ export type CatalogEpisode = {
   originalOverview?: string;
   firstAired?: string;
   runtime?: number;
+  /** Trakt episode_type: standard, series_premiere, season_premiere, mid_season_finale, mid_season_premiere, season_finale, series_finale */
+  episodeType?: string;
+  voteAverage?: number;
+  voteCount?: number;
   stillPath?: string;
   stillUrl?: string;
   stillSource?: "tvdb" | "trakt" | "balloonerismm";

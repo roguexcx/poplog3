@@ -276,6 +276,19 @@ export async function resolveAndMergeExternalIdsForPoplogTitle(
       localTitle = payloadMatch;
       aliasLookupSource.push("localTitle:tmdbPayload:imdbId");
       aliasSources.localTitle = true;
+
+      // Se o input veio com um tmdbId sintético (negativo) e o payload match tem um
+      // tmdbId real (positivo), dispara consolidação em background para fundir os dois
+      // rows e migrar dados de usuário para o ID canônico.
+      const syntheticId = before.tmdbId;
+      const realId = payloadMatch.tmdbId;
+      if (syntheticId !== undefined && syntheticId < 0 && realId > 0 && syntheticId !== realId) {
+        void import("@/server/repositories/title-consolidation.repository")
+          .then(({ consolidateSyntheticToReal }) =>
+            consolidateSyntheticToReal(syntheticId, realId, input.mediaType),
+          )
+          .catch(() => {});
+      }
     }
   }
 

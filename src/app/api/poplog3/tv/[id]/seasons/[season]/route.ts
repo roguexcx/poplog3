@@ -177,6 +177,33 @@ function cachedSeasonProblem(season: PoplogSeason): string | null {
     airedEps.every((e) => e.title_language === "eng" || e.title_language === "en");
   if (allEnglishTitles && cacheAgeMs > 86_400_000) return "all_aired_episodes_english_titles";
 
+  // Re-fetch if ALL episodes have null air_date — data fetched before show aired, no dates stored.
+  // Only triggers after 24h to avoid thrashing on brand-new shows without dates yet.
+  const allMissingDates = season.episodes.length > 0 && season.episodes.every((e) => !e.air_date);
+  if (allMissingDates && cacheAgeMs > 86_400_000) return "all_episodes_missing_air_date";
+
+  // Re-fetch if SOME episodes have no air_date while others have past air_dates (partially-announced
+  // season cached before all episodes were scheduled). This happens when the cache was built while the
+  // show was mid-season: aired eps have dates, unannounced eps have null dates that may now be stale.
+  const hasAiredEps = airedEps.length > 0;
+  const someNullDates = season.episodes.some((e) => !e.air_date);
+  if (hasAiredEps && someNullDates && cacheAgeMs > 86_400_000) return "partial_missing_dates";
+
+  // Re-fetch if ALL cached episodes are future (none have aired yet) but the cache is older than 24h.
+  // This catches the case where the cache was built with only pre-announced upcoming episodes —
+  // once the season starts airing, past episodes (with stills, confirmed dates) are missing from cache.
+  const allFutureEpisodes =
+    season.episodes.length > 0 &&
+    season.episodes.every((e) => !e.air_date || new Date(e.air_date).getTime() > now);
+  if (allFutureEpisodes && cacheAgeMs > 86_400_000) return "all_future_episodes";
+
+  // Re-fetch if the episode list doesn't start from E01 — indicates earlier episodes are missing.
+  // This happens when the cache was built while only later episodes were announced (e.g., E05-E10),
+  // causing episodes 1-4 to never be stored. No time gate — always re-fetch bad caches.
+  const epNums = season.episodes.map((e) => e.episode_number).sort((a, b) => a - b);
+  const minEpisode = epNums[0] ?? 1;
+  if (minEpisode > 1) return "episodes_not_starting_from_1";
+
   return null;
 }
 
@@ -231,6 +258,7 @@ export async function GET(
   { params }: { params: Promise<{ id: string; season: string }> },
 ) {
   const resolved = await params;
+  console.log("[season-route] GET handler chamado", { id: resolved.id, season: resolved.season });
   const seasonNumber = Number(resolved.season);
   const showDebug = request.nextUrl.searchParams.get("debugSource") === "1";
   const refresh =
@@ -497,10 +525,10 @@ export async function GET(
             stillLanguage: ep.stillLanguage ?? null,
             airDate: ep.firstAired ?? null,
             runtime: ep.runtime ?? null,
-            voteAverage: null,
-            voteCount: null,
+            voteAverage: ep.voteAverage ?? null,
+            voteCount: ep.voteCount ?? null,
             productionCode: null,
-            episodeType: null,
+            episodeType: ep.episodeType ?? null,
             absoluteNumber: ep.absoluteNumber ?? null,
             titleLanguage: ep.titleLanguage ?? ep.textLanguage ?? null,
             overviewLanguage: ep.overviewLanguage ?? ep.textLanguage ?? null,
@@ -552,9 +580,9 @@ export async function GET(
               textCandidates: ep.textCandidates ?? null,
               airDate: ep.firstAired ?? null,
               runtime: ep.runtime ?? null,
-              voteAverage: null,
-              voteCount: null,
-              episodeType: null,
+              voteAverage: ep.voteAverage ?? null,
+              voteCount: ep.voteCount ?? null,
+              episodeType: ep.episodeType ?? null,
             })),
             poplogId: resolvedPoplogId,
             externalIds,

@@ -20,10 +20,20 @@ type ShortcutResultResponse = {
   ok: boolean;
   slug: string;
   title: string;
+  displayTitle?: string;
   description: string;
   popularMovies?: SearchResult[];
   popularSeries?: SearchResult[];
   results: SearchResult[];
+  fallbackUsed?: boolean;
+  source?: string;
+  debug?: {
+    slugs: string[];
+    beforeFilter: number;
+    afterFilter: number;
+    fallbackItems: number;
+    mediaTypeFilter?: string;
+  };
 };
 
 type SearchResult = {
@@ -304,7 +314,8 @@ export default function SearchPageView({ initialQuery, initialType, initialPage,
     async function load() {
       try {
         setShortcutLoading(true);
-        const res = await fetch(`/api/poplog3/discovery/shortcut/${encodeURIComponent(selectedShortcut)}`, { signal: controller.signal });
+        const params = new URLSearchParams({ type });
+        const res = await fetch(`/api/poplog3/discovery/shortcut/${encodeURIComponent(selectedShortcut)}?${params}`, { signal: controller.signal });
         const data: ShortcutResultResponse = await res.json();
         if (data.ok) setShortcutData(data);
       } catch (e) {
@@ -505,32 +516,46 @@ export default function SearchPageView({ initialQuery, initialType, initialPage,
         {!trimmedQuery && selectedShortcut && !shortcutLoading && shortcutData ? (() => {
           const sc = findShortcut(selectedShortcut);
           const eyebrow = sc?.group.label ?? "Descoberta";
+          const displayTitle = shortcutData.displayTitle ?? shortcutData.title;
+          const hasMovies = (shortcutData.popularMovies?.length ?? 0) > 0;
+          const hasSeries = (shortcutData.popularSeries?.length ?? 0) > 0;
+          const d = shortcutData.debug;
           return (
             <div className="flex flex-col gap-10">
-              {shortcutData.popularMovies?.length ? (
+              {/* Debug log (console only) */}
+              {d ? (() => { console.log(`[search/shortcut] slug=${selectedShortcut} type=${type} source=${shortcutData.source} before=${d.beforeFilter} after=${d.afterFilter} fallback=${shortcutData.fallbackUsed} fallbackItems=${d.fallbackItems} slugs=${d.slugs?.join(",")}`); return null; })() : null}
+
+              {/* Fallback notice */}
+              {shortcutData.fallbackUsed ? (
+                <div className="rounded-xl border border-amber-400/20 bg-amber-400/[0.06] px-4 py-2.5 text-[11px] font-medium text-amber-200/70">
+                  Resultado ampliado com títulos populares do gênero — índice Trakt retornou poucos itens para &quot;{shortcutData.title}&quot; nesta janela.
+                </div>
+              ) : null}
+
+              {hasMovies ? (
                 <section className="space-y-5">
                   <SectionHeader
                     eyebrow={eyebrow}
-                    title={shortcutData.popularSeries?.length ? `Filmes — ${shortcutData.title}` : shortcutData.title}
+                    title={hasSeries ? `Filmes — ${displayTitle}` : displayTitle}
                     subtitle={shortcutData.description}
                     accent="indigo"
                   />
-                  <TitleGrid titles={shortcutData.popularMovies} />
+                  <TitleGrid titles={shortcutData.popularMovies!} />
                 </section>
               ) : null}
-              {shortcutData.popularMovies?.length && shortcutData.popularSeries?.length ? <SectionDivider /> : null}
-              {shortcutData.popularSeries?.length ? (
+              {hasMovies && hasSeries ? <SectionDivider /> : null}
+              {hasSeries ? (
                 <section className="space-y-5">
                   <SectionHeader
                     eyebrow={eyebrow}
-                    title={shortcutData.popularMovies?.length ? `Séries — ${shortcutData.title}` : shortcutData.title}
-                    subtitle={shortcutData.popularMovies?.length ? "" : shortcutData.description}
+                    title={hasMovies ? `Séries — ${displayTitle}` : displayTitle}
+                    subtitle={hasMovies ? "" : shortcutData.description}
                     accent="indigo"
                   />
-                  <TitleGrid titles={shortcutData.popularSeries} />
+                  <TitleGrid titles={shortcutData.popularSeries!} />
                 </section>
               ) : null}
-              {!shortcutData.popularMovies?.length && !shortcutData.popularSeries?.length ? (
+              {!hasMovies && !hasSeries ? (
                 <EmptyState kicker={sc?.label ?? selectedShortcut} title="Sem títulos disponíveis." description="Nenhum resultado encontrado para essa categoria no momento." accent="neutral" />
               ) : null}
             </div>

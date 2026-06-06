@@ -94,9 +94,9 @@ export default function TitleCast({ cast }: TitleCastProps) {
           ref={trackRef}
           className="-mx-1 flex gap-3 overflow-x-auto scroll-smooth px-1 pb-2 sm:gap-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
-          {cast.map((person) => (
+          {cast.map((person, i) => (
             <Link
-              key={person.id}
+              key={`${person.id}-${i}`}
               href={`/pessoa/${person.id}`}
               className="group relative flex w-[120px] shrink-0 flex-col sm:w-[140px]"
             >

@@ -8,6 +8,13 @@ export type TraktFetchOptions = {
   ttlSeconds?: number;
   cache?: RequestCache;
   signal?: AbortSignal;
+  staleTtlSeconds?: number;
+};
+
+export type TraktRequestOptions = TraktFetchOptions & {
+  method?: "GET" | "POST" | "PUT" | "DELETE";
+  body?: unknown;
+  accessToken?: string | null;
 };
 
 /** IDs externos retornados em objetos Trakt. */
@@ -64,12 +71,99 @@ export type TraktEpisodeFull = {
   rating?: number;
   votes?: number;
   runtime?: number | null;
+  /** Tipo do episódio: standard, series_premiere, season_premiere, mid_season_finale, mid_season_premiere, season_finale, series_finale */
+  episode_type?: string | null;
   images?: {
     screenshot?: string[];
     thumb?: string[];
     fanart?: string[];
   } | null;
   translations?: TraktTranslation[] | null;
+};
+
+/** Resposta de /shows/{id}/people?extended=full */
+export type TraktPeople = {
+  cast?: TraktPersonEntry[];
+  crew?: {
+    directing?: TraktPersonEntry[];
+    writing?: TraktPersonEntry[];
+    production?: TraktPersonEntry[];
+    editing?: TraktPersonEntry[];
+    camera?: TraktPersonEntry[];
+    sound?: TraktPersonEntry[];
+    art?: TraktPersonEntry[];
+    costume_make_up?: TraktPersonEntry[];
+    visual_effects?: TraktPersonEntry[];
+    crew?: TraktPersonEntry[];
+    [key: string]: TraktPersonEntry[] | undefined;
+  };
+};
+
+export type TraktPersonEntry = {
+  characters?: string[];
+  character?: string;
+  jobs?: string[];
+  job?: string;
+  episode_count?: number;
+  person: {
+    name: string;
+    ids: {
+      trakt?: number;
+      slug?: string;
+      imdb?: string;
+      tmdb?: number;
+    };
+    images?: {
+      headshot?: string[];
+    } | null;
+  };
+};
+
+/** Resposta de /shows/{id}/videos */
+export type TraktVideoItem = {
+  name: string;
+  key: string;
+  site: string;
+  type: string;
+  quality?: string;
+  language?: string;
+  thumbnail?: string;
+};
+
+/** Resposta de /shows/{id}/studios */
+export type TraktStudio = {
+  name: string;
+  country?: string;
+  ids?: {
+    trakt?: number;
+    slug?: string;
+    tmdb?: number;
+  };
+};
+
+/** Resposta de /shows/{id}/certifications */
+export type TraktCertifications = {
+  us?: string;
+  [country: string]: string | undefined;
+};
+
+/** Resposta de /shows/{id}/next-episode ou /shows/{id}/last-episode */
+export type TraktEpisodeSummary = {
+  season: number;
+  number: number;
+  title?: string | null;
+  ids: {
+    trakt: number;
+    tvdb?: number;
+    tmdb?: number;
+    imdb?: string;
+  };
+  overview?: string | null;
+  first_aired?: string | null;
+  runtime?: number | null;
+  episode_type?: string | null;
+  rating?: number;
+  votes?: number;
 };
 
 /** Resposta de /shows/{id} extended=full */
@@ -99,6 +193,7 @@ export type TraktShowFull = {
   homepage?: string | null;
   tagline?: string | null;
   available_translations?: string[];
+  translations?: TraktTranslation[] | null;
   images?: {
     poster?: string[];
     fanart?: string[];
@@ -108,6 +203,15 @@ export type TraktShowFull = {
     banner?: string[];
   } | null;
 };
+
+export type TraktImages = {
+  poster?: string[] | null;
+  fanart?: string[] | null;
+  logo?: string[] | null;
+  thumb?: string[] | null;
+  clearart?: string[] | null;
+  banner?: string[] | null;
+} | null;
 
 /** Resposta de /movies/{id} extended=full */
 export type TraktMovieFull = {
@@ -127,6 +231,8 @@ export type TraktMovieFull = {
   certification?: string;
   trailer?: string | null;
   homepage?: string | null;
+  translations?: TraktTranslation[] | null;
+  images?: TraktImages;
 };
 
 /** Trending item wrapper */
