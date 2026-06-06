@@ -11,6 +11,7 @@ import {
   markSeasonWatched,
   toggleEpisodeWatched,
 } from "@/server/episodes/episode-progress-service";
+import { resolveUserStateIdentity } from "@/server/user-state/poplog-user-state-identity";
 
 function asPositiveInteger(value: unknown): number | null {
   if (typeof value === "number" && Number.isFinite(value) && value > 0) {
@@ -98,11 +99,21 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const seriesTmdbId = asNonZeroInteger(body.seriesTmdbId);
+  const legacySeriesTmdbId = asNonZeroInteger(body.seriesTmdbId);
+  const identity = await resolveUserStateIdentity({
+    mediaType: "tv",
+    poplogId: body.poplogId,
+    tmdbId: body.seriesTmdbId,
+    imdbId: body.imdbId,
+    slug: body.slug,
+    title: body.title,
+    year: body.releaseYear,
+  }).catch(() => null);
+  const seriesTmdbId = identity?.tmdbId ?? legacySeriesTmdbId;
 
   if (!seriesTmdbId) {
     return NextResponse.json(
-      { ok: false, error: "seriesTmdbId obrigatorio" },
+      { ok: false, error: "seriesTmdbId, poplogId ou imdbId obrigatorio" },
       { status: 400 }
     );
   }

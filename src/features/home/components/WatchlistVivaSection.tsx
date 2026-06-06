@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import TmdbImage from "@/components/images/TmdbImage";
+import CatalogImage from "@/components/images/CatalogImage";
 import { ScrollRowArrows } from "@/components/ScrollRowArrows";
 import { useUserData } from "@/context/UserDataContext";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
@@ -17,8 +17,12 @@ import SectionHeader from "@/components/ui/SectionHeader";
 type StreamStatus = "streaming" | "chegando" | "cinemas" | "confirmado" | "unavailable";
 type WatchlistRow = {
   id: string;
+  poplogId?: string | number | null;
   tmdb_id: number;
   media_type: "movie" | "tv";
+  externalIds?: WatchlistIdentityFields["externalIds"];
+  imdb_id?: string | null;
+  slug?: string | null;
   title: string | null;
   release_year: number | null;
   created_at: string;
@@ -30,8 +34,12 @@ type WatchlistSlot = "recent" | "old" | "free" | "fridge";
 
 interface WatchlistTitle {
   id: string;
+  poplogId?: string | number | null;
   tmdb_id: number;
   media_type: "movie" | "tv";
+  externalIds?: WatchlistIdentityFields["externalIds"];
+  identityUsed?: string;
+  linkIdUsed?: string | number;
   title: string;
   original_title_label?: string | null;
   poster_path: string | null;
@@ -51,6 +59,17 @@ interface WatchlistTitle {
   fridge: boolean;
   stream_status_updated?: boolean;
 }
+
+type WatchlistIdentityFields = {
+  externalIds?: {
+    tmdbId?: number;
+    imdbId?: string;
+    tvdbId?: string;
+    traktId?: string | number;
+    balloonerismmId?: string;
+    slug?: string;
+  };
+};
 
 // ─── Selection logic ──────────────────────────────────────────────────────────
 
@@ -161,7 +180,7 @@ function WatchlistCard({
   onDismiss,
 }: {
   item: WatchlistTitle & { _slot: WatchlistSlot };
-  onDismiss: (id: string, action: "watched" | "remove", tmdbId: number, mediaType: "movie" | "tv") => void;
+  onDismiss: (item: WatchlistTitle, action: "watched" | "remove") => void;
 }) {
   const [imgErr, setImgErr]         = useState(false);
   const [dismissed, setDismissed]   = useState(false);
@@ -183,7 +202,7 @@ function WatchlistCard({
   function dismiss(action: "watched" | "remove") {
     if (action === "watched") setWatched(true);
     setDismissed(true);
-    setTimeout(() => onDismiss(item.id, action, item.tmdb_id, item.media_type), 280);
+    setTimeout(() => onDismiss(item, action), 280);
   }
 
   return (
@@ -212,10 +231,9 @@ function WatchlistCard({
             ].join(" ")}
           >
             {posterPath && !imgErr ? (
-              <TmdbImage
-                path={posterPath}
-                kind="poster"
-                size="card"
+              <CatalogImage
+                src={posterPath}
+                size="w342"
                 alt={item.title}
                 fill
                 sizes="(max-width: 768px) 160px, 220px"
@@ -233,10 +251,9 @@ function WatchlistCard({
 
             {mainProvider ? (
               <div className="absolute bottom-2.5 left-2.5 z-20 flex items-center gap-1.5 rounded-[5px] border border-white/[0.18] bg-black/[0.72] px-[7px] py-[3px] backdrop-blur-[8px]">
-                <TmdbImage
-                  path={mainProvider.logo}
-                  kind="logo"
-                  size="small"
+                <CatalogImage
+                  src={mainProvider.logo}
+                  size="w45"
                   alt={mainProvider.name}
                   width={13}
                   height={13}
@@ -392,7 +409,8 @@ export default function WatchlistVivaSection() {
     setVisible(selectFive(allTitles));
   }
 
-  function handleDismiss(id: string, action: "watched" | "remove", tmdbId: number, mediaType: "movie" | "tv") {
+  function handleDismiss(item: WatchlistTitle, action: "watched" | "remove") {
+    const { id } = item;
     const next = allTitles.filter((t) => t.id !== id);
     setAllTitles(next);
     setVisible((prev) => {
@@ -409,13 +427,28 @@ export default function WatchlistVivaSection() {
       fetch("/api/library/title", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ tmdbId, mediaType, status: "watched" }),
+        body: JSON.stringify({
+          poplogId: item.poplogId,
+          tmdbId: item.tmdb_id,
+          imdbId: item.externalIds?.imdbId,
+          slug: item.externalIds?.slug,
+          mediaType: item.media_type,
+          title: item.title,
+          releaseYear: item.year ? Number(item.year) : undefined,
+          status: "watched",
+        }),
       }).then(notifyUpdate);
     } else {
       fetch("/api/library/title", {
         method: "DELETE",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ tmdbId, mediaType }),
+        body: JSON.stringify({
+          poplogId: item.poplogId,
+          tmdbId: item.tmdb_id,
+          imdbId: item.externalIds?.imdbId,
+          slug: item.externalIds?.slug,
+          mediaType: item.media_type,
+        }),
       }).then(notifyUpdate);
     }
   }

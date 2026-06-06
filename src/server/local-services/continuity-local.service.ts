@@ -12,8 +12,18 @@ import {
 // ── Public types ───────────────────────────────────────────────────────────────
 
 export type LocalTitleData = {
+  poplogId?: string | number | null;
   tmdb_id: number;
   media_type: "tv" | "movie";
+  externalIds?: {
+    tmdbId?: number;
+    imdbId?: string;
+    tvdbId?: string;
+    traktId?: string;
+    balloonerismmId?: string;
+  };
+  identityUsed?: string;
+  linkIdUsed?: string | number;
   title: string | null;
   original_title: string | null;
   overview: string | null;
@@ -110,6 +120,25 @@ function jsonToRecord(val: unknown): Record<string, unknown> | null {
   return null;
 }
 
+function externalKey(mediaType: string, tmdbId: number) {
+  return `${mediaType}:${tmdbId}`;
+}
+
+function buildExternalIdentity(row: {
+  tmdbId: number;
+  imdbId: string | null;
+  tvdbId: string | null;
+  traktId: string | null;
+} | null) {
+  if (!row) return { tmdbId: undefined };
+  return {
+    tmdbId: row.tmdbId,
+    ...(row.imdbId ? { imdbId: row.imdbId, balloonerismmId: row.imdbId } : {}),
+    ...(row.tvdbId ? { tvdbId: row.tvdbId } : {}),
+    ...(row.traktId ? { traktId: row.traktId } : {}),
+  };
+}
+
 // ── State rows ─────────────────────────────────────────────────────────────────
 
 export async function getLocalContinuityStateRows(
@@ -162,9 +191,35 @@ export async function getLocalTitlesBatch(
         ...(mediaType ? { mediaType } : {}),
       },
     });
+    const externalRows = await db.titleExternalId.findMany({
+      where: {
+        tmdbId: { in: rows.map((row) => row.tmdbId) },
+        ...(mediaType ? { mediaType } : {}),
+      },
+      select: {
+        tmdbId: true,
+        mediaType: true,
+        imdbId: true,
+        tvdbId: true,
+        traktId: true,
+      },
+    });
+    const externalByKey = new Map(
+      externalRows.map((row) => [externalKey(row.mediaType, row.tmdbId), row]),
+    );
     return rows.map((row) => ({
+      poplogId: row.id,
       tmdb_id: row.tmdbId,
       media_type: row.mediaType as "tv" | "movie",
+      externalIds: buildExternalIdentity(
+        externalByKey.get(externalKey(row.mediaType, row.tmdbId)) ?? null,
+      ),
+      identityUsed:
+        externalByKey.get(externalKey(row.mediaType, row.tmdbId))?.imdbId
+          ? "imdb_id"
+          : "poplog_id",
+      linkIdUsed:
+        externalByKey.get(externalKey(row.mediaType, row.tmdbId))?.imdbId ?? row.id,
       title: row.title,
       original_title: row.originalTitle,
       overview: row.overview,
@@ -454,8 +509,16 @@ export async function enrichSyntheticTitlesBatch(
       }).catch(() => {});
 
       results.push({
+        poplogId: null,
         tmdb_id: syntheticTmdbId,
         media_type: mediaType,
+        externalIds: {
+          tmdbId: syntheticTmdbId,
+          imdbId,
+          balloonerismmId: imdbId,
+        },
+        identityUsed: "imdb_id",
+        linkIdUsed: imdbId,
         title: details.title,
         original_title: details.originalTitle ?? null,
         overview: details.overview ?? null,

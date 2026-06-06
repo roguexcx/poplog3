@@ -103,7 +103,7 @@ export default function TitleActions({
   const id = toAnyTmdbId(tmdbId);
   const identityPayload = useMemo(
     () => ({
-      tmdbId: id,
+      ...(id !== 0 ? { tmdbId: id } : {}),
       poplogId,
       imdbId,
       slug,
@@ -189,11 +189,17 @@ export default function TitleActions({
             : hasRealProgress
               ? "Assistindo"
               : "Adicionar série",
-      watched: status === "watched" ? "Assistido" : "Marcar assistido",
+      watched: isTv
+        ? status === "watched"
+          ? "Assistido"
+          : "Marcar assistido"
+        : status === "watched"
+          ? "Visto"
+          : "Marcar como visto",
       favorite: favorite ? "Favoritado" : "Favorito",
       fridge: status === "fridge" ? "Em pausa" : "Pausar série",
     }),
-    [status, favorite, hasRealProgress]
+    [status, favorite, hasRealProgress, isTv]
   );
 
   async function syncEpisodes(target: LibraryStatus | null) {

@@ -8,6 +8,7 @@ import {
   useReducer,
 } from "react";
 
+import { useAuth } from "@/hooks/useAuth";
 import type { UserTitle } from "@/types/user";
 
 type State = {
@@ -46,6 +47,10 @@ export function useUserData(): ContextValue {
   return ctx;
 }
 
+export function useOptionalUserData(): ContextValue | null {
+  return useContext(UserDataContext);
+}
+
 type ProviderProps = {
   userId: string;
   children: React.ReactNode;
@@ -65,7 +70,7 @@ export function UserDataProvider({ userId, children }: ProviderProps) {
 
     const json = (await response.json()) as { data?: UserTitle[] };
     dispatch({ type: "LOADED", titles: json.data ?? [] });
-  }, [userId]);
+  }, []);
 
   useEffect(() => {
     dispatch({ type: "LOADING" });
@@ -86,4 +91,18 @@ export function UserDataProvider({ userId, children }: ProviderProps) {
       {children}
     </UserDataContext.Provider>
   );
+}
+
+export function UserDataAutoProvider({ children }: { children: React.ReactNode }) {
+  const { user, loading } = useAuth();
+
+  if (loading || !user) {
+    return (
+      <UserDataContext.Provider value={null}>
+        {children}
+      </UserDataContext.Provider>
+    );
+  }
+
+  return <UserDataProvider userId={user.id}>{children}</UserDataProvider>;
 }

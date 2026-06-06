@@ -202,7 +202,31 @@
       "Bash(xargs grep -l \"BalloonerismSeasonResponse\\\\|BalloonerismSeasonEpisode\")",
       "Bash(xargs grep -l \"tvdbId.*season\\\\|tvdbId.*episode\")",
       "Bash(xargs grep -l \"TvdbSeason\\\\|TvdbEpisode\")",
-      "Bash(npx eslint *)"
+      "Bash(npx eslint *)",
+      "Bash(curl -s \"http://localhost:3001/api/search?q=test\")",
+      "Bash(curl -s \"http://localhost:3000/api/search?q=test\")",
+      "Bash(docker exec poplog-v3-mysql mysql -upoplog -ppoplog_local_password poplog_v3 -e ' *)",
+      "Bash(curl -s -o - -w \"\\\\n%{http_code}\" http://localhost:3000/api/auth/session)",
+      "Bash(curl -s -o - -w \"\\\\n%{http_code}\" http://localhost:3000/api/auth/providers)",
+      "Bash(curl -s -o - -w \"\\\\n%{http_code}\" http://localhost:3000/api/auth/csrf)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/api/poplog3/episodes?type=movie)",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(r['page']\\) for r in d.get\\('dynamicRoutes',[]\\)]\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(k,'->',v\\) for k,v in d.items\\(\\) if 'auth' in k.lower\\(\\)]\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(list\\(d.keys\\(\\)\\)[:20], indent=2\\)\\)\")",
+      "Bash(findstr auth *)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:thetvdb.github.io)",
+      "Bash(gh api *)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(Remove-Item -Recurse -Force .next -ErrorAction SilentlyContinue)",
+      "Bash(Write-Output \"cache limpo\")",
+      "Bash(grep -v \"^Binary\\\\|isKnown\\\\|//\\\\|logger\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000/api/auth/current)",
+      "Bash(curl -s http://localhost:3000/api/auth/current)",
+      "Bash(curl -v http://127.0.0.1:3000/api/auth/current)",
+      "Bash(curl -s \"http://localhost:3000/api/poplog3/tv/tt32767294/seasons/1?debugSource=1&forceRefresh=1\")",
+      "PowerShell($r = Invoke-RestMethod \"http://localhost:3000/api/poplog3/tv/tt32767294/seasons/1?debugSource=1&forceRefresh=1\" -ErrorAction Stop; $eps = $r.episodes; \"source: $\\($r.debugSource.episodeSource\\)\"; \"mergedFrom: $\\($r.mergedFrom -join ','\\)\"; $eps | Select-Object -First 3 | ForEach-Object { \"ep $\\($_.episodeNumber\\) | lang=$\\($_.textLanguage\\) | title=$\\($_.name\\) | still=$\\($_.stillUrl?.Substring\\(0,[Math]::Min\\(55,$_.stillUrl.Length\\)\\)\\)\" })",
+      "PowerShell($r = Invoke-RestMethod \"http://localhost:3000/api/poplog3/titles/tv/tt32767294?debugSource=1\" -ErrorAction SilentlyContinue; if \\($r\\) { \"tagline=$\\($r.tagline\\)\" } else { \"endpoint not found, trying title page\" })"
     ]
   }
 }

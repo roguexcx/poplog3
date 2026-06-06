@@ -12,7 +12,7 @@
  */
 
 import { logApiCall } from "@/server/engine-logger";
-import type { TvdbLoginResponse, TvdbFetchOptions } from "./types";
+import type { TvdbLoginResponse, TvdbFetchOptions, TvdbLinks } from "./types";
 
 export const TVDB_BASE_URL =
   process.env.TVDB_API_BASE_URL ?? "https://api4.thetvdb.com/v4";
@@ -199,6 +199,89 @@ export async function tvdbGet<T>(
       error: isAbort ? "timeout" : err instanceof Error ? err.message : String(err),
     });
     return null;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+/**
+ * Like tvdbGet, but also returns the `links` pagination object from the TVDB envelope.
+ * Use this when you need to paginate through multi-page results (e.g. episode lists).
+ *
+ * Returns `{ data: null, links: null }` when TVDB is inactive or the request fails.
+ */
+export async function tvdbGetWithLinks<T>(
+  path: string,
+  options: TvdbFetchOptions = {},
+): Promise<{ data: T | null; links: TvdbLinks | null }> {
+  if (!isTvdbActive()) return { data: null, links: null };
+
+  const token = await getToken();
+  if (!token) {
+    console.warn("[tvdb-client] Token indisponível — skipping");
+    return { data: null, links: null };
+  }
+
+  const url = buildUrl(path, options.params);
+  const ttl = options.ttlSeconds ?? DEFAULT_TTL_SECONDS;
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+
+  const t0 = Date.now();
+  try {
+    const response = await fetchWithBackoff(
+      url,
+      {
+        method: "GET",
+        headers: buildHeaders(token),
+        cache: options.cache ?? "default",
+        signal: options.signal ?? controller.signal,
+        next: { revalidate: ttl },
+      } as RequestInit & { next?: { revalidate: number } },
+      2,
+      1_000,
+    );
+
+    const durationMs = Date.now() - t0;
+
+    if (!response.ok) {
+      logApiCall({
+        api: "tvdb",
+        op: "fetch",
+        endpoint: path,
+        durationMs,
+        cacheStatus: "miss",
+        success: false,
+        httpStatus: response.status,
+        error: `HTTP ${response.status}`,
+      });
+      return { data: null, links: null };
+    }
+
+    const envelope = (await response.json()) as { status: string; data: T; links?: TvdbLinks };
+    logApiCall({
+      api: "tvdb",
+      op: "fetch",
+      endpoint: path,
+      durationMs,
+      cacheStatus: response.headers.get("x-cache") === "HIT" ? "hit" : "miss",
+      success: true,
+      httpStatus: response.status,
+    });
+    return { data: envelope.data ?? null, links: envelope.links ?? null };
+  } catch (err) {
+    const durationMs = Date.now() - t0;
+    const isAbort = err instanceof Error && err.name === "AbortError";
+    logApiCall({
+      api: "tvdb",
+      op: "fetch",
+      endpoint: path,
+      durationMs,
+      cacheStatus: "miss",
+      success: false,
+      error: isAbort ? "timeout" : err instanceof Error ? err.message : String(err),
+    });
+    return { data: null, links: null };
   } finally {
     clearTimeout(timeout);
   }

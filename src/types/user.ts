@@ -33,6 +33,18 @@ export type UserTitle = {
   user_id: string;
   tmdb_id: number;
   media_type: MediaType;
+  poplogId?: string | number | null;
+  externalIds?: {
+    tmdbId?: number;
+    imdbId?: string;
+    tvdbId?: number;
+    traktId?: number | string;
+    balloonerismmId?: string;
+    slug?: string;
+  };
+  identityUsed?: string;
+  linkIdUsed?: string | number;
+  imdb_id?: string | null;
   status: string;
   favorite: boolean;
   liked?: boolean | null;

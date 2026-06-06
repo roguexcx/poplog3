@@ -1,19 +1,26 @@
+import { isEnvFlagEnabled, logger } from "./logger";
+
 type LogLevel = "log" | "info" | "warn" | "error";
 
 const onceKeys = new Set<string>();
 const rateLimitedKeys = new Map<string, { lastLoggedAt: number; suppressed: number }>();
 
 function write(level: LogLevel, message: string, payload?: unknown) {
-  if (payload === undefined) {
-    console[level](message);
+  if (level === "log" || level === "info") {
+    logger.info(message, payload);
     return;
   }
-
-  console[level](message, payload);
+  if (level === "warn") {
+    logger.warn(message, payload);
+    return;
+  }
+  if (level === "error") {
+    logger.error(message, payload);
+  }
 }
 
 export function isDebugEnabled(flag: string) {
-  return process.env[flag] === "true";
+  return isEnvFlagEnabled(flag);
 }
 
 export function formatError(error: unknown) {

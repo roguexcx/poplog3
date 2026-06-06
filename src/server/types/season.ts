@@ -6,12 +6,24 @@ export type PoplogEpisode = {
   name: string | null;
   overview: string | null;
   still_path: string | null;
+  still_url?: string | null;
+  still_source?: string | null;
+  still_width?: number | null;
+  still_height?: number | null;
+  still_language?: string | null;
   air_date: string | null;
   runtime: number | null;
   vote_average: number | null;
   vote_count: number | null;
   production_code: string | null;
   episode_type: string | null;
+  absolute_number?: number | null;
+  title_language?: string | null;
+  overview_language?: string | null;
+  original_title?: string | null;
+  original_overview?: string | null;
+  image_candidates_json?: unknown;
+  text_candidates_json?: unknown;
 };
 
 export type PoplogSeason = {

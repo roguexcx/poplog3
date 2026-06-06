@@ -21,7 +21,12 @@ const providers = [googleProvider()].filter(
   (provider): provider is NonNullable<typeof provider> => provider !== null,
 );
 
-function isDbConnectivityError(error: Error): boolean {
+function isKnownHarmlessAuthError(error: Error): boolean {
+  // Session cookie exists but DB session is gone (expired/reset) — not a real error.
+  if (error.name === "AdapterError") return true;
+  // Session token can't be decoded — stale cookie from another env or changed secret.
+  if (error.name === "SessionTokenError") return true;
+  // DB connectivity — not suppressible but harmless noise during local dev.
   const parts = [
     error?.message ?? "",
     String((error as { cause?: unknown })?.cause ?? ""),
@@ -45,7 +50,7 @@ export const authOptions = {
   },
   logger: {
     error(error: Error) {
-      if (isDbConnectivityError(error)) return;
+      if (isKnownHarmlessAuthError(error)) return;
       console.error("[auth]", error);
     },
   },

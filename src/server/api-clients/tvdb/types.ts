@@ -121,11 +121,16 @@ export type TvdbEpisode = {
   runtime?: number | null;
   overview?: string | null;
   image?: string | null;
+  thumbnail?: string | null;
+  artwork?: TvdbArtwork[] | null;
+  artworks?: TvdbArtwork[] | null;
   imageType?: number;
   isMovie?: number;
   seasons?: TvdbSeason[];
   number?: number;
   seasonNumber?: number;
+  absoluteNumber?: number | null;
+  airedOrder?: number | null;
   lastUpdated?: string;
   finaleType?: string | null;
   year?: string | null;
@@ -271,4 +276,16 @@ export type TvdbFetchOptions = {
   cache?: RequestCache;
   signal?: AbortSignal;
   ttlSeconds?: number;
+};
+
+/**
+ * Pagination envelope returned by TVDB v4 list endpoints (episodes, etc.).
+ * `next` is a full URL to the next page; null when on the last page.
+ */
+export type TvdbLinks = {
+  prev?: string | null;
+  self?: string | null;
+  next?: string | null;
+  total_items?: number;
+  page_size?: number;
 };

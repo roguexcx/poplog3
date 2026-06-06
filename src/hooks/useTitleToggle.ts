@@ -22,10 +22,16 @@ type TitleToggleReturn<T> = {
   isLoggedIn: boolean;
 };
 
+type ExternalTitleState<T> = {
+  state: T | undefined;
+  loading: boolean;
+};
+
 export function useTitleToggle<T>(
   initialState: T,
   config: TitleToggleConfig<T>,
   deps: unknown[],
+  externalState?: ExternalTitleState<T>,
 ): TitleToggleReturn<T> {
   const { user, loading: userLoading } = useAuth();
   const [state, setState] = useState<T>(initialState);
@@ -41,13 +47,19 @@ export function useTitleToggle<T>(
       return;
     }
 
+    if (externalState?.state !== undefined) {
+      setState(externalState.state);
+      setLoading(externalState.loading);
+      return;
+    }
+
     setLoading(true);
     config.checkFn(user.id)
       .then(setState)
       .catch(() => setState(initialState))
       .finally(() => setLoading(false));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user, userLoading, ...deps]);
+  }, [user, userLoading, externalState?.state, externalState?.loading, ...deps]);
 
   async function toggle() {
     if (!user || saving) return;

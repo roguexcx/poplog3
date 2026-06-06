@@ -4,6 +4,7 @@ import ActionButton from "@/components/ui/ActionButton";
 import EmptyState from "@/components/ui/EmptyState";
 import TitlePageView from "@/features/title/TitlePageView";
 import { getTitlePageData } from "@/server/titles/get-title-page-data";
+import { formatDuration, logger } from "@/server/logging/logger";
 import type { PoplogTitleSourceHint } from "@/server/titles/poplog-title-identity";
 
 type MediaType = "movie" | "tv";
@@ -22,6 +23,7 @@ function pickFlag(value: string | string[] | undefined): boolean {
 }
 
 export default async function TitlePage({ params, searchParams }: PageProps) {
+  const startedAt = Date.now();
   const { mediaType, id } = await params;
   const resolvedSearch = searchParams ? await searchParams : undefined;
 
@@ -70,6 +72,7 @@ export default async function TitlePage({ params, searchParams }: PageProps) {
   });
 
   if (!title) {
+    logger.warn(`[PAGE] /title/${mediaType}/${id} | failed | ${formatDuration(Date.now() - startedAt)}`);
     return (
       <section className="px-4 py-10 sm:px-6 md:px-10">
         <EmptyState
@@ -86,6 +89,15 @@ export default async function TitlePage({ params, searchParams }: PageProps) {
       </section>
     );
   }
+
+  logger.info(`[PAGE] /title/${mediaType}/${id} | ok | ${formatDuration(Date.now() - startedAt)}`);
+  const titleCache = title.cacheInfo?.title;
+  logger.info(
+    `[ENGINE] resolved title | source=${titleCache?.source ?? "unknown"} | cache=${titleCache?.status ?? "unknown"} | persisted=${Boolean(title.poplogId || title.externalIds?.imdbId)}`,
+  );
+  logger.info(
+    `[RATINGS] loaded | userRating=${title.userState?.userRating == null ? "none" : "ok"} | aggregate=${title.communityRating == null && title.ratings == null ? "none" : "ok"}`,
+  );
 
   return <TitlePageView title={title} />;
 }

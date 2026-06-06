@@ -51,6 +51,7 @@ import type { SourceMeta, SourceConfidence } from "../types/source.types";
 import { normalizeTitle } from "../normalizers/normalize-title";
 import { normalizeSearchResult } from "../normalizers/normalize-search";
 import { normalizePeople } from "../normalizers/normalize-person";
+import { normalizeEpisode } from "../normalizers/normalize-episode";
 
 // ─── Helpers de confiança ─────────────────────────────────────────────────────
 
@@ -101,6 +102,7 @@ type BalloonerismTitleLike = {
   tagline?: string | null;
   runtime?: number | string | null;
   status?: string | null;
+  type?: string | null;
   genres?: Array<string | { name?: string | null }> | null;
   genre_ids?: Array<number | string> | null;
   country?: string | null;
@@ -170,6 +172,31 @@ function countFields(obj: Record<string, unknown>): number {
   return Object.values(obj).filter((v) => v !== null && v !== undefined).length;
 }
 
+function isSeriesType(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const normalized = value.trim().toLowerCase();
+  if (!normalized || /\b(movie|film|feature)\b/.test(normalized)) return false;
+  return /\b(tv\s*)?(series|miniseries|mini-series|show)\b/.test(normalized);
+}
+
+function hasBalloonerismSeriesShape(show: BalloonerismShow): boolean {
+  const detail = show as BalloonerismTitleLike;
+  return Boolean(
+    isSeriesType(show.type ?? detail.type) ||
+      (typeof show.number_of_seasons === "number" && show.number_of_seasons > 0) ||
+      (typeof show.number_of_episodes === "number" && show.number_of_episodes > 0) ||
+      (Array.isArray(show.episode_run_time) && show.episode_run_time.length > 0) ||
+      (detail.first_air_date && !detail.release_date) ||
+      (detail.original_name && !detail.original_title),
+  );
+}
+
+function looksPortugueseText(value: string | null | undefined): boolean {
+  if (!value) return false;
+  return /[áàâãéêíóôõúüç]/i.test(value) ||
+    /\b(o|a|os|as|um|uma|de|do|da|dos|das|que|com|sem|para|por|não|muito|maior|gente|volta)\b/i.test(value);
+}
+
 /**
  * Extrai empresas de produção (filtra para apenas "Production Companies",
  * excluindo distribuidoras e outros tipos).
@@ -212,11 +239,15 @@ function extractArray<T>(raw: unknown, path: string): T[] {
 function balloonerismMovieToTitle(movie: BalloonerismMovie): CatalogTitle {
   const detail = movie as BalloonerismTitleLike;
   const meta = sourceMeta(imdbIdFrom(detail), countFields(movie as unknown as Record<string, unknown>));
+  const localizedTitle = detail.title ?? detail.name ?? null;
+  const fallbackTitle = detail.original_title ?? detail.original_name ?? null;
   return normalizeTitle(
     {
       ids: movieIds(movie),
       mediaType: "movie",
-      title: detail.title ?? detail.name ?? detail.original_title ?? detail.original_name,
+      title: localizedTitle ?? fallbackTitle,
+      // Preserve the original-language title so the UI can show it as subtitle.
+      originalTitle: fallbackTitle && fallbackTitle !== localizedTitle ? fallbackTitle : undefined,
       year: yearFrom(detail.year, detail.release_date, detail.first_air_date),
       overview: detail.overview,
       tagline: detail.tagline,
@@ -252,11 +283,14 @@ function balloonerismShowToTitle(show: BalloonerismShow): CatalogTitle {
   const episodeRunTime = Array.isArray(show.episode_run_time)
     ? (show.episode_run_time[0] ?? null)
     : null;
+  const localizedTitle = detail.title ?? detail.name ?? null;
+  const fallbackTitle = detail.original_title ?? detail.original_name ?? null;
   return normalizeTitle(
     {
       ids: showIds(show),
       mediaType: "show",
-      title: detail.title ?? detail.name ?? detail.original_title ?? detail.original_name,
+      title: localizedTitle ?? fallbackTitle,
+      originalTitle: fallbackTitle && fallbackTitle !== localizedTitle ? fallbackTitle : undefined,
       year: yearFrom(detail.year, detail.first_air_date, detail.release_date),
       overview: detail.overview,
       tagline: detail.tagline,
@@ -294,6 +328,7 @@ type BalloonerismSearchLike = {
   trakt_id?: number | string | null;
   slug?: string | null;
   media_type?: "movie" | "tv" | "show" | "person" | string | null;
+  type?: string | null;
   title?: string | null;
   name?: string | null;
   original_title?: string | null;
@@ -307,6 +342,8 @@ type BalloonerismSearchLike = {
   genre_ids?: Array<number | string> | null;
   vote_average?: number | null;
   vote_count?: number | null;
+  number_of_seasons?: number | string | null;
+  number_of_episodes?: number | string | null;
   images?: { poster?: string | null; backdrop?: string | null };
   ids?: { imdb?: string | null; tmdb?: number | null; tvdb?: number | string | null; trakt?: number | string | null };
 };
@@ -324,10 +361,60 @@ function toYear(value: unknown): number | undefined {
   return undefined;
 }
 
+function normalizeMediaTypeText(value: unknown): string {
+  return typeof value === "string" ? value.trim().toLowerCase() : "";
+}
+
+function inferSearchMediaType(item: BalloonerismSearchLike): "movie" | "show" {
+  const rawMediaType = normalizeMediaTypeText(item.media_type);
+  const rawType = normalizeMediaTypeText(item.type);
+  const combinedType = `${rawMediaType} ${rawType}`.trim();
+
+  if (["tv", "show", "series"].includes(rawMediaType)) return "show";
+  if (["movie", "film"].includes(rawMediaType)) return "movie";
+  if (/\b(tv|show|series|miniseries|mini-series)\b/.test(combinedType)) return "show";
+  if (/\b(movie|film|feature)\b/.test(combinedType)) return "movie";
+
+  const hasSeriesShape = Boolean(
+    item.first_air_date ||
+      item.original_name ||
+      item.number_of_seasons != null ||
+      item.number_of_episodes != null,
+  );
+  const hasMovieShape = Boolean(item.release_date || item.original_title);
+
+  if (hasSeriesShape && !hasMovieShape) return "show";
+  if (hasMovieShape && !hasSeriesShape) return "movie";
+  if (hasSeriesShape && item.name && !item.title) return "show";
+
+  return "movie";
+}
+
+function summarizeSearchMedia(items: BalloonerismSearchLike[], path: string, query?: string): void {
+  const counts = items.reduce(
+    (acc, item) => {
+      const inferred = inferSearchMediaType(item);
+      acc[inferred] += 1;
+      if (!item.media_type) acc.missingMediaType += 1;
+      return acc;
+    },
+    { movie: 0, show: 0, missingMediaType: 0 },
+  );
+  const sample = items.slice(0, 3).map((item) => {
+    const id = item.imdb_id ?? item.ids?.imdb ?? item.id ?? "?";
+    const title = item.title ?? item.name ?? "?";
+    return `${id}:${inferSearchMediaType(item)}:${title}`;
+  });
+
+  console.log(
+    `[SERIES-DIAG] search balloonerismm | path=${path} q="${query ?? ""}" raw=${items.length} tv=${counts.show} movie=${counts.movie} missingType=${counts.missingMediaType} sample=${sample.join(" | ")}`,
+  );
+}
+
 function searchItemToResult(item: BalloonerismSearchLike): CatalogSearchResult {
   const itemId = typeof item.id === "string" ? item.id : undefined;
   const imdbId = item.imdb_id ?? item.ids?.imdb ?? (itemId?.startsWith("tt") ? itemId : undefined);
-  const mediaType = item.media_type === "tv" || item.media_type === "show" ? "show" : "movie";
+  const mediaType = inferSearchMediaType(item);
   const releaseDate = item.release_date ?? undefined;
   const firstAirDate = item.first_air_date ?? undefined;
   const genreValues = Array.isArray(item.genre_ids) ? item.genre_ids : [];
@@ -379,7 +466,7 @@ export const balloonerismAdapter: CatalogAdapter = {
     });
     if (raw === null) return [];
     const items = extractArray<BalloonerismSearchLike>(raw, path);
-    console.log(`[balloonerismm] searchTitles path=${path} count=${items.length}`);
+    summarizeSearchMedia(items, path, params.query);
     return items.map(searchItemToResult);
   },
 
@@ -400,6 +487,7 @@ export const balloonerismAdapter: CatalogAdapter = {
     if (!id) return null;
     const data = await balloonerismGet<BalloonerismShow>(`/tv/${id}`, { params: { language: "pt-BR" }, ttlSeconds: 86400 });
     if (!data) return null;
+    if (!hasBalloonerismSeriesShape(data)) return null;
     return balloonerismShowToTitle(data);
   },
 
@@ -426,19 +514,63 @@ export const balloonerismAdapter: CatalogAdapter = {
     if (!id) return [];
     const path = `/tv/${id}/season/${params.season}`;
     const raw = await balloonerismGet<BalloonerismSeasonResponse>(path, { params: { language: "pt-BR" }, ttlSeconds: 86400 });
-    if (!raw?.episodes) return [];
+    if (!raw?.episodes) {
+      console.warn("[balloonerismm] temporada vazia", {
+        path,
+        imdbId: id,
+        season: params.season,
+        reason: raw ? "endpoint_vazio_ou_idioma_sem_dados" : "temporada_inexistente_ou_id_incorreto",
+      });
+      return [];
+    }
     const meta = sourceMeta(params.imdbId);
-    return raw.episodes.map((ep) => ({
-      ids: { imdbId: params.imdbId },
-      season: params.season,
-      number: ep.episode_number,
-      title: ep.name ?? undefined,
-      overview: ep.overview ?? undefined,
-      firstAired: ep.air_date ?? undefined,
-      runtime: typeof ep.runtime === "number" ? ep.runtime : undefined,
-      stillPath: ep.still_path ?? undefined,
-      source: meta,
-    }));
+    return raw.episodes.map((ep) => {
+      const still =
+        ep.still_path ??
+        ep.image ??
+        ep.thumbnail ??
+        ep.screenshot ??
+        ep.backdrop_path ??
+        undefined;
+      // Language detection must be based on actual CONTENT, not on the API's `language` field.
+      // Balloonerismm always reports `language: "pt-BR"` because we requested it — but the
+      // content might still be English when TMDB has no PT-BR translation for this title.
+      // Falsely tagging English as pt-BR causes keepExistingPortuguese in upsertSeason to
+      // protect that content and block real PT-BR data from TVDB/Trakt in the future.
+      const titleLanguage = looksPortugueseText(ep.name) ? "pt-BR" : undefined;
+      const overviewLanguage = looksPortugueseText(ep.overview) ? "pt-BR" : undefined;
+      const textLanguage = titleLanguage ?? overviewLanguage;
+
+      return normalizeEpisode(
+        {
+          ids: {
+            imdbId: ep.imdb_id ?? undefined,
+            tmdbId: ep.tmdb_id ?? undefined,
+            tvdbId: ep.tvdb_id ?? undefined,
+            traktId: ep.trakt_id ?? undefined,
+            balloonerismmId: typeof ep.id === "string" ? ep.id : undefined,
+          },
+          season: ep.season_number ?? params.season,
+          number: ep.episode_number,
+          absoluteNumber: ep.absolute_number ?? undefined,
+          title: ep.name ?? undefined,
+          originalTitle: ep.original_name ?? undefined,
+          overview: ep.overview ?? undefined,
+          originalOverview: ep.original_overview ?? undefined,
+          titleLanguage,
+          overviewLanguage,
+          textLanguage,
+          firstAired: ep.air_date ?? undefined,
+          runtime: typeof ep.runtime === "number" ? ep.runtime : undefined,
+          stillRemoteUrl: still,
+          stillSource: "balloonerismm",
+          stillWidth: ep.still_width ?? undefined,
+          stillHeight: ep.still_height ?? undefined,
+          stillLanguage: undefined,
+        },
+        meta,
+      );
+    });
   },
 
   // ── Trending ───────────────────────────────────────────────────────────────

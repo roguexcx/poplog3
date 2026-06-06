@@ -5,6 +5,7 @@ type NormalizeTitleInput = {
   ids: CatalogIds;
   mediaType: "movie" | "show";
   title?: string | null;
+  originalTitle?: string | null;
   year?: number | null;
   overview?: string | null;
   tagline?: string | null;
@@ -36,6 +37,7 @@ export function normalizeTitle(input: NormalizeTitleInput, meta: SourceMeta): Ca
     ids: input.ids,
     mediaType: input.mediaType,
     title: input.title ?? "",
+    originalTitle: input.originalTitle ?? undefined,
     year: input.year ?? undefined,
     overview: input.overview ?? undefined,
     tagline: input.tagline ?? undefined,

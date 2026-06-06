@@ -14,6 +14,8 @@ export type CatalogTitle = {
   ids: CatalogIds;
   mediaType: "movie" | "show";
   title: string;
+  /** Original-language title (e.g. English) when `title` is a localized version. */
+  originalTitle?: string;
   year?: number;
   overview?: string;
   tagline?: string;
@@ -29,24 +31,23 @@ export type CatalogTitle = {
   backdropPath?: string;
   numberOfSeasons?: number | null;
   numberOfEpisodes?: number | null;
-  /** Orçamento de produção em USD. */
   budget?: number | null;
-  /** Bilheteria total mundial em USD (worldwide_gross). */
   revenue?: number | null;
-  /** Bilheteria doméstica (EUA) em USD. */
   domesticGross?: number | null;
-  /** Pontuação Metacritic (0–100). */
   metacriticScore?: number | null;
-  /** Empresas de produção (apenas category="Production Companies", sem distribuidoras). */
   productionCompanies?: Array<{ name: string }>;
-  /** Países de produção. */
   productionCountries?: Array<{ code: string; name: string }>;
-  /** Idiomas falados. */
   spokenLanguages?: Array<{ code: string; name: string }>;
-  /** Série ainda em produção? */
   inProduction?: boolean | null;
-  /** Tipo de série: "TV Series", "TV Mini Series", etc. */
   seriesType?: string | null;
+  trailerUrl?: string | null;
+  trailerThumbnailUrl?: string | null;
+  homepage?: string | null;
+  logoUrl?: string | null;
+  availableTranslations?: string[];
+  airedEpisodes?: number | null;
+  network?: string | null;
+  networks?: string[];
   source: SourceMeta;
 };
 
@@ -80,12 +81,48 @@ export type CatalogEpisode = {
   ids: CatalogIds;
   season: number;
   number: number;
+  absoluteNumber?: number;
   title?: string;
+  originalTitle?: string;
   overview?: string;
+  originalOverview?: string;
   firstAired?: string;
   runtime?: number;
   stillPath?: string;
+  stillUrl?: string;
+  stillSource?: "tvdb" | "trakt" | "balloonerismm";
+  stillWidth?: number;
+  stillHeight?: number;
+  stillLanguage?: string;
+  textLanguage?: string;
+  titleLanguage?: string;
+  overviewLanguage?: string;
+  sourcePriority?: string[];
+  imageCandidates?: EpisodeImageCandidate[];
+  textCandidates?: EpisodeTextCandidate[];
+  discardedCandidates?: Array<{ field: string; source: string; reason: string }>;
   source: SourceMeta;
+};
+
+export type EpisodeImageCandidate = {
+  source: "tvdb" | "trakt" | "balloonerismm";
+  url: string;
+  width?: number;
+  height?: number;
+  language?: string;
+  kind?: string;
+  confidence?: "high" | "medium" | "low";
+};
+
+export type EpisodeTextCandidate = {
+  source: "tvdb" | "trakt" | "balloonerismm";
+  title?: string;
+  originalTitle?: string;
+  overview?: string;
+  originalOverview?: string;
+  language?: string;
+  country?: string;
+  confidence?: "high" | "medium" | "low";
 };
 
 export type CatalogRatings = {
@@ -120,7 +157,6 @@ export type CatalogVideo = {
   title: string;
   url: string;
   type: string;
-  /** URL de thumbnail da capa do vídeo (IMDb ou YouTube). */
   thumbnailUrl?: string | null;
   source: SourceMeta;
 };
@@ -131,8 +167,6 @@ export type CatalogCalendarItem = {
   date?: string;
   source?: SourceMeta;
 };
-
-// ── Param types ────────────────────────────────────────────────────────────────
 
 export type SearchParams = {
   query: string;

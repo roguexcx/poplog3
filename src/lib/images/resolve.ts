@@ -49,10 +49,12 @@ export function resolveCatalogImage(
   size: CatalogImageSize | string = "w500",
 ): string | null {
   if (!src || src.trim() === "") return null;
+  const normalizedSource = src.trim();
   // URL completa — Balloonerismm, IMDb, TVDB, CDN próprio
-  if (src.startsWith("http://") || src.startsWith("https://")) return src;
+  if (normalizedSource.startsWith("http://") || normalizedSource.startsWith("https://")) return normalizedSource;
+  if (/^[a-z0-9.-]+\.[a-z]{2,}\//i.test(normalizedSource)) return `https://${normalizedSource}`;
   // Path TMDB legado (com ou sem / inicial)
-  const normalized = src.startsWith("/") ? src : `/${src}`;
+  const normalized = normalizedSource.startsWith("/") ? normalizedSource : `/${normalizedSource}`;
   return `${TMDB_IMAGE_BASE}/${size}${normalized}`;
 }
 

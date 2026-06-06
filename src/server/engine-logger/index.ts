@@ -2,6 +2,7 @@ import { push } from "./store";
 import { getOrigin } from "./context";
 import { persistEngineLogEntry, getPersistentSnapshot, clearPersistentEntries } from "./persistence";
 import type { EngineLogEntry } from "./types";
+import { formatDuration, isEnvFlagEnabled, logger } from "@/server/logging/logger";
 
 export { withOrigin } from "./context";
 export { getStats, getEntries, clear } from "./store";
@@ -18,7 +19,61 @@ export function logApiCall(input: LogInput): void {
     ts: Date.now(),
     origin: input.origin ?? getOrigin(),
   });
+
+  logEngineSummary(entry);
   void persistEngineLogEntry(entry);
+}
+
+function logEngineSummary(entry: EngineLogEntry): void {
+  const target = formatEngineScope(entry);
+  const scope = target || entry.op;
+  const source = `${entry.api}${entry.cacheStatus ? `+cache:${entry.cacheStatus}` : ""}`;
+  const duration = formatDuration(entry.durationMs);
+
+  if (!entry.success) {
+    const reason = entry.error ?? entry.httpStatus ?? "unknown";
+    const nonFatal = isNonFatalAdapterFailure(entry);
+    const level = nonFatal ? "WARN" : "ERROR";
+    const write = nonFatal ? logger.warn : logger.error;
+    write(`[ENGINE:${level}] ${scope} | failed | source=${entry.api} | reason=${reason} | ${duration}`);
+    return;
+  }
+
+  if (entry.fallbackFrom) {
+    logger.warn(
+      `[ENGINE:WARN] ${scope} | fallback=${entry.fallbackFrom}->${entry.api} | ${duration}`,
+    );
+    return;
+  }
+
+  if (isEnvFlagEnabled("ENGINE_VERBOSE_LOGS") || entry.cacheStatus === "miss") {
+    logger.info(`[ENGINE] ${scope} | source=${source} | ok | ${duration}`);
+    return;
+  }
+
+  logger.debug(`[ENGINE] ${scope} | source=${source} | ok | ${duration}`);
+}
+
+function isNonFatalAdapterFailure(entry: EngineLogEntry): boolean {
+  const reason = String(entry.error ?? entry.httpStatus ?? "").toLowerCase();
+  return (
+    entry.api === "balloonerismm" &&
+    (reason.includes("timeout") || reason.includes("abort") || entry.httpStatus === 404)
+  );
+}
+
+function formatEngineScope(entry: EngineLogEntry): string {
+  const endpoint = entry.endpoint?.replace(/^\/+/, "") ?? "";
+  const [endpointMediaType, endpointId, ...rest] = endpoint.split("/").filter(Boolean);
+  const mediaType = entry.mediaType ?? (endpointMediaType === "movie" || endpointMediaType === "tv" ? endpointMediaType : undefined);
+  const id = entry.tmdbId ?? endpointId ?? entry.endpoint;
+  const suffix = rest.length > 0 ? `/${rest.join("/")}` : "";
+
+  if (entry.origin && mediaType && id) return `${entry.origin}.${mediaType} ${id}${suffix}`;
+  if (entry.origin && id) return `${entry.origin} ${id}${suffix}`;
+  if (entry.origin) return entry.origin;
+  if (mediaType && id) return `${mediaType} ${id}${suffix}`;
+  return entry.op;
 }
 
 // ── API History ────────────────────────────────────────────────────────────────

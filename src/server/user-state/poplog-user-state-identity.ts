@@ -64,6 +64,10 @@ function stringValue(value: unknown): string | null {
     : null;
 }
 
+function isLikelyTemporaryCatalogId(value: number | null): boolean {
+  return value !== null && value >= 1_800_000_000 && value < 1_900_000_000;
+}
+
 function yearValue(value: unknown): number | undefined {
   const parsed = positiveInteger(value);
   return parsed && parsed >= 1800 && parsed <= 2200 ? parsed : undefined;
@@ -88,8 +92,10 @@ export async function resolveUserStateIdentity(
   // Positive tmdbId or imdbId for the identity resolution lookup
   const positiveTmdbId = tmdbId && tmdbId > 0 ? tmdbId : null;
 
+  const shouldPreferImdb = Boolean(imdbId && (!positiveTmdbId || isLikelyTemporaryCatalogId(positiveTmdbId)));
   const inputId =
     explicitPoplogId ??
+    (shouldPreferImdb ? imdbId : null) ??
     positiveTmdbId ??
     imdbId ??
     slug ??
@@ -98,13 +104,15 @@ export async function resolveUserStateIdentity(
   const inputIdType: UserStateIdentityResolution["inputIdType"] =
     explicitPoplogId
       ? "poplog_id"
-      : positiveTmdbId
-        ? "tmdb_id"
-        : imdbId
+      : shouldPreferImdb
           ? "imdb_id"
-          : slug
-            ? "slug"
-            : "unknown";
+          : positiveTmdbId
+            ? "tmdb_id"
+            : imdbId
+              ? "imdb_id"
+              : slug
+                ? "slug"
+                : "unknown";
 
   if (inputId === null) return null;
 
@@ -132,6 +140,7 @@ export async function resolveUserStateIdentity(
   const resolvedTmdbId =
     identity.externalIds.tmdbId ??
     (tmdbId && isSyntheticTmdbId(tmdbId) ? tmdbId : null) ??
+    (tmdbId && !isLikelyTemporaryCatalogId(tmdbId) ? tmdbId : null) ??
     (resolvedImdbId ? syntheticTmdbFromImdbId(resolvedImdbId) : null) ??
     null;
 

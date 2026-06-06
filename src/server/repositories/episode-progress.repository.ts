@@ -129,7 +129,7 @@ export async function computeUserSeriesProgress(input: {
 }): Promise<RepositoryResult<UserSeriesProgress>> {
   try {
     const now = Date.now();
-    const [watched, episodes] = await Promise.all([
+    const [watched, episodes, title] = await Promise.all([
       db.userEpisode.findMany({
         where: {
           userId: input.userId,
@@ -143,6 +143,15 @@ export async function computeUserSeriesProgress(input: {
           seasonNumber: { gt: 0 },
         },
         orderBy: [{ seasonNumber: "asc" }, { episodeNumber: "asc" }],
+      }),
+      db.poplog3Title.findFirst({
+        where: {
+          mediaType: "tv",
+          tmdbId: input.seriesTmdbId,
+        },
+        select: {
+          numberOfEpisodes: true,
+        },
       }),
     ]);
 
@@ -167,12 +176,18 @@ export async function computeUserSeriesProgress(input: {
           .toISOString()
       : null;
 
+    const cachedTotalEpisodes = episodes.filter((episode) => episode.airDate !== null).length || null;
+    const knownTotalEpisodes =
+      title?.numberOfEpisodes && title.numberOfEpisodes > 0
+        ? Math.max(title.numberOfEpisodes, cachedTotalEpisodes ?? 0)
+        : cachedTotalEpisodes;
+
     return {
       ok: true,
       data: {
         seriesTmdbId: input.seriesTmdbId,
         watchedCount: watchedValid.length,
-        totalEpisodes: episodes.filter((episode) => episode.airDate !== null).length || null,
+        totalEpisodes: knownTotalEpisodes,
         airedEpisodes: airedEpisodes.length,
         lastWatchedAt,
         watchedKeys: watchedValid.map((row) => episodeKey(row.seasonNumber, row.episodeNumber)),

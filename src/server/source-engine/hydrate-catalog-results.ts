@@ -468,6 +468,18 @@ export async function hydrateCatalogResultsWithDebug(
     },
   };
 
+  const mediaCounts = candidates.reduce(
+    (acc, candidate) => {
+      if (candidate.mediaType === "tv") acc.tv += 1;
+      if (candidate.mediaType === "movie") acc.movie += 1;
+      return acc;
+    },
+    { movie: 0, tv: 0 },
+  );
+  console.log(
+    `[SERIES-DIAG] search hydrate | raw=${debug.rawCount} normalized=${debug.normalizedCount} returned=${debug.searchCompatibleCount} tv=${mediaCounts.tv} movie=${mediaCounts.movie} poplog=${debug.poplogResolvedCount} temp=${debug.externalIdStats.temporaryCandidates} discarded=${Object.entries(discardReasons).map(([key, value]) => `${key}:${value}`).join(",") || "none"}`,
+  );
+
   return { titles, debug };
 }
 

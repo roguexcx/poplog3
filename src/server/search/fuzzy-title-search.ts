@@ -196,17 +196,23 @@ export async function findCachedFuzzyTitles({
 
   if (normalizedQuery.length < 3) return [];
 
-  const data = await db.poplog3Title.findMany({
-    where: {
-      mediaType: mediaType === "all" ? undefined : mediaType,
-    },
-    orderBy: {
-      popularity: "desc",
-    },
-    take: MAX_CACHE_CANDIDATES,
-  });
+  let data: CachedTitleRow[];
+  try {
+    data = await db.poplog3Title.findMany({
+      where: {
+        mediaType: mediaType === "all" ? undefined : mediaType,
+        posterPath: { not: null },
+      },
+      orderBy: {
+        popularity: "desc",
+      },
+      take: MAX_CACHE_CANDIDATES,
+    }) as CachedTitleRow[];
+  } catch {
+    return [];
+  }
 
-  return (data as CachedTitleRow[])
+  return data
     .map(titleFromRow)
     .filter((title) => {
       if (excludeKeys.has(`${title.media_type}-${title.tmdb_id}`)) return false;

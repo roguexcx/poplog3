@@ -15,12 +15,22 @@ import {
   resolveUserStateIdentity,
   userStateIdentityDebug,
 } from "@/server/user-state/poplog-user-state-identity";
+import { compactError, logger } from "@/server/logging/logger";
+import { logRouteResult } from "@/server/logging/route-logger";
+
+const ROUTE_PATH = "/api/library/title";
+
+function receivedTmdbId(request: NextRequest) {
+  return request.nextUrl.searchParams.get("tmdbId");
+}
 
 export async function GET(request: NextRequest) {
+  const startedAt = Date.now();
   try {
     const user = await getCurrentUser();
 
     if (!user) {
+      logRouteResult({ method: "GET", path: ROUTE_PATH, status: 401, startedAt, reason: "unauthorized" });
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -28,6 +38,7 @@ export async function GET(request: NextRequest) {
     const debugSource = request.nextUrl.searchParams.get("debugSource") === "1";
 
     if (!isValidMediaType(mediaType)) {
+      logRouteResult({ method: "GET", path: ROUTE_PATH, status: 400, startedAt, reason: "invalid mediaType", received: mediaType });
       return NextResponse.json({ error: "Invalid params" }, { status: 400 });
     }
 
@@ -40,6 +51,14 @@ export async function GET(request: NextRequest) {
     });
 
     if (identity?.tmdbId == null) {
+      logRouteResult({
+        method: "GET",
+        path: ROUTE_PATH,
+        status: 400,
+        startedAt,
+        reason: "invalid tmdbId",
+        received: receivedTmdbId(request),
+      });
       return NextResponse.json({
         error: "Unable to resolve legacy user-state alias",
         ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),
@@ -48,13 +67,15 @@ export async function GET(request: NextRequest) {
 
     const title = await getUserTitleStatus(user.id, identity.tmdbId, mediaType);
 
+    logRouteResult({ method: "GET", path: ROUTE_PATH, status: 200, startedAt });
     return NextResponse.json({
       success: true,
       data: title,
       ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),
     });
   } catch (error) {
-    console.error("[LIBRARY_TITLE_GET_ERROR]", error);
+    logger.error(`[LIBRARY:ERROR] GET title | failed | reason=${compactError(error)}`);
+    logRouteResult({ method: "GET", path: ROUTE_PATH, status: 500, startedAt, reason: compactError(error) });
 
     return NextResponse.json(
       { error: "Internal server error" },
@@ -64,10 +85,12 @@ export async function GET(request: NextRequest) {
 }
 
 export async function POST(request: NextRequest) {
+  const startedAt = Date.now();
   try {
     const user = await getCurrentUser();
 
     if (!user) {
+      logRouteResult({ method: "POST", path: ROUTE_PATH, status: 401, startedAt, reason: "unauthorized" });
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -81,6 +104,7 @@ export async function POST(request: NextRequest) {
       !isValidMediaType(mediaType) ||
       !isValidLibraryStatus(status)
     ) {
+      logRouteResult({ method: "POST", path: ROUTE_PATH, status: 400, startedAt, reason: "invalid body" });
       return NextResponse.json({ error: "Invalid body" }, { status: 400 });
     }
 
@@ -95,6 +119,14 @@ export async function POST(request: NextRequest) {
     });
 
     if (identity?.tmdbId == null) {
+      logRouteResult({
+        method: "POST",
+        path: ROUTE_PATH,
+        status: 400,
+        startedAt,
+        reason: "invalid tmdbId",
+        received: body.tmdbId ?? null,
+      });
       return NextResponse.json({
         error: "Unable to resolve legacy user-state alias",
         ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),
@@ -113,13 +145,16 @@ export async function POST(request: NextRequest) {
       notes: body.notes ?? null,
     });
 
+    logger.debug(`[LIBRARY] title.${mediaType} ${identity.tmdbId} | status=${status} | ok`);
+    logRouteResult({ method: "POST", path: ROUTE_PATH, status: 200, startedAt });
     return NextResponse.json({
       success: true,
       data: title,
       ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),
     });
   } catch (error) {
-    console.error("[LIBRARY_TITLE_POST_ERROR]", error);
+    logger.error(`[LIBRARY:ERROR] POST title | failed | reason=${compactError(error)}`);
+    logRouteResult({ method: "POST", path: ROUTE_PATH, status: 500, startedAt, reason: compactError(error) });
 
     return NextResponse.json(
       { error: "Internal server error" },
@@ -134,10 +169,12 @@ export async function POST(request: NextRequest) {
  * favorite=true, onde o título é automaticamente marcado como "watched".
  */
 export async function PATCH(request: NextRequest) {
+  const startedAt = Date.now();
   try {
     const user = await getCurrentUser();
 
     if (!user) {
+      logRouteResult({ method: "PATCH", path: ROUTE_PATH, status: 401, startedAt, reason: "unauthorized" });
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -148,6 +185,7 @@ export async function PATCH(request: NextRequest) {
     const debugSource = body.debugSource === true;
 
     if (!isValidMediaType(mediaType) || typeof favorite !== "boolean") {
+      logRouteResult({ method: "PATCH", path: ROUTE_PATH, status: 400, startedAt, reason: "invalid body" });
       return NextResponse.json({ error: "Invalid body" }, { status: 400 });
     }
 
@@ -162,6 +200,14 @@ export async function PATCH(request: NextRequest) {
     });
 
     if (identity?.tmdbId == null) {
+      logRouteResult({
+        method: "PATCH",
+        path: ROUTE_PATH,
+        status: 400,
+        startedAt,
+        reason: "invalid tmdbId",
+        received: body.tmdbId ?? null,
+      });
       return NextResponse.json({
         error: "Unable to resolve legacy user-state alias",
         ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),
@@ -188,13 +234,16 @@ export async function PATCH(request: NextRequest) {
       favorite,
     });
 
+    logger.debug(`[LIBRARY] title.${mediaType} ${identity.tmdbId} | favorite=${favorite} | ok`);
+    logRouteResult({ method: "PATCH", path: ROUTE_PATH, status: 200, startedAt });
     return NextResponse.json({
       success: true,
       data: title,
       ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),
     });
   } catch (error) {
-    console.error("[LIBRARY_TITLE_PATCH_ERROR]", error);
+    logger.error(`[LIBRARY:ERROR] PATCH title | failed | reason=${compactError(error)}`);
+    logRouteResult({ method: "PATCH", path: ROUTE_PATH, status: 500, startedAt, reason: compactError(error) });
 
     return NextResponse.json(
       { error: "Internal server error" },
@@ -204,10 +253,12 @@ export async function PATCH(request: NextRequest) {
 }
 
 export async function DELETE(request: NextRequest) {
+  const startedAt = Date.now();
   try {
     const user = await getCurrentUser();
 
     if (!user) {
+      logRouteResult({ method: "DELETE", path: ROUTE_PATH, status: 401, startedAt, reason: "unauthorized" });
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -217,6 +268,7 @@ export async function DELETE(request: NextRequest) {
     const debugSource = body.debugSource === true;
 
     if (!isValidMediaType(mediaType)) {
+      logRouteResult({ method: "DELETE", path: ROUTE_PATH, status: 400, startedAt, reason: "invalid body" });
       return NextResponse.json({ error: "Invalid body" }, { status: 400 });
     }
 
@@ -229,6 +281,14 @@ export async function DELETE(request: NextRequest) {
     });
 
     if (identity?.tmdbId == null) {
+      logRouteResult({
+        method: "DELETE",
+        path: ROUTE_PATH,
+        status: 400,
+        startedAt,
+        reason: "invalid tmdbId",
+        received: body.tmdbId ?? null,
+      });
       return NextResponse.json({
         error: "Unable to resolve legacy user-state alias",
         ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),
@@ -237,12 +297,15 @@ export async function DELETE(request: NextRequest) {
 
     await removeUserTitle(user.id, identity.tmdbId, mediaType);
 
+    logger.debug(`[LIBRARY] title.${mediaType} ${identity.tmdbId} | removed | ok`);
+    logRouteResult({ method: "DELETE", path: ROUTE_PATH, status: 200, startedAt });
     return NextResponse.json({
       success: true,
       ...(debugSource ? { debugSource: userStateIdentityDebug(identity) } : {}),
     });
   } catch (error) {
-    console.error("[LIBRARY_TITLE_DELETE_ERROR]", error);
+    logger.error(`[LIBRARY:ERROR] DELETE title | failed | reason=${compactError(error)}`);
+    logRouteResult({ method: "DELETE", path: ROUTE_PATH, status: 500, startedAt, reason: compactError(error) });
 
     return NextResponse.json(
       { error: "Internal server error" },

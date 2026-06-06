@@ -2,6 +2,14 @@ import type {
   PoplogSeason,
 } from "@/server/types/season";
 
+export type EpisodeExternalIds = {
+  imdb?: string | null;
+  tvdb?: number | string | null;
+  trakt?: number | string | null;
+  tmdb?: number | string | null;
+  plex?: { guid?: string | null } | null;
+};
+
 export type UpsertSeasonInput = {
   seriesTmdbId: number;
   seasonNumber: number;
@@ -19,12 +27,27 @@ export type UpsertSeasonInput = {
     name: string | null;
     overview: string | null;
     stillPath: string | null;
+    stillUrl?: string | null;
+    stillSource?: string | null;
+    stillWidth?: number | null;
+    stillHeight?: number | null;
+    stillLanguage?: string | null;
     airDate: string | null;
     runtime: number | null;
     voteAverage: number | null;
     voteCount: number | null;
     productionCode: string | null;
     episodeType: string | null;
+    absoluteNumber?: number | null;
+    titleLanguage?: string | null;
+    overviewLanguage?: string | null;
+    originalTitle?: string | null;
+    originalOverview?: string | null;
+    sourcePriority?: unknown;
+    imageCandidates?: unknown;
+    textCandidates?: unknown;
+    /** IDs externos: imdb, tvdb, trakt, tmdb, plex. Persistido como JSON. */
+    externalIds?: EpisodeExternalIds | null;
   }>;
 };
 

@@ -85,13 +85,24 @@ function extractPayloadExternalIds(payload: unknown): PoplogTitleExternalIds {
   if (!payload || typeof payload !== "object") return {};
 
   const root = payload as Record<string, unknown>;
+
+  // TMDB/Balloonerismm with `external_ids` appended (TMDB append_to_response format)
   const externalIds = root.external_ids && typeof root.external_ids === "object"
     ? root.external_ids as Record<string, unknown>
     : {};
 
-  const imdbRaw = root.imdb_id ?? externalIds.imdb_id;
-  const tvdbRaw = externalIds.tvdb_id;
-  const traktRaw = externalIds.trakt_id;
+  // Balloonerismm stores IDs under `ids: { imdb, tvdb, tmdb }` at the root
+  const idsField = root.ids && typeof root.ids === "object"
+    ? root.ids as Record<string, unknown>
+    : {};
+
+  // IMDb: Balloonerismm puts `imdb_id` at root; TMDB puts it in external_ids
+  const imdbRaw = root.imdb_id ?? externalIds.imdb_id ?? idsField.imdb;
+
+  // TVDB: TMDB puts it in external_ids.tvdb_id; Balloonerismm puts it in ids.tvdb
+  const tvdbRaw = externalIds.tvdb_id ?? idsField.tvdb;
+
+  const traktRaw = externalIds.trakt_id ?? idsField.trakt;
 
   return compactExternalIds({
     imdbId: typeof imdbRaw === "string" && /^tt\d+$/i.test(imdbRaw) ? imdbRaw : undefined,
@@ -311,24 +322,64 @@ export async function resolveAndMergeExternalIdsForPoplogTitle(
     payloadExternalIds,
   );
 
-  const persistResult = await persistMissingAliases(input.mediaType, before, after);
+  // ── Fallback: for TV series still missing imdbId, discover via Trakt/TVDB ──
+  // This self-heals the common case where titleExternalId.imdbId is null
+  // (e.g., series synced before full ID enrichment was in place).
+  // Result is cached 30 days via HTTP TTL, so the API is hit at most once per series.
+  let finalAfter = after;
+  let discoverySource: string | null = null;
+
+  if (
+    input.mediaType === "tv" &&
+    !after.imdbId &&
+    (after.tmdbId || input.title) &&
+    // Skip negative/synthetic tmdbIds (those already derive imdbId differently)
+    (after.tmdbId === undefined || after.tmdbId > 0)
+  ) {
+    try {
+      const { discoverTvSeriesIds } = await import("./discover-series-ids");
+      const discovered = await discoverTvSeriesIds({
+        tmdbId: after.tmdbId ?? undefined,
+        title: input.title ?? localTitle?.title ?? undefined,
+        year: input.year ?? localTitle?.year ?? undefined,
+      });
+
+      if (discovered?.imdbId || discovered?.tvdbId) {
+        finalAfter = mergeExternalIds(after, {
+          imdbId: discovered.imdbId,
+          tvdbId: discovered.tvdbId,
+          traktId: discovered.traktId,
+        });
+        discoverySource = after.tmdbId ? "trakt:tmdb_crossref" : "trakt:title_search";
+        aliasLookupSource.push(discoverySource);
+        aliasSources.cache = true;
+      }
+    } catch (err) {
+      console.warn("[poplog-title-aliases] discover-series-ids falhou", {
+        tmdbId: after.tmdbId,
+        error: (err as Error)?.message,
+      });
+    }
+  }
+
+  const persistResult = await persistMissingAliases(input.mediaType, before, finalAfter);
 
   return {
     poplogId: localTitle?.id ?? (input.poplogId ? String(input.poplogId) : undefined),
     mediaType: input.mediaType,
     title: localTitle?.title ?? localTitle?.originalTitle ?? input.title,
     year: localTitle?.year ?? input.year,
-    externalIds: after,
+    externalIds: finalAfter,
     aliasSources,
     debug: {
       aliasLookupAttempted: true,
       aliasLookupSource,
-      aliasLookupFound: idsChanged(before, after),
+      aliasLookupFound: idsChanged(before, finalAfter),
       externalIdsBefore: before,
-      externalIdsAfter: after,
+      externalIdsAfter: finalAfter,
       aliasSources,
       aliasPersisted: persistResult.persisted,
-      aliasPersistReason: persistResult.reason,
+      aliasPersistReason: discoverySource ?? persistResult.reason,
     },
   };
 }

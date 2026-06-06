@@ -48,6 +48,16 @@ import type { TitleRecommendation } from "@/features/title/types";
 import { db } from "@/server/db/client";
 import { syntheticTmdbFromImdbId } from "@/lib/ids/synthetic-tmdb-id";
 import { upsertCachedTitleRow } from "@/server/repositories";
+import {
+  resolveCanonicalSeriesMeta,
+  type SeriesCanonicalMeta,
+} from "@/server/source-engine/series-canonical-engine";
+import {
+  resolveSeriesSeasonList,
+  buildSeasonStubsFromCount,
+} from "@/server/source-engine/series-season-list-resolver";
+import { persistSeriesCanonicalMeta } from "@/server/source-engine/persist-series-canonical";
+import { hydrateSeriesEpisodesFromSources } from "@/server/source-engine/series-episode-hydrator";
 
 type MediaType = "movie" | "tv";
 
@@ -266,13 +276,33 @@ function buildMetadataFromDetails(input: MetadataInput): TitleMetadataBlock | nu
   };
 }
 
-function buildSeasonStubs(numberOfSeasons: number): TitleSeasonInfo[] {
-  return Array.from({ length: numberOfSeasons }, (_, i) => ({
-    seasonNumber: i + 1,
-    name: null,
-    airDate: null,
-    episodeCount: null,
-  }));
+function mergeSeasonSummariesWithCount(
+  seasons: TitleSeasonInfo[],
+  numberOfSeasons: number | null | undefined,
+): TitleSeasonInfo[] {
+  const byNumber = new Map<number, TitleSeasonInfo>();
+
+  for (const season of seasons) {
+    if (season.seasonNumber <= 0) continue;
+    byNumber.set(season.seasonNumber, season);
+  }
+
+  const total = Number.isFinite(numberOfSeasons)
+    ? Math.max(0, Math.floor(numberOfSeasons ?? 0))
+    : 0;
+
+  for (let seasonNumber = 1; seasonNumber <= total; seasonNumber += 1) {
+    if (!byNumber.has(seasonNumber)) {
+      byNumber.set(seasonNumber, {
+        seasonNumber,
+        name: null,
+        airDate: null,
+        episodeCount: null,
+      });
+    }
+  }
+
+  return Array.from(byNumber.values()).sort((a, b) => a.seasonNumber - b.seasonNumber);
 }
 
 export type GetTitlePageDataOptions = {
@@ -284,11 +314,91 @@ export type GetTitlePageDataOptions = {
   debugSource?: boolean;
 };
 
+/**
+ * Mescla metadados ricos da SeriesCanonicalMeta no TitlePageData base.
+ *
+ * Regras:
+ *   - Campos do base têm precedência quando não-nulos (evita regressões)
+ *   - Campos novos (tagline, trailer, homepage, logo, networks, etc.)
+ *     são preenchidos pela engine canônica quando o base está vazio
+ *   - Metadados operacionais (companies, availableTranslations, airedEpisodes)
+ *     são sempre incluídos via metadata block
+ */
+function buildSeriesEnrichment(
+  base: TitlePageData,
+  canonical: SeriesCanonicalMeta,
+): Partial<TitlePageData> {
+  const enrichment: Partial<TitlePageData> = {};
+
+  // Campos textuais — canonical preenche quando base está vazio
+  if (!base.tagline && canonical.tagline) enrichment.tagline = canonical.tagline;
+  if (!base.overview && canonical.overview) enrichment.overview = canonical.overview;
+  if (!base.status && canonical.status) enrichment.status = canonical.status;
+  if (!base.posterUrl && canonical.poster) enrichment.posterUrl = canonical.poster;
+  if (!base.backdropUrl && canonical.backdrop) enrichment.backdropUrl = canonical.backdrop;
+  if (!base.lastAirDate && canonical.lastAirDate) enrichment.lastAirDate = canonical.lastAirDate;
+  if (!base.numberOfSeasons && canonical.numberOfSeasons) enrichment.numberOfSeasons = canonical.numberOfSeasons;
+  if (!base.numberOfEpisodes && canonical.numberOfEpisodes) enrichment.numberOfEpisodes = canonical.numberOfEpisodes;
+  if (!base.genres?.length && canonical.genres.length > 0) enrichment.genres = canonical.genres;
+
+  // Trailer: enriquecer se o base não tem trailer
+  if (!base.trailer && canonical.trailerUrl) {
+    enrichment.trailer = {
+      key: canonical.trailerUrl,
+      name: "Trailer",
+      url: canonical.trailerUrl,
+      embedUrl: canonical.trailerUrl.includes("youtube") ? toEmbedUrl(canonical.trailerUrl) : canonical.trailerUrl,
+      thumbnailUrl: null,
+    };
+  }
+
+  // Metadados complementares (metadata block)
+  const existingMeta = base.metadata ?? {};
+  const canonicalNetworks = canonical.networks.length > 0
+    ? canonical.networks.map((n) => ({ id: 0 as number, name: n }))
+    : (canonical.network ? [{ id: 0 as number, name: canonical.network }] : undefined);
+
+  const canonicalCompanies = canonical.companies.length > 0
+    ? canonical.companies.map((c) => ({ id: 0 as number, name: c }))
+    : undefined;
+
+  const enrichedMeta: TitleMetadataBlock = {
+    ...existingMeta,
+    homepage: existingMeta.homepage ?? canonical.homepage ?? null,
+    ...(canonicalNetworks?.length && !existingMeta.networks?.length
+      ? { networks: canonicalNetworks }
+      : {}),
+    ...(canonicalCompanies?.length && !existingMeta.productionCompanies?.length
+      ? { productionCompanies: canonicalCompanies }
+      : {}),
+  };
+
+  // Só substituir metadata se tivermos algo novo para adicionar
+  const hasNewMeta =
+    Boolean(enrichedMeta.homepage && !existingMeta.homepage) ||
+    Boolean(enrichedMeta.networks?.length && !existingMeta.networks?.length) ||
+    Boolean(enrichedMeta.productionCompanies?.length && !existingMeta.productionCompanies?.length);
+
+  if (hasNewMeta || Object.keys(existingMeta).length > 0) {
+    enrichment.metadata = enrichedMeta;
+  }
+
+  // airedEpisodes para cálculo correto de progresso
+  if (canonical.airedEpisodes != null) {
+    // Injetado via userSeriesProgress se existir, mas também via base para
+    // que o componente de progresso tenha o denominador correto
+    enrichment.numberOfEpisodes = enrichment.numberOfEpisodes ?? canonical.numberOfEpisodes ?? base.numberOfEpisodes;
+  }
+
+  return enrichment;
+}
+
 function toEmbedUrl(url: string): string {
   if (!url) return url;
   // youtube.com/watch?v=ID → youtube.com/embed/ID
   const watchMatch = url.match(/(?:youtube\.com\/watch\?v=|youtu\.be\/)([A-Za-z0-9_-]{11})/);
   if (watchMatch) return `https://www.youtube.com/embed/${watchMatch[1]}`;
+
   return url;
 }
 
@@ -328,7 +438,7 @@ function poplogDetailsToTitlePageData(
     mediaType: details.mediaType,
     title: details.title,
     originalTitle: details.originalTitle ?? null,
-    tagline: null,
+    tagline: details.tagline ?? null,
     year: details.year ?? null,
     releaseDate: details.mediaType === "movie" ? details.releaseDate ?? null : null,
     firstAirDate: details.mediaType === "tv" ? details.releaseDate ?? null : null,
@@ -473,43 +583,126 @@ export async function getTitlePageData(
 
       if (poplogDetails && poplogDetails.sourceMeta.primarySource !== "legacy") {
         const base = poplogDetailsToTitlePageData(poplogDetails, country);
+        const resolvedMediaType = base.mediaType;
+        if (resolvedMediaType !== mediaType) {
+          console.log(
+            `[SERIES-DIAG] title page media resolved | requested=${mediaType} resolved=${resolvedMediaType} id=${requestedId} imdb=${base.externalIds?.imdbId ?? "-"} poplog=${base.poplogId ?? "-"}`,
+          );
+        }
 
         const tmdbId = poplogDetails.externalIds.tmdbId;
         const imdbId = poplogDetails.externalIds.imdbId;
-        const catalogMediaType = mediaType === "tv" ? "show" : "movie";
+        const catalogMediaType = resolvedMediaType === "tv" ? "show" : "movie";
 
-        const [currentUser, providers, relatedRaw] = await Promise.all([
+        const tvdbId = poplogDetails.externalIds.tvdbId;
+        const traktId = poplogDetails.externalIds.traktId;
+
+        const [currentUser, providers, relatedRaw, seriesCanonical] = await Promise.all([
           getCurrentUser().catch(() => null),
-          getProvidersFromCache(mediaType, tmdbId, imdbId, country),
+          getProvidersFromCache(resolvedMediaType, tmdbId, imdbId, country),
           imdbId
             ? catalogGetRelated({ mediaType: catalogMediaType, imdbId }).catch(() => [])
             : Promise.resolve([]),
+          // Para séries TV: buscar metadados canônicos de todas as fontes em paralelo
+          resolvedMediaType === "tv" && (imdbId || tvdbId || traktId)
+            ? resolveCanonicalSeriesMeta({
+                imdbId: imdbId ?? null,
+                tvdbId: tvdbId ?? null,
+                traktId: traktId ?? null,
+                tmdbId: tmdbId ?? null,
+              }).catch((err) => {
+                console.warn("[getTitlePageData] resolveCanonicalSeriesMeta erro:", (err as Error)?.message);
+                return null as SeriesCanonicalMeta | null;
+              })
+            : Promise.resolve(null as SeriesCanonicalMeta | null),
         ]);
 
         const isAuthenticated = Boolean(currentUser?.id);
 
-        // Seasons: DB stubs (tmdbId) → count stubs (numberOfSeasons) → empty
+        // Computed once — used for user state, community ratings, AND season DB lookup.
+        // Includes synthetic negative ID for IMDb-only shows without a real TMDB mapping.
+        const ratingKeyId =
+          tmdbId ?? (imdbId ? syntheticTmdbFromImdbId(imdbId) : null);
+
+        // Seasons: DB summaries + count stubs. A partial season cache (only T01,
+        // for example) must not hide known later seasons from the UI.
+        // Use ratingKeyId so that seasons cached under the synthetic key are found.
         let seasons: TitleSeasonInfo[] = [];
-        if (mediaType === "tv") {
-          if (tmdbId) {
-            seasons = await getSeasonSummariesFromDb(tmdbId);
+        if (resolvedMediaType === "tv") {
+          let hadSeasonCache = false;
+          if (ratingKeyId) {
+            seasons = await getSeasonSummariesFromDb(ratingKeyId);
+            hadSeasonCache = seasons.length > 0;
           }
-          if (seasons.length === 0 && (base.numberOfSeasons ?? 0) > 0) {
-            seasons = buildSeasonStubs(base.numberOfSeasons!);
+
+          // Número de temporadas: priorizar resultado canônico (TVDB > Trakt > Balloonerismm)
+          const canonicalSeasonCount = seriesCanonical?.numberOfSeasons ?? null;
+          const effectiveSeasonCount = canonicalSeasonCount ?? base.numberOfSeasons;
+
+          seasons = mergeSeasonSummariesWithCount(seasons, effectiveSeasonCount);
+
+          // Se o DB está vazio E não temos contagem, buscar lista live de TVDB/Trakt
+          if (seasons.length === 0 && (tvdbId || imdbId)) {
+            const liveSeasonsResult = await resolveSeriesSeasonList({
+              tvdbId: tvdbId ?? null,
+              imdbId: imdbId ?? null,
+            }).catch(() => []);
+
+            if (liveSeasonsResult.length > 0) {
+              seasons = liveSeasonsResult.map((s) => ({
+                seasonNumber: s.seasonNumber,
+                name: s.name ?? null,
+                airDate: s.airDate ?? null,
+                episodeCount: s.episodeCount ?? null,
+                posterUrl: s.posterUrl ?? null,
+              }));
+            } else if (effectiveSeasonCount && effectiveSeasonCount > 0) {
+              // Fallback final: stubs a partir da contagem
+              seasons = buildSeasonStubsFromCount(effectiveSeasonCount).map((s) => ({
+                seasonNumber: s.seasonNumber,
+                name: null,
+                airDate: null,
+                episodeCount: null,
+                posterUrl: null,
+              }));
+            }
+          }
+
+          // Se a página conseguiu resolver IDs mas o cache local ainda está vazio,
+          // hidrata e persiste temporadas/episódios agora. Assim progresso, agenda e
+          // "próximo episódio" não dependem do usuário abrir uma temporada manualmente.
+          if (!hadSeasonCache && ratingKeyId && (imdbId || tvdbId || base.title)) {
+            const hydrated = await hydrateSeriesEpisodesFromSources({
+              seriesTmdbId: ratingKeyId,
+              imdbId: imdbId ?? null,
+              tvdbId: tvdbId ?? null,
+              traktId: traktId ?? null,
+              title: base.title,
+              year: typeof base.year === "number" ? base.year : null,
+              numberOfSeasons: effectiveSeasonCount ?? null,
+            }).catch((err) => {
+              console.warn("[getTitlePageData] hydrateSeriesEpisodesFromSources erro:", (err as Error)?.message);
+              return null;
+            });
+
+            if (hydrated?.seasonsSaved) {
+              const persistedSeasons = await getSeasonSummariesFromDb(ratingKeyId);
+              seasons = mergeSeasonSummariesWithCount(persistedSeasons, effectiveSeasonCount);
+            }
           }
         }
 
-        // User state: usar tmdbId real ou sintético (imdbId-based) para lookup.
-        // Títulos IMDb-first sem mapeamento TMDB usam o ID sintético negativo.
-        const ratingKeyId =
-          tmdbId ?? (imdbId ? syntheticTmdbFromImdbId(imdbId) : null);
+        // Persistir metadados ricos da engine canônica — fire-and-forget
+        if (resolvedMediaType === "tv" && seriesCanonical && ratingKeyId) {
+          void persistSeriesCanonicalMeta(ratingKeyId, resolvedMediaType, seriesCanonical).catch(() => {});
+        }
 
         let userState = { ...base.userState, isAuthenticated };
         let userSeriesProgress = base.userSeriesProgress ?? null;
         if (isAuthenticated && currentUser && ratingKeyId) {
           const [titleState, userRating] = await Promise.all([
-            readTitleState(currentUser.id, ratingKeyId, mediaType).catch(() => null),
-            getUserRating(currentUser.id, mediaType as "movie" | "tv", ratingKeyId).catch(() => null),
+            readTitleState(currentUser.id, ratingKeyId, resolvedMediaType).catch(() => null),
+            getUserRating(currentUser.id, resolvedMediaType as "movie" | "tv", ratingKeyId).catch(() => null),
           ]);
           if (titleState) {
             userState = {
@@ -523,7 +716,7 @@ export async function getTitlePageData(
               computedState: titleState.computed_state ?? null,
               userRating: userRating ?? null,
             };
-            if (mediaType === "tv" && titleState.watched_episodes != null) {
+            if (resolvedMediaType === "tv" && titleState.watched_episodes != null) {
               userSeriesProgress = {
                 watchedCount: titleState.watched_episodes,
                 totalEpisodes: titleState.total_episodes ?? null,
@@ -539,18 +732,23 @@ export async function getTitlePageData(
               };
             }
           }
+
+          if (resolvedMediaType === "tv" && !userSeriesProgress) {
+            userSeriesProgress = await computeUserSeriesProgress(currentUser.id, ratingKeyId)
+              .catch(() => null);
+          }
         }
 
         // Community rating + OMDb ratings (cache-first; external refresh quando OMDB_API_KEY disponível)
         // ratingKeyId já declarado acima (tmdbId real ou sintético negativo).
         const [communityRating, cachedExternalRatings] = await Promise.all([
           ratingKeyId
-            ? getPublicRating(mediaType as "movie" | "tv", ratingKeyId).catch(() => null)
+            ? getPublicRating(resolvedMediaType as "movie" | "tv", ratingKeyId).catch(() => null)
             : Promise.resolve(null),
           ratingKeyId && imdbId
             ? syncOmdbRatings({
                 tmdbId: ratingKeyId,
-                mediaType: mediaType as "movie" | "tv",
+                mediaType: resolvedMediaType as "movie" | "tv",
                 imdbId,
                 tmdbRating: base.voteAverage ?? null,
                 allowExternalRefresh: Boolean(process.env.OMDB_API_KEY),
@@ -587,7 +785,7 @@ export async function getTitlePageData(
         if (!tmdbId && ratingKeyId) {
           void upsertCachedTitleRow({
             tmdbId: ratingKeyId,
-            mediaType,
+            mediaType: resolvedMediaType,
             title: base.title ?? null,
             originalTitle: base.originalTitle ?? null,
             overview: base.overview ?? null,
@@ -605,8 +803,14 @@ export async function getTitlePageData(
           }).catch(() => {});
         }
 
+        // Mesclar metadados ricos da engine canônica de séries no resultado final
+        const seriesEnrichment = resolvedMediaType === "tv" && seriesCanonical
+          ? buildSeriesEnrichment(base, seriesCanonical)
+          : {};
+
         return {
           ...base,
+          ...seriesEnrichment,
           providers,
           seasons,
           userState,
@@ -640,6 +844,7 @@ export async function getTitlePageData(
     } catch (error) {
       console.error("[getTitlePageData] erro:", error);
       return null;
+
     }
   });
 }

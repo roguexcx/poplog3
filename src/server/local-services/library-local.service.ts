@@ -1,6 +1,7 @@
 import {
   createUserEvent,
   deleteUserTitleState,
+  getExternalIdsCache,
   getCachedTitleRow,
   getUserLibraryItems,
   getUserTitle,
@@ -22,6 +23,16 @@ import {
 } from "@/lib/ids/synthetic-tmdb-id";
 
 export type Poplog3UserLibraryItem = Poplog3UserTitle & {
+  poplogId?: string | number | null;
+  externalIds?: {
+    tmdbId?: number;
+    imdbId?: string;
+    tvdbId?: number;
+    traktId?: number | string;
+    balloonerismmId?: string;
+  };
+  identityUsed?: string;
+  linkIdUsed?: string | number;
   computed_state?: string | null;
   watched_episodes?: number;
   aired_episodes?: number;
@@ -170,9 +181,24 @@ async function enrichLibraryItem(row: UserTitle): Promise<Poplog3UserLibraryItem
     }
   }
 
+  const externalRow = await getExternalIdsCache(row.mediaType, row.tmdbId);
+  const tvdbId = externalRow?.tvdbId ? Number(externalRow.tvdbId) : undefined;
+  const externalImdbId = externalRow?.imdbId ?? imdbId ?? undefined;
+  const externalIds = {
+    tmdbId: row.tmdbId,
+    ...(externalImdbId ? { imdbId: externalImdbId, balloonerismmId: externalImdbId } : {}),
+    ...(Number.isFinite(tvdbId) ? { tvdbId } : {}),
+    ...(externalRow?.traktId ? { traktId: externalRow.traktId } : {}),
+  };
+  const linkIdUsed = titleRow?.id ?? externalImdbId ?? row.tmdbId;
+
   return {
     ...base,
-    imdb_id: imdbId,
+    poplogId: titleRow?.id ?? null,
+    externalIds,
+    identityUsed: titleRow?.id ? "poplog_id" : externalImdbId ? "imdb_id" : "tmdb_id_alias",
+    linkIdUsed,
+    imdb_id: externalImdbId ?? null,
     title: titleRow ? titleRowToLibraryTitle(titleRow) : null,
   };
 }

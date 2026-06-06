@@ -14,6 +14,7 @@ import { db } from "@/server/db/client";
 import type { UserEpisode } from "@prisma/client";
 import type { EpisodeKey, UserSeriesProgress } from "@/server/repositories/episode-progress.repository";
 import type { Poplog3LibraryStatus } from "@/server/library/types";
+import { hydrateSeriesEpisodesFromSources } from "@/server/source-engine/series-episode-hydrator";
 
 export type { EpisodeKey, UserSeriesProgress };
 
@@ -344,7 +345,10 @@ export async function getUserWatchingSeries(
     return {
       seriesTmdbId: seriesId,
       watchedCount: watchedValid.length,
-      totalEpisodes: catalog.filter((episode) => episode.airDate !== null).length || null,
+      totalEpisodes:
+        title?.numberOfEpisodes && title.numberOfEpisodes > 0
+          ? Math.max(title.numberOfEpisodes, catalog.filter((episode) => episode.airDate !== null).length)
+          : catalog.filter((episode) => episode.airDate !== null).length || null,
       airedEpisodes: aired.length,
       lastWatchedAt,
       watchedKeys: watchedValid.map((row) => episodeKey(row.seasonNumber, row.episodeNumber)),
@@ -395,13 +399,24 @@ export async function markAllAiredEpisodes(
   seriesTmdbId: number,
 ): Promise<UserSeriesProgress> {
   const now = Date.now();
-  const episodes = await db.poplog3Episode.findMany({
+  let episodes = await db.poplog3Episode.findMany({
     where: {
       seriesTmdbId,
       seasonNumber: { gt: 0 },
     },
     orderBy: [{ seasonNumber: "asc" }, { episodeNumber: "asc" }],
   });
+
+  // Auto-hidratação: se DB está vazio, buscar de TVDB/Trakt/Balloonerismm
+  if (episodes.length === 0) {
+    const hydrated = await hydrateSeriesEpisodesFromSources({ seriesTmdbId });
+    if (hydrated.episodesSaved > 0) {
+      episodes = await db.poplog3Episode.findMany({
+        where: { seriesTmdbId, seasonNumber: { gt: 0 } },
+        orderBy: [{ seasonNumber: "asc" }, { episodeNumber: "asc" }],
+      });
+    }
+  }
 
   return bulkMarkEpisodesWatched({
     userId,

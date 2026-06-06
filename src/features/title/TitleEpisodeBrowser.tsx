@@ -204,8 +204,8 @@ export default function TitleEpisodeBrowser({
   useEffect(() => {
     if (selected === null) return;
 
-    // Validação defensiva: aceita string (imdbId/slug) ou número positivo
-    if (typeof seriesTmdbId === "number" && (!Number.isFinite(seriesTmdbId) || seriesTmdbId <= 0)) {
+    // Validação defensiva: aceita string (imdbId/slug), número positivo ou negativo sintético
+    if (typeof seriesTmdbId === "number" && (!Number.isFinite(seriesTmdbId) || seriesTmdbId === 0)) {
       console.error("[TitleEpisodeBrowser] Invalid seriesTmdbId", {
         seriesTmdbId,
         type: typeof seriesTmdbId,

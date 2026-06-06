@@ -279,12 +279,28 @@ export type BalloonerismGenreList = {
 };
 
 export type BalloonerismSeasonEpisode = {
+  id?: string | number | null;
+  imdb_id?: string | null;
+  tmdb_id?: number | null;
+  tvdb_id?: number | null;
+  trakt_id?: number | null;
   episode_number: number;
+  season_number?: number | null;
+  absolute_number?: number | null;
   name?: string | null;
+  original_name?: string | null;
   overview?: string | null;
+  original_overview?: string | null;
   air_date?: string | null;
   runtime?: number | null;
   still_path?: string | null;
+  image?: string | null;
+  thumbnail?: string | null;
+  screenshot?: string | null;
+  backdrop_path?: string | null;
+  still_width?: number | null;
+  still_height?: number | null;
+  language?: string | null;
   vote_average?: number | null;
   vote_count?: number | null;
   episode_type?: string | null;

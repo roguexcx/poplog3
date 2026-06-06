@@ -2,7 +2,9 @@
 
 import { useCallback } from "react";
 
+import { useOptionalUserData } from "@/context/UserDataContext";
 import { notifyUserTitlesUpdated, useTitleToggle } from "@/hooks/useTitleToggle";
+import { findUserTitleByIdentity } from "@/lib/user-title-identity";
 import { isTitleInWatchlist, toggleWatchlist } from "@/lib/user-title-service";
 import type { MediaType } from "@/lib/user-title-service";
 
@@ -25,6 +27,10 @@ export function useWatchlistToggle({
   title,
   releaseYear,
 }: Input) {
+  const userData = useOptionalUserData();
+  const globalTitle = userData
+    ? findUserTitleByIdentity(userData.titles, { tmdbId, poplogId, imdbId, slug, mediaType })
+    : undefined;
   const {
     state: inWatchlist,
     loading,
@@ -39,6 +45,12 @@ export function useWatchlistToggle({
         toggleWatchlist({ userId, tmdbId, poplogId, imdbId, slug, mediaType, title, releaseYear }),
     },
     [tmdbId, poplogId, imdbId, slug, mediaType],
+    userData
+      ? {
+          state: globalTitle ? globalTitle.status === "watchlist" : false,
+          loading: userData.loading,
+        }
+      : undefined,
   );
 
   const toggleAndNotify = useCallback(async () => {

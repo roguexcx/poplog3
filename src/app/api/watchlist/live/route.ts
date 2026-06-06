@@ -19,8 +19,12 @@ type MediaType = "movie" | "tv";
 
 type WatchlistRow = {
   id: string;
+  poplogId?: string | number | null;
   tmdb_id: number;
   media_type: MediaType;
+  externalIds?: TitleIdentityFields["externalIds"];
+  imdb_id?: string | null;
+  slug?: string | null;
   title: string | null;
   release_year: number | null;
   created_at: string;
@@ -30,8 +34,12 @@ type WatchlistRow = {
 };
 
 type TitleRow = {
+  poplogId?: string | number | null;
   tmdb_id: number;
   media_type: MediaType;
+  externalIds?: TitleIdentityFields["externalIds"];
+  identityUsed?: string;
+  linkIdUsed?: string | number;
   title: string | null;
   original_title: string | null;
   poster_path: string | null;
@@ -54,8 +62,12 @@ type AvailabilityRow = {
 
 type EnrichedTitle = {
   id: string;
+  poplogId?: string | number | null;
   tmdb_id: number;
   media_type: MediaType;
+  externalIds?: TitleIdentityFields["externalIds"];
+  identityUsed?: string;
+  linkIdUsed?: string | number;
   title: string;
   original_title_label: string | null;
   poster_path: string | null;
@@ -74,6 +86,17 @@ type EnrichedTitle = {
   context_pool: string[];
   fridge: boolean;
   stream_status_updated: boolean;
+};
+
+type TitleIdentityFields = {
+  externalIds?: {
+    tmdbId?: number;
+    imdbId?: string;
+    tvdbId?: string;
+    traktId?: string;
+    balloonerismmId?: string;
+    slug?: string;
+  };
 };
 
 type WatchlistLiveCachePayload = {
@@ -172,10 +195,42 @@ function numericJsonArray(value: unknown): number[] | null {
   return Array.isArray(value) ? value.filter((item): item is number => typeof item === "number") : null;
 }
 
-function mapTitleRow(row: Awaited<ReturnType<typeof db.poplog3Title.findMany>>[number]): TitleRow {
+function externalKey(mediaType: string, tmdbId: number) {
+  return `${mediaType}:${tmdbId}`;
+}
+
+function mapExternalIds(row: {
+  tmdbId: number;
+  imdbId: string | null;
+  tvdbId: string | null;
+  traktId: string | null;
+} | null): TitleIdentityFields["externalIds"] {
+  if (!row) return undefined;
   return {
+    tmdbId: row.tmdbId,
+    ...(row.imdbId ? { imdbId: row.imdbId, balloonerismmId: row.imdbId } : {}),
+    ...(row.tvdbId ? { tvdbId: row.tvdbId } : {}),
+    ...(row.traktId ? { traktId: row.traktId } : {}),
+  };
+}
+
+function mapTitleRow(
+  row: Awaited<ReturnType<typeof db.poplog3Title.findMany>>[number],
+  external?: {
+    tmdbId: number;
+    imdbId: string | null;
+    tvdbId: string | null;
+    traktId: string | null;
+  } | null,
+): TitleRow {
+  const externalIds = mapExternalIds(external ?? null);
+  return {
+    poplogId: row.id,
     tmdb_id: row.tmdbId,
     media_type: row.mediaType,
+    externalIds,
+    identityUsed: external?.imdbId ? "imdb_id" : "poplog_id",
+    linkIdUsed: external?.imdbId ?? row.id,
     title: row.title,
     original_title: row.originalTitle,
     poster_path: row.posterPath,
@@ -311,9 +366,19 @@ export async function POST(request: Request) {
     const ids = Array.from(new Set(rows.map((row) => row.tmdb_id)));
     const [titlesResult, availabilityResult] = await withTimeout(
       (async (): Promise<[TitleRow[], AvailabilityRow[]]> => {
-        const [titleRows, availabilityRows] = await Promise.all([
+        const [titleRows, externalRows, availabilityRows] = await Promise.all([
           db.poplog3Title.findMany({
             where: { tmdbId: { in: ids } },
+          }),
+          db.titleExternalId.findMany({
+            where: { tmdbId: { in: ids } },
+            select: {
+              tmdbId: true,
+              mediaType: true,
+              imdbId: true,
+              tvdbId: true,
+              traktId: true,
+            },
           }),
           db.catalogAvailability.findMany({
             where: {
@@ -323,7 +388,15 @@ export async function POST(request: Request) {
             },
           }),
         ]);
-        return [titleRows.map(mapTitleRow), availabilityRows.map(mapAvailabilityRow).filter((row): row is AvailabilityRow => row !== null)];
+        const externalByKey = new Map(
+          externalRows.map((row) => [externalKey(row.mediaType, row.tmdbId), row]),
+        );
+        return [
+          titleRows.map((row) =>
+            mapTitleRow(row, externalByKey.get(externalKey(row.mediaType, row.tmdbId))),
+          ),
+          availabilityRows.map(mapAvailabilityRow).filter((row): row is AvailabilityRow => row !== null),
+        ];
       })(),
       TABLE_READ_TIMEOUT_MS,
       [[], []],
@@ -388,8 +461,18 @@ export async function POST(request: Request) {
 
         return {
           id: row.id,
+          poplogId: row.poplogId ?? details.poplogId ?? null,
           tmdb_id: row.tmdb_id,
           media_type: row.media_type,
+          externalIds: {
+            ...(details.externalIds ?? {}),
+            ...(row.externalIds ?? {}),
+            tmdbId: row.tmdb_id,
+            ...(row.imdb_id ? { imdbId: row.imdb_id, balloonerismmId: row.imdb_id } : {}),
+            ...(row.slug ? { slug: row.slug } : {}),
+          },
+          identityUsed: row.externalIds?.imdbId ?? row.imdb_id ? "imdb_id" : details.identityUsed,
+          linkIdUsed: row.externalIds?.imdbId ?? row.imdb_id ?? row.poplogId ?? details.linkIdUsed,
           title,
           original_title_label: details.original_title ?? null,
           poster_path: details.poster_path ?? null,

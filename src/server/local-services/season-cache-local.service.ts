@@ -7,6 +7,14 @@ import {
 } from "@/server/repositories";
 import type { PoplogEpisode, PoplogSeason } from "@/server/types/season";
 
+export type EpisodeExternalIds = {
+  imdb?: string | null;
+  tvdb?: number | string | null;
+  trakt?: number | string | null;
+  tmdb?: number | string | null;
+  plex?: { guid?: string | null } | null;
+};
+
 export type UpsertSeasonInput = {
   seriesTmdbId: number;
   seasonNumber: number;
@@ -24,12 +32,27 @@ export type UpsertSeasonInput = {
     name: string | null;
     overview: string | null;
     stillPath: string | null;
+    stillUrl?: string | null;
+    stillSource?: string | null;
+    stillWidth?: number | null;
+    stillHeight?: number | null;
+    stillLanguage?: string | null;
     airDate: string | null;
     runtime: number | null;
     voteAverage: number | null;
     voteCount: number | null;
     productionCode: string | null;
     episodeType: string | null;
+    absoluteNumber?: number | null;
+    titleLanguage?: string | null;
+    overviewLanguage?: string | null;
+    originalTitle?: string | null;
+    originalOverview?: string | null;
+    sourcePriority?: unknown;
+    imageCandidates?: unknown;
+    textCandidates?: unknown;
+    /** IDs externos: imdb, tvdb, trakt, tmdb, plex. Persistido como JSON. */
+    externalIds?: EpisodeExternalIds | null;
   }>;
 };
 
@@ -47,12 +70,24 @@ function episodeToLegacy(row: Awaited<ReturnType<typeof getCachedEpisodeRow>>): 
     name: row.name,
     overview: row.overview,
     still_path: row.stillPath,
+    still_url: row.stillUrl,
+    still_source: row.stillSource,
+    still_width: row.stillWidth,
+    still_height: row.stillHeight,
+    still_language: row.stillLanguage,
     air_date: dateToString(row.airDate),
     runtime: row.runtime,
     vote_average: row.voteAverage === null ? null : Number(row.voteAverage),
     vote_count: row.voteCount,
     production_code: row.productionCode,
     episode_type: row.episodeType,
+    absolute_number: row.absoluteNumber,
+    title_language: row.titleLanguage,
+    overview_language: row.overviewLanguage,
+    original_title: row.originalTitle,
+    original_overview: row.originalOverview,
+    image_candidates_json: row.imageCandidatesJson,
+    text_candidates_json: row.textCandidatesJson,
   } as PoplogEpisode;
 }
 
@@ -70,7 +105,7 @@ export async function getCachedEpisode(
   if (!row) return null;
   return {
     name: row.name,
-    still_path: row.stillPath,
+    still_path: row.stillUrl ?? row.stillPath,
     air_date: dateToString(row.airDate),
     runtime: row.runtime,
   };

@@ -21,6 +21,22 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "m.media-amazon.com",
       },
+      {
+        protocol: "https",
+        hostname: "media.trakt.tv",
+      },
+      {
+        protocol: "https",
+        hostname: "artworks.thetvdb.com",
+      },
+      {
+        protocol: "https",
+        hostname: "api4.thetvdb.com",
+      },
+      {
+        protocol: "https",
+        hostname: "api.balloonerismm.workers.dev",
+      },
     ],
     // TMDB já entrega variantes pré-otimizadas (w185, w342, w500, original).
     // Não precisamos repassar pelo otimizador do next/image — economiza

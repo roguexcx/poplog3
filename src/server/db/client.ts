@@ -1,4 +1,5 @@
 import { PrismaClient } from "@prisma/client";
+import { isEnvFlagEnabled } from "@/server/logging/logger";
 
 const globalForPrisma = globalThis as unknown as {
   prisma?: PrismaClient;
@@ -7,7 +8,7 @@ const globalForPrisma = globalThis as unknown as {
 export const db =
   globalForPrisma.prisma ??
   new PrismaClient({
-    log: process.env.NODE_ENV === "development" ? ["query", "error", "warn"] : ["error"],
+    log: isEnvFlagEnabled("PRISMA_QUERY_LOGS") ? ["query", "error", "warn"] : ["error", "warn"],
   });
 
 if (process.env.NODE_ENV !== "production") {

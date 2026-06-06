@@ -554,15 +554,29 @@ model Poplog3Episode {
   name           String?   @db.VarChar(512)
   overview       String?   @db.Text
   stillPath      String?   @map("still_path") @db.VarChar(512)
+  stillUrl       String?   @map("still_url") @db.VarChar(1024)
+  stillSource    String?   @map("still_source") @db.VarChar(64)
+  stillWidth     Int?      @map("still_width")
+  stillHeight    Int?      @map("still_height")
+  stillLanguage  String?   @map("still_language") @db.VarChar(32)
   airDate        DateTime? @map("air_date") @db.Date
   runtime        Int?
   voteAverage    Decimal?  @map("vote_average") @db.Decimal(4, 2)
   voteCount      Int?      @map("vote_count")
   productionCode String?   @map("production_code") @db.VarChar(191)
-  episodeType    String?   @map("episode_type") @db.VarChar(64)
-  lastSyncedAt   DateTime? @map("last_synced_at")
-  createdAt      DateTime  @default(now()) @map("created_at")
-  updatedAt      DateTime  @updatedAt @map("updated_at")
+  episodeType     String?   @map("episode_type") @db.VarChar(64)
+  absoluteNumber  Int?      @map("absolute_number")
+  titleLanguage   String?   @map("title_language") @db.VarChar(32)
+  overviewLanguage String?  @map("overview_language") @db.VarChar(32)
+  originalTitle    String?  @map("original_title") @db.VarChar(512)
+  originalOverview String?  @map("original_overview") @db.Text
+  sourcePriority   Json?    @map("source_priority")
+  imageCandidatesJson Json? @map("image_candidates_json")
+  textCandidatesJson  Json? @map("text_candidates_json")
+  externalIdsJson Json?     @map("external_ids_json")
+  lastSyncedAt    DateTime? @map("last_synced_at")
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
 
   @@unique([seriesTmdbId, seasonNumber, episodeNumber])
   @@index([seriesTmdbId, airDate])
