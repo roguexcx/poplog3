@@ -29,6 +29,8 @@ type PosterCardProps = {
   bottomOverlay?: ReactNode;
   /** Slot fora do poster, abaixo do título */
   footer?: ReactNode;
+  /** Slot direto no container da imagem — renderiza sem wrapper; use para badges com position:absolute próprio */
+  directOverlay?: ReactNode;
   /** Loading priority pra Next.js Image */
   priority?: boolean;
   /** Aspect ratio. Default 2:3 (poster). */
@@ -67,6 +69,7 @@ export default function PosterCard({
   topRight,
   bottomOverlay,
   footer,
+  directOverlay,
   priority = false,
   aspectRatio = "2/3",
   accent = "indigo",
@@ -97,6 +100,8 @@ export default function PosterCard({
             className={`pointer-events-none absolute inset-0 opacity-0 transition duration-500 group-hover:opacity-100 ${ACCENT_GLOW[accent]}`}
             aria-hidden
           />
+
+          {directOverlay}
 
           {topLeft && (
             <div className="absolute left-3 top-3 z-10">{topLeft}</div>

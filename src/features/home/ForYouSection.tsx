@@ -1,15 +1,15 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import SynopsisText from "@/features/home/components/SynopsisText";
 import { ScrollRowArrows } from "@/components/ScrollRowArrows";
 import { CardActionButton } from "@/components/ui/CardActionButton";
 import { IconBookmark, IconCheck, IconStar, IconX } from "@/components/ui/icons";
-import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
-import { useWatchedToggle } from "@/hooks/useWatchedToggle";
+import { useUserAction } from "@/hooks/useUserAction";
 import { useUserFeedbackToggle } from "@/hooks/useUserFeedbackToggle";
+import { usePoplogUserState } from "@/stores/user-states-store";
 import { useScrollRow } from "@/hooks/useScrollRow";
 import { useUserData } from "@/context/UserDataContext";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
@@ -20,6 +20,8 @@ import SectionHeader from "@/components/ui/SectionHeader";
 
 type ForYouItem = {
   id: number;
+  /** CUID da tabela poplog3_titles quando encontrado no DB local */
+  poplogId?: string | null;
   /** ID canônico para o href do link — pode ser tmdbId numérico (string) ou imdbId ("tt...") */
   linkId?: string;
   title: string;
@@ -48,16 +50,30 @@ function parseReleaseYear(year?: string | null): number | null {
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
 
-function ForYouActions({ item }: { item: ForYouItem }) {
-  const shared = {
+function ForYouActions({ item, onDismiss }: { item: ForYouItem; onDismiss?: () => void }) {
+  const userData = useUserData();
+  const isLoggedIn = Boolean(userData && !userData.loading);
+
+  const { executeAction, effectiveKey } = useUserAction({
+    poplogId: item.poplogId,
     tmdbId: item.id,
     mediaType: item.mediaType,
     title: item.title,
     releaseYear: parseReleaseYear(item.year),
-  };
+  });
 
-  const watchlist = useWatchlistToggle(shared);
-  const watched = useWatchedToggle(shared);
+  const zustandState = usePoplogUserState(effectiveKey);
+  const inWatchlist = zustandState?.isInWatchlist ?? false;
+  const isWatched   = zustandState?.isWatched   ?? false;
+
+  const [saving, setSaving] = useState(false);
+
+  async function handleAction(action: "addToWatchlist" | "removeFromWatchlist" | "markAsWatched" | "markAsUnwatched") {
+    setSaving(true);
+    await executeAction(action);
+    setSaving(false);
+  }
+
   const feedback = useUserFeedbackToggle({
     tmdbId: item.id,
     mediaType: item.mediaType,
@@ -68,30 +84,33 @@ function ForYouActions({ item }: { item: ForYouItem }) {
   return (
     <div className="absolute right-2.5 top-2.5 z-40 flex gap-1.5">
       <CardActionButton
-        onClick={watchlist.toggle}
-        disabled={watchlist.loading || !watchlist.isLoggedIn}
-        title={watchlist.inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
-        active={watchlist.inWatchlist}
-        saving={watchlist.saving}
+        onClick={() => handleAction(inWatchlist ? "removeFromWatchlist" : "addToWatchlist")}
+        disabled={!isLoggedIn || saving}
+        title={inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
+        active={inWatchlist}
+        saving={saving}
         activeClass="border-sky-400/55 bg-sky-400/[0.18] text-sky-300 shadow-[0_0_10px_rgba(56,189,248,0.25)]"
       >
-        <IconBookmark filled={watchlist.inWatchlist} />
+        <IconBookmark filled={inWatchlist} />
       </CardActionButton>
 
       <CardActionButton
-        onClick={watched.toggle}
-        disabled={watched.loading || !watched.isLoggedIn}
-        title={watched.isWatched ? "Desmarcar como assistido" : "Já vi"}
-        active={watched.isWatched}
-        saving={watched.saving}
+        onClick={() => handleAction(isWatched ? "markAsUnwatched" : "markAsWatched")}
+        disabled={!isLoggedIn || saving}
+        title={isWatched ? "Desmarcar como assistido" : "Já vi"}
+        active={isWatched}
+        saving={saving}
         activeClass="border-emerald-400/55 bg-emerald-400/[0.18] text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.25)]"
       >
         <IconCheck />
       </CardActionButton>
 
       <CardActionButton
-        onClick={feedback.toggleNotInterested}
-        disabled={feedback.loading || !feedback.isLoggedIn}
+        onClick={() => {
+          if (!feedback.notInterested) onDismiss?.();
+          feedback.toggleNotInterested();
+        }}
+        disabled={!isLoggedIn || feedback.saving}
         title={feedback.notInterested ? "Remover sem interesse" : "Não tenho interesse"}
         active={feedback.notInterested}
         saving={feedback.saving}
@@ -105,7 +124,7 @@ function ForYouActions({ item }: { item: ForYouItem }) {
 
 // ─── FeaturedCard ─────────────────────────────────────────────────────────────
 
-function FeaturedForYouCard({ item }: { item: ForYouItem }) {
+function FeaturedForYouCard({ item, onDismiss }: { item: ForYouItem; onDismiss?: () => void }) {
   const rating = formatRating(item.rating);
   const isLongTitle = item.title.length > 24;
   const isLongOverview = (item.overview?.length ?? 0) > 140;
@@ -115,7 +134,7 @@ function FeaturedForYouCard({ item }: { item: ForYouItem }) {
     <article className="group relative h-[320px] overflow-hidden rounded-[1.65rem] border border-white/10 bg-white/[0.04] shadow-[0_20px_80px_rgba(0,0,0,0.42)] transition duration-300 hover:-translate-y-1 hover:border-sky-300/40 hover:shadow-[0_24px_90px_rgba(56,189,248,0.16)]">
       <Link href={slug} className="absolute inset-0 z-[5]" aria-label={`Abrir ${item.title}`} />
 
-      <ForYouActions item={item} />
+      <ForYouActions item={item} onDismiss={onDismiss} />
 
       {item.backdropUrl && (
         <div className="absolute inset-0 overflow-hidden">
@@ -180,7 +199,7 @@ function FeaturedForYouCard({ item }: { item: ForYouItem }) {
 
 // ─── SmallCard ────────────────────────────────────────────────────────────────
 
-function SmallForYouCard({ item }: { item: ForYouItem }) {
+function SmallForYouCard({ item, onDismiss }: { item: ForYouItem; onDismiss?: () => void }) {
   // posterUrl and backdropUrl can be either TMDB relative paths ("/xxx.jpg")
   // or full CDN URLs ("https://...") — TmdbImage handles both via normalizeAbsoluteImageUrl
   const imagePath = item.posterUrl ?? item.backdropUrl ?? null;
@@ -195,7 +214,7 @@ function SmallForYouCard({ item }: { item: ForYouItem }) {
         aria-label={`Abrir ${item.title}`}
       />
 
-      <ForYouActions item={item} />
+      <ForYouActions item={item} onDismiss={onDismiss} />
 
       {imagePath && (
         <TmdbImage
@@ -257,9 +276,9 @@ function ForYouSkeleton() {
           <div key={index} className="h-[260px] w-[180px] shrink-0 animate-pulse rounded-[1.35rem] bg-white/5" />
         ))}
       </div>
-      <div className="hidden gap-5 lg:grid lg:grid-cols-[2.05fr_repeat(4,0.72fr)]">
+      <div className="hidden gap-5 lg:grid lg:grid-cols-[2.05fr_repeat(5,0.72fr)]">
         <div className="h-[320px] animate-pulse rounded-[1.65rem] bg-white/5" />
-        {Array.from({ length: 4 }).map((_, index) => (
+        {Array.from({ length: 5 }).map((_, index) => (
           <div key={index} className="h-[320px] animate-pulse rounded-[1.35rem] bg-white/5" />
         ))}
       </div>
@@ -269,11 +288,50 @@ function ForYouSkeleton() {
 
 // ─── Seção principal ──────────────────────────────────────────────────────────
 
+// Quantos slots mostrar no grid (1 featured + 5 small) e quantos buscar (buffer 2×)
+const DISPLAY_COUNT = 6;
+const FETCH_LIMIT   = 12;
+
 export default function ForYouSection() {
   const { titles, loading: titlesLoading } = useUserData();
   const [featured, setFeatured] = useState<ForYouItem | null>(null);
   const [items, setItems] = useState<ForYouItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [dismissedKeys, setDismissedKeys] = useState<Set<string>>(new Set());
+
+  // Conjuntos de exclusão: itens em qualquer estado da biblioteca são ocultados.
+  const { libraryKeys, libraryImdbIds } = useMemo(() => {
+    const keys    = new Set<string>();
+    const imdbIds = new Set<string>();
+    for (const t of titles) {
+      keys.add(`${t.tmdb_id}:${t.media_type}`);
+      const imdbId = (t as { imdb_id?: string | null }).imdb_id
+        ?? (t as { externalIds?: { imdbId?: string } }).externalIds?.imdbId;
+      if (imdbId) imdbIds.add(`${t.media_type}:${imdbId}`);
+    }
+    return { libraryKeys: keys, libraryImdbIds: imdbIds };
+  }, [titles]);
+
+  function dismissItem(id: number, mediaType: "movie" | "tv") {
+    setDismissedKeys((prev) => new Set([...prev, `${id}:${mediaType}`]));
+  }
+
+  // Pool visível: combina featured + items, filtra ocultos, limita a DISPLAY_COUNT.
+  // Quando um item é marcado/dispensado, o próximo do buffer preenche automaticamente.
+  const visiblePool = useMemo(() => {
+    const all: ForYouItem[] = featured ? [featured, ...items] : [...items];
+    return all.filter((item) => {
+      const tmdbKey = `${item.id}:${item.mediaType}`;
+      const imdbKey = item.linkId?.startsWith("tt") ? `${item.mediaType}:${item.linkId}` : null;
+      return !libraryKeys.has(tmdbKey)
+        && !(imdbKey !== null && libraryImdbIds.has(imdbKey))
+        && !dismissedKeys.has(tmdbKey);
+    }).slice(0, DISPLAY_COUNT);
+  }, [featured, items, libraryKeys, libraryImdbIds, dismissedKeys]);
+
+  const visibleFeatured = visiblePool[0] ?? null;
+  const visibleItems    = visiblePool.slice(1);
+
   const {
     ref: rowRef,
     canScrollLeft,
@@ -298,7 +356,7 @@ export default function ForYouSection() {
     fetch("/api/user/for-you", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ titles: titlesSnapshot, exclude }),
+      body: JSON.stringify({ titles: titlesSnapshot, exclude, limit: FETCH_LIMIT }),
     })
       .then((res) => (res.ok ? res.json() : null))
       .then((json) => {
@@ -339,7 +397,7 @@ export default function ForYouSection() {
     setRefreshCount((c) => c + 1);
   }
 
-  if (!loading && !featured && items.length === 0) return null;
+  if (!loading && visiblePool.length === 0) return null;
 
   return (
     <section>
@@ -391,22 +449,37 @@ export default function ForYouSection() {
       ) : (
         <>
           <div ref={rowRef} className="no-scrollbar -mx-6 flex gap-4 overflow-x-auto px-6 pb-2 lg:hidden">
-            {featured && (
+            {visibleFeatured && (
               <div className="w-[180px] shrink-0">
-                <SmallForYouCard item={featured} />
+                <SmallForYouCard item={visibleFeatured} onDismiss={() => dismissItem(visibleFeatured.id, visibleFeatured.mediaType)} />
               </div>
             )}
-            {items.map((item) => (
+            {visibleItems.map((item) => (
               <div key={`${item.mediaType}-${item.id}`} className="w-[180px] shrink-0">
-                <SmallForYouCard item={item} />
+                <SmallForYouCard item={item} onDismiss={() => dismissItem(item.id, item.mediaType)} />
               </div>
             ))}
           </div>
 
-          <div className="hidden gap-5 lg:grid lg:grid-cols-[2.05fr_repeat(4,0.72fr)]">
-            {featured && <FeaturedForYouCard item={featured} />}
-            {items.map((item) => (
-              <SmallForYouCard key={`${item.mediaType}-${item.id}`} item={item} />
+          <div
+            className="hidden gap-5 lg:grid"
+            style={visibleItems.length > 0
+              ? { gridTemplateColumns: `2.05fr repeat(${visibleItems.length}, 0.72fr)` }
+              : { gridTemplateColumns: "1fr" }
+            }
+          >
+            {visibleFeatured && (
+              <FeaturedForYouCard
+                item={visibleFeatured}
+                onDismiss={() => dismissItem(visibleFeatured.id, visibleFeatured.mediaType)}
+              />
+            )}
+            {visibleItems.map((item) => (
+              <SmallForYouCard
+                key={`${item.mediaType}-${item.id}`}
+                item={item}
+                onDismiss={() => dismissItem(item.id, item.mediaType)}
+              />
             ))}
           </div>
         </>

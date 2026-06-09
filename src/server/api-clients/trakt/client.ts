@@ -8,8 +8,7 @@
 import { logApiCall } from "@/server/engine-logger";
 import type { TraktFetchOptions, TraktRequestOptions } from "./types";
 
-export const TRAKT_BASE_URL =
-  process.env.TRAKT_API_BASE_URL ?? "https://api.trakt.tv";
+export const TRAKT_BASE_URL = "https://api.trakt.tv";
 
 export const TRAKT_USER_AGENT = "POPLOG/1.0.0";
 
@@ -18,6 +17,7 @@ const DEFAULT_TTL_SECONDS = 86_400;
 const DEFAULT_STALE_TTL_SECONDS = 604_800;
 const MIN_WRITE_INTERVAL_MS = 1_000;
 const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 60_000;
+const CONTROLLED_HTTP_STATUSES = new Set([401, 403, 404, 410, 412, 422, 429, 500, 502, 503, 504, 520, 521, 522]);
 
 type TraktMethod = NonNullable<TraktRequestOptions["method"]>;
 type CacheEntry = {
@@ -208,8 +208,17 @@ function getCooldown(path: string): CooldownEntry | null {
 function setCooldown(path: string, response: Response): CooldownEntry {
   const retryAfterSeconds = parseRetryAfter(response.headers.get("Retry-After"));
   const rateLimit = response.headers.get("X-Ratelimit");
+  const remaining = response.headers.get("X-Ratelimit-Remaining");
+  const reset = response.headers.get("X-Ratelimit-Reset");
+  const resetSeconds = reset && /^\d+$/.test(reset)
+    ? Math.max(0, Number(reset) - Math.floor(Date.now() / 1_000))
+    : null;
   const durationMs = Math.max(
-    retryAfterSeconds != null ? retryAfterSeconds * 1_000 : DEFAULT_RATE_LIMIT_COOLDOWN_MS,
+    retryAfterSeconds != null
+      ? retryAfterSeconds * 1_000
+      : resetSeconds != null && remaining === "0"
+        ? resetSeconds * 1_000
+        : DEFAULT_RATE_LIMIT_COOLDOWN_MS,
     1_000,
   );
   const entry = {
@@ -407,6 +416,27 @@ async function performTraktRequest<T>(
     }
 
     if (!response.ok) {
+      if (CONTROLLED_HTTP_STATUSES.has(response.status)) {
+        const retryable = response.status === 429 || response.status >= 500;
+        const cooldown = retryable ? setCooldown(path, response) : null;
+        const stale = method === "GET" ? readStaleCache<T>(key) : null;
+        logTraktLine(method, path, "controlled_error", response.status, {
+          cache: stale ? "stale" : "miss",
+          remaining,
+          retryAfter: cooldown?.retryAfterSeconds,
+          rateLimit: cooldown?.rateLimit,
+        });
+        logFailure(path, durationMs, response.status, `HTTP ${response.status}`, stale ? "stale" : "miss");
+        if (stale != null) return stale;
+        throw new TraktControlledError("http_error", `Trakt retornou HTTP ${response.status}.`, {
+          status: response.status,
+          retryAfterSeconds: cooldown?.retryAfterSeconds ?? null,
+          rateLimit: cooldown?.rateLimit ?? null,
+          cacheStatus: "miss",
+          logged: true,
+        });
+      }
+
       const stale = method === "GET" ? readStaleCache<T>(key) : null;
       logTraktLine(method, path, "failed", response.status, {
         cache: stale ? "stale" : "miss",

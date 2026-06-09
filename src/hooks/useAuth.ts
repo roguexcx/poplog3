@@ -1,15 +1,13 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { AuthUser } from "@/server/auth/types";
 
-type Session = {
-  user: AuthUser;
-} | null;
+type Session = { user: AuthUser } | null;
 
-type AuthState = {
+export type AuthState = {
   user: AuthUser | null;
-  session: Session | null;
+  session: Session;
   loading: boolean;
   isLoggedIn: boolean;
   authjsConfigured: boolean;
@@ -17,61 +15,78 @@ type AuthState = {
 };
 
 type CurrentResponse = {
-  user: AuthUser | null;
-  auth?: {
-    local?: boolean;
-    authjsConfigured?: boolean;
-  };
+  user?: AuthUser | null;
+  auth?: { local?: boolean; authjsConfigured?: boolean };
 };
 
+// ─── Module-level singleton ───────────────────────────────────────────────────
+// Shared across ALL useAuth() instances — one /api/auth/current call per page load.
+// Without this, each component (Sidebar, UserDataContext, HomeMemberSections, etc.)
+// would independently fetch auth, causing 7+ concurrent requests on every render.
+
+let _user: AuthUser | null = null;
+let _loading = true;
+let _authjsConfigured = false;
+let _fetchPromise: Promise<void> | null = null;
+const _subscribers = new Set<() => void>();
+
+function _notify() {
+  _subscribers.forEach((fn) => fn());
+}
+
+async function _fetchAuth() {
+  try {
+    const res = await fetch("/api/auth/current", { cache: "no-store" });
+    const json = (await res.json()) as CurrentResponse;
+    _user = json.user ?? null;
+    _authjsConfigured = json.auth?.authjsConfigured ?? false;
+  } catch {
+    _user = null;
+    _authjsConfigured = false;
+  } finally {
+    _loading = false;
+    _fetchPromise = null;
+    _notify();
+  }
+}
+
+// ─── Hook ─────────────────────────────────────────────────────────────────────
+
 export function useAuth(): AuthState {
-  const [state, setState] = useState<AuthState>({
-    user: null,
-    session: null,
-    loading: true,
-    isLoggedIn: false,
-    authjsConfigured: false,
-    refresh: async () => {},
-  });
+  const [, tick] = useState(0);
+  const rerender = useCallback(() => tick((n) => n + 1), []);
 
   useEffect(() => {
-    let cancelled = false;
+    _subscribers.add(rerender);
 
-    async function load() {
-      try {
-        const response = await fetch("/api/auth/current", { cache: "no-store" });
-        const json = (await response.json()) as CurrentResponse;
-        if (cancelled) return;
-        const user = json.user ?? null;
-        setState({
-          user,
-          session: user ? { user } : null,
-          loading: false,
-          isLoggedIn: !!user,
-          authjsConfigured: json.auth?.authjsConfigured ?? false,
-          refresh: load,
-        });
-      } catch {
-        if (!cancelled) {
-          setState((current) => ({
-            ...current,
-            user: null,
-            session: null,
-            loading: false,
-            isLoggedIn: false,
-            authjsConfigured: false,
-          }));
-        }
+    if (_loading) {
+      // Initiate fetch only once; subsequent mounts reuse the in-flight promise
+      if (!_fetchPromise) {
+        _fetchPromise = _fetchAuth();
       }
+    } else {
+      // Data already fetched before this component mounted — sync immediately
+      rerender();
     }
 
-    setState((current) => ({ ...current, refresh: load }));
-    void load();
-
     return () => {
-      cancelled = true;
+      _subscribers.delete(rerender);
     };
+  }, [rerender]);
+
+  const refresh = useCallback(async () => {
+    _loading = true;
+    _notify();
+    _fetchPromise = _fetchAuth();
+    await _fetchPromise;
   }, []);
 
-  return state;
+  return {
+    user: _user,
+    session: _user ? { user: _user } : null,
+    loading: _loading,
+    isLoggedIn: !!_user,
+    authjsConfigured: _authjsConfigured,
+    refresh,
+  };
 }

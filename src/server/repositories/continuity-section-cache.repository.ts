@@ -24,9 +24,10 @@ export async function readContinuitySectionCache<T>(
 ): Promise<RepositoryResult<ContinuitySectionCacheEntry<T> | null>> {
   try {
     const key = normalizeKey(input);
+    // findFirst sem orderBy — a unique constraint garante no máximo 1 row;
+    // o orderBy { updatedAt: "desc" } anterior causava OOM (MySQL sort buffer).
     const row = await db.continuitySectionCache.findFirst({
       where: key,
-      orderBy: { updatedAt: "desc" },
     });
 
     if (!row) return { ok: true, data: null };

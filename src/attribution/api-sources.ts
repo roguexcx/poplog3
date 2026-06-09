@@ -50,6 +50,14 @@ export const API_SOURCES: Record<ApiSourceId, ApiSourceDefinition> = {
     officialUrl: "https://www.bancodeseries.com.br/",
     contexts: ["calendar"],
   },
+  balloonerismm: {
+    id: "balloonerismm",
+    name: "JustWatch",
+    shortName: "JustWatch",
+    role: "Disponibilidade de streaming, aluguel e compra no Brasil.",
+    officialUrl: "https://www.justwatch.com/",
+    contexts: ["availability"],
+  },
 };
 
 export const GLOBAL_CREDIT_SOURCE_IDS = Object.values(API_SOURCES)

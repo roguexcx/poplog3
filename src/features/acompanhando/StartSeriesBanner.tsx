@@ -3,7 +3,7 @@
 import { ChevronLeft, ChevronRight, Play, Sparkles } from "lucide-react";
 import Image from "next/image";
 import { useRef } from "react";
-import { resolveCatalogImage } from "@/lib/images/resolve";
+import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import type { WatchlistPickItem } from "@/features/acompanhando/WatchlistPickCard";

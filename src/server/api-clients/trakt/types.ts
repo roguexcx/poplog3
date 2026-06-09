@@ -250,6 +250,16 @@ export type TraktSearchResult = {
   movie?: TraktMovieFull;
 };
 
+/** Entrada retornada por GET /networks */
+export type TraktNetwork = {
+  name: string;
+  country?: string;
+  ids?: {
+    trakt?: number;
+    slug?: string;
+  };
+};
+
 /** Item from /movies/{id}/translations/{lang} or /shows/{id}/translations/{lang} */
 export type TraktTranslation = {
   title: string;

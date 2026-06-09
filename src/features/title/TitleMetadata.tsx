@@ -54,9 +54,15 @@ function formatLanguageName(language: {
   return cleanName(language.code);
 }
 
+type NetworkItem = {
+  name: string;
+  slug: string;
+};
+
 type DetailItem = {
   label: string;
   value: string;
+  networks?: NetworkItem[];
 };
 
 function buildDetails(
@@ -161,12 +167,16 @@ function buildDetails(
     });
   }
 
-  const networks = joinNames(metadata.networks, 3);
+  const networksWithSlugs = (metadata.networks ?? [])
+    .filter((n) => Boolean(n.name))
+    .slice(0, 3)
+    .map((n) => ({ name: n.name!, slug: n.slug ?? "" }));
 
-  if (networks) {
+  if (networksWithSlugs.length > 0) {
     details.push({
       label: "Emissora",
-      value: networks,
+      value: networksWithSlugs.map((n) => n.name).join(" • "),
+      networks: networksWithSlugs,
     });
   }
 
@@ -227,7 +237,27 @@ export default function TitleMetadata({
                   {item.label}
                 </dt>
                 <dd className="min-w-0 text-left text-[11.5px] font-semibold leading-[1.45] tracking-[-0.01em] text-white/70 break-words sm:text-right">
-                  {item.value}
+                  {item.networks && item.networks.length > 0 ? (
+                    <span className="inline-flex flex-wrap justify-start gap-x-1 gap-y-0.5 sm:justify-end">
+                      {item.networks.map((n, i) => (
+                        <span key={n.slug || n.name} className="inline-flex items-center">
+                          {i > 0 && <span className="mr-1 text-white/30">•</span>}
+                          {n.slug ? (
+                            <Link
+                              href={`/network/${n.slug}`}
+                              className="transition-colors hover:text-white"
+                            >
+                              {n.name}
+                            </Link>
+                          ) : (
+                            <span>{n.name}</span>
+                          )}
+                        </span>
+                      ))}
+                    </span>
+                  ) : (
+                    item.value
+                  )}
                 </dd>
               </div>
             ))}

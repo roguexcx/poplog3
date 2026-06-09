@@ -5,22 +5,38 @@ import {
   normalizeSearchTerm,
   shouldUseFuzzyFallback,
 } from "@/server/search/fuzzy-title-search";
-import type { TmdbTitleSummary } from "@/server/api-clients/tmdb/types";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { getUserFeedbackMap } from "@/lib/personalization/feedback";
 import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
-import {
-  catalogSearch,
-  isBalloonerismSearchEnabled,
-} from "@/server/source-engine/engine";
+import { catalogSearch } from "@/server/source-engine/engine";
 import {
   hydrateCatalogResultsWithDebug,
   type HydrationDebug,
 } from "@/server/source-engine/hydrate-catalog-results";
 
+type SearchTitleSummary = {
+  id: number;
+  media_type: "movie" | "tv";
+  title?: string;
+  name?: string;
+  original_title?: string | null;
+  original_name?: string | null;
+  overview?: string | null;
+  poster_path?: string | null;
+  backdrop_path?: string | null;
+  release_date?: string | null;
+  first_air_date?: string | null;
+  last_air_date?: string | null;
+  genre_ids?: unknown;
+  popularity?: number | null;
+  vote_average?: number | null;
+  vote_count?: number | null;
+  original_language?: string | null;
+};
+
 function fuzzyMatchToTmdbSummary(
   title: Awaited<ReturnType<typeof findCachedFuzzyTitles>>[number]
-): TmdbTitleSummary {
+): SearchTitleSummary {
   return {
     id: title.tmdb_id,
     media_type: title.media_type,
@@ -68,89 +84,72 @@ export async function GET(request: NextRequest) {
       // Unauthenticated -- proceed without personalization.
     }
 
-    // ── Balloonerismm primary path ────────────────────────────────────────────
-    let balloonerismmDebug: HydrationDebug | null = null;
-    if (isBalloonerismSearchEnabled()) {
-      try {
-        const catalogResults = await catalogSearch({ query });
-        const hydratedResult = await hydrateCatalogResultsWithDebug(catalogResults);
-        const hydrated = hydratedResult.titles;
-        balloonerismmDebug = hydratedResult.debug;
-        const validTitles = filterValidTitles(hydrated);
-        balloonerismmDebug.searchCompatibleCount = validTitles.length;
-        Object.assign(balloonerismmDebug, {
-          usedTmdbApi: false,
-          usedLegacy: false,
-          normalizedFrom: "balloonerismm",
-          identityUsed: "poplog_id_or_best_alias",
-          legacyCompatibilityUsed: true,
+    let catalogDebug: HydrationDebug | null = null;
+    try {
+      const catalogResults = await catalogSearch({ query });
+      const hydratedResult = await hydrateCatalogResultsWithDebug(catalogResults);
+      const hydrated = hydratedResult.titles;
+      catalogDebug = hydratedResult.debug;
+      const validTitles = filterValidTitles(hydrated);
+      catalogDebug.searchCompatibleCount = validTitles.length;
+
+      if (validTitles.length > 0) {
+        const seenKeys = new Set(
+          validTitles.map((t) => `${t.media_type}-${t.tmdb_id}`)
+        );
+        const fuzzyTitles = shouldUseFuzzyFallback(validTitles.length, 1)
+          ? await findCachedFuzzyTitles({ query, mediaType: "all", excludeKeys: seenKeys })
+          : [];
+
+        const rawCombined = [
+          ...validTitles.map((t) => ({ ...t, id: t.tmdb_id })),
+          ...fuzzyTitles.map(fuzzyMatchToTmdbSummary),
+        ];
+
+        const results = applyUserFeedbackScoring(rawCombined, {
+          userId,
+          feedbackMap,
+          context: "search",
+          preserveOrder: true,
         });
 
-        if (validTitles.length > 0) {
-          const seenKeys = new Set(
-            validTitles.map((t) => `${t.media_type}-${t.tmdb_id}`)
-          );
-          const fuzzyTitles = shouldUseFuzzyFallback(validTitles.length, 1)
-            ? await findCachedFuzzyTitles({ query, mediaType: "all", excludeKeys: seenKeys })
-            : [];
+        console.log(`[search] source=balloonerismm count=${validTitles.length} fuzzy=${fuzzyTitles.length}`);
 
-          const rawCombined = [
-            ...validTitles.map((t) => ({ ...t, id: t.tmdb_id })),
-            ...fuzzyTitles.map(fuzzyMatchToTmdbSummary),
-          ];
-
-          const results = applyUserFeedbackScoring(rawCombined, {
-            userId,
-            feedbackMap,
-            context: "search",
-            preserveOrder: true,
-          });
-
-          console.log(
-            `[search] source=balloonerismm count=${validTitles.length} fuzzy=${fuzzyTitles.length}`
-          );
-
-          return NextResponse.json({
-            ok: true,
-            query,
-            normalizedQuery: normalizeSearchTerm(query),
-            count: results.length,
-            fuzzyCount: fuzzyTitles.length,
-            results,
-            ...(debugSource ? { debugSource: balloonerismmDebug } : {}),
-          });
-        }
-
-        const fallbackReason = catalogResults.length === 0 ? "raw_empty" : "normalized_empty";
-        balloonerismmDebug.fallbackUsed = true;
-        balloonerismmDebug.fallbackReason = fallbackReason;
-        console.log(`[search] source=balloonerismm_fallback reason=${fallbackReason}`);
-      } catch (err) {
-        balloonerismmDebug = {
-          source: "balloonerismm",
-          rawCount: 0,
-          normalizedCount: 0,
-          poplogResolvedCount: 0,
-          searchCompatibleCount: 0,
-          fallbackUsed: true,
-          fallbackReason: "error",
-          discardReasons: {},
-          externalIdStats: {
-            imdbId: 0,
-            tmdbId: 0,
-            tvdbId: 0,
-            traktId: 0,
-            balloonerismmId: 0,
-            slug: 0,
-            poplogResolved: 0,
-            temporaryCandidates: 0,
-          },
-        };
-        console.warn(
-          "[search] source=balloonerismm_fallback reason=error",
-          err instanceof Error ? err.message : err
-        );
+        return NextResponse.json({
+          ok: true,
+          query,
+          normalizedQuery: normalizeSearchTerm(query),
+          count: results.length,
+          fuzzyCount: fuzzyTitles.length,
+          results,
+          ...(debugSource ? { debugSource: catalogDebug } : {}),
+        });
       }
+
+      catalogDebug.fallbackUsed = true;
+      catalogDebug.fallbackReason = catalogResults.length === 0 ? "raw_empty" : "normalized_empty";
+      console.log(`[search] source=balloonerismm_fallback reason=${catalogDebug.fallbackReason}`);
+    } catch (err) {
+      catalogDebug = {
+        source: "trakt",
+        rawCount: 0,
+        normalizedCount: 0,
+        poplogResolvedCount: 0,
+        searchCompatibleCount: 0,
+        fallbackUsed: true,
+        fallbackReason: "error",
+        discardReasons: {},
+        externalIdStats: {
+          imdbId: 0,
+          tmdbId: 0,
+          tvdbId: 0,
+          traktId: 0,
+          slug: 0,
+          poplogResolved: 0,
+          temporaryCandidates: 0,
+        },
+      };
+      console.warn("[search] source=balloonerismm_fallback reason=error", err instanceof Error ? err.message : err);
     }
 
     const fuzzyTitles = await findCachedFuzzyTitles({ query, mediaType: "all" });
@@ -171,12 +170,10 @@ export async function GET(request: NextRequest) {
       results,
       ...(debugSource
         ? {
-            debugSource: balloonerismmDebug ?? {
-              source: "local_cache",
+            debugSource: catalogDebug ?? {
+              source: "trakt",
               fallbackUsed: true,
-              fallbackReason: "tmdb_fallback_blocked",
-              usedTmdbApi: false,
-              usedLegacy: false,
+              fallbackReason: "catalog_empty_or_unavailable",
               normalizedFrom: "local_cache",
               identityUsed: "poplog_id_or_best_alias",
               legacyCompatibilityUsed: true,

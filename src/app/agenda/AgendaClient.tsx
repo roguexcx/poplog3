@@ -9,7 +9,7 @@ import PageShell from "@/components/layout/PageShell";
 import type { IcsSeriesGroup, MovieGroup, ContentCategory } from "@/lib/ics-engine";
 import { CATEGORY_PRIORITY, ALL_BLOCKED_CATEGORIES } from "@/lib/ics-engine";
 import type { IcsAgendaResponse } from "@/app/api/ics/agenda/route";
-import { resolveCatalogImage } from "@/lib/images/resolve";
+import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 
 // ── Constantes ─────────────────────────────────────────────────────────────────
 

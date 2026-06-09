@@ -3,6 +3,7 @@
 import ContextualAttribution from "@/components/attribution/ContextualAttribution";
 import SourceChip from "@/components/attribution/SourceChip";
 import Image from "next/image";
+import { resolveForRender } from "@/lib/images/proxy";
 import { useEffect, useMemo, useState } from "react";
 
 type MovieSocialModalProps = {
@@ -75,7 +76,7 @@ export default function MovieSocialModal({
   onToggleWatched,
 }: MovieSocialModalProps) {
   const modalBackdropUrl = useMemo(
-    () => getOriginalTmdbImageUrl(backdropUrl),
+    () => resolveForRender(getOriginalTmdbImageUrl(backdropUrl)),
     [backdropUrl],
   );
 

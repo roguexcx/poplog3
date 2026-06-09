@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
-import { resolveCatalogImage } from "@/lib/images/resolve";
+import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 
 export type ContinueStatusSignal =
   | "new_episode"

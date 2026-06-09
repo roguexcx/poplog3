@@ -3,7 +3,7 @@
 import Image, { type ImageProps } from "next/image";
 import { useState, type ReactNode } from "react";
 
-import { buildTmdbUrlLoose } from "@/lib/images/url";
+import { resolveForRender } from "@/lib/images/proxy";
 import type { ImageKind } from "@/lib/images/sizes";
 
 // ─── V2-style default export (para componentes migrados do V2) ────────────────
@@ -16,17 +16,15 @@ export type TmdbImageProps = Omit<ImageProps, "src" | "alt"> & {
   fallback?: ReactNode;
 };
 
-export default function TmdbImage({
-  path,
-  kind,
-  size,
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export default function TmdbImage({ path, kind, size,
   alt,
   fallback = null,
   ...rest
 }: TmdbImageProps) {
   const [errored, setErrored] = useState(false);
 
-  const src = buildTmdbUrlLoose(kind, size, path);
+  const src = resolveForRender(path, size);
   if (!src || errored) return <>{fallback}</>;
 
   return (
@@ -41,8 +39,6 @@ export default function TmdbImage({
 
 // ─── V3-style named export (backward compat para componentes existentes do V3) ─
 
-const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
-
 type TmdbImageV3Props = {
   path: string | null;
   fallbackPath?: string | null;
@@ -53,20 +49,6 @@ type TmdbImageV3Props = {
   fallbackLabel?: string;
 };
 
-function normalizePath(path: string | null | undefined) {
-  if (!path) return null;
-  const value = path.trim();
-  if (!value) return null;
-  if (value.startsWith("http://") || value.startsWith("https://")) return value;
-  if (/^[a-z0-9.-]+\.[a-z]{2,}\//i.test(value)) return `https://${value}`;
-  return value.startsWith("/") ? value : `/${value}`;
-}
-
-function buildImageSrc(path: string, size: string): string {
-  if (path.startsWith("http://") || path.startsWith("https://")) return path;
-  return `${TMDB_IMAGE_BASE}/${size}${path}`;
-}
-
 export function TmdbImageLegacy({
   path,
   fallbackPath = null,
@@ -76,9 +58,9 @@ export function TmdbImageLegacy({
   priority = false,
   fallbackLabel = "Sem imagem",
 }: TmdbImageV3Props) {
-  const imagePath = normalizePath(path) ?? normalizePath(fallbackPath);
+  const src = resolveForRender(path ?? fallbackPath, size);
 
-  if (!imagePath) {
+  if (!src) {
     return (
       <div
         className={`flex h-full w-full items-center justify-center bg-gradient-to-br from-zinc-900 via-zinc-950 to-black p-4 text-center text-xs font-semibold uppercase tracking-[0.18em] text-white/35 ${className}`}
@@ -87,8 +69,6 @@ export function TmdbImageLegacy({
       </div>
     );
   }
-
-  const src = buildImageSrc(imagePath, size);
 
   return (
     <Image

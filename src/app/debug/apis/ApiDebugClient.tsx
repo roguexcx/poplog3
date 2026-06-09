@@ -63,10 +63,7 @@ type ApiState = {
 };
 
 const APIS: Omit<ApiState, "loading">[] = [
-  { id: "tmdb", label: "TMDB", path: "/api/debug/tmdb" },
-  { id: "watchmode", label: "Watchmode", path: "/api/debug/watchmode" },
-  { id: "movieofthenight", label: "MovieOfTheNight", path: "/api/debug/movieofthenight" },
-  { id: "omdb", label: "OMDb", path: "/api/debug/omdb" },
+  { id: "trakt", label: "Trakt", path: "/api/dev/trakt-test" },
 ];
 
 export default function ApiDebugClient() {

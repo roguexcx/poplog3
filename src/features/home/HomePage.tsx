@@ -19,7 +19,7 @@ export const dynamic = "force-dynamic";
 export default async function HomePage() {
   const initialUser = await getCurrentUser();
 
-  const trendingItems = await getTrending();
+  const trendingItems = await getTrending(initialUser?.id);
 
   const featuredCandidates = trendingItems.filter(
     (item) =>

@@ -1,19 +1,52 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 
 import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
 import { CardActionButton } from "@/components/ui/CardActionButton";
 import { IconBookmark, IconCheck, IconX } from "@/components/ui/icons";
+import { useUserAction } from "@/hooks/useUserAction";
 import { useUserFeedbackToggle } from "@/hooks/useUserFeedbackToggle";
-import { useWatchedToggle } from "@/hooks/useWatchedToggle";
-import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
+import { useOptionalUserData } from "@/context/UserDataContext";
+import { usePoplogUserState } from "@/stores/user-states-store";
 import type { TitleCollection, TitleCollectionPart } from "./types";
 
 type TitleCollectionSectionProps = {
   collection?: TitleCollection | null;
   currentTitleId?: number | null;
 };
+
+// ─── Shared action state for collection parts ─────────────────────────────────
+
+function useCollectionPartActions(part: TitleCollectionPart) {
+  const userData = useOptionalUserData();
+  const isLoggedIn = Boolean(userData && !userData.loading);
+  const releaseYear = part.year != null ? Number(String(part.year).slice(0, 4)) || undefined : undefined;
+
+  const { executeAction, effectiveKey } = useUserAction({
+    tmdbId: part.id,
+    mediaType: "movie",
+    title: part.title,
+    releaseYear,
+  });
+
+  const zustandState = usePoplogUserState(effectiveKey);
+  const inWatchlist = zustandState?.isInWatchlist ?? false;
+  const isWatched   = zustandState?.isWatched   ?? false;
+
+  const [saving, setSaving] = useState(false);
+
+  async function handleAction(action: "addToWatchlist" | "removeFromWatchlist" | "markAsWatched" | "markAsUnwatched") {
+    setSaving(true);
+    await executeAction(action);
+    setSaving(false);
+  }
+
+  const feedback = useUserFeedbackToggle({ tmdbId: part.id, mediaType: "movie", source: "collection" });
+
+  return { isLoggedIn, inWatchlist, isWatched, saving, handleAction, feedback };
+}
 
 // ─── Horizontal card (≤ 3 films) ─────────────────────────────────────────────
 
@@ -26,10 +59,7 @@ function HorizontalCard({
   index: number;
   isCurrent: boolean;
 }) {
-  const releaseYear = part.year != null ? Number(String(part.year).slice(0, 4)) || undefined : undefined;
-  const watchlist = useWatchlistToggle({ tmdbId: part.id, mediaType: "movie", title: part.title, releaseYear });
-  const watched   = useWatchedToggle({ tmdbId: part.id, mediaType: "movie", title: part.title, releaseYear });
-  const feedback  = useUserFeedbackToggle({ tmdbId: part.id, mediaType: "movie", source: "collection" });
+  const { isLoggedIn, inWatchlist, isWatched, saving, handleAction, feedback } = useCollectionPartActions(part);
 
   const href = isCurrent ? undefined : `/title/movie/${part.id}`;
 
@@ -105,26 +135,26 @@ function HorizontalCard({
           onClick={(e) => e.stopPropagation()}
         >
           <CardActionButton
-            onClick={watchlist.toggle}
-            disabled={watchlist.loading || !watchlist.isLoggedIn}
-            title={watchlist.inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
-            active={watchlist.inWatchlist} saving={watchlist.saving}
+            onClick={() => handleAction(inWatchlist ? "removeFromWatchlist" : "addToWatchlist")}
+            disabled={!isLoggedIn || saving}
+            title={inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
+            active={inWatchlist} saving={saving}
             activeClass="border-sky-400/55 bg-sky-400/[0.18] text-sky-300"
           >
-            <IconBookmark filled={watchlist.inWatchlist} />
+            <IconBookmark filled={inWatchlist} />
           </CardActionButton>
           <CardActionButton
-            onClick={watched.toggle}
-            disabled={watched.loading || !watched.isLoggedIn}
-            title={watched.isWatched ? "Desmarcar" : "Já vi"}
-            active={watched.isWatched} saving={watched.saving}
+            onClick={() => handleAction(isWatched ? "markAsUnwatched" : "markAsWatched")}
+            disabled={!isLoggedIn || saving}
+            title={isWatched ? "Desmarcar" : "Já vi"}
+            active={isWatched} saving={saving}
             activeClass="border-emerald-400/55 bg-emerald-400/[0.18] text-emerald-300"
           >
             <IconCheck />
           </CardActionButton>
           <CardActionButton
             onClick={feedback.toggleNotInterested}
-            disabled={feedback.loading || !feedback.isLoggedIn}
+            disabled={!isLoggedIn || feedback.saving}
             title={feedback.notInterested ? "Remover sem interesse" : "Não tenho interesse"}
             active={feedback.notInterested} saving={feedback.saving}
             activeClass="border-rose-400/55 bg-rose-400/[0.18] text-rose-300"
@@ -154,11 +184,7 @@ function PosterCard({
   index: number;
   isCurrent: boolean;
 }) {
-  const releaseYear = part.year != null ? Number(String(part.year).slice(0, 4)) || undefined : undefined;
-  const watchlist = useWatchlistToggle({ tmdbId: part.id, mediaType: "movie", title: part.title, releaseYear });
-  const watched   = useWatchedToggle({ tmdbId: part.id, mediaType: "movie", title: part.title, releaseYear });
-  const feedback  = useUserFeedbackToggle({ tmdbId: part.id, mediaType: "movie", source: "collection" });
-
+  const { isLoggedIn, inWatchlist, isWatched, saving, handleAction, feedback } = useCollectionPartActions(part);
   const href = isCurrent ? undefined : `/title/movie/${part.id}`;
 
   const card = (
@@ -194,26 +220,26 @@ function PosterCard({
           >
             <div className="flex gap-1.5">
               <CardActionButton
-                onClick={watchlist.toggle}
-                disabled={watchlist.loading || !watchlist.isLoggedIn}
-                title={watchlist.inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
-                active={watchlist.inWatchlist} saving={watchlist.saving}
+                onClick={() => handleAction(inWatchlist ? "removeFromWatchlist" : "addToWatchlist")}
+                disabled={!isLoggedIn || saving}
+                title={inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
+                active={inWatchlist} saving={saving}
                 activeClass="border-sky-400/55 bg-sky-400/[0.18] text-sky-300"
               >
-                <IconBookmark filled={watchlist.inWatchlist} />
+                <IconBookmark filled={inWatchlist} />
               </CardActionButton>
               <CardActionButton
-                onClick={watched.toggle}
-                disabled={watched.loading || !watched.isLoggedIn}
-                title={watched.isWatched ? "Desmarcar" : "Já vi"}
-                active={watched.isWatched} saving={watched.saving}
+                onClick={() => handleAction(isWatched ? "markAsUnwatched" : "markAsWatched")}
+                disabled={!isLoggedIn || saving}
+                title={isWatched ? "Desmarcar" : "Já vi"}
+                active={isWatched} saving={saving}
                 activeClass="border-emerald-400/55 bg-emerald-400/[0.18] text-emerald-300"
               >
                 <IconCheck />
               </CardActionButton>
               <CardActionButton
                 onClick={feedback.toggleNotInterested}
-                disabled={feedback.loading || !feedback.isLoggedIn}
+                disabled={!isLoggedIn || feedback.saving}
                 title={feedback.notInterested ? "Remover" : "Não tenho interesse"}
                 active={feedback.notInterested} saving={feedback.saving}
                 activeClass="border-rose-400/55 bg-rose-400/[0.18] text-rose-300"

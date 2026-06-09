@@ -1,9 +1,9 @@
 import type { TMDBItem, TMDBDetails } from "@/types/tmdb";
-import { catalogGetTrending } from "@/server/source-engine/engine";
+import { catalogGetMovie, catalogGetShow, catalogGetTrending } from "@/server/source-engine/engine";
 import { hydrateCatalogResultsWithDebug } from "@/server/source-engine/hydrate-catalog-results";
 import { filterValidTitles } from "@/server/utils/filter-valid-titles";
+import { filterOutLibraryItems } from "@/lib/discovery/library-filter";
 import { db } from "@/server/db/client";
-import { balloonerismGet } from "@/server/api-clients/balloonerismm/client";
 import { isTraktIndexEnabled } from "@/lib/trakt-index/engine";
 import { getPoplogDailyTrendingIndex } from "@/lib/trakt-index/canonical";
 import type { TraktIndexItem } from "@/lib/trakt-index/types";
@@ -30,15 +30,14 @@ async function localPopularQuery(mediaType: "movie" | "tv", limit: number): Prom
       year: true,
       voteAverage: true,
       popularity: true,
-      tmdbPayload: true,
+      imdbId: true,
     },
   });
 
   return rows
     .filter((row) => row.title ?? row.originalTitle)
     .map((row): TMDBItem => {
-      const payload = row.tmdbPayload as { imdb_id?: string | null } | null;
-      const imdbId = payload?.imdb_id ?? undefined;
+      const imdbId = row.imdbId ?? undefined;
       return {
         id: row.tmdbId,
         media_type: row.mediaType as "movie" | "tv",
@@ -88,24 +87,25 @@ function traktIndexToTMDBItem(item: TraktIndexItem): TMDBItem {
   };
 }
 
-export async function getTrending(): Promise<TMDBItem[]> {
+export async function getTrending(userId?: string | null): Promise<TMDBItem[]> {
   // ── Trakt Index (fonte primária) ──────────────────────────────────────────
   if (isTraktIndexEnabled()) {
     try {
       const traktItems: TraktIndexItem[] = await getPoplogDailyTrendingIndex();
       if (traktItems.length >= 3) {
-        return traktItems.map(traktIndexToTMDBItem);
+        const results = traktItems.map(traktIndexToTMDBItem);
+        return filterOutLibraryItems(userId, results);
       }
     } catch {
-      // fall through to Balloonerismm/local
+      // fall through to Trakt adapter/local
     }
   }
 
-  // ── Balloonerismm fallback ────────────────────────────────────────────────
+  // ── Trakt adapter fallback ────────────────────────────────────────────────
   try {
     const [movieResults, tvResults] = await Promise.all([
-      catalogGetTrending({ mediaType: "movie", limit: 10 }),
-      catalogGetTrending({ mediaType: "show", limit: 10 }),
+      catalogGetTrending({ mediaType: "movie", limit: 25 }),
+      catalogGetTrending({ mediaType: "show", limit: 25 }),
     ]);
     const [movieHydrated, tvHydrated] = await Promise.all([
       hydrateCatalogResultsWithDebug(movieResults),
@@ -115,7 +115,7 @@ export async function getTrending(): Promise<TMDBItem[]> {
     const valid = filterValidTitles(merged);
 
     if (valid.length >= 3) {
-      return valid.map((t): TMDBItem => ({
+      const results = valid.map((t): TMDBItem => ({
         id: t.tmdb_id,
         poplogId: t.poplogId,
         externalIds: t.externalIds,
@@ -136,6 +136,7 @@ export async function getTrending(): Promise<TMDBItem[]> {
         vote_average: t.vote_average ?? undefined,
         popularity: t.popularity ?? undefined,
       }));
+      return filterOutLibraryItems(userId, results);
     }
   } catch {
     // fall through to local fallback
@@ -143,80 +144,61 @@ export async function getTrending(): Promise<TMDBItem[]> {
 
   // ── Local DB fallback ─────────────────────────────────────────────────────
   try {
-    return await localPopularQuery("movie", 10)
-      .then(async (movies) => {
-        const tv = await localPopularQuery("tv", 10);
-        return [...movies, ...tv];
-      });
+    const movies = await localPopularQuery("movie", 25);
+    const tv = await localPopularQuery("tv", 25);
+    return filterOutLibraryItems(userId, [...movies, ...tv]);
   } catch {
     return [];
   }
 }
 
-export async function getPopularMovies(): Promise<TMDBItem[]> {
+export async function getPopularMovies(userId?: string | null): Promise<TMDBItem[]> {
   try {
-    return await localPopularQuery("movie", 20);
+    const results = await localPopularQuery("movie", 20);
+    return filterOutLibraryItems(userId, results);
   } catch {
     return [];
   }
 }
 
-export async function getPopularTV(): Promise<TMDBItem[]> {
+export async function getPopularTV(userId?: string | null): Promise<TMDBItem[]> {
   try {
-    return await localPopularQuery("tv", 20);
+    const results = await localPopularQuery("tv", 20);
+    return filterOutLibraryItems(userId, results);
   } catch {
     return [];
   }
 }
 
-// Busca overview em pt-BR para o item em destaque do hero.
-// Usa o endpoint TMDB-proxied do Balloonerismm (/discover/movie ou /tv com filtro de ID),
-// ou o endpoint de detalhe com language=pt-BR.
-// Não afeta trending — é uma chamada única apenas para o item featured.
 export async function getFeaturedDetails(
   mediaType: "movie" | "tv",
   item: TMDBItem,
 ): Promise<TMDBDetails | null> {
   const imdbId = item.externalIds?.imdbId;
-  if (!imdbId) return null;
+  const traktId = typeof item.externalIds?.traktId === "number" ? item.externalIds.traktId : undefined;
+  const traktSlug = item.externalIds?.slug;
+  if (!imdbId && !traktId && !traktSlug) return null;
 
   try {
-    const path = mediaType === "tv" ? `/tv/${imdbId}` : `/movie/${imdbId}`;
-    const data = await balloonerismGet<{
-      overview?: string | null;
-      title?: string | null;
-      name?: string | null;
-      number_of_seasons?: number | null;
-      runtime?: number | null;
-      episode_run_time?: number[] | null;
-      // Balloonerismm é proxy TMDB: retorna { id, name }[] — não string[]
-      genres?: Array<{ id?: number; name: string } | string> | null;
-      release_date?: string | null;
-      first_air_date?: string | null;
-      last_air_date?: string | null;
-    }>(path, {
-      params: { language: "pt-BR" },
-      ttlSeconds: 86400,
-    });
+    const data = mediaType === "tv"
+      ? await catalogGetShow({ imdbId, traktId, traktSlug }).catch(() => null)
+      : await catalogGetMovie({ imdbId, traktId, traktSlug }).catch(() => null);
 
     if (!data) return null;
 
     const genres = data.genres?.length
-      ? data.genres.map((g, i): { id: number; name: string } => {
-          if (typeof g === "string") return { id: -(i + 1), name: g };
-          return { id: g.id ?? -(i + 1), name: g.name };
-        })
+      ? data.genres.map((name, i): { id: number; name: string } => ({ id: -(i + 1), name }))
       : undefined;
 
     return {
       id: item.id,
       overview: data.overview ?? undefined,
       genres,
-      number_of_seasons: data.number_of_seasons ?? undefined,
+      number_of_seasons: data.numberOfSeasons ?? undefined,
       runtime: data.runtime ?? undefined,
-      episode_run_time: data.episode_run_time ?? undefined,
-      release_date: data.release_date ?? item.release_date,
-      first_air_date: data.first_air_date ?? item.first_air_date,
+      episode_run_time: data.runtime ? [data.runtime] : undefined,
+      release_date: item.release_date,
+      first_air_date: item.first_air_date,
     };
   } catch {
     return null;

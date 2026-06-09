@@ -5,7 +5,7 @@ import Image from "next/image";
 import type { ScoredItem } from "./types";
 import HeroCTA from "./HeroCTA";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
-import { resolveCatalogImage } from "@/lib/images/resolve";
+import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 
 interface HeroSlideProps {
   item: ScoredItem;

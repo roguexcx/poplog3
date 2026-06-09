@@ -25,7 +25,9 @@ import type {
   TraktVideoItem,
   TraktStudio,
   TraktEpisodeSummary,
+  TraktNetwork,
 } from "@/server/api-clients/trakt/types";
+import { normalizeNetworkSlug } from "@/lib/networks/normalize";
 
 import type { CatalogAdapter } from "./catalog-adapter";
 import type {
@@ -95,6 +97,36 @@ function ptBrTranslationTitle(entry: TraktShowFull | TraktMovieFull): string | n
   );
 }
 
+function normalizeGenreToId(genre: string | null | undefined): number | undefined {
+  if (!genre) return undefined;
+  const key = genre.toLowerCase().replace(/[-_]+/g, " ");
+  const map: Record<string, number> = {
+    action: 28,
+    adventure: 12,
+    animation: 16,
+    comedy: 35,
+    crime: 80,
+    documentary: 99,
+    drama: 18,
+    family: 10751,
+    fantasy: 14,
+    history: 36,
+    horror: 27,
+    music: 10402,
+    mystery: 9648,
+    romance: 10749,
+    "science fiction": 878,
+    "sci fi": 878,
+    thriller: 53,
+    war: 10752,
+    western: 37,
+    reality: 10764,
+    soap: 10766,
+    talk: 10767,
+  };
+  return map[key];
+}
+
 // ─── Adapter ──────────────────────────────────────────────────────────────────
 
 export const traktAdapter: CatalogAdapter = {
@@ -103,7 +135,7 @@ export const traktAdapter: CatalogAdapter = {
   async searchTitles(params: SearchParams): Promise<CatalogSearchResult[]> {
     const type = params.mediaType === "movie" ? "movie" : params.mediaType === "show" ? "show" : "movie,show";
     const results = await traktGet<TraktSearchResult[]>(`/search/${type}`, {
-      params: { query: params.query, limit: 20 },
+      params: { query: params.query, limit: 20, extended: "full,images" },
       ttlSeconds: 3600,
     });
     if (!results) return [];
@@ -117,6 +149,7 @@ export const traktAdapter: CatalogAdapter = {
             ids: {
               traktId: entry.ids.trakt,
               traktSlug: entry.ids.slug,
+              slug: entry.ids.slug,
               imdbId: entry.ids.imdb,
               tmdbId: entry.ids.tmdb,
               tvdbId: (entry as TraktShowFull).ids?.tvdb,
@@ -125,6 +158,11 @@ export const traktAdapter: CatalogAdapter = {
             title: entry.title,
             year: entry.year,
             overview: entry.overview ?? undefined,
+            posterRemoteUrl: entry.images?.poster?.[0] ?? null,
+            backdropRemoteUrl: entry.images?.fanart?.[0] ?? entry.images?.thumb?.[0] ?? null,
+            genres: entry.genres,
+            voteAverage: entry.rating,
+            voteCount: entry.votes,
           },
           MED,
         );
@@ -139,18 +177,19 @@ export const traktAdapter: CatalogAdapter = {
     if (!id) return null;
 
     const movie = await traktGet<TraktMovieFull>(`/movies/${id}`, {
-      params: { extended: "full" },
+      params: { extended: "full,images,translations" },
       ttlSeconds: 86400,
     });
     if (!movie) return null;
 
     return normalizeTitle(
       {
-        ids: {
-          traktId: movie.ids.trakt,
-          traktSlug: movie.ids.slug,
-          imdbId: movie.ids.imdb,
-          tmdbId: movie.ids.tmdb,
+          ids: {
+            traktId: movie.ids.trakt,
+            traktSlug: movie.ids.slug,
+            slug: movie.ids.slug,
+            imdbId: movie.ids.imdb,
+            tmdbId: movie.ids.tmdb,
         },
         mediaType: "movie",
         title: movie.title,
@@ -163,6 +202,8 @@ export const traktAdapter: CatalogAdapter = {
         language: movie.language,
         rating: movie.rating,
         votes: movie.votes,
+        posterRemoteUrl: movie.images?.poster?.[0] ?? undefined,
+        backdropRemoteUrl: movie.images?.fanart?.[0] ?? movie.images?.thumb?.[0] ?? undefined,
       },
       HIGH,
     );
@@ -175,18 +216,19 @@ export const traktAdapter: CatalogAdapter = {
     if (!id) return null;
 
     const show = await traktGet<TraktShowFull>(`/shows/${id}`, {
-      params: { extended: "full" },
+      params: { extended: "full,images,translations" },
       ttlSeconds: 86400,
     });
     if (!show) return null;
 
     const normalized = normalizeTitle(
       {
-        ids: {
-          traktId: show.ids.trakt,
-          traktSlug: show.ids.slug,
-          imdbId: show.ids.imdb,
-          tmdbId: show.ids.tmdb,
+          ids: {
+            traktId: show.ids.trakt,
+            traktSlug: show.ids.slug,
+            slug: show.ids.slug,
+            imdbId: show.ids.imdb,
+            tmdbId: show.ids.tmdb,
           tvdbId: show.ids.tvdb,
         },
         mediaType: "show",
@@ -202,6 +244,9 @@ export const traktAdapter: CatalogAdapter = {
         rating: show.rating,
         votes: show.votes,
         numberOfSeasons: show.aired_seasons ?? undefined,
+        numberOfEpisodes: show.aired_episodes ?? undefined,
+        posterRemoteUrl: show.images?.poster?.[0] ?? undefined,
+        backdropRemoteUrl: show.images?.fanart?.[0] ?? show.images?.thumb?.[0] ?? undefined,
       },
       HIGH,
     );
@@ -330,7 +375,7 @@ export const traktAdapter: CatalogAdapter = {
     type TraktTrending = { watchers: number; show?: TraktShowFull; movie?: TraktMovieFull };
     const endpoint = params.mediaType === "movie" ? "/movies/trending" : "/shows/trending";
     const results = await traktGet<TraktTrending[]>(endpoint, {
-      params: { limit: params.limit ?? 20 },
+      params: { limit: params.limit ?? 20, extended: "full,images" },
       ttlSeconds: 3600,
     });
     if (!results) return [];
@@ -344,12 +389,19 @@ export const traktAdapter: CatalogAdapter = {
             ids: {
               traktId: entry.ids.trakt,
               traktSlug: entry.ids.slug,
+              slug: entry.ids.slug,
               imdbId: entry.ids.imdb,
               tmdbId: entry.ids.tmdb,
             },
             mediaType: item.show ? "show" : "movie",
             title: entry.title,
             year: entry.year,
+            overview: entry.overview ?? undefined,
+            posterRemoteUrl: entry.images?.poster?.[0] ?? null,
+            backdropRemoteUrl: entry.images?.fanart?.[0] ?? entry.images?.thumb?.[0] ?? null,
+            genres: entry.genres,
+            voteAverage: entry.rating,
+            voteCount: entry.votes,
           },
           MED,
         );
@@ -357,12 +409,45 @@ export const traktAdapter: CatalogAdapter = {
       .filter((r): r is CatalogSearchResult => r !== null);
   },
 
-  async getPopular(_params: PopularParams): Promise<CatalogSearchResult[]> {
-    return [];
+  async getPopular(params: PopularParams): Promise<CatalogSearchResult[]> {
+    const endpoint = params.mediaType === "movie" ? "/movies/popular" : "/shows/popular";
+    const results = await traktGet<Array<TraktShowFull | TraktMovieFull>>(endpoint, {
+      params: { limit: params.limit ?? 20, extended: "full,images" },
+      ttlSeconds: 3600,
+    });
+    if (!results) return [];
+
+    return results.map((entry) =>
+      normalizeSearchResult(
+        {
+          ids: {
+            traktId: entry.ids.trakt,
+            traktSlug: entry.ids.slug,
+            slug: entry.ids.slug,
+            imdbId: entry.ids.imdb,
+            tmdbId: entry.ids.tmdb,
+            tvdbId: (entry as TraktShowFull).ids?.tvdb,
+          },
+          mediaType: params.mediaType,
+          title: entry.title,
+          year: entry.year,
+          releaseDate: params.mediaType === "movie" ? (entry as TraktMovieFull).released ?? undefined : undefined,
+          firstAirDate: params.mediaType === "show" ? (entry as TraktShowFull).first_aired ?? undefined : undefined,
+          overview: entry.overview ?? undefined,
+          posterRemoteUrl: entry.images?.poster?.[0] ?? null,
+          backdropRemoteUrl: entry.images?.fanart?.[0] ?? entry.images?.thumb?.[0] ?? null,
+          genres: entry.genres,
+          voteAverage: entry.rating,
+          voteCount: entry.votes,
+        },
+        MED,
+      )
+    );
   },
 
-  async getDiscover(_params: DiscoverParams): Promise<CatalogSearchResult[]> {
-    return [];
+  async getDiscover(params: DiscoverParams): Promise<CatalogSearchResult[]> {
+    const popular = await this.getPopular({ mediaType: params.mediaType, limit: 50, page: params.page });
+    return popular.filter((item) => item.genreIds?.includes(params.genreId) || item.genres?.some((genre) => normalizeGenreToId(genre) === params.genreId));
   },
 
   async getRelated(params: RelatedParams): Promise<CatalogSearchResult[]> {
@@ -383,6 +468,7 @@ export const traktAdapter: CatalogAdapter = {
           ids: {
             traktId: entry.ids.trakt,
             traktSlug: entry.ids.slug,
+            slug: entry.ids.slug,
             imdbId: entry.ids.imdb,
             tmdbId: entry.ids.tmdb,
           },
@@ -483,6 +569,7 @@ export const traktAdapter: CatalogAdapter = {
 export type TraktShowEnrichment = {
   studios?: Array<{ name: string; country?: string }>;
   certifications?: Record<string, string>;
+  network?: { name: string; slug: string; country?: string } | null;
   nextEpisode?: {
     season: number;
     number: number;
@@ -507,11 +594,17 @@ export async function getTraktShowEnrichment(imdbId: string): Promise<TraktShowE
     traktGet<TraktShowFull>(`/shows/${imdbId}`, { params: { extended: "full" }, ttlSeconds: 86400 }).catch(() => null),
   ]);
 
+  const networkName = summaryRaw?.network ?? null;
+  const networkCountry = summaryRaw?.country ?? undefined;
+
   return {
     studios: Array.isArray(studiosRaw)
       ? studiosRaw.map((s) => ({ name: s.name, country: s.country }))
       : undefined,
     certifications: summaryRaw?.certification ? { us: summaryRaw.certification } : undefined,
+    network: networkName
+      ? { name: networkName, slug: normalizeNetworkSlug(networkName), country: networkCountry }
+      : null,
     nextEpisode: nextRaw
       ? { season: nextRaw.season, number: nextRaw.number, title: nextRaw.title, firstAired: nextRaw.first_aired, episodeType: nextRaw.episode_type }
       : null,
@@ -519,6 +612,12 @@ export async function getTraktShowEnrichment(imdbId: string): Promise<TraktShowE
       ? { season: lastRaw.season, number: lastRaw.number, title: lastRaw.title, firstAired: lastRaw.first_aired, episodeType: lastRaw.episode_type }
       : null,
   };
+}
+
+/** Busca e cacheia a lista canônica de redes da API Trakt. TTL de 30 dias. */
+export async function getTraktNetworks(): Promise<TraktNetwork[]> {
+  const raw = await traktGet<TraktNetwork[]>(`/networks`, { ttlSeconds: 86400 * 30 }).catch(() => null);
+  return Array.isArray(raw) ? raw : [];
 }
 
 export async function getTraktMovieEnrichment(imdbId: string): Promise<{

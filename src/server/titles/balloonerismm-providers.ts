@@ -1,108 +1,135 @@
 /**
- * Providers/disponibilidade experimental via Balloonerismm.
+ * Watch providers via Balloonerismm — fonte primária de disponibilidade.
  *
- * IMPORTANTE: Balloonerismm NÃO pode ser persistido em Poplog3TitleAvailability
- * porque o enum AvailabilitySource só aceita tmdb | watchmode | motn.
+ * Endpoints:
+ *   GET /movie/{imdbId}/watch/providers?region=BR
+ *   GET /tv/{imdbId}/watch/providers?region=BR
  *
- * Se futuramente for necessário persistir, a migration mínima seria:
- *   ALTER TABLE poplog3_title_availability
- *   MODIFY COLUMN source ENUM('tmdb','watchmode','motn','balloonerismm');
- *   (risco: baixo, rollback seguro removendo o valor do enum)
- *
- * Por ora, providers Balloonerismm são retornados apenas via debug endpoint.
- *
- * Feature flags:
- *   BALLOONERISMM_PROVIDERS_ENABLED=false     — produção desabilitada
- *   BALLOONERISMM_PROVIDERS_DEBUG_ONLY=true   — permite via debug endpoint
+ * Retorna dados no formato JustWatch/TMDB: results[region]{ flatrate, rent, buy, free, ads }.
+ * Usa `resolveCatalogImage` para normalizar logo_path → URL completa.
+ * Sem persistência em DB — dado ao vivo com cache de processo (TTL 1h).
  */
 
 import { balloonerismGet } from "@/server/api-clients/balloonerismm/client";
-import type { BalloonerismMovie, BalloonerismShow, BalloonerismProvider } from "@/server/api-clients/balloonerismm/types";
+import type {
+  BalloonerismWatchProvidersResponse,
+  BalloonerismWatchProviderItem,
+  BalloonerismWatchRegionData,
+} from "@/server/api-clients/balloonerismm/types";
+import { resolveCatalogImage } from "@/lib/images/resolve";
+import type { TitleProvider } from "@/features/title/types";
 
-// ─── Feature flags ─────────────────────────────────────────────────────────────
+const DEFAULT_REGION = "BR";
+const PROVIDERS_TTL = 3600; // 1h — dados de disponibilidade mudam raramente
 
-export function isProvidersEnabled(): boolean {
-  const flag = process.env.BALLOONERISMM_PROVIDERS_ENABLED;
-  if (!flag) return false;
-  return flag !== "false" && flag !== "0";
-}
+// ─── Normalização ────────────────────────────────────────────────────────────
 
-export function isProvidersDebugOnly(): boolean {
-  const flag = process.env.BALLOONERISMM_PROVIDERS_DEBUG_ONLY;
-  if (!flag) return false;
-  return flag !== "false" && flag !== "0";
-}
-
-// ─── Tipos normalizados ────────────────────────────────────────────────────────
-
-export type NormalizedProvider = {
-  name: string;
-  type: "subscription" | "rent" | "buy" | "free" | "ads" | "unknown";
-  logoUrl: string | null;
-  region: string | null;
-  url: string | null;
-  source: "balloonerismm";
-};
-
-function normalizeProviderType(
-  raw: string | undefined,
-): NormalizedProvider["type"] {
-  switch (raw) {
-    case "subscription": return "subscription";
-    case "rent":         return "rent";
-    case "buy":          return "buy";
-    case "free":         return "free";
-    case "ads":          return "ads";
-    default:             return "unknown";
-  }
-}
-
-function normalizeProvider(p: BalloonerismProvider): NormalizedProvider {
-  return {
-    name: p.name,
-    type: normalizeProviderType(p.type),
-    logoUrl: p.logo_url ?? null,
-    region: p.region ?? null,
-    url: p.url ?? null,
-    source: "balloonerismm",
-  };
-}
-
-// ─── Fetch providers ───────────────────────────────────────────────────────────
+type ProviderCategory = "streaming" | "rent" | "buy" | "free" | "ads";
 
 /**
- * Busca providers do Balloonerismm para um título via IMDb ID.
- *
- * Retorna null quando:
- *   - BALLOONERISMM_PROVIDERS_ENABLED=false E BALLOONERISMM_PROVIDERS_DEBUG_ONLY=false
- *   - Balloonerismm está inativo (BALLOONERISMM_ACTIVE=false)
- *   - API retorna erro ou título não tem providers
- *
- * Nunca persiste em DB — use apenas para debug/enrichment.
+ * Valida se uma URL é um deeplink útil para o usuário.
+ * Rejeita links IMDb (/watch) — a rota existe mas retorna 404 na maioria dos títulos.
+ * Só aceita URLs absolutas de serviços de streaming reais ou JustWatch.
  */
-export async function getBalloonerismProviders(
+function isValidDeepLink(url: string | null | undefined): url is string {
+  if (!url || typeof url !== "string") return false;
+  if (!url.startsWith("http://") && !url.startsWith("https://")) return false;
+  const lower = url.toLowerCase();
+  // IMDb /watch não é um deeplink de streaming — rejeita
+  if (lower.includes("imdb.com")) return false;
+  return true;
+}
+
+function normalizeLogo(item: BalloonerismWatchProviderItem): string | null {
+  return resolveCatalogImage(item.logo_url ?? item.logo_path, "w92");
+}
+
+function normalizeName(item: BalloonerismWatchProviderItem): string | null {
+  const name = item.provider_name ?? item.name;
+  return name && name.trim() ? name.trim() : null;
+}
+
+function itemsToProviders(
+  items: BalloonerismWatchProviderItem[] | undefined,
+  type: ProviderCategory,
+  deepLinkFallback?: string | null,
+): TitleProvider[] {
+  if (!items?.length) return [];
+  return items
+    .map((item): TitleProvider | null => {
+      const name = normalizeName(item);
+      if (!name) return null;
+      // Prefere o link específico do item; fallback para o link regional (JustWatch);
+      // rejeita qualquer link IMDb que não seja um deeplink real de streaming
+      const deepLink = isValidDeepLink(item.link)
+        ? item.link
+        : isValidDeepLink(deepLinkFallback)
+          ? deepLinkFallback
+          : null;
+      return {
+        name,
+        logoUrl: normalizeLogo(item),
+        type: type === "streaming" ? "streaming" : type,
+        source: "balloonerismm",
+        deepLink,
+        country: DEFAULT_REGION,
+      };
+    })
+    .filter((p): p is TitleProvider => p !== null);
+}
+
+function normalizeRegionData(
+  regionData: BalloonerismWatchRegionData,
+  region: string,
+): TitleProvider[] {
+  if (!regionData) return [];
+
+  // Usa o link regional apenas se for JustWatch ou serviço real (não IMDb)
+  const link = isValidDeepLink(regionData.link) ? regionData.link : null;
+
+  return [
+    ...itemsToProviders(regionData.flatrate, "streaming", link),
+    ...itemsToProviders(regionData.free,     "free",      link),
+    ...itemsToProviders(regionData.ads,      "ads",       link),
+    ...itemsToProviders(regionData.rent,     "rent",      link),
+    ...itemsToProviders(regionData.buy,      "buy",       link),
+  ];
+}
+
+// ─── Fetch principal ─────────────────────────────────────────────────────────
+
+/**
+ * Busca watch providers do Balloonerismm para um título via IMDb ID.
+ *
+ * - Sempre retorna BR como região padrão.
+ * - Nunca lança — retorna [] em caso de erro ou indisponibilidade.
+ * - Cache de processo: 1h por path.
+ */
+export async function getBalloonerismWatchProviders(
   imdbId: string,
   mediaType: "movie" | "tv",
-  region?: string,
-): Promise<NormalizedProvider[] | null> {
-  if (!isProvidersEnabled() && !isProvidersDebugOnly()) return null;
+  region = DEFAULT_REGION,
+): Promise<TitleProvider[]> {
+  const segment = mediaType === "movie" ? "movie" : "tv";
+  const path = `/${segment}/${imdbId}/watch/providers`;
 
-  const path = mediaType === "movie" ? `/movie/${imdbId}` : `/tv/${imdbId}`;
-  const data = await balloonerismGet<BalloonerismMovie | BalloonerismShow>(path, {
-    ttlSeconds: 3600,
+  const data = await balloonerismGet<BalloonerismWatchProvidersResponse>(path, {
+    params: { region },
+    ttlSeconds: PROVIDERS_TTL,
   });
 
-  if (!data?.providers || data.providers.length === 0) return null;
+  if (!data?.results) return [];
 
-  let providers = data.providers.map(normalizeProvider);
+  // Tenta a região solicitada; se vazia, tenta qualquer região disponível como fallback
+  const regionData = data.results[region.toUpperCase()]
+    ?? data.results[region.toLowerCase()]
+    ?? null;
 
-  if (region) {
-    const filtered = providers.filter(
-      (p) => !p.region || p.region.toUpperCase() === region.toUpperCase(),
-    );
-    // Só filtra se houver resultados — evita retornar vazio por região desconhecida
-    if (filtered.length > 0) providers = filtered;
-  }
+  if (regionData) return normalizeRegionData(regionData, region);
 
-  return providers;
+  // Fallback: se só há uma região disponível, usa ela
+  const available = Object.values(data.results);
+  if (available.length === 1) return normalizeRegionData(available[0], region);
+
+  return [];
 }

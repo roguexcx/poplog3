@@ -186,7 +186,7 @@ function WatchlistCard({
   const [dismissed, setDismissed]   = useState(false);
   const [watchedActive, setWatched] = useState(false);
 
-  const slug        = `/title/${item.media_type}/${item.tmdb_id}`;
+  const slug        = `/title/${item.media_type}/${item.poplogId ?? item.tmdb_id}`;
   const posterPath  = item.poster_path ?? null;
 
   const flatrateProvider = item.providers.find((p) => p.type === "flatrate") ?? null;

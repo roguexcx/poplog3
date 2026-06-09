@@ -14,13 +14,16 @@
 // ──────────────────────────────────────────────────────────────────────────────
 
 import {
+  createContext,
   useCallback,
+  useContext,
   useEffect,
   useMemo,
   useRef,
   useState,
   type CSSProperties,
 } from "react";
+import { useOptionalUserData } from "@/context/UserDataContext";
 import { useRouter } from "next/navigation";
 import ContextualAttribution from "@/components/attribution/ContextualAttribution";
 import PageShell from "@/components/layout/PageShell";
@@ -48,7 +51,40 @@ import type {
   LegacyAgendaTv,
   LegacyAgendaMovie,
 } from "@/server/agenda/types";
-import { resolveCatalogImage } from "@/lib/images/resolve";
+import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
+
+// ── Library state context ───────────────────────────────────────────────────────
+
+type LibraryEntry = { status: string; isFavorite: boolean };
+type LibraryLookup = Map<string, LibraryEntry>;
+
+const RadarLibraryCtx = createContext<LibraryLookup>(new Map());
+
+const STATUS_BADGE_MAP: Record<string, { label: string; cls: string }> = {
+  watched:   { label: "Assistido",  cls: "border-emerald-500/40 bg-emerald-900/70 text-emerald-300" },
+  watchlist: { label: "Watchlist",  cls: "border-sky-500/40 bg-sky-900/70 text-sky-300" },
+  watching:  { label: "Assistindo", cls: "border-violet-500/40 bg-violet-900/70 text-violet-300" },
+  abandoned: { label: "Abandonado", cls: "border-rose-500/40 bg-rose-900/70 text-rose-300" },
+  fridge:    { label: "Geladeira",  cls: "border-amber-500/40 bg-amber-900/70 text-amber-300" },
+};
+
+function RadarLibraryBadge({ tmdbId, mediaType }: { tmdbId: number; mediaType: "movie" | "tv" }) {
+  const lib = useContext(RadarLibraryCtx);
+  const entry = lib.get(`${tmdbId}:${mediaType}`);
+  if (!entry) return null;
+
+  const statusKey = entry.isFavorite && entry.status === "watched" ? "watched" : entry.status;
+  const badge = STATUS_BADGE_MAP[statusKey];
+  if (!badge) return null;
+
+  return (
+    <span
+      className={`pointer-events-none absolute top-2.5 left-2.5 z-20 rounded-md border px-2 py-0.5 text-[8.5px] font-black uppercase tracking-wide backdrop-blur-sm ${badge.cls}`}
+    >
+      {entry.isFavorite && entry.status === "watched" ? `★ ${badge.label}` : badge.label}
+    </span>
+  );
+}
 
 // ── Constantes ─────────────────────────────────────────────────────────────────
 
@@ -1750,11 +1786,13 @@ function AgendaEditorialHeroCard({
     ? (episodesOnDay(item.group, item.dateStr)[0] ?? null)
     : null;
   const showTime = firstEp && !firstEp.startAt.endsWith("T00:00:00.000Z");
+  const heroMediaType = item.movie ? "movie" : "tv";
   return (
     <a
       href={d.href}
       className="group relative w-full h-full overflow-hidden rounded-[26px] border border-white/[0.08] bg-zinc-950/80 text-left shadow-[0_18px_44px_rgba(0,0,0,0.34)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-white/[0.16] block"
     >
+      <RadarLibraryBadge tmdbId={d.tmdbId} mediaType={heroMediaType} />
       {d.backdrop && (
         <img
           src={d.backdrop}
@@ -1841,11 +1879,13 @@ function AgendaEditorialWideCard({
     trendingWeek,
     item.movie,
   );
+  const wideMediaType = item.movie ? "movie" : "tv";
   return (
     <a
       href={d.href}
       className="group relative w-full h-full overflow-hidden rounded-[24px] border border-white/[0.08] bg-zinc-950/75 text-left shadow-[0_14px_34px_rgba(0,0,0,0.30)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-white/[0.15] block"
     >
+      <RadarLibraryBadge tmdbId={d.tmdbId} mediaType={wideMediaType} />
       {d.backdrop && (
         <img
           src={d.backdrop}
@@ -1907,11 +1947,13 @@ function AgendaEditorialPosterCard({
     trendingWeek,
     item.movie,
   );
+  const posterMediaType = item.movie ? "movie" : "tv";
   return (
     <a
       href={d.href}
       className="group relative w-full h-full overflow-hidden rounded-[24px] border border-white/[0.08] bg-zinc-950/75 text-left shadow-[0_14px_34px_rgba(0,0,0,0.30)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-white/[0.15] block"
     >
+      <RadarLibraryBadge tmdbId={d.tmdbId} mediaType={posterMediaType} />
       {bgImg && (
         <img
           src={bgImg}
@@ -1972,11 +2014,13 @@ function AgendaEditorialSquareCard({
     trendingWeek,
     item.movie,
   );
+  const squareMediaType = item.movie ? "movie" : "tv";
   return (
     <a
       href={d.href}
       className="group relative w-full h-full overflow-hidden rounded-[24px] border border-white/[0.08] bg-zinc-950/75 text-left shadow-[0_14px_34px_rgba(0,0,0,0.28)] backdrop-blur-xl transition-all duration-300 hover:-translate-y-1 hover:border-white/[0.15] block"
     >
+      <RadarLibraryBadge tmdbId={d.tmdbId} mediaType={squareMediaType} />
       {bgImg && (
         <img
           src={bgImg}
@@ -3312,6 +3356,22 @@ export default function RadarClient({
   initialData: IcsAgendaResponse | null;
   initialMode: RadarMode;
 }) {
+  const userData = useOptionalUserData();
+
+  // Mapa de estado da biblioteca indexado por "tmdbId:mediaType".
+  // Atualiza automaticamente quando UserDataContext recarrega após mutações.
+  const libraryLookup = useMemo((): LibraryLookup => {
+    const map = new Map<string, LibraryEntry>();
+    if (!userData) return map;
+    for (const t of userData.titles) {
+      map.set(`${t.tmdb_id}:${t.media_type}`, {
+        status: t.status,
+        isFavorite: Boolean(t.favorite),
+      });
+    }
+    return map;
+  }, [userData?.titles]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const hydrate = (gs: IcsSeriesGroup[]): IcsSeriesGroup[] =>
     gs.map((g) => ({ ...g, episodes: g.episodes.map((ep) => ({ ...ep })) }));
 
@@ -3660,29 +3720,31 @@ export default function RadarClient({
       <SectionDivider />
 
       {/* Feed unificado — mesmo componente para Geral e Personalizado */}
-      <section>
-        {radarMode === "personal" && !isLoadingMode && personalEmpty && (
-          <div className="rounded-[24px] border border-violet-500/10 bg-violet-950/10 px-6 py-14 text-center">
-            <p className="text-[14px] font-black text-white/35">
-              Nenhum título da sua biblioteca está no radar agora.
-            </p>
-            <p className="mt-2 text-[12px] text-white/20">
-              Adicione séries à sua watchlist para vê-las aqui quando tiverem novidades.
-            </p>
-          </div>
-        )}
-        {!(radarMode === "personal" && !isLoadingMode && personalEmpty) && (
-          <AgendaEditorialFeed
-            items={filteredEditorialItems}
-            mode={viewMode}
-            isLoading={isLoading || isLoadingMode}
-            trendingDay={trendingDayRef.current}
-            trendingWeek={trendingWeekRef.current}
-            radarMode={radarMode}
-            contentFilter={contentFilter}
-          />
-        )}
-      </section>
+      <RadarLibraryCtx.Provider value={libraryLookup}>
+        <section>
+          {radarMode === "personal" && !isLoadingMode && personalEmpty && (
+            <div className="rounded-[24px] border border-violet-500/10 bg-violet-950/10 px-6 py-14 text-center">
+              <p className="text-[14px] font-black text-white/35">
+                Nenhum título da sua biblioteca está no radar agora.
+              </p>
+              <p className="mt-2 text-[12px] text-white/20">
+                Adicione séries à sua watchlist para vê-las aqui quando tiverem novidades.
+              </p>
+            </div>
+          )}
+          {!(radarMode === "personal" && !isLoadingMode && personalEmpty) && (
+            <AgendaEditorialFeed
+              items={filteredEditorialItems}
+              mode={viewMode}
+              isLoading={isLoading || isLoadingMode}
+              trendingDay={trendingDayRef.current}
+              trendingWeek={trendingWeekRef.current}
+              radarMode={radarMode}
+              contentFilter={contentFilter}
+            />
+          )}
+        </section>
+      </RadarLibraryCtx.Provider>
 
       <div className="mt-10 flex items-center gap-2 border-t border-white/[0.05] pt-6">
         <span

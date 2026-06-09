@@ -4,7 +4,6 @@ import {
   imdbIdFromSyntheticTmdbId,
   isSyntheticTmdbId,
 } from "@/lib/ids/synthetic-tmdb-id";
-import { discoverTvSeriesIds } from "@/server/titles/discover-series-ids";
 
 import { resolveCanonicalSeason } from "./canonical-season-resolver";
 
@@ -108,12 +107,12 @@ export async function hydrateSeriesEpisodesFromSources(input: {
     ? imdbIdFromSyntheticTmdbId(seriesTmdbId)
     : null;
 
-  let imdbId = input.imdbId ?? syntheticImdb ?? externalRow?.imdbId ?? null;
+  const imdbId = input.imdbId ?? syntheticImdb ?? externalRow?.imdbId ?? null;
   let tvdbId =
     input.tvdbId ??
     finitePositive(externalRow?.tvdbId) ??
     null;
-  let traktId = input.traktId ?? externalRow?.traktId ?? null;
+  const traktId = input.traktId ?? externalRow?.traktId ?? null;
   const title = input.title ?? titleRow?.title ?? null;
   const year = input.year ?? titleRow?.year ?? null;
   const knownSeasonCount =
@@ -130,24 +129,11 @@ export async function hydrateSeriesEpisodesFromSources(input: {
     year,
   });
 
-  if (!imdbId && !tvdbId && title) {
-    const discovered = await discoverTvSeriesIds({
-      tmdbId: seriesTmdbId > 0 ? seriesTmdbId : null,
+  if (!imdbId && !traktId && title) {
+    log(logs, "identity", "hidratação sem lookup externo auxiliar: aguardando ID Trakt/IMDb canônico", {
       title,
       year,
-    }).catch(() => null);
-
-    if (discovered) {
-      imdbId = discovered.imdbId ?? imdbId;
-      tvdbId = discovered.tvdbId ?? tvdbId;
-      traktId = discovered.traktId ?? discovered.traktSlug ?? traktId;
-      await persistDiscoveredIds({ seriesTmdbId, imdbId, tvdbId, traktId });
-      log(logs, "identity", "IDs externos descobertos e persistidos", {
-        imdbId,
-        tvdbId,
-        traktId,
-      });
-    }
+    });
   }
 
   if (!input.force && existingSeasonCount > 0) {

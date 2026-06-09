@@ -14,11 +14,12 @@
 import Image, { type ImageProps } from "next/image";
 import { useState, type ReactNode } from "react";
 
-// Importa o helper canônico — seguro server + client
-import { resolveCatalogImage, type CatalogImageSize } from "@/lib/images/resolve";
+import { type CatalogImageSize } from "@/lib/images/resolve";
+import { resolveForRender } from "@/lib/images/proxy";
 
 // Re-exporta para compatibilidade com código que importava daqui
 export { resolveCatalogImage as resolveCatalogImageUrl, resolveCatalogImage } from "@/lib/images/resolve";
+export { resolveForRender } from "@/lib/images/proxy";
 export type { CatalogImageSize } from "@/lib/images/resolve";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
@@ -51,8 +52,8 @@ export default function CatalogImage({
 }: CatalogImageProps) {
   const [errorCount, setErrorCount] = useState(0);
 
-  const primary = resolveCatalogImage(src, size);
-  const secondary = resolveCatalogImage(fallbackSrc, size);
+  const primary = resolveForRender(src, size);
+  const secondary = resolveForRender(fallbackSrc, size);
 
   const resolved =
     errorCount === 0 ? primary :
@@ -98,8 +99,8 @@ export function CatalogImageInline({
 }: CatalogImageInlineProps) {
   const [errorCount, setErrorCount] = useState(0);
 
-  const primary = resolveCatalogImage(src, size);
-  const secondary = resolveCatalogImage(fallbackSrc, size);
+  const primary = resolveForRender(src, size);
+  const secondary = resolveForRender(fallbackSrc, size);
   const resolved =
     errorCount === 0 ? primary :
     errorCount === 1 ? secondary :

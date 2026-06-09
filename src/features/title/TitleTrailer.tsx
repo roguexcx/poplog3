@@ -1,21 +1,28 @@
 "use client";
 
 import { Clapperboard } from "lucide-react";
+import { resolveForRender } from "@/lib/images/proxy";
 import { useEffect, useMemo, useState } from "react";
 import type { TitleTrailer as TitleTrailerData } from "./types";
 
 type TitleTrailerProps = {
-  trailer: TitleTrailerData;
+  trailer: TitleTrailerData | null | undefined;
   title?: string;
   variant?: "card" | "inline";
 };
 
-function getYoutubeId(url: string): string | null {
-  return url.match(/embed\/([^?&]+)/)?.[1] ?? null;
+function getYoutubeId(url: string | null | undefined): string | null {
+  if (!url) return null;
+  return (
+    url.match(/youtube\.com\/embed\/([^?&]+)/)?.[1] ??
+    url.match(/youtube\.com\/watch\?v=([^&]+)/)?.[1] ??
+    url.match(/youtu\.be\/([^?&]+)/)?.[1] ??
+    null
+  );
 }
 
-function isEmbeddable(embedUrl: string): boolean {
-  return embedUrl.includes("youtube.com/embed/");
+function isEmbeddable(embedUrl: string | null | undefined): boolean {
+  return !!embedUrl?.includes("youtube.com/embed/");
 }
 
 const PREVIEW_CLASSES =
@@ -26,7 +33,7 @@ function PreviewMedia({ thumbnailUrl }: { thumbnailUrl: string | null | undefine
     <div className="relative aspect-video w-full overflow-hidden">
       {thumbnailUrl ? (
         <img
-          src={thumbnailUrl}
+          src={resolveForRender(thumbnailUrl) ?? thumbnailUrl}
           alt=""
           className="absolute inset-0 h-full w-full object-cover opacity-90 transition duration-300 group-hover:opacity-100"
         />
@@ -49,17 +56,17 @@ export default function TitleTrailer({
   const [open, setOpen] = useState(false);
 
   const youtubeId = useMemo(
-    () => getYoutubeId(trailer.embedUrl),
-    [trailer.embedUrl],
+    () => getYoutubeId(trailer?.embedUrl ?? trailer?.url),
+    [trailer?.embedUrl, trailer?.url],
   );
 
-  const embeddable = useMemo(() => isEmbeddable(trailer.embedUrl), [trailer.embedUrl]);
+  const embeddable = useMemo(() => isEmbeddable(trailer?.embedUrl), [trailer?.embedUrl]);
 
   const thumbnailUrl = youtubeId
     ? `https://img.youtube.com/vi/${youtubeId}/hqdefault.jpg`
-    : (trailer.thumbnailUrl ?? null);
+    : (trailer?.thumbnailUrl ?? null);
 
-  const displayTitle = trailer.name?.trim() || title || "Trailer";
+  const displayTitle = trailer?.name?.trim() || title || "Trailer";
 
   useEffect(() => {
     if (!open) return;
@@ -71,6 +78,8 @@ export default function TitleTrailer({
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
+
+  if (!trailer || (!trailer.embedUrl && !trailer.url)) return null;
 
   // Embed (YouTube): abre modal inline
   // Link externo (IMDb, outros): abre em nova aba
@@ -85,7 +94,7 @@ export default function TitleTrailer({
     </button>
   ) : (
     <a
-      href={trailer.url}
+      href={trailer.url ?? "#"}
       target="_blank"
       rel="noopener noreferrer"
       aria-label={`Assistir trailer: ${displayTitle}`}
@@ -141,7 +150,7 @@ export default function TitleTrailer({
 
             <div className="relative aspect-video w-full bg-black">
               <iframe
-                src={`${trailer.embedUrl}?autoplay=1&rel=0`}
+                src={`${trailer.embedUrl ?? ""}?autoplay=1&rel=0`}
                 title={displayTitle}
                 className="absolute inset-0 h-full w-full"
                 allow="autoplay; encrypted-media; picture-in-picture; fullscreen"

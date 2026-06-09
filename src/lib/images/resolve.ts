@@ -3,6 +3,7 @@
  *
  * Aceita qualquer formato de entrada:
  *   - URL completa (Balloonerismm, IMDb, TVDB, CDN próprio) → passthrough
+ *   - URL sem protocolo (walter-r2.trakt.tv/...) → prepend https://
  *   - Path TMDB legado (/abc.jpg ou abc.jpg) → prepend image.tmdb.org
  *   - null / undefined / string vazia → null
  *
@@ -53,6 +54,7 @@ export function resolveCatalogImage(
   // URL completa — Balloonerismm, IMDb, TVDB, CDN próprio
   if (normalizedSource.startsWith("http://") || normalizedSource.startsWith("https://")) return normalizedSource;
   if (/^[a-z0-9.-]+\.[a-z]{2,}\//i.test(normalizedSource)) return `https://${normalizedSource}`;
+  if (/^\/[a-z0-9.-]+\.[a-z]{2,}\//i.test(normalizedSource)) return `https://${normalizedSource.slice(1)}`;
   // Path TMDB legado (com ou sem / inicial)
   const normalized = normalizedSource.startsWith("/") ? normalizedSource : `/${normalizedSource}`;
   return `${TMDB_IMAGE_BASE}/${size}${normalized}`;

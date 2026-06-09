@@ -25,7 +25,6 @@ import { getUserProviderPreferences } from "@/server/streaming/user-provider-pre
 import { getAvailabilityForDisplay } from "@/server/streaming/title-availability";
 import { withOrigin } from "@/server/engine-logger";
 import type { TmdbPayloadWithWatch } from "@/server/sync/sync-availability";
-import { syncOmdbRatings } from "@/server/sync/sync-omdb-ratings";
 import { findOfficialTrailerOnYouTube } from "@/server/trailers/youtube-trailer";
 import { getSeriesEpisodeRuntimes } from "@/server/runtime/series-episode-runtimes";
 import { rankRecommendationsByEditorialOrigin } from "@/server/recommendations/editorial-origin-ranker";
@@ -43,14 +42,18 @@ import {
   type PoplogTitleDetailsResult,
 } from "@/server/titles/poplog-title-details";
 import type { PoplogTitleSourceHint } from "@/server/titles/poplog-title-identity";
-import { catalogGetRelated } from "@/server/source-engine/engine";
 import { traktAdapter, getTraktShowEnrichment, getTraktMovieEnrichment } from "@/server/source-engine/adapters/trakt-adapter";
+import {
+  fetchBalloonerismForSeed,
+  mergeBalloonCandidates,
+} from "@/server/recommendations/balloon-engine";
 import { traktGet } from "@/server/api-clients/trakt/client";
 import type { TraktTranslation } from "@/server/api-clients/trakt/types";
 import type { CatalogSearchResult } from "@/server/source-engine/types/catalog.types";
 import type { TitleRecommendation } from "@/features/title/types";
 import { db } from "@/server/db/client";
 import { syntheticTmdbFromImdbId } from "@/lib/ids/synthetic-tmdb-id";
+import { normalizeNetworkSlug } from "@/lib/networks/normalize";
 import { upsertCachedTitleRow } from "@/server/repositories";
 import {
   resolveCanonicalSeriesMeta,
@@ -104,22 +107,40 @@ async function getProvidersFromCache(
   imdbId: string | undefined,
   country: string,
 ): Promise<TitleProvider[]> {
+  const region = country.toUpperCase() || "BR";
+
+  // Fonte primária: Balloonerismm /watch/providers (ao vivo, cache de processo 1h)
+  if (imdbId) {
+    try {
+      const { getBalloonerismWatchProviders } = await import("@/server/titles/balloonerismm-providers");
+      const providers = await getBalloonerismWatchProviders(
+        imdbId,
+        mediaType as "movie" | "tv",
+        region,
+      );
+      if (providers.length > 0) return providers;
+    } catch {
+      // fallthrough para cache local
+    }
+  }
+
+  // Fallback: cache local (dados TMDB/Watchmode/MOTN já sincronizados)
   try {
-    // Prefer tmdbId path (uses existing getAvailability with BigInt conversion)
     if (tmdbId) {
       const { getAvailability } = await import("@/server/cache/availability-cache");
       const rows = await getAvailability(mediaType, tmdbId, country);
-      return rows.map((row) => ({
-        name: row.provider_name,
-        logoUrl: null,
-        type: (row.availability_type === "streaming" ? "streaming" : row.availability_type) as TitleProvider["type"],
-        source: row.source,
-        country: row.country,
-        deepLink: row.deep_link,
-        quality: row.quality,
-      }));
+      if (rows.length > 0) {
+        return rows.map((row) => ({
+          name: row.provider_name,
+          logoUrl: null,
+          type: (row.availability_type === "streaming" ? "streaming" : row.availability_type) as TitleProvider["type"],
+          source: row.source,
+          country: row.country,
+          deepLink: row.deep_link,
+          quality: row.quality,
+        }));
+      }
     }
-    // Fallback: imdbId path via local service
     if (imdbId) {
       const local = await import("@/server/local-services/catalog-availability-local.service");
       const rows = await local.listAvailability({
@@ -135,10 +156,11 @@ async function getProvidersFromCache(
         country: row.provider_region,
       }));
     }
-    return [];
   } catch {
-    return [];
+    // ignora
   }
+
+  return [];
 }
 
 async function getSeasonSummariesFromDb(
@@ -359,8 +381,10 @@ function buildSeriesEnrichment(
   // Metadados complementares (metadata block)
   const existingMeta = base.metadata ?? {};
   const canonicalNetworks = canonical.networks.length > 0
-    ? canonical.networks.map((n) => ({ id: 0 as number, name: n }))
-    : (canonical.network ? [{ id: 0 as number, name: canonical.network }] : undefined);
+    ? canonical.networks.map((n) => ({ id: 0 as number, name: n, slug: normalizeNetworkSlug(n) }))
+    : (canonical.network
+        ? [{ id: 0 as number, name: canonical.network, slug: normalizeNetworkSlug(canonical.network) }]
+        : undefined);
 
   const canonicalCompanies = canonical.companies.length > 0
     ? canonical.companies.map((c) => ({ id: 0 as number, name: c }))
@@ -516,40 +540,83 @@ function poplogDetailsToTitlePageData(
   };
 }
 
-async function getTraktRelatedWithFallback({
+/**
+ * Fetches "Mais como este" recommendations via Balloonerismm (primary).
+ * Trakt is no longer used for recommendation ranking — only for pt-BR enrichment
+ * (handled downstream by enrichRelatedWithPtBrTitles) and local DB for images.
+ *
+ * Strategy:
+ *   1. Fetch /recommendations + /similar from Balloonerismm for the seed imdbId
+ *   2. Merge and score via mergeBalloonCandidates (recs > sim, internal ordering)
+ *   3. Resolve tmdbId from local DB by imdbId (enables enrichRelatedWithLocalImages)
+ *   4. Return CatalogSearchResult[] compatible with the existing enrichment pipeline
+ */
+async function getUnifiedRelated({
   mediaType,
   imdbId,
-  traktId,
-  traktSlug,
 }: {
   mediaType: "movie" | "show";
   imdbId?: string | null;
-  traktId?: number | string | null;
-  traktSlug?: string | null;
+  traktId?: number | string | null;  // kept for call-site compat, unused
+  traktSlug?: string | null;         // kept for call-site compat, unused
 }): Promise<CatalogSearchResult[]> {
-  const numericTraktId =
-    typeof traktId === "number"
-      ? traktId
-      : typeof traktId === "string" && /^\d+$/.test(traktId)
-        ? Number(traktId)
-        : undefined;
+  if (!imdbId) return [];
 
-  if (imdbId || numericTraktId || traktSlug) {
-    const traktRelated = await traktAdapter.getRelated({
-      mediaType,
-      imdbId: imdbId ?? undefined,
-      traktId: numericTraktId,
-      traktSlug: traktSlug ?? undefined,
-    }).catch((err) => {
-      console.warn("[getTitlePageData] Trakt related erro:", (err as Error)?.message);
-      return [] as CatalogSearchResult[];
-    });
-    if (traktRelated.length > 0) return traktRelated;
+  const apiMediaType = mediaType === "movie" ? "movie" as const : "tv" as const;
+
+  const balloonFetch = await fetchBalloonerismForSeed(imdbId, apiMediaType, "title-related");
+  if (!balloonFetch.items.length) return [];
+
+  // mergeBalloonCandidates expects BalloonSeedResult[]; single-seed call here.
+  const merged = mergeBalloonCandidates([{
+    seedImdbId:    imdbId,
+    seedMediaType: apiMediaType,
+    seedWeight:    100,
+    seedTitle:     "",
+    seedReason:    "",
+    items:         balloonFetch.items,
+  }]);
+
+  console.log(
+    `[title-related:balloon] context=title-related imdbId=${imdbId} ` +
+    `candidates=${merged.length} ` +
+    `recs=${merged.filter(c => c.balloonSource !== "similar").length} ` +
+    `sim=${merged.filter(c => c.balloonSource !== "recommendations").length}`,
+  );
+
+  // Resolve tmdbIds from local DB so enrichRelatedWithLocalImages can find images
+  const imdbIds = merged.map(c => c.imdbId).filter(Boolean);
+  const imdbToTmdb = new Map<string, { tmdbId: number; mediaType: string }>();
+  if (imdbIds.length > 0) {
+    try {
+      const rows = await db.titleExternalId.findMany({
+        where:  { imdbId: { in: imdbIds }, tmdbId: { gt: 0 } },
+        select: { imdbId: true, tmdbId: true, mediaType: true },
+      });
+      for (const r of rows) {
+        if (r.imdbId) imdbToTmdb.set(r.imdbId, { tmdbId: r.tmdbId, mediaType: r.mediaType });
+      }
+    } catch { /* non-fatal, enrichment will skip */ }
   }
 
-  return imdbId
-    ? catalogGetRelated({ mediaType, imdbId }).catch(() => [])
-    : [];
+  return merged.map((c): CatalogSearchResult => {
+    const resolved = imdbToTmdb.get(c.imdbId);
+    return {
+      ids: {
+        imdbId:  c.imdbId,
+        tmdbId:  resolved?.tmdbId ?? undefined,
+      },
+      mediaType,
+      title:       c.title,
+      year:        c.year ? (parseInt(c.year, 10) || undefined) : undefined,
+      overview:    c.overview   ?? undefined,
+      posterPath:  c.posterUrl  ?? undefined,
+      genreIds:    c.genreIds   ?? [],
+      voteAverage: c.voteAverage ?? undefined,
+      voteCount:   c.voteCount   ?? undefined,
+      source: { primary: "balloonerismm", confidence: "high", usedFallback: false },
+    };
+  });
 }
 
 function recommendationFromCatalogResult(result: CatalogSearchResult): TitleRecommendation {
@@ -690,20 +757,39 @@ async function filterRelatedOutsideUserLibrary(
   });
   if (library.length === 0) return related;
 
-  const known = new Set(
+  // Exclusão por tmdbId (inclui abandonados — todos os status bloqueiam resultados)
+  const knownByTmdb = new Set(
     library.map((item) => `${item.media_type}:${item.tmdb_id}`),
   );
+  // Exclusão por imdbId: cobre itens Balloon-only (sem tmdbId real na recomendação)
+  // quando o usuário salvou o mesmo título com tmdbId positivo real.
+  const knownByImdb = new Set(
+    library
+      .filter((item) => item.imdb_id)
+      .map((item) => `${item.media_type}:${item.imdb_id}`),
+  );
 
-  return related.filter((item) => {
+  let removed = 0;
+  const filtered = related.filter((item) => {
     const mediaType = item.mediaType === "show" ? "tv" : "movie";
-    const tmdbId = item.ids.tmdbId ?? null;
+    const tmdbId    = item.ids.tmdbId ?? null;
     const syntheticId = item.ids.imdbId ? syntheticTmdbFromImdbId(item.ids.imdbId) : null;
+    const imdbKey   = item.ids.imdbId ? `${mediaType}:${item.ids.imdbId}` : null;
 
-    return !(
-      (tmdbId && known.has(`${mediaType}:${tmdbId}`)) ||
-      (syntheticId && known.has(`${mediaType}:${syntheticId}`))
-    );
+    const inLibrary =
+      (tmdbId     && knownByTmdb.has(`${mediaType}:${tmdbId}`)) ||
+      (syntheticId && knownByTmdb.has(`${mediaType}:${syntheticId}`)) ||
+      (imdbKey    && knownByImdb.has(imdbKey));
+
+    if (inLibrary) removed++;
+    return !inLibrary;
   });
+
+  if (removed > 0) {
+    console.log(`[title-related] library-filter removed=${removed} remaining=${filtered.length}`);
+  }
+
+  return filtered;
 }
 
 function buildTmdbFallbackBlockedPageData({
@@ -794,7 +880,7 @@ export async function getTitlePageData(
         const [currentUser, providers, relatedRaw, seriesCanonical, traktEnrichment] = await Promise.all([
           getCurrentUser().catch(() => null),
           getProvidersFromCache(resolvedMediaType, tmdbId, imdbId, country),
-          getTraktRelatedWithFallback({
+          getUnifiedRelated({
             mediaType: catalogMediaType,
             imdbId,
             traktId,
@@ -942,36 +1028,12 @@ export async function getTitlePageData(
           }
         }
 
-        // Community rating + OMDb ratings (cache-first; external refresh quando OMDB_API_KEY disponível)
+        // Community rating + Trakt/base ratings. No external ratings API is called.
         // ratingKeyId já declarado acima (tmdbId real ou sintético negativo).
-        const [communityRating, cachedExternalRatings] = await Promise.all([
-          ratingKeyId
-            ? getPublicRating(resolvedMediaType as "movie" | "tv", ratingKeyId).catch(() => null)
-            : Promise.resolve(null),
-          ratingKeyId && imdbId
-            ? syncOmdbRatings({
-                tmdbId: ratingKeyId,
-                mediaType: resolvedMediaType as "movie" | "tv",
-                imdbId,
-                tmdbRating: base.voteAverage ?? null,
-                allowExternalRefresh: Boolean(process.env.OMDB_API_KEY),
-                origin: { endpoint: requestedId, action: "title_page_data" },
-              }).then((r) => r.ratings).catch(() => null)
-            : Promise.resolve(null),
-        ]);
-
-        // Enrich ratings block with cached RT/Metacritic/poplog scores when available
-        const enrichedRatings = cachedExternalRatings
-          ? {
-              ...(base.ratings ?? {}),
-              imdbRating: cachedExternalRatings.imdb_rating ?? base.ratings?.imdbRating ?? null,
-              imdbVotes: cachedExternalRatings.imdb_votes ?? base.ratings?.imdbVotes ?? null,
-              rottenTomatoesScore: cachedExternalRatings.rotten_tomatoes_score ?? base.ratings?.rottenTomatoesScore ?? null,
-              metacriticScore: cachedExternalRatings.metacritic_score ?? base.ratings?.metacriticScore ?? null,
-              tmdbRating: cachedExternalRatings.tmdb_rating ?? base.ratings?.tmdbRating ?? null,
-              poplogScore: cachedExternalRatings.poplog_score ?? base.ratings?.poplogScore ?? null,
-            }
-          : base.ratings;
+        const communityRating = ratingKeyId
+          ? await getPublicRating(resolvedMediaType as "movie" | "tv", ratingKeyId).catch(() => null)
+          : null;
+        const enrichedRatings = base.ratings;
 
         const relatedOutsideLibrary = await filterRelatedOutsideUserLibrary(
           relatedRaw,
@@ -984,9 +1046,18 @@ export async function getTitlePageData(
           .slice(0, 12)
           .map(recommendationFromCatalogResult);
 
+        // Log de entrega: breakdown por fonte nos itens finais
+        const recTraktOnly   = recommendations.filter((r) => r.tmdbId && r.tmdbId > 0 && !r.imdbId).length;
+        const recBalloonOnly = recommendations.filter((r) => !r.tmdbId || r.tmdbId < 0).length;
+        const recBoth        = recommendations.length - recTraktOnly - recBalloonOnly;
+        console.log(
+          `[title-related] delivered=${recommendations.length}` +
+          ` trakt=${recTraktOnly + recBoth} balloon=${recBalloonOnly + recBoth} both=${recBoth}`,
+        );
+
         // Write-through cache para IDs sintéticos (IMDb-first sem TMDB real).
         // Primeira visita à página já popula poplog3Title, então biblioteca/acompanhando
-        // encontram os dados localmente sem nova chamada Balloonerismm.
+        // encontram os dados localmente sem nova chamada externa.
         if (!tmdbId && ratingKeyId) {
           void upsertCachedTitleRow({
             tmdbId: ratingKeyId,
@@ -1013,17 +1084,29 @@ export async function getTitlePageData(
           ? buildSeriesEnrichment(base, seriesCanonical)
           : {};
 
-        // Enriquecimento Trakt: studios, certifications, next/last episode
+        // Enriquecimento Trakt: studios, certifications, network, next/last episode
         const traktEnrichmentPatch: Partial<TitlePageData> = {};
         if (traktEnrichment) {
+          const existingMetaForStudios = (seriesEnrichment.metadata ?? base.metadata) ?? {};
+
           // studios → productionCompanies se vazio
           const studios = traktEnrichment.studios;
-          if (studios?.length) {
-            const existingMeta = (seriesEnrichment.metadata ?? base.metadata) ?? {};
-            if (!existingMeta.productionCompanies?.length) {
+          if (studios?.length && !existingMetaForStudios.productionCompanies?.length) {
+            traktEnrichmentPatch.metadata = {
+              ...existingMetaForStudios,
+              productionCompanies: studios.map((s) => ({ id: 0 as number, name: s.name })),
+            };
+          }
+
+          // network: substitui/complementa os networks da engine canônica se houver slug
+          if ("network" in traktEnrichment && traktEnrichment.network) {
+            const tn = (traktEnrichment as { network: { name: string; slug: string; country?: string } }).network;
+            const patchedMeta = traktEnrichmentPatch.metadata ?? existingMetaForStudios;
+            const hasSluggedNetwork = patchedMeta.networks?.some((n) => n.slug);
+            if (!hasSluggedNetwork) {
               traktEnrichmentPatch.metadata = {
-                ...existingMeta,
-                productionCompanies: studios.map((s) => ({ id: 0 as number, name: s.name })),
+                ...patchedMeta,
+                networks: [{ id: 0, name: tn.name, slug: tn.slug, originCountry: tn.country ?? null }],
               };
             }
           }

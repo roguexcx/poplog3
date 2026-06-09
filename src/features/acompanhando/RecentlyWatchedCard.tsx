@@ -2,7 +2,7 @@
 
 import type { RecentlyWatchedItem } from "@/app/api/poplog3/continuity/recently-watched/route";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
-import { resolveCatalogImage } from "@/lib/images/resolve";
+import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 
 export type { RecentlyWatchedItem };
 

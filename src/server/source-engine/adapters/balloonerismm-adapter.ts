@@ -340,6 +340,7 @@ type BalloonerismSearchLike = {
   poster_path?: string | null;
   backdrop_path?: string | null;
   genre_ids?: Array<number | string> | null;
+  genres?: Array<string | { name?: string | null }> | null;
   vote_average?: number | null;
   vote_count?: number | null;
   number_of_seasons?: number | string | null;
@@ -450,9 +451,150 @@ function searchItemToResult(item: BalloonerismSearchLike): CatalogSearchResult {
   );
 }
 
+// ─── Person search types ──────────────────────────────────────────────────────
+
+export type PersonSearchResult = {
+  imdbId?: string;
+  name: string;
+  profilePath?: string | null;
+  knownForDepartment?: string | null;
+  biography?: string | null;
+  knownFor?: Array<{ imdbId?: string; title: string; mediaType: "movie" | "tv"; year?: number; posterPath?: string | null }>;
+};
+
+export type CompanySearchResult = {
+  id?: string;
+  name: string;
+  logoPath?: string | null;
+  originCountry?: string | null;
+  description?: string | null;
+};
+
+type BalloonerismPersonSearchLike = {
+  imdb_id?: string | null;
+  id?: string | null;
+  name?: string | null;
+  profile_path?: string | null;
+  known_for_department?: string | null;
+  biography?: string | null;
+  known_for?: Array<{
+    imdb_id?: string | null;
+    title?: string | null;
+    name?: string | null;
+    media_type?: string | null;
+    year?: number | null;
+    images?: { poster?: string | null };
+    poster_path?: string | null;
+  }>;
+};
+
+// ─── Helpers de filtro/dedup de busca ────────────────────────────────────────
+
+/** Media types that are never legitimate movie/show catalog entries. */
+const EXCLUDED_MEDIA_TYPES = new Set([
+  "podcast", "episode", "clip", "video", "person", "news",
+  "short_video", "music_video", "music", "game",
+]);
+
+/** TMDB genre IDs that indicate the item is a music video / concert film, not a narrative work. */
+const MUSIC_GENRE_IDS = new Set([10402]); // 10402 = Music (TMDB)
+
+/**
+ * Returns true if the title looks like "ArtistName: SongTitle" — the canonical
+ * pattern for music singles and EPs on TMDB/Balloonerismm.
+ */
+function looksLikeMusicArtistTitle(title: string, query: string): boolean {
+  const t = title.trim();
+  const q = query.trim();
+  if (!t || !q) return false;
+  // "Zendaya: Neverland" when query = "zendaya"
+  const prefix = t.slice(0, q.length + 2).toLowerCase();
+  const expectedPrefix = `${q.toLowerCase()}: `;
+  return prefix === expectedPrefix;
+}
+
+/**
+ * Strict filter: rejects music videos, podcast episodes, clips, and other
+ * non-cinematic content from /search/multi results.
+ */
+function isValidTitleItem(item: BalloonerismSearchLike, query?: string): boolean {
+  // 1. Explicit non-title media types
+  const mt = normalizeMediaTypeText(item.media_type ?? "");
+  if (mt && EXCLUDED_MEDIA_TYPES.has(mt)) return false;
+
+  // 2. Music genre filter (genre_id 10402)
+  const genreIds = Array.isArray(item.genre_ids) ? item.genre_ids : [];
+  if (genreIds.some((g) => MUSIC_GENRE_IDS.has(Number(g)))) return false;
+
+  // 3. String-based genre check ("Music" in genres array)
+  const genres = Array.isArray(item.genres)
+    ? (item.genres as Array<string | { name?: string }>).map((g) =>
+        typeof g === "string" ? g.toLowerCase() : (g?.name ?? "").toLowerCase(),
+      )
+    : [];
+  if (genres.includes("music")) return false;
+
+  // 4. "Artist: Song" title pattern — clearly a music single
+  const title = item.title ?? item.name ?? "";
+  if (query && looksLikeMusicArtistTitle(title, query)) return false;
+
+  // 5. Must have at least a title
+  return Boolean(title);
+}
+
+/**
+ * Deduplicates search items.
+ * Priority: imdbId → title+year+mediaType key.
+ * When duplicates exist (pt-BR vs EN), prefers the localized title.
+ */
+function deduplicateSearchItems(items: BalloonerismSearchLike[]): BalloonerismSearchLike[] {
+  const byImdbId = new Map<string, BalloonerismSearchLike>();
+  const byTitleKey = new Map<string, BalloonerismSearchLike>();
+  const result: BalloonerismSearchLike[] = [];
+
+  for (const item of items) {
+    const itemId = typeof item.id === "string" ? item.id : "";
+    const imdbId = item.imdb_id ?? item.ids?.imdb ?? (itemId.startsWith("tt") ? itemId : undefined);
+
+    if (imdbId) {
+      const existing = byImdbId.get(imdbId);
+      if (!existing) {
+        byImdbId.set(imdbId, item);
+        result.push(item);
+      } else {
+        // Prefer localized (title ≠ original_title) over un-localized
+        const existingIsLocalized = existing.title && existing.original_title && existing.title !== existing.original_title;
+        const newIsLocalized = item.title && item.original_title && item.title !== item.original_title;
+        if (newIsLocalized && !existingIsLocalized) {
+          // Replace in-place in the result array
+          const idx = result.indexOf(existing);
+          if (idx !== -1) result[idx] = item;
+          byImdbId.set(imdbId, item);
+        }
+      }
+      continue;
+    }
+
+    // No imdbId: fall back to title+year+type key
+    const title = (item.title ?? item.name ?? "").toLowerCase().trim();
+    const year = item.year ?? toYear(item.release_date ?? item.first_air_date ?? undefined);
+    const type = inferSearchMediaType(item);
+    const key = `${type}:${title}:${year ?? ""}`;
+    if (key && !byTitleKey.has(key)) {
+      byTitleKey.set(key, item);
+      result.push(item);
+    }
+  }
+
+  return result;
+}
+
 // ─── Adapter ──────────────────────────────────────────────────────────────────
 
-export const balloonerismAdapter: CatalogAdapter = {
+export const balloonerismAdapter: CatalogAdapter & {
+  searchPeople(params: { query: string }): Promise<PersonSearchResult[]>;
+  searchCompanies(params: { query: string }): Promise<CompanySearchResult[]>;
+} = {
   // ── Busca ──────────────────────────────────────────────────────────────────
 
   async searchTitles(params: SearchParams): Promise<CatalogSearchResult[]> {
@@ -465,9 +607,72 @@ export const balloonerismAdapter: CatalogAdapter = {
       ttlSeconds: 3600,
     });
     if (raw === null) return [];
-    const items = extractArray<BalloonerismSearchLike>(raw, path);
+    const all = extractArray<BalloonerismSearchLike>(raw, path);
+    const filtered = all.filter((item) => isValidTitleItem(item, params.query));
+    const items = deduplicateSearchItems(filtered);
     summarizeSearchMedia(items, path, params.query);
     return items.map(searchItemToResult);
+  },
+
+  // ── Pessoas ────────────────────────────────────────────────────────────────
+
+  async searchPeople({ query }: { query: string }): Promise<PersonSearchResult[]> {
+    const raw = await balloonerismGet<unknown>("/search/person", {
+      params: { query, language: "pt-BR" },
+      ttlSeconds: 3600,
+    });
+    if (raw === null) return [];
+    const items = extractArray<BalloonerismPersonSearchLike>(raw, "/search/person");
+    return items
+      .filter((p) => Boolean(p.name))
+      .slice(0, 8)
+      .map((p) => {
+        // IMDb IDs for people start with "nm" (not "tt"). Accept both.
+        const rawId = typeof p.id === "string" ? p.id : undefined;
+        const imdbId = p.imdb_id
+          ?? (rawId?.startsWith("tt") || rawId?.startsWith("nm") ? rawId : undefined)
+          ?? undefined;
+        const knownFor = (p.known_for ?? [])
+          .filter((kf) => Boolean(kf.title ?? kf.name))
+          .map((kf) => ({
+            imdbId: kf.imdb_id ?? undefined,
+            title: kf.title ?? kf.name ?? "",
+            mediaType: (kf.media_type === "tv" || kf.media_type === "show" ? "tv" : "movie") as "movie" | "tv",
+            year: kf.year ?? undefined,
+            posterPath: kf.images?.poster ?? kf.poster_path ?? null,
+          }));
+        return {
+          imdbId,
+          name: p.name!,
+          profilePath: p.profile_path ?? null,
+          knownForDepartment: p.known_for_department ?? null,
+          biography: p.biography ?? null,
+          knownFor,
+        };
+      });
+  },
+
+  // ── Empresas ───────────────────────────────────────────────────────────────
+
+  async searchCompanies({ query }: { query: string }): Promise<CompanySearchResult[]> {
+    // Balloonerismm has /search/company — call it if available, safe fallback.
+    const raw = await balloonerismGet<unknown>("/search/company", {
+      params: { query },
+      ttlSeconds: 3600,
+    });
+    if (raw === null) return [];
+    type RawCompany = { id?: string; name?: string; logo_path?: string | null; origin_country?: string | null; description?: string | null };
+    const items = extractArray<RawCompany>(raw, "/search/company");
+    return items
+      .filter((c) => Boolean(c.name))
+      .slice(0, 5)
+      .map((c) => ({
+        id: c.id ?? c.name,
+        name: c.name!,
+        logoPath: c.logo_path ?? null,
+        originCountry: c.origin_country ?? null,
+        description: c.description ?? null,
+      }));
   },
 
   // ── Filme ──────────────────────────────────────────────────────────────────

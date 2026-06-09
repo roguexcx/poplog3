@@ -4,7 +4,8 @@ export type ApiSourceId =
   | "omdb"
   | "trakt"
   | "movieofthenight"
-  | "bancodeseries";
+  | "bancodeseries"
+  | "balloonerismm";
 
 export type AttributionContext =
   | "metadata"

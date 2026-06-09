@@ -13,6 +13,7 @@ const SOURCE_ALIASES: Record<string, ApiSourceId> = {
   bancodeseries: "bancodeseries",
   banco_de_series: "bancodeseries",
   "banco-de-series": "bancodeseries",
+  balloonerismm: "balloonerismm",
 };
 
 const CONTEXT_LABELS: Record<AttributionContext, string> = {

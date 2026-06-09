@@ -6,6 +6,7 @@ function normalizeAbsoluteImageUrl(path: string): string | null {
   const value = path.trim();
   if (value.startsWith("http://") || value.startsWith("https://")) return value;
   if (/^[a-z0-9.-]+\.[a-z]{2,}\//i.test(value)) return `https://${value}`;
+  if (/^\/[a-z0-9.-]+\.[a-z]{2,}\//i.test(value)) return `https://${value.slice(1)}`;
   return null;
 }
 

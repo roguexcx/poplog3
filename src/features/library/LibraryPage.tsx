@@ -11,7 +11,7 @@ import {
 } from "lucide-react";
 
 import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
-import { resolveCatalogImage } from "@/lib/images/resolve";
+import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import SectionHeader from "@/components/ui/SectionHeader";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";

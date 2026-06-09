@@ -243,7 +243,31 @@
       "Bash(curl -s \"http://localhost:3000/api/admin/consolidate-synthetic-ids\" -H \"x-admin-secret: poplog-admin-local-2026\")",
       "Bash(ConvertFrom-Json)",
       "Bash(ConvertTo-Json -Depth 10)",
-      "PowerShell(curl -s \"http://localhost:3000/api/admin/consolidate-synthetic-ids\" -H \"x-admin-secret: poplog-admin-local-2026\")"
+      "PowerShell(curl -s \"http://localhost:3000/api/admin/consolidate-synthetic-ids\" -H \"x-admin-secret: poplog-admin-local-2026\")",
+      "Bash(xargs grep -l \"prisma\")",
+      "Bash(xargs grep -l \"PoplogCard\\\\|CacheMeta\\\\|UserState\\\\|TitleCard\\\\|MediaCard\")",
+      "Bash(Get-Process node *)",
+      "Bash(Select-Object Id, ProcessName, StartTime)",
+      "Bash(Format-Table)",
+      "PowerShell(Get-Process node -ErrorAction SilentlyContinue)",
+      "Bash(cd /I/poplog-v3 && find . -type f -name \"*.ts\" -o -name \"*.tsx\" | head -50)",
+      "Bash(python -c \"import sys,json; p=json.load\\(sys.stdin\\); deps={**p.get\\('dependencies',{}\\),**p.get\\('devDependencies',{}\\)}; [print\\(k,v\\) for k,v in sorted\\(deps.items\\(\\)\\) if any\\(x in k for x in ['zustand','tanstack','query','react-query','jotai','valtio','immer']\\)]\")",
+      "Read(//c/Users/Philipe/Downloads/**)",
+      "Bash(python3 -c ' *)",
+      "Bash(grep -v '^$')",
+      "Bash(grep -rn '`/title/\\\\${' src/ --include=\"*.tsx\" --include=\"*.ts\")",
+      "Bash(grep -rn \"href.*title.*tmdb\\\\|/title/.*\\\\\\\\.id\\\\b\" src/features/ --include=\"*.tsx\")",
+      "Bash(sed -n '55,75p' src/features/title/TitleCollectionSection.tsx)",
+      "Bash(sed -n '1,50p' src/features/title/TitleRecommendations.tsx)",
+      "PowerShell($env:DATABASE_URL)",
+      "Bash(mysql -u poplog -ppoplog_local_password -h localhost -P 3306 poplog_v3 -e \"SHOW TABLES;\")",
+      "PowerShell(cd \"I:\\\\poplog-v3\"; $job = Start-Job -ScriptBlock { cd \"I:\\\\poplog-v3\"; npm run dev 2>&1 }; Start-Sleep -Seconds 15; Receive-Job $job | Select-Object -First 80; Stop-Job $job; Remove-Job $job)",
+      "Bash(mkdir -p \"I:\\\\poplog-v3\\\\src\\\\app\\\\person\\\\[id]\")",
+      "Bash(curl -s \"https://api.balloonerismm.workers.dev/search/person?query=zendaya\")",
+      "WebFetch(domain:api.balloonerismm.workers.dev)",
+      "Bash(cd /I:/poplog-v3 && find . -type f -name \"*.ts\" -o -name \"*.tsx\" | head -20)",
+      "Bash(xargs grep -l \"providers\")",
+      "Bash(xargs grep -l \"StreamingProvider\")"
     ]
   }
 }

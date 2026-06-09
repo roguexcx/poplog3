@@ -15,7 +15,6 @@ import {
 } from "@/server/continuity/continuity-section-cache";
 import {
   catalogGetTrending,
-  isBalloonerismTrendingEnabled,
 } from "@/server/source-engine/engine";
 import {
   hydrateCatalogResultsWithDebug,
@@ -33,7 +32,7 @@ import type { TraktIndexItem } from "@/lib/trakt-index/types";
 const TRENDING_CACHE_TTL_MS = 30 * 60_000;
 const TRENDING_DB_TIMEOUT_MS = 1_500;
 const TRENDING_AUTH_TIMEOUT_MS = 500;
-const TRENDING_BALLOONERISMM_LIMIT = 15;
+const TRENDING_TRAKT_LIMIT = 15;
 const TRENDING_MIN_RESULTS = 5;
 const TRENDING_LOCAL_FALLBACK_LIMIT = 20;
 const TRAKT_INDEX_TIMEOUT_MS = 14_000;
@@ -198,7 +197,7 @@ async function enrichWithRuntime(titles: PoplogTitle[]) {
     // Itens do Trakt Index já têm identity resolvida — não sobrescrever com resolveCatalogIdentityFields
     const identityOverride = title.normalizedFrom === "trakt_index"
       ? {}
-      : resolveCatalogIdentityFields(title, title.normalizedFrom === "cache-fuzzy" ? "cache-fuzzy" : "balloonerismm");
+      : resolveCatalogIdentityFields(title, title.normalizedFrom === "cache-fuzzy" ? "cache-fuzzy" : "trakt");
 
     return {
       ...title,
@@ -212,7 +211,7 @@ async function enrichWithRuntime(titles: PoplogTitle[]) {
 
 /**
  * Interleave movies and tv results: [movie1, tv1, movie2, tv2, ...]
- * Preserves Balloonerismm popularity order within each type.
+ * Preserves Trakt popularity order within each type.
  */
 function interleaveTrending(movies: PoplogTitle[], tv: PoplogTitle[]): PoplogTitle[] {
   const result: PoplogTitle[] = [];
@@ -236,7 +235,7 @@ export async function GET(request: NextRequest) {
     markStage(perf, stageRef, "auth");
 
     // Quando Trakt Index está ativo, o cache `home_trending` genérico é ignorado para evitar
-    // servir resultados antigos do Balloonerismm (30 itens) no lugar dos 50 do Trakt Index.
+    // servir resultados antigos no lugar dos 50 do Trakt Index.
     // O cache específico `trakt_index_top50_daily` é lido dentro do bloco Trakt Index abaixo.
     const useGeneralCache = !isTraktIndexEnabled();
     const cached = useGeneralCache
@@ -339,12 +338,12 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // ── Balloonerismm primary path ────────────────────────────────────────────
-    if (isBalloonerismTrendingEnabled()) {
+    // ── Trakt adapter path ───────────────────────────────────────────────────
+    {
       try {
         const [movieResults, tvResults] = await Promise.all([
-          catalogGetTrending({ mediaType: "movie", limit: TRENDING_BALLOONERISMM_LIMIT }),
-          catalogGetTrending({ mediaType: "show", limit: TRENDING_BALLOONERISMM_LIMIT }),
+          catalogGetTrending({ mediaType: "movie", limit: TRENDING_TRAKT_LIMIT }),
+          catalogGetTrending({ mediaType: "show", limit: TRENDING_TRAKT_LIMIT }),
         ]);
         markStage(perf, stageRef, "external_fetch");
 
@@ -353,8 +352,8 @@ export async function GET(request: NextRequest) {
           hydrateCatalogResultsWithDebug(tvResults),
         ]);
         const merged = interleaveTrending(movieHydrated.titles, tvHydrated.titles);
-        const balloonerismmDebug = {
-          source: "balloonerismm",
+        const traktDebug = {
+          source: "trakt",
           rawCount: movieHydrated.debug.rawCount + tvHydrated.debug.rawCount,
           normalizedCount:
             movieHydrated.debug.normalizedCount + tvHydrated.debug.normalizedCount,
@@ -365,7 +364,7 @@ export async function GET(request: NextRequest) {
           fallbackUsed: false,
           fallbackReason: null as string | null,
           usedTmdbApi: false,
-          normalizedFrom: "balloonerismm",
+          normalizedFrom: "trakt",
           identityUsed: "poplog_id_or_best_alias",
           legacyCompatibilityUsed: true,
           externalIdStats: {
@@ -377,9 +376,6 @@ export async function GET(request: NextRequest) {
               movieHydrated.debug.externalIdStats.tvdbId + tvHydrated.debug.externalIdStats.tvdbId,
             traktId:
               movieHydrated.debug.externalIdStats.traktId + tvHydrated.debug.externalIdStats.traktId,
-            balloonerismmId:
-              movieHydrated.debug.externalIdStats.balloonerismmId +
-              tvHydrated.debug.externalIdStats.balloonerismmId,
             slug:
               movieHydrated.debug.externalIdStats.slug + tvHydrated.debug.externalIdStats.slug,
             poplogResolved:
@@ -417,7 +413,7 @@ export async function GET(request: NextRequest) {
           });
 
           console.log("[trending/perf]", {
-            cacheStatus: "balloonerismm_primary",
+            cacheStatus: "trakt_primary",
             returned: results.length,
             ...perf,
             total: Date.now() - totalStartedAt,
@@ -427,19 +423,19 @@ export async function GET(request: NextRequest) {
             ok: true,
             count: results.length,
             results,
-            ...(debugSource ? { debugSource: balloonerismmDebug } : {}),
+            ...(debugSource ? { debugSource: traktDebug } : {}),
           });
         }
 
-        balloonerismmDebug.fallbackUsed = true;
-        balloonerismmDebug.fallbackReason =
+        traktDebug.fallbackUsed = true;
+        traktDebug.fallbackReason =
           validTitles.length < TRENDING_MIN_RESULTS ? "insufficient" : "empty";
         console.log(
-          `[trending] source=balloonerismm_fallback reason=${validTitles.length < TRENDING_MIN_RESULTS ? "insufficient" : "empty"}`
+          `[trending] source=trakt_fallback reason=${validTitles.length < TRENDING_MIN_RESULTS ? "insufficient" : "empty"}`
         );
       } catch (err) {
         console.warn(
-          "[trending] source=balloonerismm_fallback reason=error",
+          "[trending] source=trakt_fallback reason=error",
           err instanceof Error ? err.message : err
         );
         markStage(perf, stageRef, "external_fetch");
@@ -480,10 +476,10 @@ export async function GET(request: NextRequest) {
               debugSource: {
                 source: "local_db",
                 fallbackUsed: true,
-                fallbackReason: "balloonerismm_insufficient_or_failed",
+                fallbackReason: "trakt_insufficient_or_failed",
                 usedTmdbApi: false,
                 usedLegacy: false,
-                normalizedFrom: "legacy",
+                normalizedFrom: "local_cache",
                 identityUsed: "poplog_id",
                 legacyCompatibilityUsed: true,
               },

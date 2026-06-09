@@ -2,20 +2,15 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { resolveCatalogImage } from "@/lib/images/resolve";
+import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 import { Reorder, useDragControls } from "framer-motion";
 import { signOut as signOutAuthJs } from "next-auth/react";
-import {
-  getStoredTitleLanguagePreference,
-  setStoredTitleLanguagePreference,
-  type TitleLanguagePreference,
-} from "@/lib/title-language-preference";
 import type { AuthUser } from "@/server/auth/types";
 import { useAuth } from "@/hooks/useAuth";
 import {
   GripVertical, X, Search, ChevronRight,
-  LogOut, Mail, Lock, Check,
-  Film, Tv, BarChart2, ChevronDown, RotateCcw,
+  LogOut, Mail, Lock, Check, Trash2,
+  Film, Tv, BarChart2, ChevronDown, RotateCcw, AlertTriangle,
 } from "lucide-react";
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -922,13 +917,6 @@ function SaveStatusBadge({ status }: { status: SaveStatus }) {
 // TAB: PREFERÊNCIAS
 // ─────────────────────────────────────────────────────────────────────────────
 
-const LANG_OPTIONS: { id: TitleLanguagePreference; label: string; desc: string }[] = [
-  { id: "auto",     label: "Automático",  desc: "Usa o idioma do dispositivo" },
-  { id: "pt",       label: "Português",   desc: "Títulos em português"        },
-  { id: "en",       label: "Inglês",      desc: "Títulos em inglês"           },
-  { id: "original", label: "Original",    desc: "Título original da obra"     },
-];
-
 function TabPreferences({
   allProviders,
   initialActiveIds,
@@ -938,15 +926,10 @@ function TabPreferences({
 }) {
   const [activeIds,  setActiveIds]  = useState<string[]>(initialActiveIds);
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-  const [langPref,   setLangPref]   = useState<TitleLanguagePreference>("auto");
   const saveTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
   const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const isSaving = saveStatus === "saving";
-
-  useEffect(() => {
-    setLangPref(getStoredTitleLanguagePreference());
-  }, []);
 
   const doSave = useCallback(async (ids: string[]) => {
     setSaveStatus("saving");
@@ -989,44 +972,12 @@ function TabPreferences({
     scheduleProviderSave(next);
   }
 
-  function handleLanguageChange(id: TitleLanguagePreference) {
-    setLangPref(id);
-    setStoredTitleLanguagePreference(id);
-  }
-
   const activeProviders = activeIds
     .map(id => allProviders.find(p => p.id === id))
     .filter((p): p is StreamingProvider => !!p);
 
   return (
     <div className="space-y-4">
-
-      {/* Idioma — compacto, no topo */}
-      <Block>
-        <Eyebrow color="violet">Preferências</Eyebrow>
-        <BlockTitle>Idioma dos títulos</BlockTitle>
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-          {LANG_OPTIONS.map(opt => (
-            <button
-              key={opt.id}
-              type="button"
-              onClick={() => handleLanguageChange(opt.id)}
-              className={[
-                "rounded-2xl border p-3.5 text-left transition-all",
-                langPref === opt.id
-                  ? "bg-indigo-600/15 border-indigo-500/35 text-white"
-                  : "bg-white/[0.025] border-white/[0.06] text-white/50 hover:bg-white/[0.05] hover:text-white/70",
-              ].join(" ")}
-            >
-              <div className="flex items-center justify-between mb-1">
-                <p className="text-[12px] font-bold">{opt.label}</p>
-                {langPref === opt.id && <Check size={12} className="text-indigo-400" />}
-              </div>
-              <p className="text-[10px] text-white/30 leading-snug">{opt.desc}</p>
-            </button>
-          ))}
-        </div>
-      </Block>
 
       {/* Streaming: 2 cols desktop — direita fixa/sticky, esquerda com scroll */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 lg:items-start">
@@ -1189,8 +1140,28 @@ function TabNotInterested({
 // TAB: CONTA
 // ─────────────────────────────────────────────────────────────────────────────
 
-function TabAccount({ user, onSignOut }: { user: AuthUser; onSignOut: () => void }) {
+function TabAccount({
+  user, onSignOut, onResetLibrary,
+}: {
+  user: AuthUser;
+  onSignOut: () => void;
+  onResetLibrary: () => Promise<void>;
+}) {
   const hasProvider = (user.app_metadata?.providers as string[] | undefined)?.includes("email");
+  const [confirmReset, setConfirmReset] = useState(false);
+  const [resetting, setResetting]       = useState(false);
+  const [resetDone, setResetDone]       = useState(false);
+
+  async function handleConfirmReset() {
+    setResetting(true);
+    try {
+      await onResetLibrary();
+      setResetDone(true);
+      setConfirmReset(false);
+    } finally {
+      setResetting(false);
+    }
+  }
 
   return (
     <div className="space-y-4">
@@ -1249,22 +1220,71 @@ function TabAccount({ user, onSignOut }: { user: AuthUser; onSignOut: () => void
 
       </div>{/* end desktop 2-col grid */}
 
+      {/* Reset library */}
       <Block>
-        <Eyebrow color="muted">Conta</Eyebrow>
-        <BlockTitle>Gerenciar conta</BlockTitle>
+        <Eyebrow color="muted">Zona de perigo</Eyebrow>
+        <BlockTitle>Resetar biblioteca</BlockTitle>
 
-        <p className="text-[12px] text-white/35 mb-5 leading-relaxed">
-          A exclusão permanente da conta ainda não está disponível nesta etapa. Por enquanto, você pode encerrar a sessão neste dispositivo.
-        </p>
-
-        <button
-          type="button"
-          onClick={onSignOut}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.04] hover:bg-white/[0.07] text-[13px] font-semibold text-white/60 hover:text-white/80 transition-all"
-        >
-          <LogOut size={15} />
-          Sair da conta
-        </button>
+        {resetDone ? (
+          <div className="flex items-center gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-3.5">
+            <Check size={15} className="text-emerald-400 flex-shrink-0" />
+            <p className="text-[13px] text-emerald-300/80">
+              Biblioteca apagada. Sua conta está zerada.
+            </p>
+          </div>
+        ) : confirmReset ? (
+          <div className="rounded-2xl border border-rose-500/25 bg-rose-500/[0.05] p-4 space-y-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle size={16} className="text-rose-400 flex-shrink-0 mt-0.5" />
+              <div className="space-y-1">
+                <p className="text-[13px] font-semibold text-rose-300">Tem certeza absoluta?</p>
+                <p className="text-[12px] text-white/40 leading-relaxed">
+                  Isso vai apagar <strong className="text-white/60">permanentemente</strong> toda a sua
+                  biblioteca, histórico, avaliações, episódios assistidos e sinais de recomendação.
+                  Essa ação não pode ser desfeita.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={handleConfirmReset}
+                disabled={resetting}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-rose-500/40 bg-rose-600/20 hover:bg-rose-600/30 text-[13px] font-semibold text-rose-300 hover:text-rose-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {resetting ? (
+                  <div className="w-3.5 h-3.5 rounded-full border-2 border-rose-400/30 border-t-rose-400 animate-spin" />
+                ) : (
+                  <Trash2 size={14} />
+                )}
+                {resetting ? "Apagando..." : "Sim, apagar tudo"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirmReset(false)}
+                disabled={resetting}
+                className="px-4 py-2.5 rounded-xl text-[13px] text-white/40 hover:text-white/60 transition-colors disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <p className="text-[12px] text-white/35 mb-5 leading-relaxed">
+              Apaga toda a sua biblioteca, histórico de episódios, avaliações e dados de comportamento.
+              Suas preferências de streaming são mantidas. Essa ação é irreversível.
+            </p>
+            <button
+              type="button"
+              onClick={() => setConfirmReset(true)}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-rose-500/20 bg-rose-500/[0.06] hover:bg-rose-500/[0.12] text-[13px] font-semibold text-rose-400/80 hover:text-rose-300 transition-all"
+            >
+              <Trash2 size={14} />
+              Resetar biblioteca
+            </button>
+          </>
+        )}
       </Block>
 
     </div>
@@ -1370,6 +1390,14 @@ export default function ProfilePageClient() {
     router.refresh();
   }
 
+  async function handleResetLibrary() {
+    const res = await fetch("/api/user/reset-library", { method: "DELETE" });
+    if (!res.ok) throw new Error("Falha ao resetar a biblioteca");
+    setStats({ watched: 0, watching: 0, watchlist: 0, abandoned: 0, favorites: 0, movies: 0, series: 0, total: 0 });
+    setGenres([]);
+    router.refresh();
+  }
+
   async function handleUndoNotInterested(title: NotInterestedTitle) {
     const previous = notInterestedTitles;
     setNotInterestedTitles((current) =>
@@ -1443,7 +1471,7 @@ export default function ProfilePageClient() {
       )}
 
       {tab === "conta" && (
-        <TabAccount user={user} onSignOut={handleSignOut} />
+        <TabAccount user={user} onSignOut={handleSignOut} onResetLibrary={handleResetLibrary} />
       )}
 
     </div>

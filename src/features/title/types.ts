@@ -10,7 +10,7 @@ export type TitleProviderType =
   | "free"
   | "ads";
 
-export type TitleProviderSource = "tmdb" | "watchmode" | "motn";
+export type TitleProviderSource = "tmdb" | "watchmode" | "motn" | "balloonerismm";
 
 export type TitleProvider = {
   name: string;
@@ -119,7 +119,7 @@ export type TitleTrailer = {
   key: string;
   name: string;
   url: string;
-  embedUrl: string;
+  embedUrl?: string | null;
   /** Thumbnail do vídeo (IMDb ou YouTube). Usado quando não há YouTube ID. */
   thumbnailUrl?: string | null;
 };
@@ -176,7 +176,13 @@ export type TitleCompany = {
   originCountry?: string | null;
 };
 
-export type TitleNetwork = TitleCompany;
+export type TitleNetwork = {
+  id: number;
+  name: string;
+  slug: string;
+  logoPath?: string | null;
+  originCountry?: string | null;
+};
 
 export type TitleCountry = {
   code: string;

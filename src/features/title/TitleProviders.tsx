@@ -1,4 +1,5 @@
 import Image from "next/image";
+import { resolveForRender } from "@/lib/images/proxy";
 
 import ContextualAttribution from "@/components/attribution/ContextualAttribution";
 import { getProviderSourceIds } from "@/attribution/helpers";
@@ -244,7 +245,7 @@ function ProviderPill({ provider }: { provider: MergedProvider }) {
     >
       {provider.logoUrl ? (
         <Image
-          src={provider.logoUrl}
+          src={resolveForRender(provider.logoUrl) ?? provider.logoUrl}
           alt={provider.name}
           width={32}
           height={32}

@@ -2,6 +2,7 @@
 
 import LoginDrawer from "@/components/auth/LoginDrawer";
 import { useAuth } from "@/hooks/useAuth";
+import { FEATURES } from "@/lib/features";
 import {
   Dice5,
   Film,
@@ -46,7 +47,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: "Acompanhar",
     links: [
       { href: "/acompanhando", label: "Acompanhando", icon: PlayCircle, authRequired: true },
-      { href: "/radar", label: "Radar", icon: Radar },
+      ...(FEATURES.RADAR ? [{ href: "/radar", label: "Radar", icon: Radar } as NavLink] : []),
     ],
   },
   {
@@ -77,7 +78,7 @@ const MOBILE_LINKS: NavLink[] = [
 ];
 
 const MOBILE_MORE_LINKS: NavLink[] = [
-  { href: "/radar", label: "Radar", icon: Radar },
+  ...(FEATURES.RADAR ? [{ href: "/radar", label: "Radar", icon: Radar } as NavLink] : []),
   { href: "/buscar?type=movie", label: "Filmes", icon: Film },
   { href: "/buscar?type=tv", label: "Séries", icon: Tv },
   { href: "/sorteio", label: "Sorteio", icon: Dice5, authRequired: true },

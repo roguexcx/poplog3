@@ -35,7 +35,7 @@ export default function TitleRecommendations({
             originalTitle={item.originalTitle ?? null}
             year={item.year ?? null}
             mediaType={item.mediaType}
-            href={`/title/${item.mediaType}/${item.id}`}
+            href={`/title/${item.mediaType}/${item.poplogId ?? item.id}`}
             accent="rose"
             source="recommendations"
           />

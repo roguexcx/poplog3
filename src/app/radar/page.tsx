@@ -10,6 +10,8 @@ import { getRadarCachedPayload, radarCacheKey } from "@/server/radar-trakt/radar
 import { applyRadarPersonalFilter, getRadarLibraryIdentity } from "@/server/radar-trakt/radar-personal-filter";
 import { radarPayloadToLegacyAgenda } from "@/server/radar-trakt/radar-legacy-adapter";
 import { getCurrentUser } from "@/server/auth/get-current-user";
+import { redirect } from "next/navigation";
+import { FEATURES } from "@/lib/features";
 
 interface RadarPageProps {
   searchParams?: Promise<{ mode?: string }>;
@@ -20,6 +22,8 @@ const DEFAULT_LANGUAGE = "pt-BR";
 const WINDOW_DAYS = 62;
 
 export default async function RadarPage({ searchParams }: RadarPageProps) {
+  if (!FEATURES.RADAR) redirect("/");
+
   const params = await searchParams;
   const rawMode = params?.mode ?? "general";
   const initialMode: RadarMode = rawMode === "personal" ? "personal" : "general";

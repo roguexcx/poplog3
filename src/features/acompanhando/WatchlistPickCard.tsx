@@ -1,7 +1,7 @@
 "use client";
 
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
-import { resolveCatalogImage } from "@/lib/images/resolve";
+import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 
 export type WatchlistPickItem = {
   content_id: string;

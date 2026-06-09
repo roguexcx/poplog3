@@ -28,8 +28,8 @@ export async function buildRadarGeneralPayload(options: {
   debug?: boolean;
 }): Promise<RadarPayload> {
   const startedAt = Date.now();
-  const windowStart = toDateStr(addDays(new Date(), -30));
-  const windowDays = 62;
+  const windowStart = toDateStr(addDays(new Date(), -7));
+  const windowDays = 37;
   const [calendar, discovery] = await Promise.all([
     fetchRadarCalendarWindow(windowStart, windowDays),
     fetchRadarDiscovery(),

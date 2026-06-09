@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { resolveForRender } from "@/lib/images/proxy";
 import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
@@ -97,7 +98,7 @@ export default function TitleCast({ cast }: TitleCastProps) {
           {cast.map((person, i) => (
             <Link
               key={`${person.id}-${i}`}
-              href={`/pessoa/${person.id}`}
+              href={`/person/${person.id}`}
               className="group relative flex w-[120px] shrink-0 flex-col sm:w-[140px]"
             >
               <article className="relative">
@@ -105,7 +106,7 @@ export default function TitleCast({ cast }: TitleCastProps) {
                   <div className="relative aspect-[3/4] overflow-hidden bg-white/[0.04]">
                     {person.photoUrl ? (
                       <Image
-                        src={person.photoUrl}
+                        src={resolveForRender(person.photoUrl) ?? person.photoUrl}
                         alt={person.name}
                         fill
                         unoptimized

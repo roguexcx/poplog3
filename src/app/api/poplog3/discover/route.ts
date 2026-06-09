@@ -1,13 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { filterValidTitles } from "@/server/utils/filter-valid-titles";
-import {
-  catalogGetPopular,
-  isBalloonerismDiscoverEnabled,
-} from "@/server/source-engine/engine";
+import { catalogGetByGenre, catalogGetPopular } from "@/server/source-engine/engine";
 import { hydrateCatalogResults } from "@/server/source-engine/hydrate-catalog-results";
-import { balloonerismGet } from "@/server/api-clients/balloonerismm/client";
-import type { PoplogTitle } from "@/server/types/title";
+import { filterValidTitles } from "@/server/utils/filter-valid-titles";
 
 type DiscoverMediaType = "all" | "movie" | "tv";
 const DISCOVER_MIN_RESULTS = 5;
@@ -30,153 +25,73 @@ function parseGenre(value: string | null): number | undefined {
   return Math.floor(genre);
 }
 
-// Balloonerismm helpers ───────────────────────────────────────────────────────
-
-async function getBalloonerismByGenre(
-  mediaType: "movie" | "tv",
-  genre: number,
-): Promise<PoplogTitle[]> {
-  const path = mediaType === "movie" ? "/discover/movie" : "/discover/tv";
-  const raw = await balloonerismGet<unknown>(path, {
-    params: { with_genres: genre, language: "pt-BR", region: "BR", page: 1 },
-    ttlSeconds: 3600,
-  });
-  if (!raw) return [];
-
-  const items = Array.isArray(raw) ? raw
-    : Array.isArray((raw as Record<string, unknown>).results) ? (raw as Record<string, unknown>).results as unknown[]
-    : [];
-
-  const { normalizeSearchResult } = await import("@/server/source-engine/normalizers/normalize-search");
-  const catalogResults = (items as Array<Record<string, unknown>>).map((item) => {
-    const imdbId = typeof item.imdb_id === "string" ? item.imdb_id : undefined;
-    return normalizeSearchResult(
-      {
-        ids: {
-          imdbId,
-          tmdbId: typeof item.tmdb_id === "number" ? item.tmdb_id : undefined,
-          balloonerismmId: imdbId,
-        },
-        mediaType: mediaType === "tv" ? "show" : "movie",
-        title: typeof item.title === "string" ? item.title : typeof item.name === "string" ? item.name : "",
-        originalTitle: typeof item.original_title === "string" ? item.original_title : undefined,
-        year: typeof item.year === "number" ? item.year : undefined,
-        releaseDate: typeof item.release_date === "string" ? item.release_date : undefined,
-        firstAirDate: typeof item.first_air_date === "string" ? item.first_air_date : undefined,
-        overview: typeof item.overview === "string" ? item.overview : undefined,
-        posterRemoteUrl: typeof item.poster_path === "string" ? item.poster_path : undefined,
-        backdropRemoteUrl: typeof item.backdrop_path === "string" ? item.backdrop_path : undefined,
-        voteAverage: typeof item.vote_average === "number" ? item.vote_average : undefined,
-      },
-      { primary: "balloonerismm", confidence: "medium", usedFallback: false, fetchedAt: new Date().toISOString() },
-    );
-  });
-
-  const hydrated = await hydrateCatalogResults(catalogResults);
-  return filterValidTitles(hydrated);
-}
-
-async function getBalloonerismSection(
-  mediaType: "movie" | "tv",
-  genre?: number
-): Promise<PoplogTitle[]> {
-  if (genre) return getBalloonerismByGenre(mediaType, genre);
+async function getTraktSection(mediaType: "movie" | "tv", genre?: number) {
   const catalogMediaType = mediaType === "tv" ? "show" : "movie";
-  const raw = await catalogGetPopular({ mediaType: catalogMediaType });
+  const raw = genre
+    ? await catalogGetByGenre({ mediaType: catalogMediaType, genreId: genre })
+    : await catalogGetPopular({ mediaType: catalogMediaType, limit: 24 });
   const hydrated = await hydrateCatalogResults(raw);
   return filterValidTitles(hydrated);
 }
 
-function toBalloonerismDiscoverSection(titles: PoplogTitle[]) {
-  return {
-    page: 1,
-    totalPages: 1,
-    totalResults: titles.length,
-    results: titles,
-  };
-}
-
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
-
   const type = parseMediaType(searchParams.get("type"));
   const page = parsePage(searchParams.get("page"));
   const genre = parseGenre(searchParams.get("genre"));
 
   try {
-    // ── Balloonerismm primary path ────────────────────────────────────────────
-    // Genre filter + page > 1: fall through to TMDB (no Balloonerismm equivalent)
-    if (isBalloonerismDiscoverEnabled() && page === 1) {
-      try {
-        if (type === "movie") {
-          const movies = await getBalloonerismSection("movie", genre);
-          if (movies.length >= DISCOVER_MIN_RESULTS) {
-            console.log(`[poplog3/discover] source=balloonerismm type=movie count=${movies.length}`);
-            return NextResponse.json({
-              ok: true,
-              type,
-              genre,
-              popularMovies: movies,
-              results: movies,
-              page: 1,
-              totalPages: 1,
-              totalResults: movies.length,
-            });
-          }
-          console.log(`[poplog3/discover] source=balloonerismm_fallback type=movie reason=insufficient count=${movies.length}`);
-        } else if (type === "tv") {
-          const series = await getBalloonerismSection("tv", genre);
-          if (series.length >= DISCOVER_MIN_RESULTS) {
-            console.log(`[poplog3/discover] source=balloonerismm type=tv count=${series.length}`);
-            return NextResponse.json({
-              ok: true,
-              type,
-              genre,
-              popularSeries: series,
-              results: series,
-              page: 1,
-              totalPages: 1,
-              totalResults: series.length,
-            });
-          }
-          console.log(`[poplog3/discover] source=balloonerismm_fallback type=tv reason=insufficient count=${series.length}`);
-        } else {
-          // type === "all": parallel fetch both
-          const [movies, series] = await Promise.all([
-            getBalloonerismSection("movie", genre),
-            getBalloonerismSection("tv", genre),
-          ]);
-
-          if (
-            movies.length >= DISCOVER_MIN_RESULTS &&
-            series.length >= DISCOVER_MIN_RESULTS
-          ) {
-            console.log(
-              `[poplog3/discover] source=balloonerismm type=all movies=${movies.length} series=${series.length}`
-            );
-
-            return NextResponse.json({
-              ok: true,
-              type,
-              genre,
-              popularMovies: movies,
-              popularSeries: series,
-              results: [...movies, ...series].slice(0, 24),
-              page: 1,
-              totalPages: 1,
-              totalResults: movies.length + series.length,
-            });
-          }
-
-          console.log(
-            `[poplog3/discover] source=balloonerismm_fallback type=all reason=insufficient movies=${movies.length} series=${series.length}`
-          );
+    if (page === 1) {
+      if (type === "movie") {
+        const movies = await getTraktSection("movie", genre);
+        if (movies.length >= DISCOVER_MIN_RESULTS) {
+          return NextResponse.json({
+            ok: true,
+            type,
+            genre,
+            popularMovies: movies,
+            results: movies,
+            page: 1,
+            totalPages: 1,
+            totalResults: movies.length,
+            debugSource: { source: "trakt", cacheStrategy: "db_first_write_through" },
+          });
         }
-      } catch (err) {
-        console.warn(
-          `[poplog3/discover] source=balloonerismm_fallback reason=error type=${type}`,
-          err instanceof Error ? err.message : err
-        );
+      } else if (type === "tv") {
+        const series = await getTraktSection("tv", genre);
+        if (series.length >= DISCOVER_MIN_RESULTS) {
+          return NextResponse.json({
+            ok: true,
+            type,
+            genre,
+            popularSeries: series,
+            results: series,
+            page: 1,
+            totalPages: 1,
+            totalResults: series.length,
+            debugSource: { source: "trakt", cacheStrategy: "db_first_write_through" },
+          });
+        }
+      } else {
+        const [movies, series] = await Promise.all([
+          getTraktSection("movie", genre),
+          getTraktSection("tv", genre),
+        ]);
+
+        if (movies.length >= DISCOVER_MIN_RESULTS || series.length >= DISCOVER_MIN_RESULTS) {
+          return NextResponse.json({
+            ok: true,
+            type,
+            genre,
+            popularMovies: movies,
+            popularSeries: series,
+            results: [...movies, ...series].slice(0, 24),
+            page: 1,
+            totalPages: 1,
+            totalResults: movies.length + series.length,
+            debugSource: { source: "trakt", cacheStrategy: "db_first_write_through" },
+          });
+        }
       }
     }
 
@@ -193,14 +108,9 @@ export async function GET(request: NextRequest) {
       totalPages: 1,
       totalResults: 0,
       debugSource: {
-        source: "unavailable",
+        source: "local_cache",
         fallbackUsed: true,
-        fallbackReason: "tmdb_fallback_blocked",
-        usedTmdbApi: false,
-        usedLegacy: false,
-        normalizedFrom: "none",
-        identityUsed: "none",
-        legacyCompatibilityUsed: true,
+        fallbackReason: "trakt_empty_or_unavailable",
       },
     });
   } catch (error) {
@@ -212,7 +122,7 @@ export async function GET(request: NextRequest) {
         error: "Failed to load discover data",
         details: error instanceof Error ? error.message : String(error),
       },
-      { status: 500 }
+      { status: 500 },
     );
   }
 }

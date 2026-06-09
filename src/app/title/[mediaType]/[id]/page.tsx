@@ -1,11 +1,12 @@
 import Link from "next/link";
-import { redirect } from "next/navigation";
+import { redirect, permanentRedirect } from "next/navigation";
 
 import ActionButton from "@/components/ui/ActionButton";
 import EmptyState from "@/components/ui/EmptyState";
 import TitlePageView from "@/features/title/TitlePageView";
 import { getTitlePageData } from "@/server/titles/get-title-page-data";
 import { formatDuration, logger } from "@/server/logging/logger";
+import { isCanonicalPoplogId } from "@/lib/title-href";
 import type { PoplogTitleSourceHint } from "@/server/titles/poplog-title-identity";
 
 type MediaType = "movie" | "tv";
@@ -72,19 +73,32 @@ export default async function TitlePage({ params, searchParams }: PageProps) {
     force: refresh,
   });
 
-  // Redireciona ID sintético (negativo) para o ID canônico real quando disponível.
-  // Garante que a URL canônica seja sempre usada, independente de por onde o usuário acessou.
-  const requestedNumeric = parseInt(id, 10);
-  const canonicalTmdbId = title?.externalIds?.tmdbId;
-  if (
-    title &&
-    typeof canonicalTmdbId === "number" &&
-    canonicalTmdbId > 0 &&
-    Number.isInteger(requestedNumeric) &&
-    requestedNumeric < 0 &&
-    canonicalTmdbId !== requestedNumeric
-  ) {
-    redirect(`/title/${mediaType}/${canonicalTmdbId}`);
+  // Normalização da URL canônica:
+  // A URL oficial é sempre /title/{mediaType}/{poplogId} onde poplogId é o CUID
+  // local do banco. Qualquer alias (imdbId, slug, tmdbId numérico, sintético) deve
+  // redirecionar permanentemente (308) para a URL canônica.
+  if (title?.poplogId) {
+    const canonicalId = String(title.poplogId);
+
+    // Só redireciona se o id atual não for já o poplogId canônico
+    if (canonicalId && canonicalId !== id && !refresh) {
+      permanentRedirect(`/title/${mediaType}/${canonicalId}`);
+    }
+  } else {
+    // Fallback legado: se não há poplogId mas há um tmdbId positivo diferente do
+    // id solicitado (ex: chegou por sintético negativo), redireciona para o tmdbId.
+    const requestedNumeric = parseInt(id, 10);
+    const canonicalTmdbId = title?.externalIds?.tmdbId;
+    if (
+      title &&
+      typeof canonicalTmdbId === "number" &&
+      canonicalTmdbId > 0 &&
+      Number.isInteger(requestedNumeric) &&
+      requestedNumeric < 0 &&
+      canonicalTmdbId !== requestedNumeric
+    ) {
+      redirect(`/title/${mediaType}/${canonicalTmdbId}`);
+    }
   }
 
   if (!title) {
@@ -94,7 +108,7 @@ export default async function TitlePage({ params, searchParams }: PageProps) {
         <EmptyState
           kicker="Sem dados"
           title="Titulo nao encontrado."
-          description="Nao foi possivel carregar os dados deste titulo. Pode ser um ID inexistente no TMDB ou uma falha temporaria."
+          description="Nao foi possivel carregar os dados deste titulo. Pode ser um ID inexistente ou uma falha temporaria."
           accent="rose"
           action={
             <Link href="/buscar">

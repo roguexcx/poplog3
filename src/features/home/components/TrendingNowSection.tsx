@@ -8,11 +8,13 @@ import { ScrollRowArrows } from "@/components/ScrollRowArrows";
 import { CardActionButton } from "@/components/ui/CardActionButton";
 import { IconBookmark, IconCheck, IconX } from "@/components/ui/icons";
 import { useScrollRow } from "@/hooks/useScrollRow";
-import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
-import { useWatchedToggle } from "@/hooks/useWatchedToggle";
+import { useUserAction } from "@/hooks/useUserAction";
 import { useUserFeedbackToggle } from "@/hooks/useUserFeedbackToggle";
+import { useOptionalUserData } from "@/context/UserDataContext";
+import { usePoplogUserState } from "@/stores/user-states-store";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import SectionHeader from "@/components/ui/SectionHeader";
+import LibraryStateBadge from "@/components/ui/LibraryStateBadge";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -197,18 +199,32 @@ function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
   const isMovie = item.media_type === "movie";
   const slug = `/title/${item.media_type}/${item.linkIdUsed ?? item.poplogId ?? item.externalIds?.imdbId ?? item.id}`;
 
-  const sharedProps = {
+  const userData = useOptionalUserData();
+  const isLoggedIn = Boolean(userData && !userData.loading);
+
+  const { executeAction, effectiveKey } = useUserAction({
     tmdbId: item.id,
-    poplogId: item.poplogId ?? null,
-    imdbId: item.externalIds?.imdbId ?? null,
-    slug: item.externalIds?.slug ?? null,
+    poplogId: item.poplogId != null ? String(item.poplogId) : undefined,
+    imdbId: item.externalIds?.imdbId ?? undefined,
+    slug: item.externalIds?.slug ?? undefined,
     mediaType: item.media_type as "movie" | "tv",
     title: item.title_label,
-    releaseYear: item.year ? Number(item.year) : null,
-  };
-  const watchlist = useWatchlistToggle(sharedProps);
-  const watched   = useWatchedToggle(sharedProps);
-  const feedback  = useUserFeedbackToggle({
+    releaseYear: item.year ? Number(item.year) : undefined,
+  });
+
+  const zustandState = usePoplogUserState(effectiveKey);
+  const inWatchlist = zustandState?.isInWatchlist ?? false;
+  const isWatched   = zustandState?.isWatched   ?? false;
+
+  const [saving, setSaving] = useState(false);
+
+  async function handleTrendingAction(action: "addToWatchlist" | "removeFromWatchlist" | "markAsWatched" | "markAsUnwatched") {
+    setSaving(true);
+    await executeAction(action);
+    setSaving(false);
+  }
+
+  const feedback = useUserFeedbackToggle({
     tmdbId: item.id,
     poplogId: item.poplogId ?? null,
     imdbId: item.externalIds?.imdbId ?? null,
@@ -273,32 +289,39 @@ function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
               <span className="text-[12px] font-black leading-none tracking-tight text-white tabular-nums">{rank}</span>
             </div>
 
-            
+            {/* Badge de estado da biblioteca — visível quando não está em hover (z-10 < z-30 dos botões) */}
+            <LibraryStateBadge
+              tmdbId={item.id}
+              poplogId={item.poplogId}
+              imdbId={item.externalIds?.imdbId}
+              mediaType={item.media_type}
+              className="top-2.5 left-2.5 z-10 group-hover:opacity-0 transition-opacity duration-200"
+            />
           </div>
         </Link>
 
         <div className="absolute left-2.5 top-2.5 z-30 flex flex-col gap-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
           <CardActionButton
-            onClick={watchlist.toggle}
-            disabled={watchlist.loading || !watchlist.isLoggedIn}
-            title={watchlist.inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
-            active={watchlist.inWatchlist} saving={watchlist.saving}
+            onClick={() => handleTrendingAction(inWatchlist ? "removeFromWatchlist" : "addToWatchlist")}
+            disabled={!isLoggedIn || saving}
+            title={inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
+            active={inWatchlist} saving={saving}
             activeClass="border-sky-400/55 bg-sky-400/[0.18] text-sky-300 shadow-[0_0_10px_rgba(56,189,248,0.25)]"
           >
-            <IconBookmark filled={watchlist.inWatchlist} />
+            <IconBookmark filled={inWatchlist} />
           </CardActionButton>
           <CardActionButton
-            onClick={watched.toggle}
-            disabled={watched.loading || !watched.isLoggedIn}
-            title={watched.isWatched ? "Desmarcar como assistido" : "Já vi"}
-            active={watched.isWatched} saving={watched.saving}
+            onClick={() => handleTrendingAction(isWatched ? "markAsUnwatched" : "markAsWatched")}
+            disabled={!isLoggedIn || saving}
+            title={isWatched ? "Desmarcar como assistido" : "Já vi"}
+            active={isWatched} saving={saving}
             activeClass="border-emerald-400/55 bg-emerald-400/[0.18] text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.25)]"
           >
             <IconCheck />
           </CardActionButton>
           <CardActionButton
             onClick={feedback.toggleNotInterested}
-            disabled={feedback.loading || !feedback.isLoggedIn}
+            disabled={!isLoggedIn || feedback.saving}
             title={feedback.notInterested ? "Remover sem interesse" : "Não tenho interesse"}
             active={feedback.notInterested} saving={feedback.saving}
             activeClass="border-rose-400/55 bg-rose-400/[0.18] text-rose-300 shadow-[0_0_10px_rgba(251,113,133,0.22)]"

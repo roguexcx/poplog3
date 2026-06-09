@@ -2,7 +2,7 @@ import Image from "next/image";
 import Link from "next/link";
 
 import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
-import { resolveCatalogImage } from "@/lib/images/resolve";
+import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";
 
 const STATUS_BADGE: Record<string, string> = {

@@ -99,7 +99,7 @@ export default function TitleCrew({ crew, creators }: TitleCrewProps) {
               {group.members.slice(0, 4).map((p) => (
                 <li key={`${p.id}-${p.job}`}>
                   <Link
-                    href={`/pessoa/${p.id}`}
+                    href={`/person/${p.id}`}
                     className="group inline-flex items-baseline gap-2 text-[14px] leading-snug text-white/82 transition hover:text-white"
                   >
                     <span className="font-semibold tracking-[-0.01em] group-hover:underline group-hover:decoration-cyan-300/60 group-hover:decoration-2 group-hover:underline-offset-4">

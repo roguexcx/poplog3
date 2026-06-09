@@ -7,6 +7,8 @@ export type Origin =
   | "agenda"
   | "hero"
   | "title"
+  | "title-related"
+  | "for-you"
   | "library"
   | "acompanhando"
   | "search"

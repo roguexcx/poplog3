@@ -24,6 +24,8 @@ export type UpsertTitleCacheInput = {
   numberOfEpisodes?: number | null;
   numberOfSeasons?: number | null;
   originalLanguage?: string | null;
+  primaryNetworkSlug?: string | null;
+  networksJson?: unknown;
   tmdbPayload?: unknown;
   lastSyncedAt?: string | Date | null;
 };
@@ -44,6 +46,9 @@ function normalizeImagePath(path: string | null | undefined): string | null {
   if (!trimmed) return null;
   // Full URLs (Balloonerismm, IMDb, CDN) — pass through as-is
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed;
+  // Trakt returns CDN URLs without protocol. Keep them host-relative, not TMDB paths.
+  if (/^[a-z0-9.-]+\.[a-z]{2,}\//i.test(trimmed)) return trimmed;
+  if (/^\/[a-z0-9.-]+\.[a-z]{2,}\//i.test(trimmed)) return trimmed.slice(1);
   // TMDB paths — normalize leading slash
   return trimmed.startsWith("/") ? trimmed : `/${trimmed}`;
 }
@@ -113,6 +118,8 @@ export async function upsertCachedTitleRow(input: UpsertTitleCacheInput): Promis
         numberOfEpisodes: input.numberOfEpisodes ?? existing?.numberOfEpisodes ?? null,
         numberOfSeasons: input.numberOfSeasons ?? existing?.numberOfSeasons ?? null,
         originalLanguage: input.originalLanguage ?? existing?.originalLanguage ?? null,
+        primaryNetworkSlug: input.primaryNetworkSlug !== undefined ? input.primaryNetworkSlug : (existing?.primaryNetworkSlug ?? null),
+        networksJson: input.networksJson === undefined ? existing?.networksJson ?? undefined : input.networksJson as object,
         tmdbPayload: input.tmdbPayload === undefined ? existing?.tmdbPayload ?? undefined : input.tmdbPayload as object,
         lastSyncedAt,
       },
@@ -137,6 +144,8 @@ export async function upsertCachedTitleRow(input: UpsertTitleCacheInput): Promis
         numberOfEpisodes: input.numberOfEpisodes ?? null,
         numberOfSeasons: input.numberOfSeasons ?? null,
         originalLanguage: input.originalLanguage ?? null,
+        primaryNetworkSlug: input.primaryNetworkSlug ?? null,
+        networksJson: input.networksJson as object ?? undefined,
         tmdbPayload: input.tmdbPayload as object ?? undefined,
         lastSyncedAt,
       },

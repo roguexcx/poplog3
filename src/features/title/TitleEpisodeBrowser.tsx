@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { resolveForRender } from "@/lib/images/proxy";
 import {
   useCallback,
   useEffect,
@@ -1013,6 +1014,7 @@ function EpisodeCard({
   onToggle,
   onOpen,
 }: EpisodeCardProps) {
+  const stillSrc = resolveForRender(episode.stillUrl);
   const airDate = formatAirDate(episode.airDate);
   const runtime = formatRuntimeLabel(episode.runtime, { spaced: true });
   const isFinale =
@@ -1053,9 +1055,9 @@ function EpisodeCard({
       ].join(" ")}
     >
       <div className="relative aspect-video w-full shrink-0 overflow-hidden bg-zinc-900 sm:aspect-auto sm:w-[200px]">
-        {episode.stillUrl ? (
+        {stillSrc ? (
           <Image
-            src={episode.stillUrl}
+            src={stillSrc}
             alt={episode.name ?? `Episódio ${episode.episodeNumber}`}
             fill
             unoptimized
@@ -1241,7 +1243,7 @@ function EpisodeModal({
     episode.episodeType === "series_premiere";
 
   const modalStillUrl = useMemo(
-    () => getOriginalTmdbImageUrl(episode.stillUrl),
+    () => resolveForRender(getOriginalTmdbImageUrl(episode.stillUrl)),
     [episode.stillUrl],
   );
 

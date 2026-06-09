@@ -1,6 +1,7 @@
 "use client";
 
 import Image from "next/image";
+import { resolveForRender } from "@/lib/images/proxy";
 
 import {
   availabilityStateToBadgeVariant,
@@ -111,6 +112,9 @@ export default function TitleHero({
 
   const nextEpUser = progress?.nextEpisode ?? null;
 
+  const posterSrc = resolveForRender(title.posterUrl);
+  const backdropSrc = resolveForRender(title.backdropUrl);
+
   // Progresso de temporada — usa a temporada onde o usuário está (nextEpisode)
   const currentSeasonNumber = !isComplete ? (nextEpUser?.seasonNumber ?? null) : null;
   const currentSeasonTotal =
@@ -141,10 +145,10 @@ export default function TitleHero({
 
   return (
     <section className="-mx-4 -mt-4 relative isolate min-h-[88vh] overflow-hidden sm:-mx-6 md:-mx-8 md:-mt-6 lg:-mx-10">
-      {title.backdropUrl && (
+      {backdropSrc && (
         <div className="absolute inset-0 -z-10">
           <Image
-            src={title.backdropUrl}
+            src={backdropSrc}
             alt=""
             fill
             priority
@@ -181,9 +185,9 @@ export default function TitleHero({
             <div className="absolute -inset-3 -z-10 rounded-[2rem] bg-gradient-to-br from-cyan-300/20 via-indigo-400/12 to-fuchsia-400/14 opacity-70 blur-2xl" />
 
             <div className="overflow-hidden rounded-[1.5rem] border border-white/[0.10] bg-zinc-900/70 shadow-[0_28px_80px_rgba(0,0,0,0.55)] backdrop-blur-xl">
-              {title.posterUrl ? (
+              {posterSrc ? (
                 <Image
-                  src={title.posterUrl}
+                  src={posterSrc}
                   alt={title.title}
                   width={640}
                   height={960}

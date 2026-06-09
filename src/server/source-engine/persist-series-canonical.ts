@@ -13,6 +13,7 @@
 
 import { upsertCachedTitleRow } from "@/server/repositories";
 import type { SeriesCanonicalMeta } from "./series-canonical-engine";
+import { normalizeNetworkSlug } from "@/lib/networks/normalize";
 
 type MediaType = "movie" | "tv";
 
@@ -55,6 +56,13 @@ export async function persistSeriesCanonicalMeta(
     },
   };
 
+  const primaryNetwork = canonical.network ?? canonical.networks[0] ?? null;
+  const networksForJson = canonical.networks.length > 0
+    ? canonical.networks.map((n) => ({ name: n, slug: normalizeNetworkSlug(n) }))
+    : primaryNetwork
+      ? [{ name: primaryNetwork, slug: normalizeNetworkSlug(primaryNetwork) }]
+      : null;
+
   await upsertCachedTitleRow({
     tmdbId,
     mediaType,
@@ -71,6 +79,8 @@ export async function persistSeriesCanonicalMeta(
     ...(canonical.lastAirDate ? { lastAirDate: canonical.lastAirDate } : {}),
     ...(canonical.language ? { originalLanguage: canonical.language } : {}),
     ...(canonical.genres.length > 0 ? { genres: canonical.genres } : {}),
+    ...(primaryNetwork ? { primaryNetworkSlug: normalizeNetworkSlug(primaryNetwork) } : {}),
+    ...(networksForJson ? { networksJson: networksForJson } : {}),
     // Payload canônico completo no campo tmdbPayload
     tmdbPayload: canonicalPayload,
     lastSyncedAt: new Date(),

@@ -12,6 +12,7 @@ export type PoplogTitleSourceHint =
   | "poplog"
   | "tmdb"
   | "imdb"
+  | "trakt"
   | "balloonerismm"
   | "slug"
   | "auto";
@@ -54,6 +55,9 @@ type ResolveInput = {
 type TitleRow = {
   id: string;
   tmdbId: number;
+  traktId?: bigint | number | null;
+  imdbId?: string | null;
+  slug?: string | null;
   mediaType: MediaType;
   title: string | null;
   originalTitle: string | null;
@@ -121,7 +125,10 @@ function identityFromRow(
     year: row.year ?? undefined,
     externalIds: {
       tmdbId: row.tmdbId,
-      ...(derivedImdbId ? { imdbId: derivedImdbId, balloonerismmId: derivedImdbId } : {}),
+      ...(row.traktId ? { traktId: row.traktId.toString() } : {}),
+      ...(row.imdbId ? { imdbId: row.imdbId } : {}),
+      ...(row.slug ? { slug: row.slug } : {}),
+      ...(derivedImdbId ? { imdbId: derivedImdbId } : {}),
       ...externalIds,
     },
     resolvedFrom,
@@ -135,6 +142,9 @@ async function findByPoplogId(mediaType: MediaType, id: string) {
     select: {
       id: true,
       tmdbId: true,
+      traktId: true,
+      imdbId: true,
+      slug: true,
       mediaType: true,
       title: true,
       originalTitle: true,
@@ -149,6 +159,9 @@ async function findByTmdbId(mediaType: MediaType, tmdbId: number) {
     select: {
       id: true,
       tmdbId: true,
+      traktId: true,
+      imdbId: true,
+      slug: true,
       mediaType: true,
       title: true,
       originalTitle: true,
@@ -194,6 +207,34 @@ async function findByExternalId(
   };
 }
 
+async function findByCanonicalExternalId(
+  mediaType: MediaType,
+  external: Partial<Pick<PoplogTitleExternalIds, "imdbId" | "traktId" | "slug">>,
+) {
+  const or = [
+    external.imdbId ? { imdbId: external.imdbId, mediaType } : null,
+    external.traktId ? { traktId: BigInt(String(external.traktId)), mediaType } : null,
+    external.slug ? { slug: external.slug, mediaType } : null,
+  ].filter((item): item is NonNullable<typeof item> => Boolean(item));
+
+  if (!or.length) return null;
+
+  return db.poplog3Title.findFirst({
+    where: { OR: or },
+    select: {
+      id: true,
+      tmdbId: true,
+      traktId: true,
+      imdbId: true,
+      slug: true,
+      mediaType: true,
+      title: true,
+      originalTitle: true,
+      year: true,
+    },
+  }).catch(() => null);
+}
+
 async function findByTitleYear(mediaType: MediaType, title?: string, year?: number) {
   if (!title || !year) return null;
   const normalized = normalizeSearchTerm(title);
@@ -204,6 +245,9 @@ async function findByTitleYear(mediaType: MediaType, title?: string, year?: numb
     select: {
       id: true,
       tmdbId: true,
+      traktId: true,
+      imdbId: true,
+      slug: true,
       mediaType: true,
       title: true,
       originalTitle: true,
@@ -267,12 +311,18 @@ export async function resolvePoplogTitleIdentity({
 
   if (isImdbId || sourceHint === "imdb" || sourceHint === "balloonerismm") {
     const imdbId = isImdbId ? cleanId : undefined;
+    const canonicalMatch = await findByCanonicalExternalId(mediaType, { imdbId });
+    if (canonicalMatch) {
+      return enrichIdentity(identityFromRow(canonicalMatch as TitleRow, "imdb_id", 0.98, {
+        imdbId,
+      }));
+    }
+
     const match = await findByExternalId(mediaType, { imdbId });
     if (match) {
       return enrichIdentity(identityFromRow(match.row as TitleRow, "imdb_id", 0.96, {
         ...match.externalIds,
         imdbId,
-        balloonerismmId: imdbId,
       }));
     }
 
@@ -280,10 +330,26 @@ export async function resolvePoplogTitleIdentity({
       mediaType,
       externalIds: {
         imdbId,
-        balloonerismmId: imdbId,
       },
       resolvedFrom: sourceHint === "balloonerismm" ? "balloonerismm_id" : "imdb_id",
       confidence: imdbId ? 0.72 : 0.2,
+    });
+  }
+
+  if (sourceHint === "trakt") {
+    const traktId = numericId;
+    const canonicalMatch = await findByCanonicalExternalId(mediaType, traktId ? { traktId } : { slug: cleanId });
+    if (canonicalMatch) {
+      return enrichIdentity(identityFromRow(canonicalMatch as TitleRow, "title_match", 0.95, {
+        ...(traktId ? { traktId } : { slug: cleanId }),
+      }));
+    }
+
+    return enrichIdentity({
+      mediaType,
+      externalIds: traktId ? { traktId } : { slug: cleanId },
+      resolvedFrom: "unknown",
+      confidence: 0.55,
     });
   }
 
@@ -320,6 +386,14 @@ export async function resolvePoplogTitleIdentity({
   const parsedSlug = sourceHint === "slug" || sourceHint === "auto"
     ? slugParts(cleanId)
     : {};
+  if ((sourceHint === "slug" || sourceHint === "auto") && parsedSlug.title) {
+    const canonicalMatch = await findByCanonicalExternalId(mediaType, { slug: cleanId });
+    if (canonicalMatch) {
+      return enrichIdentity(identityFromRow(canonicalMatch as TitleRow, "slug", 0.96, {
+        slug: cleanId,
+      }));
+    }
+  }
   const rowByTitle = await findByTitleYear(
     mediaType,
     title ?? parsedSlug.title,

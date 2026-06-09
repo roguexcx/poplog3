@@ -1,12 +1,8 @@
 /**
  * /api/poplog3/providers — disponibilidade regional (onde assistir).
  *
- * Fonte: Balloonerismm / Watchmode / local (catalog_availability).
- * Zero chamadas TMDB watch/providers.
- *
- * Quando não há dados confirmados, retorna sinal de indisponibilidade
- * controlado — a UI exibe "Disponibilidade ainda não confirmada" em vez
- * de erro ou dado vazio genérico.
+ * Fonte primária: Balloonerismm /watch/providers (ao vivo, BR por padrão).
+ * Fallback: cache local (TMDB/Watchmode/MOTN já sincronizados).
  *
  * Parâmetros:
  *   ?id=<imdb_id|trakt_id>  — identificador do título
@@ -18,6 +14,8 @@ import { NextRequest, NextResponse } from "next/server";
 import { AVAILABILITY_UNAVAILABLE } from "@/server/source-engine/normalizers/normalize-availability";
 import { getAvailability } from "@/server/cache/availability-cache";
 import { resolvePoplogTitleIdentity } from "@/server/titles/poplog-title-identity";
+import { getBalloonerismWatchProviders } from "@/server/titles/balloonerismm-providers";
+import type { TitleProvider } from "@/features/title/types";
 
 type MediaType = "movie" | "tv";
 
@@ -25,24 +23,22 @@ function normalizeMediaType(value: string | null): MediaType | null {
   return value === "movie" || value === "tv" ? value : null;
 }
 
-function groupProviders(rows: Awaited<ReturnType<typeof getAvailability>>) {
-  const providers = {
-    flatrate: [] as typeof rows,
-    rent: [] as typeof rows,
-    buy: [] as typeof rows,
-    ads: [] as typeof rows,
-    free: [] as typeof rows,
+function groupTitleProviders(providers: TitleProvider[]) {
+  const grouped = {
+    flatrate: [] as TitleProvider[],
+    rent:     [] as TitleProvider[],
+    buy:      [] as TitleProvider[],
+    ads:      [] as TitleProvider[],
+    free:     [] as TitleProvider[],
   };
-
-  for (const row of rows) {
-    if (row.availability_type === "streaming") providers.flatrate.push(row);
-    else if (row.availability_type === "rent") providers.rent.push(row);
-    else if (row.availability_type === "buy") providers.buy.push(row);
-    else if (row.availability_type === "ads") providers.ads.push(row);
-    else if (row.availability_type === "free") providers.free.push(row);
+  for (const p of providers) {
+    if (p.type === "streaming") grouped.flatrate.push(p);
+    else if (p.type === "rent")  grouped.rent.push(p);
+    else if (p.type === "buy")   grouped.buy.push(p);
+    else if (p.type === "ads")   grouped.ads.push(p);
+    else if (p.type === "free")  grouped.free.push(p);
   }
-
-  return providers;
+  return grouped;
 }
 
 export async function GET(request: NextRequest) {
@@ -60,57 +56,74 @@ export async function GET(request: NextRequest) {
   }
 
   const identity = await resolvePoplogTitleIdentity({ mediaType, id });
-  const sourceIdUsed = identity.externalIds.tmdbId
-    ? identity.externalIds.tmdbId
-    : identity.externalIds.imdbId ??
-      identity.externalIds.traktId ??
-      identity.externalIds.balloonerismmId ??
-      identity.externalIds.slug ??
-      id;
-  const sourceIdType = identity.externalIds.tmdbId
-    ? "tmdb_id_alias"
-    : identity.externalIds.imdbId
-      ? "imdb_id"
-      : identity.externalIds.traktId
-        ? "trakt_id"
-        : identity.externalIds.balloonerismmId
-          ? "balloonerismm_id"
-          : identity.externalIds.slug
-            ? "slug"
-            : "input";
+  const imdbId = identity.externalIds.imdbId;
+  const tmdbId = identity.externalIds.tmdbId;
 
-  let rows: Awaited<ReturnType<typeof getAvailability>> = [];
-  if (identity.externalIds.tmdbId) {
-    rows = await getAvailability(mediaType, identity.externalIds.tmdbId, region).catch(() => []);
-  } else if (identity.externalIds.imdbId) {
+  const sourceIdUsed = tmdbId ?? imdbId
+    ?? identity.externalIds.traktId
+    ?? identity.externalIds.balloonerismmId
+    ?? identity.externalIds.slug ?? id;
+  const sourceIdType = tmdbId ? "tmdb_id_alias"
+    : imdbId        ? "imdb_id"
+    : identity.externalIds.traktId ? "trakt_id"
+    : identity.externalIds.balloonerismmId ? "balloonerismm_id"
+    : identity.externalIds.slug ? "slug" : "input";
+
+  let providers: TitleProvider[] = [];
+  let providerSource = "not_configured";
+
+  // ── Fonte primária: Balloonerismm ──────────────────────────────────────────
+  if (imdbId) {
     try {
-      const local = await import("@/server/local-services/catalog-availability-local.service");
-      const localRows = await local.listAvailability({
-        imdbId: identity.externalIds.imdbId,
-        mediaType: mediaType as "movie" | "tv",
-        providerRegion: region,
-      });
-      rows = localRows.map((r) => ({
-        tmdb_id: 0,
-        media_type: mediaType,
-        provider_id: null,
-        provider_name: r.provider_name,
-        provider_logo_path: r.provider_logo_url ?? null,
-        tmdb_provider_id: null,
-        country: region,
-        availability_type: (r.provider_type === "subscription" ? "streaming" : r.provider_type) as "streaming" | "rent" | "buy" | "ads" | "free",
-        source: r.source as "tmdb" | "watchmode" | "motn",
-        deep_link: r.provider_url ?? null,
-        quality: null,
-        last_synced_at: r.checked_at ?? null,
-      }));
+      providers = await getBalloonerismWatchProviders(imdbId, mediaType, region);
+      if (providers.length > 0) providerSource = "balloonerismm";
     } catch {
-      rows = [];
+      providers = [];
     }
   }
 
-  const grouped = groupProviders(rows);
-  const cacheStatus = rows.length > 0 ? "local_hit" : "local_miss";
+  // ── Fallback: cache local ──────────────────────────────────────────────────
+  if (providers.length === 0) {
+    try {
+      if (tmdbId) {
+        const rows = await getAvailability(mediaType, tmdbId, region).catch(() => []);
+        if (rows.length > 0) {
+          providers = rows.map((row) => ({
+            name: row.provider_name,
+            logoUrl: null,
+            type: (row.availability_type === "streaming" ? "streaming" : row.availability_type) as TitleProvider["type"],
+            source: row.source,
+            country: row.country,
+            deepLink: row.deep_link,
+            quality: row.quality,
+          }));
+          providerSource = rows[0]?.source ?? "local";
+        }
+      } else if (imdbId) {
+        const local = await import("@/server/local-services/catalog-availability-local.service");
+        const localRows = await local.listAvailability({
+          imdbId,
+          mediaType,
+          providerRegion: region,
+        });
+        if (localRows.length > 0) {
+          providers = localRows.map((r) => ({
+            name: r.provider_name,
+            logoUrl: r.provider_logo_url ?? null,
+            type: (r.provider_type === "subscription" ? "streaming" : r.provider_type) as TitleProvider["type"],
+            source: r.source,
+            country: r.provider_region,
+          }));
+          providerSource = localRows[0]?.source ?? "local";
+        }
+      }
+    } catch {
+      // ignora — retorna vazio abaixo
+    }
+  }
+
+  const grouped = groupTitleProviders(providers);
+  const hasData = providers.length > 0;
 
   return NextResponse.json({
     ok: true,
@@ -119,29 +132,28 @@ export async function GET(request: NextRequest) {
     id,
     region,
     media_type: mediaType,
-    dataSource: rows.length > 0 ? "local_cache" : "source_engine_unavailable",
-    ...(rows.length === 0 ? AVAILABILITY_UNAVAILABLE : { available: true }),
+    dataSource: hasData ? "balloonerismm" : "source_engine_unavailable",
+    ...(hasData ? { available: true } : AVAILABILITY_UNAVAILABLE),
     providers: grouped,
-    providerSource: rows.length > 0 ? rows[0]?.source ?? "local" : "not_configured",
+    providerSource,
     usedTmdbApi: false,
     sourceIdUsed,
     sourceIdType,
-    message: rows.length > 0
-      ? "Provider data loaded from local cache."
-      : "Provider data not yet available for this title without external refresh.",
+    message: hasData
+      ? "Provider data loaded from Balloonerismm."
+      : "Provider data not yet available for this title.",
     ...(debugSource
       ? {
           debugSource: {
             providerLookupAttempted: true,
-            providerSource: rows.length > 0 ? rows[0]?.source ?? "local" : "not_configured",
+            providerSource,
             providerSourceIdType: sourceIdType,
             providerSourceIdUsed: sourceIdUsed,
             poplogId: identity.poplogId ?? null,
             externalIds: identity.externalIds,
             usedTmdbApi: false,
-            fallbackUsed: rows.length === 0,
-            fallbackReason: rows.length === 0 ? "no_local_or_configured_provider_source" : null,
-            cacheStatus,
+            fallbackUsed: providerSource !== "balloonerismm",
+            imdbIdUsed: imdbId ?? null,
           },
         }
       : {}),

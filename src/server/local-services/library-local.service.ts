@@ -128,6 +128,49 @@ function titleRowToLibraryTitle(title: TitleCacheRow): Poplog3UserLibraryItem["t
 }
 
 /**
+ * Para IDs TMDB positivos sem cache local: busca via Trakt /search/tmdb/{id},
+ * persiste em poplog3Title e retorna o row cacheado.
+ * Usado como fallback para entradas de biblioteca órfãs (tmdbId positivo sem registro no DB).
+ */
+async function fetchAndCacheTitleByTmdbId(
+  mediaType: MediaType,
+  tmdbId: number,
+): Promise<TitleCacheRow | null> {
+  try {
+    const { traktGet, isTraktActive } = await import("@/server/api-clients/trakt/client");
+    if (!isTraktActive()) return null;
+
+    const traktType = mediaType === "movie" ? "movie" : "show";
+    const results = await traktGet<Array<{
+      type?: string;
+      movie?: { title?: string; year?: number; ids: { trakt?: number; slug?: string; imdb?: string; tmdb?: number }; images?: { poster?: string[] | null; fanart?: string[] | null } };
+      show?: { title?: string; year?: number; ids: { trakt?: number; slug?: string; imdb?: string; tvdb?: number; tmdb?: number }; images?: { poster?: string[] | null; fanart?: string[] | null } };
+    }>>(`/search/tmdb/${tmdbId}`, {
+      params: { type: traktType, extended: "images" },
+      ttlSeconds: 7 * 86400,
+    });
+
+    const hit = results?.find((r) => r.type === traktType || r[traktType as "movie" | "show"]);
+    const item = mediaType === "movie" ? hit?.movie : hit?.show;
+    if (!item?.title) return null;
+
+    await upsertCachedTitleRow({
+      tmdbId,
+      mediaType,
+      title: item.title,
+      year: item.year ?? null,
+      posterPath: item.images?.poster?.[0] ?? null,
+      backdropPath: item.images?.fanart?.[0] ?? null,
+      releaseDate: mediaType === "movie" ? null : null,
+    });
+
+    return getCachedTitleRow(mediaType, tmdbId);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Para IDs sintéticos negativos: busca dados via Balloonerismm, persiste em poplog3Title
  * com o ID sintético como chave, e retorna o row cacheado para uso imediato.
  *
@@ -179,6 +222,11 @@ async function enrichLibraryItem(row: UserTitle): Promise<Poplog3UserLibraryItem
     if (imdbId) {
       titleRow = await fetchAndCacheSyntheticTitle(row.mediaType, row.tmdbId, imdbId);
     }
+  }
+
+  // Positive tmdbIds with no local record: try Trakt cross-reference lookup
+  if (!titleRow && row.tmdbId > 0) {
+    titleRow = await fetchAndCacheTitleByTmdbId(row.mediaType, row.tmdbId);
   }
 
   const externalRow = await getExternalIdsCache(row.mediaType, row.tmdbId);

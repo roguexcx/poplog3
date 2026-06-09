@@ -7,11 +7,15 @@ import {
   catalogGetVideos,
 } from "@/server/source-engine/engine";
 import { traktAdapter } from "@/server/source-engine/adapters/trakt-adapter";
-import { tvdbAdapter } from "@/server/source-engine/adapters/tvdb-adapter";
 import { traktGet } from "@/server/api-clients/trakt/client";
 import type { TraktTranslation } from "@/server/api-clients/trakt/types";
 import type { CatalogPeople, CatalogTitle, CatalogVideo } from "@/server/source-engine/types/catalog.types";
 import { db } from "@/server/db/client";
+import {
+  canonicalInputFromCatalogTitle,
+  enqueueCanonicalRefresh,
+  upsertCanonicalTitle,
+} from "@/server/source-engine/canonical-store";
 import {
   resolvePoplogTitleIdentity,
   type PoplogTitleExternalIds,
@@ -22,7 +26,7 @@ import type { PoplogTitleAliasResolution } from "./poplog-title-aliases";
 
 type MediaType = "movie" | "tv";
 
-export type PoplogTitleDetailsSource = "balloonerismm" | "trakt" | "tvdb" | "local" | "legacy";
+export type PoplogTitleDetailsSource = "trakt" | "local" | "legacy";
 
 export type PoplogTitleDetailsResult = {
   /**
@@ -280,12 +284,12 @@ function localToDetails(
   };
 }
 
-function balloonerismmToDetails(
+function catalogTitleToDetails(
   identity: PoplogTitleIdentity,
   title: CatalogTitle,
   people?: CatalogPeople | null,
   videos?: CatalogVideo[],
-  source: Exclude<PoplogTitleDetailsSource, "local" | "legacy"> = "balloonerismm",
+  source: Exclude<PoplogTitleDetailsSource, "local" | "legacy"> = "trakt",
 ): PoplogTitleDetailsResult {
   return {
     poplogId: identity.poplogId,
@@ -310,7 +314,6 @@ function balloonerismmToDetails(
       imdbId: title.ids.imdbId ?? identity.externalIds.imdbId,
       tvdbId: title.ids.tvdbId ?? identity.externalIds.tvdbId,
       traktId: title.ids.traktId ?? identity.externalIds.traktId,
-      balloonerismmId: identity.externalIds.balloonerismmId ?? title.ids.imdbId,
       slug: identity.externalIds.slug,
     }),
     cast: (people?.cast ?? []).map((person) => ({
@@ -354,7 +357,7 @@ function balloonerismmToDetails(
 
 function localizeTitleDetails(details: PoplogTitleDetailsResult): PoplogTitleDetailsResult {
   // Titles, overviews and taglines are NEVER machine-translated.
-  // PT-BR content must come from APIs: Trakt translations, Balloonerismm language=pt-BR.
+  // PT-BR content must come from Trakt translations.
   // Genre labels use a static PT-BR mapping (not machine translation).
   return {
     ...details,
@@ -368,27 +371,13 @@ type RemoteTitleCandidate = {
 };
 
 async function resolveMovieTitleCandidate(params: { imdbId: string }): Promise<RemoteTitleCandidate | null> {
-  const [balloonerismm, trakt] = await Promise.all([
-    catalogGetMovie(params).catch(() => null),
-    traktAdapter.getMovie(params).catch(() => null),
-  ]);
-
-  if (balloonerismm) return { title: balloonerismm, source: "balloonerismm" };
-  if (trakt) return { title: trakt, source: "trakt" };
-  return null;
+  const trakt = await catalogGetMovie(params).catch(() => null);
+  return trakt ? { title: trakt, source: "trakt" } : null;
 }
 
 async function resolveShowTitleCandidate(params: { imdbId: string; tvdbId?: number }): Promise<RemoteTitleCandidate | null> {
-  const [balloonerismm, trakt, tvdb] = await Promise.all([
-    catalogGetShow(params).catch(() => null),
-    traktAdapter.getShow(params).catch(() => null),
-    params.tvdbId ? tvdbAdapter.getShow({ tvdbId: params.tvdbId }).catch(() => null) : Promise.resolve(null),
-  ]);
-
-  if (balloonerismm) return { title: balloonerismm, source: "balloonerismm" };
-  if (trakt) return { title: trakt, source: "trakt" };
-  if (tvdb) return { title: tvdb, source: "tvdb" };
-  return null;
+  const trakt = await catalogGetShow(params).catch(() => null);
+  return trakt ? { title: trakt, source: "trakt" } : null;
 }
 
 async function findLocalTitle(identity: PoplogTitleIdentity): Promise<LocalTitleRow | null> {
@@ -399,21 +388,19 @@ async function findLocalTitle(identity: PoplogTitleIdentity): Promise<LocalTitle
     if (row) return row as LocalTitleRow;
   }
 
-  const tmdbId = identity.externalIds.tmdbId;
-  if (!tmdbId) return null;
+  const or = [
+    identity.externalIds.tmdbId ? { tmdbId: identity.externalIds.tmdbId, mediaType: identity.mediaType } : null,
+    identity.externalIds.imdbId ? { imdbId: identity.externalIds.imdbId, mediaType: identity.mediaType } : null,
+    identity.externalIds.traktId ? { traktId: BigInt(String(identity.externalIds.traktId)), mediaType: identity.mediaType } : null,
+    identity.externalIds.slug ? { slug: identity.externalIds.slug, mediaType: identity.mediaType } : null,
+  ].filter((item): item is NonNullable<typeof item> => Boolean(item));
 
-  return db.poplog3Title.findUnique({
-    where: {
-      tmdbId_mediaType: {
-        tmdbId,
-        mediaType: identity.mediaType,
-      },
-    },
-  }).catch(() => null) as Promise<LocalTitleRow | null>;
+  if (!or.length) return null;
+  return db.poplog3Title.findFirst({ where: { OR: or } }).catch(() => null) as Promise<LocalTitleRow | null>;
 }
 
 function detailLookupId(identity: PoplogTitleIdentity): string | null {
-  return identity.externalIds.imdbId ?? identity.externalIds.balloonerismmId ?? null;
+  return identity.externalIds.imdbId ?? identity.externalIds.slug ?? (identity.externalIds.traktId ? String(identity.externalIds.traktId) : null);
 }
 
 export function getPoplogTitleDetailsDebugSource(
@@ -449,7 +436,7 @@ export function getPoplogTitleDetailsDebugSource(
     rawSource: details?.sourceMeta.rawSource ?? primarySource,
     usedLegacy,
     usedTmdbApi,
-    usedBalloonerismm: primarySource === "balloonerismm",
+    usedBalloonerismm: false,
     aliasLookupAttempted: aliasResolution?.aliasLookupAttempted,
     aliasLookupSource: aliasResolution?.aliasLookupSource,
     aliasLookupFound: aliasResolution?.aliasLookupFound,
@@ -461,12 +448,12 @@ export function getPoplogTitleDetailsDebugSource(
 }
 
 /**
- * Tenta obter numberOfSeasons de Trakt e TVDB quando Balloonerismm e DB local retornam null.
+ * Tenta obter numberOfSeasons de Trakt quando DB local retorna null.
  * Usado para séries com múltiplas temporadas onde a contagem é crítica para gerar os season stubs.
  */
 async function resolveNumberOfSeasons(
   imdbId: string | undefined,
-  tvdbId: number | undefined,
+  _tvdbId: number | undefined,
 ): Promise<number | null> {
   // Trakt: /shows/{imdbId}/seasons retorna array de seasons, contamos os number > 0
   if (imdbId) {
@@ -474,14 +461,6 @@ async function resolveNumberOfSeasons(
     const count = seasons.filter((s) => s.number > 0).length;
     if (count > 0) return count;
   }
-
-  // TVDB fallback: getSeasons usa série extended que inclui lista de seasons
-  if (tvdbId) {
-    const seasons = await tvdbAdapter.getSeasons({ tvdbId }).catch(() => []);
-    const count = seasons.filter((s) => s.number > 0).length;
-    if (count > 0) return count;
-  }
-
   return null;
 }
 
@@ -530,7 +509,7 @@ export async function getPoplogTitleDetails({
 
   if (lookupId) {
     let remoteTitle: CatalogTitle | null = null;
-    let remoteSource: Exclude<PoplogTitleDetailsSource, "local" | "legacy"> = "balloonerismm";
+    let remoteSource: Exclude<PoplogTitleDetailsSource, "local" | "legacy"> = "trakt";
     let effectiveMediaType: MediaType = mediaType;
 
     if (mediaType === "movie" && lookupId.startsWith("tt")) {
@@ -543,7 +522,7 @@ export async function getPoplogTitleDetails({
 
       if (hasSeriesEvidence(showTitle) && (!movieTitle || showTitle?.ids.imdbId === movieTitle.ids.imdbId || showTitle?.title === movieTitle.title)) {
         remoteTitle = showTitle;
-        remoteSource = showCandidate?.source ?? "balloonerismm";
+        remoteSource = showCandidate?.source ?? "trakt";
         effectiveMediaType = "tv";
         logMediaCorrection({
           requested: mediaType,
@@ -554,14 +533,14 @@ export async function getPoplogTitleDetails({
         });
       } else {
         remoteTitle = movieTitle;
-        remoteSource = movieCandidate?.source ?? "balloonerismm";
+        remoteSource = movieCandidate?.source ?? "trakt";
       }
     } else {
       const candidate = mediaType === "movie"
         ? await resolveMovieTitleCandidate({ imdbId: lookupId })
         : await resolveShowTitleCandidate({ imdbId: lookupId, tvdbId: identity.externalIds.tvdbId });
       remoteTitle = candidate?.title ?? null;
-      remoteSource = candidate?.source ?? "balloonerismm";
+      remoteSource = candidate?.source ?? "trakt";
     }
 
     const [people, videos] = await Promise.all([
@@ -570,13 +549,20 @@ export async function getPoplogTitleDetails({
     ]);
 
     if (remoteTitle) {
-      const details = balloonerismmToDetails(identity, remoteTitle, people, videos, remoteSource);
+      const persisted = await upsertCanonicalTitle(canonicalInputFromCatalogTitle(remoteTitle, 86_400)).catch(() => null);
+      const details = catalogTitleToDetails(
+        persisted ? { ...identity, poplogId: persisted.id } : identity,
+        remoteTitle,
+        people,
+        videos,
+        remoteSource,
+      );
       const mergedExternalIds = {
         ...mergeExternalIds(identity, local),
         ...details.externalIds,
       };
 
-      // numberOfSeasons: Balloonerismm → local DB → Trakt/TVDB (parallel, async)
+      // numberOfSeasons: Trakt → local DB.
       // Garante que séries com múltiplas temporadas nunca mostrem 0 tabs na UI.
       let numberOfSeasons = details.numberOfSeasons ?? local?.numberOfSeasons ?? null;
       if (numberOfSeasons == null && effectiveMediaType === "tv") {
@@ -584,7 +570,7 @@ export async function getPoplogTitleDetails({
           mergedExternalIds.imdbId,
           mergedExternalIds.tvdbId,
         ).catch(() => null);
-        // Persist so the next request doesn't need to call Trakt/TVDB again
+        // Persist so the next request doesn't need to call Trakt again.
         if (numberOfSeasons != null && local) {
           void db.poplog3Title.update({
             where: { id: local.id },
@@ -596,9 +582,9 @@ export async function getPoplogTitleDetails({
       // ── Canonical text resolution (title, overview, tagline) ────────────────
       //
       // Priority for each field (highest → lowest):
-      //   title   : Trakt PT-BR translation > Balloonerismm PT-BR > local DB PT-BR > English
-      //   overview: Trakt PT-BR translation > Balloonerismm PT-BR (language=pt-BR) > English
-      //   tagline : Trakt PT-BR translation > Balloonerismm PT-BR (language=pt-BR) > English
+      //   title   : Trakt PT-BR translation > local DB PT-BR > English
+      //   overview: Trakt PT-BR translation > English
+      //   tagline : Trakt PT-BR translation > English
       //
       // No machine translation — PT-BR must come from the APIs.
 
@@ -610,26 +596,23 @@ export async function getPoplogTitleDetails({
         traktTranslation = await fetchTraktPtBrTranslation(lookupId, effectiveMediaType).catch(() => null);
       }
 
-      // Title: Trakt > Balloonerismm PT-BR > local DB PT-BR > original
-      const balloonerismPtBr = looksLikeLocalizedTitle(details.title) ? details.title : null;
       const localPtBr = (local?.title && looksLikeLocalizedTitle(local.title)) ? local.title : null;
-      const canonicalTitle = traktTranslation?.title ?? balloonerismPtBr ?? localPtBr ?? remoteEnglishTitle;
+      const canonicalTitle = traktTranslation?.title ?? localPtBr ?? remoteEnglishTitle;
 
-      // Overview: Trakt > Balloonerismm (already PT-BR when language=pt-BR worked) > English
+      // Overview: Trakt > English
       const canonicalOverview = traktTranslation?.overview ?? details.overview ?? null;
 
-      // Tagline: Trakt > Balloonerismm > English
+      // Tagline: Trakt > English
       const canonicalTagline = traktTranslation?.tagline ?? details.tagline ?? null;
 
-      // The English original title: carry the Balloonerismm original_title if present,
-      // or fall back to the remote API title when a localized candidate won.
+      // The English original title falls back to the remote API title when a localized candidate won.
       const canonicalOriginalTitle: string | null | undefined =
         details.originalTitle ??
         (canonicalTitle !== remoteEnglishTitle ? remoteEnglishTitle : null);
 
       if (canonicalTitle !== remoteEnglishTitle) {
         console.log("[title-details] localized pt-BR title selected", {
-          source: traktTranslation?.title ? "trakt" : balloonerismPtBr ? "balloonerismm" : "local_db",
+          source: traktTranslation?.title ? "trakt" : "local_db",
           ptBrTitle: canonicalTitle,
           englishTitle: remoteEnglishTitle,
         });
@@ -653,7 +636,7 @@ export async function getPoplogTitleDetails({
   if (local) {
     const localDetails = localToDetails(identity, local);
 
-    // Se DB local tem numberOfSeasons null para série TV, tenta Trakt/TVDB e persiste
+    // Se DB local tem numberOfSeasons null para série TV, tenta Trakt e agenda refresh.
     let numberOfSeasons = localDetails.numberOfSeasons;
     if (numberOfSeasons == null && mediaType === "tv") {
       numberOfSeasons = await resolveNumberOfSeasons(
@@ -674,7 +657,7 @@ export async function getPoplogTitleDetails({
       sourceMeta: {
         primarySource: "local",
         fallbackUsed: Boolean(!lookupId),
-        fallbackReason: lookupId ? undefined : "missing_imdb_alias_for_balloonerismm",
+        fallbackReason: lookupId ? undefined : "missing_trakt_lookup_alias",
         confidence: identity.confidence,
         resolvedFrom: identity.resolvedFrom,
         rawSource: "local",
@@ -691,7 +674,7 @@ export async function getPoplogTitleDetails({
     sourceMeta: {
       primarySource: "legacy",
       fallbackUsed: true,
-      fallbackReason: lookupId ? "balloonerismm_empty" : "unresolved_external_identity",
+      fallbackReason: lookupId ? "trakt_empty" : "unresolved_external_identity",
       confidence: identity.confidence,
       resolvedFrom: identity.resolvedFrom,
       rawSource: "legacy",

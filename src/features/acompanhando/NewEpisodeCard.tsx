@@ -1,7 +1,7 @@
 "use client";
 
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
-import { resolveCatalogImage } from "@/lib/images/resolve";
+import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 
 export type NewEpisodeItem = {
   content_id: string;

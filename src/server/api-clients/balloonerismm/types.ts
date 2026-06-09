@@ -183,6 +183,36 @@ export type BalloonerismProvider = {
   url?: string;
 };
 
+/** Um provider individual dentro do endpoint /watch/providers (formato JustWatch). */
+export type BalloonerismWatchProviderItem = {
+  provider_id?: number;
+  provider_name?: string;
+  name?: string;
+  logo_path?: string | null;
+  logo_url?: string | null;
+  display_priority?: number;
+  link?: string;
+};
+
+/** Dados de disponibilidade para uma região específica (formato JustWatch). */
+export type BalloonerismWatchRegionData = {
+  link?: string;
+  flatrate?: BalloonerismWatchProviderItem[];
+  rent?: BalloonerismWatchProviderItem[];
+  buy?: BalloonerismWatchProviderItem[];
+  free?: BalloonerismWatchProviderItem[];
+  ads?: BalloonerismWatchProviderItem[];
+};
+
+/**
+ * Resposta de GET /movie/{id}/watch/providers e GET /tv/{id}/watch/providers.
+ * Segue o formato JustWatch/TMDB com `results` indexado por código de região.
+ */
+export type BalloonerismWatchProvidersResponse = {
+  id?: string;
+  results?: Record<string, BalloonerismWatchRegionData>;
+};
+
 export type BalloonerismPerson = {
   imdb_id?: string;
   name: string;

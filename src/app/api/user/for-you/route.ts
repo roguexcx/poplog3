@@ -2,28 +2,42 @@
  * /api/user/for-you
  *
  * Engine de recomendações personalizada baseada na biblioteca do usuário.
- * Fonte de relacionados: Trakt Related (primary).
- * Resolução de imagens + pt-BR: local DB (canonical) → Trakt images (VIP fallback).
- * Fallback final de pool: poplog3Title popular quando Trakt não retorna suficientes.
+ * Fonte de relacionados: Balloonerismm (primary) — /recommendations + /similar por seed.
+ * Hidratação: Trakt por imdbId (canonical IDs, pt-BR, imagens VIP).
+ * Fallback de imagens/metadata: local DB (TMDB canonical paths).
  */
 
 import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { db } from "@/server/db/client";
 import { traktGet, isTraktActive } from "@/server/api-clients/trakt/client";
-import type { TraktTranslation } from "@/server/api-clients/trakt/types"; // used in TraktRelatedItem.translations
+import type { TraktTranslation } from "@/server/api-clients/trakt/types";
 import {
   isSyntheticTmdbId,
   imdbIdFromSyntheticTmdbId,
+  syntheticTmdbFromImdbId,
 } from "@/lib/ids/synthetic-tmdb-id";
+import {
+  fetchBalloonerismForSeed,
+  mergeBalloonCandidates,
+  hydrateCandidatesWithTrakt,
+  type BalloonSeedResult,
+  type ScoreBreakdown,
+} from "@/server/recommendations/balloon-engine";
+import { withOrigin } from "@/server/engine-logger";
 import type { UserTitle } from "@/types/user";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
-const MAX_SEEDS           = 10;
-const DEFAULT_FINAL_COUNT = 5;
-const MAX_FINAL_COUNT     = 30;
-const SESSION_EXCLUDE_CAP = 60;
+const MAX_SEEDS             = 12;
+const DEFAULT_FINAL_COUNT   = 6;   // home desktop exibe 1 featured + 5 small = 6 slots
+const MAX_FINAL_COUNT       = 30;
+const SESSION_EXCLUDE_CAP   = 150;
+// Balloonerismm is the primary source. All seeds with imdbId are queried.
+// Concurrency cap avoids rate-limit cascades; hydration cap limits Trakt calls.
+const BALLOON_CONCURRENCY   = 4;
+const HYDRATION_CAP         = 40; // top-N candidates to enrich via Trakt single-item lookup
+const HYDRATION_CONCURRENCY = 8;
 
 // ─── Genre map (TMDB IDs → pt-BR) ─────────────────────────────────────────────
 
@@ -121,7 +135,10 @@ type WeightedSeed = {
 
 type RecCandidate = {
   tmdbId: number;
+  /** CUID canônico de poplog3_titles quando encontrado no DB local */
+  _poplogId?: string | null;
   imdbId?: string | null;
+  traktId?: number | null;
   traktSlug?: string | null;
   // Pre-enrichment (Trakt): English, no images
   // Post-enrichment (local DB): pt-BR, TMDB image paths or Trakt image URLs
@@ -145,42 +162,13 @@ type RecCandidate = {
   // true quando o título foi encontrado em poplog3_titles sob o tmdbId do Trakt.
   // Determina qual ID usar no link: tmdbId (in DB) ou imdbId (Balloonerismm-only).
   _inLocalDb?: boolean;
+  // Provenance from Balloon engine
+  _balloonSource?: "recommendations" | "similar" | "both";
+  _hydrationSource?: "trakt" | "balloon";
+  _appearedFromSeeds?: number;
+  _scoreBreakdown?: ScoreBreakdown;
 };
 
-// Trakt Related response (extended=full,images,translations)
-type TraktRelatedItem = {
-  title: string;
-  year?: number | null;
-  ids: {
-    trakt?: number | null;
-    slug?: string | null;
-    imdb?: string | null;
-    tmdb?: number | null;
-    tvdb?: number | null;
-  };
-  overview?: string | null;
-  released?: string | null;
-  first_aired?: string | null;
-  runtime?: number | null;
-  rating?: number | null;
-  votes?: number | null;
-  genres?: string[] | null;
-  language?: string | null;
-  available_translations?: string[] | null;
-  certification?: string | null;
-  status?: string | null;
-  // Returned with extended=full,translations
-  translations?: TraktTranslation[] | null;
-  // Returned only with extended=full,images (Trakt VIP)
-  images?: {
-    poster?: string[] | null;   // full CDN URLs — poster[0] is best quality
-    fanart?: string[] | null;   // full CDN URLs — fanart[0] is backdrop
-    logo?: string[] | null;
-    thumb?: string[] | null;
-    clearart?: string[] | null;
-    banner?: string[] | null;
-  } | null;
-};
 
 // The canonical payload item returned to the client
 export type ForYouApiItem = {
@@ -228,17 +216,36 @@ function buildWeightedSeeds(titles: UserTitle[]): WeightedSeed[] {
   return Array.from(map.values());
 }
 
-// Jitter ±20 so equal-weight seeds rotate across Sorteio rounds.
-// Recency is a ranking bonus, never a filter.
+// Picks up to MAX_SEEDS seeds with guaranteed media-type diversity when possible.
+// Each type gets up to half the budget; remainder filled by top-scoring from either type.
+// Jitter ±20 rotates equal-weight seeds across sessions.
 function pickSeeds(seeds: WeightedSeed[]): WeightedSeed[] {
   if (!seeds.length) return [];
   if (seeds.length <= MAX_SEEDS) return seeds;
 
-  return seeds
+  const scored = seeds
     .map((s) => ({ seed: s, score: s.effectiveWeight + Math.random() * 20 }))
-    .sort((a, b) => b.score - a.score)
-    .slice(0, MAX_SEEDS)
-    .map((x) => x.seed);
+    .sort((a, b) => b.score - a.score);
+
+  const movies = scored.filter((x) => x.seed.title.media_type === "movie");
+  const shows  = scored.filter((x) => x.seed.title.media_type === "tv");
+
+  // At least 2 from each type when both are present; remaining budget fills from top scorer
+  const minPerType = 2;
+  const movieSlots = movies.length > 0 ? Math.max(minPerType, Math.floor(MAX_SEEDS / 2)) : 0;
+  const tvSlots    = shows.length  > 0 ? Math.max(minPerType, Math.floor(MAX_SEEDS / 2)) : 0;
+
+  const picked = new Set<WeightedSeed>();
+  for (const x of movies.slice(0, movieSlots)) picked.add(x.seed);
+  for (const x of shows.slice(0, tvSlots))    picked.add(x.seed);
+
+  // Fill remaining budget with top-scoring seeds of either type
+  for (const x of scored) {
+    if (picked.size >= MAX_SEEDS) break;
+    picked.add(x.seed);
+  }
+
+  return Array.from(picked);
 }
 
 // ─── Reason strings ───────────────────────────────────────────────────────────
@@ -249,6 +256,22 @@ function buildReason(seed: WeightedSeed): string {
   if (seed.title.status === "watched")   return `Baseado em "${seed.label}"`;
   if (seed.title.status === "watchlist") return `Da sua watchlist: "${seed.label}"`;
   return `Baseado na sua biblioteca`;
+}
+
+// ─── Seed source label ────────────────────────────────────────────────────────
+
+function seedSourceLabel(seed: WeightedSeed): string {
+  if (seed.title.favorite) return "favorite";
+  switch (seed.title.status) {
+    case "watching":  return "watching";
+    case "watched":   return "watched";
+    case "watchlist": return "watchlist";
+    case "fridge":    return "fridge";
+  }
+  if (seed.title.stream_status && /soon|coming|anticipated/i.test(seed.title.stream_status)) {
+    return "upcoming";
+  }
+  return "manual";
 }
 
 // ─── External ID resolution ───────────────────────────────────────────────────
@@ -267,9 +290,10 @@ async function resolveExternalIds(seed: WeightedSeed): Promise<ExtIds> {
   // 2. Fast path — already in UserTitle (flat fields)
   const quickImdb  = safeStr(t.imdb_id) ?? safeStr(t.externalIds?.imdbId) ?? null;
   const quickTrakt = t.externalIds?.traktId ? String(t.externalIds.traktId) : null;
+  const quickSlug  = safeStr(t.externalIds?.slug) ?? null;
 
-  if (quickImdb || quickTrakt) {
-    return { imdbId: quickImdb, traktId: quickTrakt, traktSlug: null };
+  if (quickImdb || quickTrakt || quickSlug) {
+    return { imdbId: quickImdb, traktId: quickTrakt, traktSlug: quickSlug };
   }
 
   // 3. DB lookup
@@ -281,89 +305,13 @@ async function resolveExternalIds(seed: WeightedSeed): Promise<ExtIds> {
     return {
       imdbId:    row?.imdbId  ?? null,
       traktId:   row?.traktId ?? null,
-      traktSlug: null,
+      traktSlug: null, // slug não está em titleExternalId; fast-path usa externalIds.slug
     };
   } catch {
     return { imdbId: null, traktId: null, traktSlug: null };
   }
 }
 
-// ─── Trakt Related ─────────────────────────────────────────────────────────────
-// Uses extended=full,images to get images if the account has VIP access.
-// Falls back gracefully when images are absent (free tier).
-// Accepts: imdbId (preferred), traktId (numeric or slug).
-
-async function fetchTraktRelated(
-  mediaType: "movie" | "tv",
-  id: string | null,
-): Promise<TraktRelatedItem[]> {
-  if (!isTraktActive() || !id) return [];
-
-  const endpoint =
-    mediaType === "movie"
-      ? `/movies/${encodeURIComponent(id)}/related`
-      : `/shows/${encodeURIComponent(id)}/related`;
-
-  // translations: inline pt-BR per item — no separate API calls needed
-  // images: VIP-only, free tier returns null (handled gracefully)
-  const result = await traktGet<TraktRelatedItem[]>(endpoint, {
-    params:     { extended: "full,images,translations" },
-    ttlSeconds: 86_400,
-  });
-
-  return Array.isArray(result) ? result : [];
-}
-
-// ─── Local DB pool (fallback when not enough Trakt candidates) ─────────────────
-
-async function fetchLocalDbPool(
-  mediaType: "movie" | "tv",
-  excludeTmdbIds: Set<number>,
-): Promise<RecCandidate[]> {
-  try {
-    const rows = await db.poplog3Title.findMany({
-      where:   { mediaType, voteAverage: { gte: 5 } },
-      orderBy: { popularity: "desc" },
-      take:    60,
-      select: {
-        tmdbId: true, mediaType: true,
-        title: true, originalTitle: true, overview: true,
-        posterPath: true, backdropPath: true,
-        voteAverage: true, voteCount: true,
-        genres: true, releaseDate: true, firstAirDate: true,
-      },
-    });
-
-    return rows
-      .filter((r) => r.tmdbId > 0 && !excludeTmdbIds.has(r.tmdbId))
-      .map((row): RecCandidate => {
-        const date = row.releaseDate ?? row.firstAirDate;
-        const hasImg = Boolean(row.posterPath || row.backdropPath);
-        return {
-          tmdbId:              row.tmdbId,
-          title:               row.title ?? "Título",
-          originalTitle:       row.originalTitle ?? null,
-          overview:            row.overview ?? null,
-          posterUrl:           row.posterPath  ?? null,
-          backdropUrl:         row.backdropPath ?? null,
-          voteAverage:         row.voteAverage  ? Number(row.voteAverage)  : null,
-          voteCount:           row.voteCount   ?? null,
-          year:                date ? String(date.getFullYear()) : null,
-          genreIds:            parseGenreIds(row.genres),
-          mediaType:           row.mediaType as "movie" | "tv",
-          seedEffectiveWeight: 0,
-          relationStrength:    0,
-          reason:              "Popular na plataforma",
-          _imageSource:        row.posterPath ? "db:poster" : row.backdropPath ? "db:backdrop" : "none",
-          _langSource:         "pt-BR",
-          _inLocalDb:          true,
-          ...(!hasImg && { _discardReason: "no-image-in-pool" }),
-        };
-      });
-  } catch {
-    return [];
-  }
-}
 
 function parseGenreIds(raw: unknown): number[] {
   if (!Array.isArray(raw)) return [];
@@ -386,7 +334,7 @@ async function enrichFromDb(candidates: RecCandidate[]): Promise<void> {
     const rows = await db.poplog3Title.findMany({
       where:  { tmdbId: { in: candidates.map((c) => c.tmdbId) } },
       select: {
-        tmdbId: true, mediaType: true,
+        id: true, tmdbId: true, mediaType: true,
         title: true, originalTitle: true, overview: true,
         posterPath: true, backdropPath: true,
         voteAverage: true, voteCount: true, genres: true,
@@ -406,7 +354,8 @@ async function enrichFromDb(candidates: RecCandidate[]): Promise<void> {
         continue;
       }
 
-      c._inLocalDb = true;
+      c._inLocalDb  = true;
+      c._poplogId   = row.id;
 
       // Title: only apply DB title when Trakt didn't already provide pt-BR inline.
       // "pt-BR:trakt" = title came from extended=full,translations — authoritative.
@@ -456,54 +405,69 @@ async function enrichFromDb(candidates: RecCandidate[]): Promise<void> {
   }
 }
 
+// ─── Concurrency limiter ──────────────────────────────────────────────────────
+// Runs tasks with at most `concurrency` simultaneous executions.
+// Used to avoid overwhelming external APIs with large Promise.all batches.
+
+async function runWithConcurrency<T>(
+  tasks: (() => Promise<T>)[],
+  concurrency: number,
+): Promise<void> {
+  let idx = 0;
+  async function worker() {
+    while (idx < tasks.length) {
+      const i = idx++;
+      await tasks[i]().catch(() => undefined);
+    }
+  }
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, tasks.length) }, worker),
+  );
+}
+
 // ─── pt-BR enrichment via Trakt dedicated translations endpoint ───────────────
 // Runs on candidates that still don't have a pt-BR title after inline translations
 // and DB enrichment. Calls /movies/{id}/translations/pt or /shows/{id}/translations/pt.
 // These responses are cached with TTL=86400. NOT a VIP-only feature (unlike images).
 //
-// Log schema per candidate:
-//   titleOriginal : title before localization (English)
-//   titlePtBr     : pt-BR title if found, else "n/a"
-//   overviewPtBr  : "yes" | "no"
-//   source        : where pt-BR came from ("trakt-inline" | "trakt-trans" | "db" | "none")
-//   fallbackReason: why pt-BR was not available, when applicable
+// Concurrency cap: max 8 simultaneous requests to avoid Trakt rate-limit cascade.
+// Candidate cap: top 60 by score — beyond this, translations rarely affect outcome.
 
 async function enrichWithTraktTranslations(candidates: RecCandidate[]): Promise<void> {
   if (!isTraktActive()) return;
 
-  const needsTranslation = candidates.filter(
-    (c) => !c._langSource.startsWith("pt-BR") && c.imdbId,
-  );
+  // Prioritize candidates most likely to be selected before hitting the cap
+  const sorted = [...candidates].sort((a, b) => score(b) - score(a));
+  const needsTranslation = sorted
+    .filter((c) => !c._langSource.startsWith("pt-BR") && c.imdbId)
+    .slice(0, 60);
   if (!needsTranslation.length) return;
 
-  await Promise.allSettled(
-    needsTranslation.map(async (c) => {
+  await runWithConcurrency(
+    needsTranslation.map((c) => async () => {
       const imdbId = c.imdbId!;
       const path =
         c.mediaType === "movie"
           ? `/movies/${encodeURIComponent(imdbId)}/translations/pt`
           : `/shows/${encodeURIComponent(imdbId)}/translations/pt`;
 
-      try {
-        const translations = await traktGet<TraktTranslation[]>(path, {
-          ttlSeconds: 86_400,
-        });
-        if (!Array.isArray(translations)) return;
+      const translations = await traktGet<TraktTranslation[]>(path, {
+        ttlSeconds: 86_400,
+      }).catch(() => null);
+      if (!Array.isArray(translations)) return;
 
-        const ptBr = translations.find((t) => t.language === "pt" && t.country === "br" && t.title);
-        const pt   = translations.find((t) => t.language === "pt" && t.title);
-        const best = ptBr ?? pt;
-        if (!best?.title) return;
+      const ptBr = translations.find((t) => t.language === "pt" && t.country === "br" && t.title);
+      const pt   = translations.find((t) => t.language === "pt" && t.title);
+      const best = ptBr ?? pt;
+      if (!best?.title) return;
 
-        const titleOriginal = c.title; // save English title before overwriting
-        c.originalTitle = c.originalTitle ?? titleOriginal;
-        c.title         = best.title;
-        c._langSource   = "pt-BR:trakt-trans";
-        if (best.overview) c.overview = best.overview;
-      } catch {
-        // non-fatal — candidate keeps its current (English) title
-      }
+      const titleOriginal = c.title;
+      c.originalTitle = c.originalTitle ?? titleOriginal;
+      c.title         = best.title;
+      c._langSource   = "pt-BR:trakt-trans";
+      if (best.overview) c.overview = best.overview;
     }),
+    8,
   );
 }
 
@@ -542,7 +506,11 @@ function score(c: RecCandidate): number {
   const visual = (c.posterUrl ? 20 : 0) + (c.backdropUrl ? 12 : 0);
   const meta   = (c.overview ? 3 : 0) + (c.year ? 1 : 0) + ((c.genreIds?.length ?? 0) > 0 ? 1 : 0);
   const lang   = c._langSource.startsWith("pt-BR") ? 5 : 0;
-  return c.seedEffectiveWeight + c.relationStrength * 0.3 + pop + visual + meta + lang;
+  // Apply hydration penalty for balloon-only candidates missing visual/pt-BR (light penalty only)
+  const hydrationAdj = c._scoreBreakdown?.hydrationPenalty
+    ? c.seedEffectiveWeight * c._scoreBreakdown.hydrationPenalty
+    : 0;
+  return c.seedEffectiveWeight + c.relationStrength * 0.3 + pop + visual + meta + lang + hydrationAdj;
 }
 
 // ─── Weighted sampler (roulette-wheel without replacement) ────────────────────
@@ -567,33 +535,84 @@ function weightedSample<T>(items: T[], getW: (i: T) => number, n: number): T[] {
   return out;
 }
 
-// ─── Handler ──────────────────────────────────────────────────────────────────
+// ─── Route-level in-flight dedup ─────────────────────────────────────────────
+// Previne dois requests idênticos simultâneos (ex.: duplo mount da UI no mesmo ciclo).
+// Key: primeiros 10 tmdbIds ordenados + limit. TTL curto (3s) para capturar bursts.
 
-export async function POST(req: NextRequest) {
-  try {
-    const body     = await req.json().catch(() => null);
-    const titles: UserTitle[] = Array.isArray(body?.titles) ? body.titles : [];
-    const excludeKeys = new Set<string>(
-      Array.isArray(body?.exclude)
-        ? (body.exclude as string[]).slice(0, SESSION_EXCLUDE_CAP)
-        : [],
-    );
-    const FINAL_COUNT = Math.min(
-      typeof body?.limit === "number" && body.limit > 0 ? body.limit : DEFAULT_FINAL_COUNT,
-      MAX_FINAL_COUNT,
-    );
+const ROUTE_IN_FLIGHT = new Map<string, Promise<unknown>>();
+const ROUTE_CACHE     = new Map<string, { data: unknown; ts: number }>();
+const ROUTE_DEDUP_TTL = 3_000; // ms
 
-    if (!titles.length) {
-      return NextResponse.json({ featured: null, items: [], recommendationSource: "empty" });
+function buildRouteKey(titles: UserTitle[], limit: number): string {
+  const ids = titles
+    .slice(0, 10)
+    .map((t) => `${t.media_type}:${t.tmdb_id}`)
+    .sort()
+    .join(",");
+  return `fy:${ids}:limit=${limit}`;
+}
+
+// ─── Pipeline ─────────────────────────────────────────────────────────────────
+// Separada do handler para facilitar withOrigin + route-level dedup.
+// Retorna o payload JSON (não NextResponse).
+
+async function runForYouPipeline(
+  titles: UserTitle[],
+  FINAL_COUNT: number,
+  excludeKeys: Set<string>,
+): Promise<unknown> {
+    // Auth primeiro — necessário para lookup autoritativo da biblioteca no DB.
+    const user = await getCurrentUser().catch(() => null);
+
+    // ── Conjuntos de exclusão da biblioteca ─────────────────────────────────────
+    // Estratégia tri-camada para cobrir diferentes mapeamentos de ID entre fontes.
+    // REGRA: qualquer item na biblioteca (qualquer status) jamais aparece como recomendação.
+
+    // Camada 1: Títulos enviados pelo cliente (rápido, inclui metadata de sementes)
+    const libraryKeys    = new Set(titles.map((t) => `${t.media_type}:${t.tmdb_id}`));
+    const libraryTmdbIds = new Set(titles.map((t) => t.tmdb_id));
+    const libraryImdbIds = new Set<string>();
+    const libraryTraktIds = new Set<string>();
+
+    for (const t of titles) {
+      const imdbId = safeStr(t.imdb_id) ?? safeStr(t.externalIds?.imdbId);
+      if (imdbId) libraryImdbIds.add(`${t.media_type}:${imdbId}`);
+      if (t.externalIds?.traktId) libraryTraktIds.add(`${t.media_type}:${t.externalIds.traktId}`);
     }
 
-    const libraryKeys = new Set(titles.map((t) => `${t.media_type}:${t.tmdb_id}`));
-    const libraryTmdbIds = new Set(titles.map((t) => t.tmdb_id));
+    // Camada 2: DB autoritativo em paralelo
+    // (a) todos os tmdbIds do usuário direto do DB → captura stale no cliente
+    // (b) imdbId/traktId via titleExternalId → cross-ID matching (item salvo com tmdbId real,
+    //     recomendação chega com imdbId de fonte diferente)
+    const positiveTmdbIds = titles.map((t) => t.tmdb_id).filter((id) => id > 0);
+    const [dbLibItems, extIdRows] = await Promise.all([
+      user
+        ? db.userTitle.findMany({
+            where: { userId: user.id },
+            select: { tmdbId: true, mediaType: true },
+          }).catch(() => [] as { tmdbId: number; mediaType: string }[])
+        : Promise.resolve([] as { tmdbId: number; mediaType: string }[]),
+      positiveTmdbIds.length > 0
+        ? db.titleExternalId.findMany({
+            where: { tmdbId: { in: positiveTmdbIds } },
+            select: { tmdbId: true, mediaType: true, imdbId: true, traktId: true },
+          }).catch(() => [] as { tmdbId: number; mediaType: string; imdbId: string | null; traktId: string | null }[])
+        : Promise.resolve([] as { tmdbId: number; mediaType: string; imdbId: string | null; traktId: string | null }[]),
+    ]);
 
-    // ── Expande exclusão para cobrir IDs reais de títulos com ID sintético na biblioteca ──
-    // Cenário: usuário salvou um título via Balloonerismm (tmdb_id negativo, e.g. -5788792).
-    // O Trakt retorna o mesmo título com o ID real (e.g. 257994). Sem essa expansão, o
-    // filtro de biblioteca falha e o título aparece em "Para você" mesmo já estando salvo.
+    for (const row of dbLibItems) {
+      libraryKeys.add(`${row.mediaType}:${row.tmdbId}`);
+      libraryTmdbIds.add(row.tmdbId);
+    }
+    for (const row of extIdRows) {
+      if (row.imdbId) libraryImdbIds.add(`${row.mediaType}:${row.imdbId}`);
+      if (row.traktId) libraryTraktIds.add(`${row.mediaType}:${row.traktId}`);
+    }
+
+    // Camada 3: Expansão de IDs sintéticos → reais
+    // Cenário: usuário salvou via Balloonerismm (tmdb_id negativo, e.g. -5788792).
+    // O Trakt retorna o mesmo título com o ID real (e.g. 257994). Sem essa expansão o
+    // filtro falha e o título aparece em "Para você" mesmo já estando na biblioteca.
     const syntheticInLibrary = titles
       .filter((t) => isSyntheticTmdbId(t.tmdb_id))
       .flatMap((t) => {
@@ -602,12 +621,16 @@ export async function POST(req: NextRequest) {
       });
 
     if (syntheticInLibrary.length > 0) {
+      // Adiciona os imdbIds sintéticos diretamente — captura cross-source mesmo sem DB match
+      for (const x of syntheticInLibrary) {
+        libraryImdbIds.add(`${x.media_type}:${x.imdbId}`);
+      }
+
       const realIdRows = await db.titleExternalId.findMany({
         where: { imdbId: { in: syntheticInLibrary.map((x) => x.imdbId) }, tmdbId: { gt: 0 } },
         select: { tmdbId: true, mediaType: true, imdbId: true },
       }).catch(() => [] as { tmdbId: number; mediaType: string; imdbId: string | null }[]);
 
-      // imdbId → realTmdbId (por mediaType para segurança)
       const imdbKeyToReal = new Map(
         realIdRows.map((r) => [`${r.mediaType}:${r.imdbId}`, r.tmdbId]),
       );
@@ -621,14 +644,12 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const user = await getCurrentUser().catch(() => null);
-
     // ── FASE 1 — SEMENTES ────────────────────────────────────────────────────
     const allSeeds = buildWeightedSeeds(titles);
     const picks    = pickSeeds(allSeeds);
 
     if (!picks.length) {
-      return NextResponse.json({ featured: null, items: [], recommendationSource: "empty" });
+      return { featured: null, items: [], recommendationSource: "empty" };
     }
 
     // ── FASE 2 — LABELS pt-BR das sementes (via local DB) ─────────────────────
@@ -655,88 +676,199 @@ export async function POST(req: NextRequest) {
       }),
     );
 
-    // ── FASE 4 — Trakt Related (em paralelo para todas as sementes) ───────────
-    const traktSources: string[] = [];
-    const recArrays = await Promise.all(
-      picks.map(async (seed): Promise<RecCandidate[]> => {
-        const key      = `${seed.title.media_type}:${seed.title.tmdb_id}`;
-        const ext      = extIds.get(key)!;
-        const reason   = buildReason(seed);
-        const lookupId = ext.imdbId ?? ext.traktId ?? ext.traktSlug;
+    // ── FASE 4 — Balloonerismm para todas as sementes com imdbId ─────────────────
+    // Balloonerismm é a fonte primária de relevância. Trakt é usado apenas como
+    // camada de hidratação/canonicalização depois (Fase 5b). Todas as seeds com
+    // imdbId são consultadas em /recommendations + /similar com concorrência controlada.
 
+    const seedsWithImdb = picks
+      .map((s, i) => ({
+        i,
+        seed: s,
+        imdbId: extIds.get(`${s.title.media_type}:${s.title.tmdb_id}`)?.imdbId,
+      }))
+      .filter((x): x is typeof x & { imdbId: string } => Boolean(x.imdbId));
+
+    const balloonSeedResults: BalloonSeedResult[] = [];
+
+    await runWithConcurrency(
+      seedsWithImdb.map(({ seed, imdbId }) => async () => {
+        const src = seedSourceLabel(seed);
         console.log(
-          `[for-you:seed] "${seed.label}" tmdb=${seed.title.tmdb_id} ` +
-          `w=${seed.baseWeight}+${seed.bonus} id_used=${lookupId ?? "none"} ` +
-          `endpoint=${seed.title.media_type === "movie" ? "/movies" : "/shows"}/${lookupId ?? "?"}/related`,
+          `[for-you:seed] title="${seed.label}" imdb=${imdbId} ` +
+          `seedSource=${src} seedWeight=${seed.effectiveWeight} ` +
+          `(base:${seed.baseWeight}+recency:${seed.bonus}) userLibrary=true libraryStatus=${seed.title.status ?? "?"}`,
         );
+        const fetchResult = await fetchBalloonerismForSeed(imdbId, seed.title.media_type, "for-you");
 
-        const traktItems = await fetchTraktRelated(seed.title.media_type, lookupId);
-
-        console.log(
-          `[for-you:seed] "${seed.label}" → ${traktItems.length} Trakt candidates ` +
-          `(${traktItems.filter((r) => r.images?.poster?.length).length} with Trakt images)`,
-        );
-
-        if (!traktItems.length) {
-          traktSources.push("none");
-          return [];
+        if (fetchResult.allBlocked) {
+          console.log(
+            `[for-you:seed] seedSkippedByCooldown=true ` +
+            `cooldownKey="/tv+movie/${imdbId}/rec+sim" ` +
+            `retryAfterMs=${fetchResult.retryAfterMs} staleCacheUsed=false ` +
+            `title="${seed.label}" imdb=${imdbId}`,
+          );
+        } else if (fetchResult.partial) {
+          console.log(
+            `[for-you:seed] partial=true failedEndpoint=${fetchResult.failedEndpoints.join(",")} ` +
+            `recs=${fetchResult.items.filter(i => i._source !== "similar").length} ` +
+            `sim=${fetchResult.items.filter(i => i._source !== "recommendations").length} ` +
+            `title="${seed.label}" imdb=${imdbId}`,
+          );
         }
 
-        traktSources.push("trakt");
-        return traktItems
-          .filter((r) => typeof r.ids.tmdb === "number")
-          .map((r, idx): RecCandidate => {
-            // pt-BR from inline translations (extended=full,images,translations)
-            // Prefer country=br, fallback to any pt entry
-            const ptBr =
-              r.translations?.find((t) => t.country === "br" && t.title) ??
-              r.translations?.find((t) => t.language === "pt" && t.title) ??
-              null;
-
-            const traktPoster = r.images?.poster?.[0] ?? null;
-            const traktFanart = r.images?.fanart?.[0] ?? null;
-
-            return {
-              tmdbId:              r.ids.tmdb!,
-              imdbId:              r.ids.imdb  ?? null,
-              traktSlug:           r.ids.slug  ?? null,
-              title:               ptBr?.title ?? r.title,
-              originalTitle:       ptBr ? r.title : null,
-              year:                r.year != null ? String(r.year) : null,
-              overview:            ptBr?.overview ?? r.overview ?? null,
-              posterUrl:           traktPoster,
-              backdropUrl:         traktFanart,
-              voteAverage:         r.rating ?? null,
-              voteCount:           r.votes  ?? null,
-              mediaType:           seed.title.media_type,
-              seedEffectiveWeight: seed.effectiveWeight,
-              relationStrength:    Math.round(((traktItems.length - idx) / traktItems.length) * 100),
-              reason,
-              _imageSource:        traktPoster ? "trakt:poster" : traktFanart ? "trakt:fanart" : "pending",
-              _langSource:         ptBr ? "pt-BR:trakt" : "pending",
-            };
+        if (fetchResult.items.length > 0) {
+          balloonSeedResults.push({
+            seedImdbId:    imdbId,
+            seedMediaType: seed.title.media_type,
+            seedWeight:    seed.effectiveWeight,
+            seedTitle:     seed.label,
+            seedReason:    buildReason(seed),
+            items:         fetchResult.items,
           });
+        }
+
+        console.log(
+          `[for-you:seed] "${seed.label}" imdb=${imdbId} ` +
+          `surface=for-you.${seed.title.media_type} ` +
+          `→ ${fetchResult.items.length} Balloon items ` +
+          `(recs=${fetchResult.items.filter(i => i._source !== "similar").length} ` +
+          `sim=${fetchResult.items.filter(i => i._source !== "recommendations").length} ` +
+          `both=${fetchResult.items.filter(i => i._source === "both").length} ` +
+          `partial=${fetchResult.partial} blocked=${fetchResult.allBlocked})`,
+        );
       }),
+      BALLOON_CONCURRENCY,
     );
 
-    // ── FASE 5 — Agregação + deduplicação ─────────────────────────────────────
+    const balloonTotal = balloonSeedResults.reduce((n, r) => n + r.items.length, 0);
+    console.log(
+      `[for-you:phase4] balloon_seeds=${balloonSeedResults.length}/${seedsWithImdb.length} ` +
+      `balloon_items=${balloonTotal} picks=${picks.length}`,
+    );
+
+    // ── FASE 4c — Merge Balloon cross-seeds + hidratação Trakt ───────────────
+    // Balloon determina relevância. Trakt fornece tmdbId, slug, pt-BR, imagens.
+    const mergedBalloon = mergeBalloonCandidates(balloonSeedResults);
+
+    console.log(
+      `[for-you:merge] merged_candidates=${mergedBalloon.length} ` +
+      `recs_only=${mergedBalloon.filter(c => c.balloonSource === "recommendations").length} ` +
+      `sim_only=${mergedBalloon.filter(c => c.balloonSource === "similar").length} ` +
+      `both=${mergedBalloon.filter(c => c.balloonSource === "both").length}`,
+    );
+
+    // Empty state: all seeds failed Balloon fetch
+    if (!mergedBalloon.length) {
+      const cooldownActive = balloonSeedResults.length === 0 && seedsWithImdb.length > 0;
+      return {
+        featured:             null,
+        items:                [],
+        recommendationSource: "empty_balloon",
+        emptyReason:          cooldownActive ? "balloon_cooldown" : "no_balloon_results",
+        retryAfterMs:         cooldownActive ? 60_000 : 0,
+        staleCacheUsed:       false,
+        validSeeds:           seedsWithImdb.length,
+        failedSeeds:          seedsWithImdb.length - balloonSeedResults.length,
+        cooldownActive,
+      };
+    }
+
+    // Per-candidate hydration using c.mediaType per candidate (no shared mediaType param)
+    const { results: allHydrated, stats: hydrationStats } = await hydrateCandidatesWithTrakt(
+      mergedBalloon,
+      HYDRATION_CAP,
+      HYDRATION_CONCURRENCY,
+    );
+
+    console.log(
+      `[for-you:hydration] hydrated=${allHydrated.length} ` +
+      `trakt=${hydrationStats.hydratedTrakt} balloon_only=${hydrationStats.balloonOnly} ` +
+      `not_found=${hydrationStats.traktNotFound} ` +
+      `missing_ptbr=${hydrationStats.missingPtBrTranslation} ` +
+      `missing_poster=${hydrationStats.missingPoster}`,
+    );
+
+    // ── FASE 4d — Converter TraktHydratedCandidate → RecCandidate ─────────────
+    const totalMerged = allHydrated.length;
+    const rawCandidates: RecCandidate[] = [];
+
+    for (let idx = 0; idx < allHydrated.length; idx++) {
+      const h = allHydrated[idx];
+      const relationStrength = Math.max(0, Math.round(((totalMerged - idx) / totalMerged) * 100));
+
+      const tmdbId = h.tmdbId ?? syntheticTmdbFromImdbId(h.imdbId);
+      if (!tmdbId) continue;
+
+      const hasPoster  = Boolean(h.posterUrl);
+      const hasFanart  = Boolean(h.backdropUrl);
+      const imgSrc     =
+        h.hydrationSource === "trakt" && hasPoster  ? "trakt:poster"  :
+        h.hydrationSource === "trakt" && hasFanart  ? "trakt:fanart"  :
+        hasPoster                                    ? "balloon:poster" : "pending";
+
+      // Multi-seed reason: if appeared from multiple seeds, mention top 2
+      let reason = h.seedReason;
+      if (h.appearedFromSeeds > 1 && h.seedOrigins.length > 1) {
+        const top  = h.seedOrigins[0];
+        const rest = h.appearedFromSeeds - 1;
+        reason = `${top.seedReason} e mais ${rest} título${rest > 1 ? "s" : ""} que você gostou`;
+      }
+
+      rawCandidates.push({
+        tmdbId,
+        imdbId:              h.imdbId,
+        traktId:             h.traktId ?? null,
+        traktSlug:           h.traktSlug ?? null,
+        title:               h.title,
+        originalTitle:       h.originalTitle ?? null,
+        year:                h.year ?? null,
+        overview:            h.overview ?? null,
+        posterUrl:           h.posterUrl ?? null,
+        backdropUrl:         h.backdropUrl ?? null,
+        voteAverage:         h.voteAverage ?? null,
+        voteCount:           h.voteCount ?? null,
+        genreIds:            h.genreIds ?? [],
+        mediaType:           h.mediaType,
+        seedEffectiveWeight: h.seedBestWeight,
+        relationStrength,
+        reason,
+        _imageSource:        imgSrc,
+        _langSource:         h.langSource,
+        _inLocalDb:          h.tmdbId != null ? undefined : false,
+        _balloonSource:      h.balloonSource,
+        _hydrationSource:    h.hydrationSource,
+        _appearedFromSeeds:  h.appearedFromSeeds,
+        _scoreBreakdown:     h.scoreBreakdown,
+      });
+    }
+
+    // ── FASE 5 — Deduplicação + filtro biblioteca ──────────────────────────────
     let libRemoved = 0;
     let excluded   = 0;
     let deduped    = 0;
-    const deduper     = new Deduper();
+    const deduper    = new Deduper();
     const candidates: RecCandidate[] = [];
 
-    for (const recs of recArrays) {
-      for (const rec of recs) {
-        const k = `${rec.mediaType}:${rec.tmdbId}`;
-        if (libraryKeys.has(k))  { libRemoved++; rec._discardReason = "in-library"; continue; }
-        if (excludeKeys.has(k))  { excluded++;   rec._discardReason = "session-exclude"; continue; }
-        if (deduper.seen(rec))   { deduped++;    rec._discardReason = "dedup"; continue; }
-        candidates.push(rec);
+    for (const rec of rawCandidates) {
+      const k          = `${rec.mediaType}:${rec.tmdbId}`;
+      const imdbKey    = rec.imdbId  ? `${rec.mediaType}:${rec.imdbId}`  : null;
+      const traktIdKey = rec.traktId ? `${rec.mediaType}:${rec.traktId}` : null;
+      const inLibrary =
+        libraryKeys.has(k) ||
+        (imdbKey    && libraryImdbIds.has(imdbKey))    ||
+        (traktIdKey && libraryTraktIds.has(traktIdKey));
+      if (inLibrary)          {
+        libRemoved++;
+        console.log(`[for-you:filter] excludedReason=in-library imdb=${rec.imdbId ?? "?"} title="${rec.title}"`);
+        continue;
       }
+      if (excludeKeys.has(k)) { excluded++;  rec._discardReason = "session-exclude"; continue; }
+      if (deduper.seen(rec))  { deduped++;   rec._discardReason = "dedup"; continue; }
+      candidates.push(rec);
     }
 
-    const hadTraktCandidates = candidates.length > 0;
+    const hadBalloonCandidates = candidates.length > 0;
 
     // ── FASE 6 — Enriquecimento canônico com local DB ─────────────────────────
     // Aplica: imagens TMDB (sobre Trakt se necessário), ratings, gêneros.
@@ -772,44 +904,23 @@ export async function POST(req: NextRequest) {
 
     // ── FASE 8 — Pool com preferência por imagens ─────────────────────────────
     const withImages = eligible.filter((c) => c.posterUrl || c.backdropUrl);
-
-    let pool = withImages.length >= FINAL_COUNT ? withImages : eligible;
-
-    // ── FASE 9 — Suplementação com local DB se não temos suficientes ──────────
-    // Garante que sempre tenhamos FINAL_COUNT candidatos com imagem.
-    if (withImages.length < FINAL_COUNT) {
-      const allExcludedTmdbIds = new Set([
-        ...libraryTmdbIds,
-        ...candidates.map((c) => c.tmdbId),
-      ]);
-
-      const [moviePool, tvPool] = await Promise.all([
-        fetchLocalDbPool("movie", allExcludedTmdbIds),
-        fetchLocalDbPool("tv", allExcludedTmdbIds),
-      ]);
-
-      // Interleave movies and tv for variety, filter by session exclude
-      const supplement: RecCandidate[] = [];
-      for (const rec of [...moviePool, ...tvPool]) {
-        if (excludeKeys.has(`${rec.mediaType}:${rec.tmdbId}`)) continue;
-        if (deduper.seen(rec)) continue;
-        if (rec.posterUrl || rec.backdropUrl) supplement.push(rec);
-      }
-
-      pool = [...withImages, ...supplement.slice(0, FINAL_COUNT - withImages.length)];
-      if (!pool.length) pool = eligible; // ultimate fallback
-    }
+    // Suplementação por DB local genérico removida: não preenchemos com populares
+    // sem relação semântica com os seeds do usuário.
+    const pool = withImages.length >= FINAL_COUNT ? withImages : eligible;
 
     // ── LOG SUMMARY ───────────────────────────────────────────────────────────
-    const source = traktSources.includes("trakt") ? "trakt_related" : "local_db";
+    const source = hadBalloonCandidates ? "balloon_primary" : "empty";
     console.log(
-      `[for-you] seeds=${picks.length} traktCandidates=${hadTraktCandidates ? candidates.length : 0} ` +
+      `[for-you] context=user-for-you seeds=${picks.length} ` +
+      `balloon_seeds=${balloonSeedResults.length} candidates=${candidates.length} ` +
       `lib_removed=${libRemoved} excluded=${excluded} deduped=${deduped} ` +
-      `with_images=${withImages.length} pool=${pool.length} source=${source}`,
+      `with_images=${withImages.length} pool=${pool.length} source=${source} ` +
+      `exclusion_keys=tmdbId(client+db)+imdbId(client+db)+traktId(client+db)+syntheticExpansion` +
+      ` lib_db=${dbLibItems.length} ext_enriched=${extIdRows.length}`,
     );
 
     if (!pool.length) {
-      return NextResponse.json({ featured: null, items: [], recommendationSource: source });
+      return { featured: null, items: [], recommendationSource: source };
     }
 
     // ── FASE 10 — Seleção ponderada ───────────────────────────────────────────
@@ -830,23 +941,29 @@ export async function POST(req: NextRequest) {
       const fallbackReason = isPtBr ? "—" : `no-pt-BR-translation (${c._langSource})`;
 
       console.log(
-        `[for-you:item] tmdb=${c.tmdbId} ` +
+        `[for-you:item] tmdb=${c.tmdbId} imdb=${c.imdbId ?? "?"} ` +
         `titleOriginal="${titleOriginal}" titlePtBr="${titlePtBr}" ` +
-        `overviewPtBr=${overviewPtBr} source=${transSource} ` +
+        `overviewPtBr=${overviewPtBr} langSource=${transSource} ` +
         `fallbackReason=${fallbackReason} ` +
         `image=${c._imageSource} ` +
+        `balloonSource=${c._balloonSource ?? "?"} ` +
+        `hydrationSource=${c._hydrationSource ?? "?"} ` +
+        `appearedFromSeeds=${c._appearedFromSeeds ?? 1} ` +
+        `seedWeight=${c.seedEffectiveWeight} ` +
+        `userLibrary=false ` +
         `${!c.posterUrl && !c.backdropUrl ? "⚠ sem-imagem " : ""}` +
         `reason="${c.reason}"`,
       );
 
       // linkId canônico:
-      // - título está no DB local sob o tmdbId do Trakt → usa tmdbId numérico (link direto, sem round-trip)
-      // - título não está no DB → usa imdbId do Trakt se disponível (a página carrega via Balloonerismm)
-      // - fallback final: String(tmdbId) (raro: Trakt sem imdbId + não está no DB)
+      // - título está no DB local (enrichFromDb marcou _inLocalDb) → tmdbId (link direto)
+      // - não está no DB → imdbId (página carrega via Balloonerismm)
+      // - fallback: String(tmdbId) (sintético)
       const linkId = c._inLocalDb ? String(c.tmdbId) : (c.imdbId ?? String(c.tmdbId));
 
       return {
         id:           c.tmdbId,
+        poplogId:     c._poplogId ?? null,
         linkId,
         title:        c.title,
         originalTitle: c.originalTitle !== c.title ? (c.originalTitle ?? null) : null,
@@ -860,7 +977,15 @@ export async function POST(req: NextRequest) {
         genreLabel,
         reason:       c.reason,
         sourceSeed:   c.seedEffectiveWeight > 0 ? undefined : "popular",
-        debug:        `${c._imageSource}|${c._langSource}|w=${c.seedEffectiveWeight}+${c.relationStrength}`,
+        debug:        [
+          `${c._imageSource}|${c._langSource}`,
+          `balloon=${c._balloonSource ?? "?"}`,
+          `seeds=${c._appearedFromSeeds ?? 1}`,
+          `w=${c.seedEffectiveWeight}`,
+          c._scoreBreakdown
+            ? `score=[final=${c._scoreBreakdown.finalScore.toFixed(3)},internalBalloon=${c._scoreBreakdown.internalScore.toFixed(3)},srcMult=${c._scoreBreakdown.sourceMultiplier},penalty=${c._scoreBreakdown.hydrationPenalty}]`
+            : "",
+        ].filter(Boolean).join("|"),
       };
     });
 
@@ -871,16 +996,69 @@ export async function POST(req: NextRequest) {
       : (items[0] ?? null);
     const rest = featured ? items.filter((it) => it !== featured) : items;
 
-    console.log(`[for-you] final=${selected.length} featured="${featured?.title ?? "none"}" source=${source}`);
+    // Breakdown por fonte Balloon nos itens selecionados
+    const recsOnly  = selected.filter((c) => c._balloonSource === "recommendations").length;
+    const simOnly   = selected.filter((c) => c._balloonSource === "similar").length;
+    const both      = selected.filter((c) => c._balloonSource === "both").length;
+    const hydrTrkt  = selected.filter((c) => c._hydrationSource === "trakt").length;
+    console.log(
+      `[for-you] final=${selected.length}` +
+      ` balloon_recs=${recsOnly} balloon_sim=${simOnly} balloon_both=${both}` +
+      ` hydrated_trakt=${hydrTrkt}` +
+      ` featured="${featured?.title ?? "none"}" source=${source}`,
+    );
 
-    return NextResponse.json({
+    return {
       featured,
       items:                rest,
       recommendationSource: source,
-    });
+    };
+}
 
-  } catch (err) {
-    console.error("[for-you]", err);
-    return NextResponse.json({ featured: null, items: [], recommendationSource: "error" });
+// ─── Handler ──────────────────────────────────────────────────────────────────
+
+export async function POST(req: NextRequest) {
+  const body     = await req.json().catch(() => null);
+  const titles: UserTitle[] = Array.isArray(body?.titles) ? body.titles : [];
+  const excludeKeys = new Set<string>(
+    Array.isArray(body?.exclude)
+      ? (body.exclude as string[]).slice(-SESSION_EXCLUDE_CAP)
+      : [],
+  );
+  const FINAL_COUNT = Math.min(
+    typeof body?.limit === "number" && body.limit > 0 ? body.limit : DEFAULT_FINAL_COUNT,
+    MAX_FINAL_COUNT,
+  );
+
+  if (!titles.length) {
+    return NextResponse.json({ featured: null, items: [], recommendationSource: "empty" });
   }
+
+  // ── Route-level dedup (burst protection) ─────────────────────────────────
+  const routeKey    = buildRouteKey(titles, FINAL_COUNT);
+  const cachedRoute = ROUTE_CACHE.get(routeKey);
+  if (cachedRoute && Date.now() - cachedRoute.ts < ROUTE_DEDUP_TTL) {
+    console.log(`[for-you] dedup_hit key="${routeKey}" age=${Date.now() - cachedRoute.ts}ms`);
+    return NextResponse.json(cachedRoute.data);
+  }
+  const inflight = ROUTE_IN_FLIGHT.get(routeKey);
+  if (inflight) {
+    console.log(`[for-you] dedup_inflight key="${routeKey}"`);
+    const data = await inflight;
+    return NextResponse.json(data);
+  }
+
+  // ── Run pipeline with origin context ─────────────────────────────────────
+  const pipelinePromise: Promise<unknown> = withOrigin("for-you", () =>
+    runForYouPipeline(titles, FINAL_COUNT, excludeKeys)
+  ).catch((err: unknown) => {
+    console.error("[for-you]", err);
+    return { featured: null, items: [], recommendationSource: "error" };
+  });
+
+  ROUTE_IN_FLIGHT.set(routeKey, pipelinePromise);
+  const data = await pipelinePromise;
+  ROUTE_IN_FLIGHT.delete(routeKey);
+  ROUTE_CACHE.set(routeKey, { data, ts: Date.now() });
+  return NextResponse.json(data);
 }

@@ -1,21 +1,24 @@
 "use client";
 
 import Link from "next/link";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import TmdbImage from "@/components/images/TmdbImage";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import { CardActionButton } from "@/components/ui/CardActionButton";
 import { IconBookmark, IconCheck, IconStar, IconX } from "@/components/ui/icons";
+import LibraryStateBadge from "@/components/ui/LibraryStateBadge";
 import { useOptionalUserData } from "@/context/UserDataContext";
+import { useUserAction } from "@/hooks/useUserAction";
 import { useUserFeedbackToggle } from "@/hooks/useUserFeedbackToggle";
-import { useWatchedToggle } from "@/hooks/useWatchedToggle";
-import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
+import { usePoplogUserState } from "@/stores/user-states-store";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 type ForYouItem = {
   id: number;
+  /** CUID da tabela poplog3_titles quando encontrado no DB local */
+  poplogId?: string | null;
   /** ID canônico para o href do link — pode ser tmdbId numérico (string) ou imdbId ("tt...") */
   linkId?: string;
   title: string;
@@ -43,20 +46,34 @@ function parseReleaseYear(year?: string | null): number | null {
 }
 
 const PAGE_SIZE = 20;
-const SESSION_HISTORY_CAP = 120;
+const SESSION_HISTORY_CAP = 160;
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
 
-function ForYouActions({ item }: { item: ForYouItem }) {
-  const shared = {
+function ForYouActions({ item, onDismiss }: { item: ForYouItem; onDismiss?: () => void }) {
+  const userData = useOptionalUserData();
+  const isLoggedIn = Boolean(userData && !userData.loading);
+
+  const { executeAction, effectiveKey } = useUserAction({
+    poplogId: item.poplogId,
     tmdbId: item.id,
     mediaType: item.mediaType,
     title: item.title,
     releaseYear: parseReleaseYear(item.year),
-  };
+  });
 
-  const watchlist = useWatchlistToggle(shared);
-  const watched = useWatchedToggle(shared);
+  const zustandState = usePoplogUserState(effectiveKey);
+  const inWatchlist = zustandState?.isInWatchlist ?? false;
+  const isWatched   = zustandState?.isWatched   ?? false;
+
+  const [saving, setSaving] = useState(false);
+
+  async function handleAction(action: "addToWatchlist" | "removeFromWatchlist" | "markAsWatched" | "markAsUnwatched") {
+    setSaving(true);
+    await executeAction(action);
+    setSaving(false);
+  }
+
   const feedback = useUserFeedbackToggle({
     tmdbId: item.id,
     mediaType: item.mediaType,
@@ -67,30 +84,33 @@ function ForYouActions({ item }: { item: ForYouItem }) {
   return (
     <div className="absolute right-2 top-2 z-40 flex gap-1">
       <CardActionButton
-        onClick={watchlist.toggle}
-        disabled={watchlist.loading || !watchlist.isLoggedIn}
-        title={watchlist.inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
-        active={watchlist.inWatchlist}
-        saving={watchlist.saving}
+        onClick={() => handleAction(inWatchlist ? "removeFromWatchlist" : "addToWatchlist")}
+        disabled={!isLoggedIn || saving}
+        title={inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
+        active={inWatchlist}
+        saving={saving}
         activeClass="border-sky-400/55 bg-sky-400/[0.18] text-sky-300 shadow-[0_0_10px_rgba(56,189,248,0.25)]"
       >
-        <IconBookmark filled={watchlist.inWatchlist} />
+        <IconBookmark filled={inWatchlist} />
       </CardActionButton>
 
       <CardActionButton
-        onClick={watched.toggle}
-        disabled={watched.loading || !watched.isLoggedIn}
-        title={watched.isWatched ? "Desmarcar como assistido" : "Já vi"}
-        active={watched.isWatched}
-        saving={watched.saving}
+        onClick={() => handleAction(isWatched ? "markAsUnwatched" : "markAsWatched")}
+        disabled={!isLoggedIn || saving}
+        title={isWatched ? "Desmarcar como assistido" : "Já vi"}
+        active={isWatched}
+        saving={saving}
         activeClass="border-emerald-400/55 bg-emerald-400/[0.18] text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.25)]"
       >
         <IconCheck />
       </CardActionButton>
 
       <CardActionButton
-        onClick={feedback.toggleNotInterested}
-        disabled={feedback.loading || !feedback.isLoggedIn}
+        onClick={() => {
+          onDismiss?.();
+          feedback.toggleNotInterested();
+        }}
+        disabled={!isLoggedIn || feedback.saving}
         title={feedback.notInterested ? "Remover sem interesse" : "Não tenho interesse"}
         active={feedback.notInterested}
         saving={feedback.saving}
@@ -104,7 +124,7 @@ function ForYouActions({ item }: { item: ForYouItem }) {
 
 // ─── Card ─────────────────────────────────────────────────────────────────────
 
-function ForYouCard({ item }: { item: ForYouItem }) {
+function ForYouCard({ item, onDismiss }: { item: ForYouItem; onDismiss?: () => void }) {
   const imagePath = item.posterUrl ?? item.backdropUrl ?? null;
   const imageKind: "poster" | "backdrop" = item.posterUrl ? "poster" : "backdrop";
   const rating = formatRating(item.rating);
@@ -117,7 +137,12 @@ function ForYouCard({ item }: { item: ForYouItem }) {
         aria-label={`Abrir ${item.title}`}
       />
 
-      <ForYouActions item={item} />
+      <ForYouActions item={item} onDismiss={onDismiss} />
+      <LibraryStateBadge
+        tmdbId={item.id > 0 ? item.id : undefined}
+        mediaType={item.mediaType}
+        className="bottom-[4.5rem] left-2.5 top-auto group-hover:opacity-0 transition-opacity duration-200"
+      />
 
       {imagePath && (
         <TmdbImage
@@ -174,7 +199,7 @@ function ForYouCard({ item }: { item: ForYouItem }) {
 
 function GridSkeleton({ count = 20 }: { count?: number }) {
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+    <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
       {Array.from({ length: count }).map((_, i) => (
         <div key={i} className="animate-pulse rounded-[1.35rem] bg-white/5" style={{ aspectRatio: "2/3" }} />
       ))}
@@ -231,6 +256,31 @@ export default function ForYouAllPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(true);
   const [initialized, setInitialized] = useState(false);
+  const [dismissedKeys, setDismissedKeys] = useState<Set<string>>(new Set());
+
+  const { libraryKeys, libraryImdbIds } = useMemo(() => {
+    const keys    = new Set<string>();
+    const imdbIds = new Set<string>();
+    for (const t of titles) {
+      keys.add(`${t.tmdb_id}:${t.media_type}`);
+      const imdbId = (t as { imdb_id?: string | null }).imdb_id
+        ?? (t as { externalIds?: { imdbId?: string } }).externalIds?.imdbId;
+      if (imdbId) imdbIds.add(`${t.media_type}:${imdbId}`);
+    }
+    return { libraryKeys: keys, libraryImdbIds: imdbIds };
+  }, [titles]);
+
+  function dismissItem(id: number, mediaType: "movie" | "tv") {
+    setDismissedKeys((prev) => new Set([...prev, `${id}:${mediaType}`]));
+  }
+
+  function isHidden(item: ForYouItem): boolean {
+    const tmdbKey = `${item.id}:${item.mediaType}`;
+    const imdbKey = item.linkId?.startsWith("tt") ? `${item.mediaType}:${item.linkId}` : null;
+    return libraryKeys.has(tmdbKey)
+      || (imdbKey !== null && libraryImdbIds.has(imdbKey))
+      || dismissedKeys.has(tmdbKey);
+  }
 
   const shownHistoryRef = useRef<string[]>([]);
 
@@ -270,7 +320,16 @@ export default function ForYouAllPage() {
         }
         shownHistoryRef.current = shownHistoryRef.current.slice(-SESSION_HISTORY_CAP);
 
-        setItems((prev) => (isLoadMore ? [...prev, ...allItems] : allItems));
+        setItems((prev) => {
+          const next = isLoadMore ? [...prev, ...allItems] : allItems;
+          const seen = new Set<string>();
+          return next.filter((item) => {
+            const k = `${item.mediaType}-${item.id}`;
+            if (seen.has(k)) return false;
+            seen.add(k);
+            return true;
+          });
+        });
         setHasMore(allItems.length >= PAGE_SIZE);
       } catch {
         setHasMore(false);
@@ -293,7 +352,8 @@ export default function ForYouAllPage() {
     fetchPage(titles, true);
   }
 
-  const isEmpty = initialized && !loading && items.length === 0;
+  const visibleItems = items.filter((item) => !isHidden(item));
+  const isEmpty = initialized && !loading && visibleItems.length === 0;
   const isNotLoggedIn = userData === null;
 
   return (
@@ -321,14 +381,18 @@ export default function ForYouAllPage() {
       {isNotLoggedIn ? (
         <NotLoggedInState />
       ) : loading ? (
-        <GridSkeleton count={20} />
+        <GridSkeleton count={18} />
       ) : isEmpty ? (
         <EmptyState />
       ) : (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-            {items.map((item) => (
-              <ForYouCard key={`${item.mediaType}-${item.id}`} item={item} />
+          <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
+            {visibleItems.map((item) => (
+              <ForYouCard
+                key={`${item.mediaType}-${item.id}`}
+                item={item}
+                onDismiss={() => dismissItem(item.id, item.mediaType)}
+              />
             ))}
             {loadingMore &&
               Array.from({ length: 6 }).map((_, i) => (

@@ -1,11 +1,15 @@
 "use client";
 
+import { useState } from "react";
+
 import { CardActionButton } from "@/components/ui/CardActionButton";
+import LibraryStateBadge from "@/components/ui/LibraryStateBadge";
 import PosterCard from "@/components/ui/PosterCard";
 import { IconBookmark, IconCheck, IconX } from "@/components/ui/icons";
+import { useUserAction } from "@/hooks/useUserAction";
 import { useUserFeedbackToggle } from "@/hooks/useUserFeedbackToggle";
-import { useWatchedToggle } from "@/hooks/useWatchedToggle";
-import { useWatchlistToggle } from "@/hooks/useWatchlistToggle";
+import { useOptionalUserData } from "@/context/UserDataContext";
+import { usePoplogUserState } from "@/stores/user-states-store";
 
 import type { ReactNode } from "react";
 
@@ -52,6 +56,9 @@ function ActionButtons({
   year?: number | string | null;
   source?: string;
 }) {
+  const userData = useOptionalUserData();
+  const isLoggedIn = Boolean(userData && !userData.loading);
+
   const releaseYear =
     year != null ? Number(String(year).slice(0, 4)) || undefined : undefined;
   const numericId = typeof id === "number" ? id : Number(id);
@@ -60,31 +67,43 @@ function ActionButtons({
       ? tmdbId
       : Number.isInteger(numericId) && numericId !== 0
         ? numericId
-        : 0;
+        : undefined;
+  const poplogIdStr =
+    typeof poplogId === "string" ? poplogId :
+    typeof poplogId === "number" ? String(poplogId) : undefined;
   const hasUsableIdentity =
-    actionTmdbId !== 0 || Boolean(poplogId) || Boolean(imdbId) || Boolean(slug);
+    Boolean(actionTmdbId) || Boolean(poplogIdStr) || Boolean(imdbId) || Boolean(slug);
 
-  const watchlist = useWatchlistToggle({
+  const { executeAction, effectiveKey } = useUserAction({
     tmdbId: actionTmdbId,
-    poplogId,
-    imdbId,
-    slug,
+    poplogId: poplogIdStr,
+    imdbId: imdbId ?? undefined,
+    slug: slug ?? undefined,
     mediaType,
     title,
     releaseYear,
   });
 
-  const watched = useWatchedToggle({
-    tmdbId: actionTmdbId,
-    poplogId,
-    imdbId,
-    slug,
-    mediaType,
-    title,
-    releaseYear,
-  });
+  const zustandState = usePoplogUserState(effectiveKey);
+  const inWatchlist = zustandState?.isInWatchlist ?? false;
+  const isWatched   = zustandState?.isWatched   ?? false;
 
-  const feedback = useUserFeedbackToggle({ tmdbId: actionTmdbId, poplogId, imdbId, slug, mediaType, source });
+  const [saving, setSaving] = useState(false);
+
+  async function handleAction(action: "addToWatchlist" | "removeFromWatchlist" | "markAsWatched" | "markAsUnwatched") {
+    setSaving(true);
+    await executeAction(action);
+    setSaving(false);
+  }
+
+  const feedback = useUserFeedbackToggle({
+    tmdbId: actionTmdbId ?? 0,
+    poplogId: poplogIdStr,
+    imdbId: imdbId ?? null,
+    slug: slug ?? null,
+    mediaType,
+    source,
+  });
 
   return (
     <div
@@ -92,22 +111,22 @@ function ActionButtons({
       onClick={(e) => e.stopPropagation()}
     >
       <CardActionButton
-        onClick={watchlist.toggle}
-        disabled={!hasUsableIdentity || watchlist.loading || !watchlist.isLoggedIn}
-        title={watchlist.inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
-        active={watchlist.inWatchlist}
-        saving={watchlist.saving}
+        onClick={() => handleAction(inWatchlist ? "removeFromWatchlist" : "addToWatchlist")}
+        disabled={!hasUsableIdentity || !isLoggedIn || saving}
+        title={inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
+        active={inWatchlist}
+        saving={saving}
         activeClass="border-sky-400/55 bg-sky-400/[0.18] text-sky-300 shadow-[0_0_10px_rgba(56,189,248,0.25)]"
       >
-        <IconBookmark filled={watchlist.inWatchlist} />
+        <IconBookmark filled={inWatchlist} />
       </CardActionButton>
 
       <CardActionButton
-        onClick={watched.toggle}
-        disabled={!hasUsableIdentity || watched.loading || !watched.isLoggedIn}
-        title={watched.isWatched ? "Desmarcar como assistido" : "Já vi"}
-        active={watched.isWatched}
-        saving={watched.saving}
+        onClick={() => handleAction(isWatched ? "markAsUnwatched" : "markAsWatched")}
+        disabled={!hasUsableIdentity || !isLoggedIn || saving}
+        title={isWatched ? "Desmarcar como assistido" : "Já vi"}
+        active={isWatched}
+        saving={saving}
         activeClass="border-emerald-400/55 bg-emerald-400/[0.18] text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.25)]"
       >
         <IconCheck />
@@ -115,7 +134,7 @@ function ActionButtons({
 
       <CardActionButton
         onClick={feedback.toggleNotInterested}
-        disabled={!hasUsableIdentity || feedback.loading || !feedback.isLoggedIn}
+        disabled={!hasUsableIdentity || !isLoggedIn || feedback.saving}
         title={feedback.notInterested ? "Remover sem interesse" : "Não tenho interesse"}
         active={feedback.notInterested}
         saving={feedback.saving}
@@ -148,6 +167,13 @@ export default function InteractivePosterCard({
   source,
   priority = false,
 }: InteractivePosterCardProps) {
+  const numericTmdbId =
+    typeof tmdbId === "number" && Number.isInteger(tmdbId) && tmdbId !== 0
+      ? tmdbId
+      : typeof id === "number" && Number.isInteger(id) && id !== 0
+        ? id
+        : undefined;
+
   return (
     <PosterCard
       posterPath={posterPath}
@@ -163,6 +189,17 @@ export default function InteractivePosterCard({
       footer={footer}
       className={className}
       priority={priority}
+      directOverlay={
+        numericTmdbId !== undefined || poplogId ? (
+          <LibraryStateBadge
+            tmdbId={numericTmdbId}
+            poplogId={poplogId}
+            imdbId={imdbId}
+            mediaType={mediaType}
+            className="top-2.5 left-2.5 z-10 group-hover:opacity-0 transition-opacity duration-200"
+          />
+        ) : undefined
+      }
       bottomOverlay={
         <ActionButtons
           id={id}

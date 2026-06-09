@@ -1,5 +1,6 @@
 import Image from "next/image";
 import Link from "next/link";
+import LibraryStateBadge from "@/components/ui/LibraryStateBadge";
 import FeaturedCardActions from "@/features/home/components/FeaturedCardActions";
 import SynopsisText from "@/features/home/components/SynopsisText";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
@@ -58,6 +59,12 @@ export default function FeaturedCard({
                 className="object-cover"
               />
             )}
+            <LibraryStateBadge
+              tmdbId={item.id > 0 ? item.id : undefined}
+              poplogId={item.poplogId}
+              imdbId={item.externalIds?.imdbId}
+              mediaType={mediaType}
+            />
           </div>
 
           <div className="min-w-0 pt-2">

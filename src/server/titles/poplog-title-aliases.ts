@@ -26,7 +26,6 @@ export type PoplogTitleAliasSources = {
   localTitle?: boolean;
   titleExternalIds?: boolean;
   cache?: boolean;
-  balloonerismm?: boolean;
 };
 
 export type PoplogTitleAliasResolution = {
@@ -76,7 +75,6 @@ function idsChanged(before: PoplogTitleExternalIds, after: PoplogTitleExternalId
     before.imdbId !== after.imdbId ||
     before.tvdbId !== after.tvdbId ||
     before.traktId !== after.traktId ||
-    before.balloonerismmId !== after.balloonerismmId ||
     before.slug !== after.slug
   );
 }
@@ -86,20 +84,16 @@ function extractPayloadExternalIds(payload: unknown): PoplogTitleExternalIds {
 
   const root = payload as Record<string, unknown>;
 
-  // TMDB/Balloonerismm with `external_ids` appended (TMDB append_to_response format)
   const externalIds = root.external_ids && typeof root.external_ids === "object"
     ? root.external_ids as Record<string, unknown>
     : {};
 
-  // Balloonerismm stores IDs under `ids: { imdb, tvdb, tmdb }` at the root
   const idsField = root.ids && typeof root.ids === "object"
     ? root.ids as Record<string, unknown>
     : {};
 
-  // IMDb: Balloonerismm puts `imdb_id` at root; TMDB puts it in external_ids
   const imdbRaw = root.imdb_id ?? externalIds.imdb_id ?? idsField.imdb;
 
-  // TVDB: TMDB puts it in external_ids.tvdb_id; Balloonerismm puts it in ids.tvdb
   const tvdbRaw = externalIds.tvdb_id ?? idsField.tvdb;
 
   const traktRaw = externalIds.trakt_id ?? idsField.trakt;
@@ -119,12 +113,7 @@ function mergeExternalIds(...items: Array<PoplogTitleExternalIds | undefined>): 
     if (item.imdbId) merged.imdbId = item.imdbId;
     if (item.tvdbId !== undefined) merged.tvdbId = item.tvdbId;
     if (item.traktId !== undefined) merged.traktId = item.traktId;
-    if (item.balloonerismmId) merged.balloonerismmId = item.balloonerismmId;
     if (item.slug) merged.slug = item.slug;
-  }
-
-  if (!merged.balloonerismmId && merged.imdbId) {
-    merged.balloonerismmId = merged.imdbId;
   }
 
   return compactExternalIds(merged);
@@ -201,7 +190,6 @@ async function findExternalIds(
     ids.imdbId ? { imdbId: ids.imdbId, mediaType } : null,
     ids.tvdbId ? { tvdbId: String(ids.tvdbId), mediaType } : null,
     ids.traktId ? { traktId: String(ids.traktId), mediaType } : null,
-    ids.balloonerismmId ? { imdbId: ids.balloonerismmId, mediaType } : null,
   ].filter((item): item is NonNullable<typeof item> => Boolean(item));
 
   if (!or.length) return null;

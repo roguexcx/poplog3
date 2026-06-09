@@ -1,12 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState, type ElementType } from "react";
-import {
-  getStoredTitleLanguagePreference,
-  resolveTitleLanguagePreference,
-  TITLE_LANGUAGE_CHANGED_EVENT,
-  type TitleLanguagePreference,
-} from "@/lib/title-language-preference";
+import { type ElementType } from "react";
 
 type TitleVariant = "hero" | "large" | "medium" | "compact" | "poster";
 
@@ -18,11 +12,10 @@ type Props = {
   className?: string;
 };
 
-
 function normalizeTitle(value?: string | null): string {
   return (value ?? "")
     .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[̀-ͯ]/g, "")
     .replace(/[^\p{L}\p{N}]+/gu, " ")
     .toLowerCase()
     .trim();
@@ -38,28 +31,21 @@ export function getDisplayOriginalTitle(
   return normalizeTitle(original) !== normalizeTitle(title) ? original : null;
 }
 
-
+/**
+ * Resolve a exibição do título em pt-BR com subtítulo original quando diverge.
+ * O POPLOG usa pt-BR como idioma fixo — título pt-BR é sempre o principal.
+ */
 export function resolveRandomizedTitleDisplay(
   title: string,
   originalTitle?: string | null,
-  preference: TitleLanguagePreference = "auto",
 ) {
   const diffOriginal = getDisplayOriginalTitle(title, originalTitle);
-  const resolvedPreference = resolveTitleLanguagePreference(preference);
 
   if (!diffOriginal) {
     return {
       mainTitle: title,
       subTitle: null as string | null,
       fullTitle: title,
-    };
-  }
-
-  if (resolvedPreference === "original" || resolvedPreference === "en") {
-    return {
-      mainTitle: diffOriginal,
-      subTitle: title,
-      fullTitle: `${diffOriginal} (${title})`,
     };
   }
 
@@ -70,45 +56,11 @@ export function resolveRandomizedTitleDisplay(
   };
 }
 
-function useTitleLanguagePreference() {
-  const [preference, setPreference] = useState<TitleLanguagePreference>("auto");
-
-  useEffect(() => {
-    setPreference(getStoredTitleLanguagePreference());
-
-    function handleChange(event: Event) {
-      const next = (event as CustomEvent<TitleLanguagePreference>).detail;
-      setPreference(next ?? getStoredTitleLanguagePreference());
-    }
-
-    function handleStorage(event: StorageEvent) {
-      if (event.key === "poplog:title-language") {
-        setPreference(getStoredTitleLanguagePreference());
-      }
-    }
-
-    window.addEventListener(TITLE_LANGUAGE_CHANGED_EVENT, handleChange);
-    window.addEventListener("storage", handleStorage);
-
-    return () => {
-      window.removeEventListener(TITLE_LANGUAGE_CHANGED_EVENT, handleChange);
-      window.removeEventListener("storage", handleStorage);
-    };
-  }, []);
-
-  return preference;
-}
-
 export function useRandomizedTitleDisplay(
   title: string,
   originalTitle?: string | null,
 ) {
-  const preference = useTitleLanguagePreference();
-
-  return useMemo(
-    () => resolveRandomizedTitleDisplay(title, originalTitle, preference),
-    [title, originalTitle, preference],
-  );
+  return resolveRandomizedTitleDisplay(title, originalTitle);
 }
 
 export default function LocalizedTitle({
@@ -118,7 +70,7 @@ export default function LocalizedTitle({
   as: Tag = "div",
   className = "",
 }: Props) {
-  const { mainTitle, subTitle, fullTitle } = useRandomizedTitleDisplay(
+  const { mainTitle, subTitle, fullTitle } = resolveRandomizedTitleDisplay(
     title,
     originalTitle,
   );

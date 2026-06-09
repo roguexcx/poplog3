@@ -5,6 +5,7 @@ import { getRadarCachedPayload, radarCacheKey } from "@/server/radar-trakt/radar
 import { applyRadarPersonalFilter, getRadarLibraryIdentity } from "@/server/radar-trakt/radar-personal-filter";
 import { radarPayloadToLegacyAgenda } from "@/server/radar-trakt/radar-legacy-adapter";
 import type { RadarMode, RadarPayload } from "@/server/radar-trakt/types";
+import { FEATURES } from "@/lib/features";
 
 export const revalidate = 0;
 
@@ -16,6 +17,12 @@ const DEFAULT_LANGUAGE = "pt-BR";
 const WINDOW_DAYS = 62;
 
 export async function GET(req: NextRequest) {
+  if (!FEATURES.RADAR) {
+    return NextResponse.json(
+      { error: "radar_disabled", message: "Radar está temporariamente desativado." },
+      { status: 503 },
+    );
+  }
   try {
     const { searchParams } = new URL(req.url);
     const mode: RadarMode = searchParams.get("mode") === "personal" ? "personal" : "general";
