@@ -18,7 +18,7 @@ TMDB cinema   ──► fetchCinemaReleasesBR ───────────�
                                      │  true → clusters por data (sem caps)           │
                                      │  false → section-scorer (com caps)             │
                                                                                       │
-                                     Supabase cache (TTL 24h) ◄──────────────────────┘
+                                     cache persistente (TTL 24h) ◄──────────────────────┘
                                               │
                               /api/radar ──────────────────────► RadarClient (SSR + CSR)
 ```
@@ -116,7 +116,7 @@ TMDB é apenas enriquecimento (metadata, imagens, score) e cinema (filmes teatra
 8. Deduplicação ICS por tmdb_id (variantes regionais preservadas)
 9. Filtro estrutural (HIDDEN/DISCARD) — pula em RAW_BDS_MODE
 10. Distribuição em seções (raw vs. curado)
-11. Cache Supabase (somente quando `!RAW_BDS_MODE`)
+11. Cache persistente (somente quando `!RAW_BDS_MODE`)
 12. Retorno JSON
 
 **Cache:**
@@ -129,11 +129,11 @@ TMDB é apenas enriquecimento (metadata, imagens, score) e cinema (filmes teatra
 ### `src/app/api/radar/route.ts` (160 linhas)
 **Endpoint unificado: `GET /api/radar?mode=general|personal`**
 
-- **Modo general:** lê Supabase cache → se stale, chama `${SITE_URL}/api/ics/agenda`
+- **Modo general:** lê cache persistente → se stale, chama `${SITE_URL}/api/ics/agenda`
 - **Modo personal:** chama `agendaEngine.compose(userId, { region: "BR" })`
 
 **BUG CRÍTICO:** `CACHE_SCHEMA_VERSION = 6` (deveria ser 7)  
-→ Sempre rejeita o cache Supabase → sempre rebuilda o pipeline → latência desnecessária
+→ Sempre rejeita o cache persistente → sempre rebuilda o pipeline → latência desnecessária
 
 **Cache-Control:** `"no-store"` (modo general) | `private, max-age=120` (personal autenticado)
 
@@ -344,7 +344,7 @@ RadarSections {
 
 ## 5. Sistema de Cache
 
-### 5.1 Supabase — `ics_agenda_cache`
+### 5.1 Cache persistente — `ics_agenda_cache`
 | Atributo | Valor |
 |---|---|
 | TTL | 24 horas |
@@ -358,7 +358,7 @@ RadarSections {
 ```typescript
 const CACHE_SCHEMA_VERSION = 6; // ERRADO — deve ser 7
 ```
-→ Efeito: `/api/radar?mode=general` sempre rejeita o cache Supabase → rebuild a cada request → latência alta
+→ Efeito: `/api/radar?mode=general` sempre rejeita o cache persistente → rebuild a cada request → latência alta
 
 **BUG 2 — `page.tsx` linha 21:**
 ```typescript
@@ -465,7 +465,7 @@ RadarClient monta (CSR)
                         ├── applyRealityClassifier + score
                         ├── dedup ICS
                         ├── distribui seções (raw ou curado)
-                        └── writeCache(Supabase) → cache com version=7
+                        └── writeCache(cache) → cache com version=7
 
                    ← retorna payload
               ← retorna RadarResponse { mode, general, sections, ... }

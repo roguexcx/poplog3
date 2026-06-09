@@ -15,7 +15,7 @@ ICS Feed (bancodeseries.com.br)
                 └─ computeRelevanceScore()  → score 0-100 (ordenação)
                     └─ filterEnrichedGroup()  → passa/bloqueia
                         └─ buildAgendaPayload()  → IcsAgendaResponse
-                            └─ Supabase cache (TTL 24h)
+                            └─ cache persistente (TTL 24h)
                                 └─ /api/radar → RadarClient
 ```
 
@@ -114,12 +114,12 @@ O score tem viés embutido mesmo sem threshold:
    secondaryGroups = filter(!FEATURED_CATEGORIES && !HIDDEN)
 8. Dedup filmes por tmdb_id
 9. [NOVO] Log estruturado no console do servidor
-10. Salva no Supabase cache (TTL 24h)
+10. Salva no cache persistente (TTL 24h)
 ```
 
 ### Cliente (`RadarClient.tsx`)
 ```
-1. SSR quente: initialData já pronto do Supabase cache
+1. SSR quente: initialData já pronto do cache persistente
 2. Se cache frio: client-side fetch /api/ics/agenda
 3. buildSpotlightItems()  → hero carousel (sem filtros, slice 20)
 4. buildEditorialGroups() → grid editorial por dia/semana/mês
@@ -196,5 +196,5 @@ Conteúdo classificado como `VARIETY` passa pelos filtros técnicos mas não ent
 ### `refined_category` via TMDB pode reclassificar silenciosamente
 Se o TMDB classifica um grupo com `tmdb_type = "Talk Show"`, o `refineCategoryFromTmdb()` pode mudar sua categoria para `PODCAST` → bloqueado por `HIDDEN_CATEGORIES`. Esse caminho está documentado mas não logado individualmente. Para auditar: usar `?debug=<título>` na API.
 
-### Cache Supabase TTL = 24h
+### Cache persistente TTL = 24h
 O pipeline completo executa em média 8–15s (enriquecimento TMDB). Se o cache estiver frio, a primeira requisição do dia é lenta. Para forçar rebuild: qualquer request com cache stale aciona o pipeline automaticamente.

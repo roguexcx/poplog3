@@ -183,7 +183,7 @@ export function TabRadarCache({ secret }: { secret: string }) {
           </button>
         </div>
 
-        {view.kind === "loading"      && <AdminFeedback kind="loading" message="Consultando Supabase..." />}
+        {view.kind === "loading"      && <AdminFeedback kind="loading" message="Consultando cache..." />}
         {view.kind === "unauthorized" && <AdminFeedback kind="error"   message="Secret incorreto." />}
         {view.kind === "error"        && <AdminFeedback kind="error"   message={view.message} />}
 
@@ -192,7 +192,7 @@ export function TabRadarCache({ secret }: { secret: string }) {
             {view.data.status === "empty" ? (
               <div className="px-4 py-3 text-sm text-zinc-400 flex items-center gap-2">
                 <AlertTriangle size={13} className="text-amber-400 shrink-0" />
-                Nenhum cache encontrado no Supabase.
+                Nenhum cache encontrado.
               </div>
             ) : (
               <>

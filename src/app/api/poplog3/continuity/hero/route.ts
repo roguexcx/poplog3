@@ -444,7 +444,7 @@ export async function GET(request: Request) {
 
     return NextResponse.json(payload);
   } catch (error) {
-    // Qualquer falha interna (Supabase, TMDB, etc.) não deve retornar 404 ou 500
+    // Qualquer falha interna (API externa, TMDB, etc.) não deve retornar 404 ou 500
     // para o cliente — isso quebraria o carregamento da página. Retornamos lista
     // vazia com status 200 para que a UI exiba o fallback de onboarding normalmente.
     const errorMsg = error instanceof Error ? error.message : String(error);

@@ -150,7 +150,7 @@ Evento (episódio/status/clear)
 
 **Arquivo:** `src/context/UserDataContext.tsx`
 
-Lê integralmente `user_titles` do Supabase client. Rerenderiza toda vez que `poplog:user-titles-updated` é disparado.
+Lê integralmente `user_titles` do cliente legado. Rerenderiza toda vez que `poplog:user-titles-updated` é disparado.
 
 **Usado atualmente por:**
 - `HomeMemberSections` → envolve `ForYouSection` e `WatchlistVivaSection`
@@ -160,7 +160,7 @@ Lê integralmente `user_titles` do Supabase client. Rerenderiza toda vez que `po
 **Problema estrutural:**
 1. Lê `user_titles` inteiro (sem filtro), não `user_title_state`
 2. Não tem acesso a `computed_state`, `progress_pct`, `next_episode`, etc.
-3. `WatchlistVivaSection` escreve diretamente em `user_titles` via Supabase client sem chamar `upsertTitleState()` — cria gap de sincronização
+3. `WatchlistVivaSection` escreve diretamente em `user_titles` via cliente legado sem chamar `upsertTitleState()` — cria gap de sincronização
 
 **Plano de migração:** Substituir por um provider que consome `/api/poplog3/continuity/watchlist-picks` e o próprio estado de `user_title_state`. Eliminar `UserDataContext` após migração da Home.
 
@@ -182,7 +182,7 @@ Todos os hooks de toggle herdam do mesmo padrão base em `useTitleToggle<T>()`.
 | `useWatchlistToggle` | `src/hooks/useWatchlistToggle.ts` | `isTitleInWatchlist()` | `toggleWatchlist()` → `user_titles` |
 | `useUserFeedbackToggle` | `src/hooks/useUserFeedbackToggle.ts` | `/api/user/feedback` GET | `/api/user/feedback` POST/DELETE |
 
-**Problema crítico:** `useWatchedToggle` e `useWatchlistToggle` chamam `user-title-service.ts` que escreve **diretamente no Supabase client** (não via API route). Isso significa que `upsertTitleState()` **não é chamado** após essas ações. A `user_title_state` fica desatualizada até o próximo evento vindo do servidor.
+**Problema crítico:** `useWatchedToggle` e `useWatchlistToggle` chamam `user-title-service.ts` que escrevia **diretamente pelo cliente legado** (não via API route). Isso significa que `upsertTitleState()` **não é chamado** após essas ações. A `user_title_state` fica desatualizada até o próximo evento vindo do servidor.
 
 **Solução necessária:** Migrar esses toggles para chamar API routes server-side que chamem `upsertTitleState()` após a escrita.
 
@@ -322,7 +322,7 @@ O sistema calcula o "melhor provedor" considerando `user_streaming_preferences` 
 
 **Arquivo:** `src/features/home/components/WatchlistVivaSection.tsx:412-425`
 
-Ao marcar um título como watched ou remover da watchlist diretamente nos cards da Home, o componente chama o Supabase client diretamente. `upsertTitleState()` não é chamado. `user_title_state` fica desatualizada.
+Ao marcar um título como watched ou remover da watchlist diretamente nos cards da Home, o componente escrevia diretamente via cliente legado. `upsertTitleState()` não é chamado. `user_title_state` fica desatualizada.
 
 ### 🟡 ALTA — /api/poplog3/acompanhando não usa user_title_state
 
@@ -360,10 +360,10 @@ Alguns lugares usam UUID (de `user_title_state.id`), outros usam `"tmdb-{mediaTy
 Todo fluxo de escrita deve seguir este padrão:
 
 ```typescript
-// 1. Escrever na tabela transacional
-await supabaseAdmin.from("user_titles").upsert({ ... });
+// 1. Escrever na tabela transacional via API route (server-side)
+await prisma.userTitles.upsert({ ... });
 // ou
-await supabaseAdmin.from("user_episodes").insert({ ... });
+await prisma.userEpisodes.create({ ... });
 
 // 2. Atualizar estado materializado (pode ser fire-and-forget)
 upsertTitleState({
@@ -374,7 +374,7 @@ upsertTitleState({
 }).catch(console.error);
 ```
 
-**Nunca escreva em `user_titles` diretamente do Supabase client no frontend** sem ter um mecanismo de propagação para `user_title_state`.
+**Nunca escreva em `user_titles` diretamente do cliente no frontend** sem ter um mecanismo de propagação para `user_title_state`.
 
 ---
 
@@ -399,7 +399,7 @@ Estes sistemas já funcionam bem e devem ser a base de expansão para novas pág
 
 1. **Migrar toggles para API routes** — `useWatchedToggle`, `useWatchlistToggle` devem chamar rotas server que invoquem `upsertTitleState()`. Elimina o principal gap de sincronização.
 
-2. **Corrigir WatchlistVivaSection** — substituir escrita direta no Supabase client por chamada a API routes com `upsertTitleState()`.
+2. **Corrigir WatchlistVivaSection** — substituir escrita direta pelo cliente legado por chamada a API routes com `upsertTitleState()`.
 
 3. **Migrar /api/poplog3/acompanhando para user_title_state** — reescrever a rota para consumir `getUserTitleStates()` + `poplog3_curadoria_overlay`, eliminando joins manuais.
 

@@ -401,7 +401,7 @@ async function upsertCuradoriaOverlay(
     });
     return;
   }
-  // No Supabase fallback — requires local curadoria state service
+  // No fallback — requires local curadoria state service
 }
 
 async function readCuradoriaPreference(userId: string): Promise<CuradoriaPreferencesResult> {

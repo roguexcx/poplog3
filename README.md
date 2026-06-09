@@ -27,10 +27,10 @@ Abra `http://localhost:3000`.
 
 - Rotas em `src/app/api`
 - Integrações de catálogo e streaming
-- Supabase, autenticação e middleware de sessão
+- Autenticação e middleware de sessão legados
 - Hooks e providers de usuário
 - Cache e sincronização
 - Regras de recomendação, confiança e contexto
 - Migrations e scripts de banco antigos
 
-Use a branch `codex/streamings` como referência técnica do sistema anterior quando precisar consultar a implementação antiga.
+Use o histórico do git como referência técnica do sistema anterior quando precisar consultar a implementação antiga.

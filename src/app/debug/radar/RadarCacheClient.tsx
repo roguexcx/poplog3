@@ -181,7 +181,7 @@ export default function RadarCacheClient() {
               {view.data.status === "empty" ? (
                 <div className="px-5 py-4 text-sm text-zinc-400 flex items-center gap-2">
                   <AlertTriangle size={14} className="text-amber-400" />
-                  Nenhum cache encontrado no Supabase.
+                  Nenhum cache encontrado.
                 </div>
               ) : (
                 <>

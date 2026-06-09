@@ -15,7 +15,7 @@ export type Origin =
   | "admin"
   | "unknown";
 
-/** cache: Supabase cache hit; miss: foi ao provider externo; skipped: sem imdb_id etc. */
+/** cache: cache hit; miss: foi ao provider externo; skipped: sem imdb_id etc. */
 export type CacheStatus =
   | "hit"
   | "miss"

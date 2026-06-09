@@ -518,7 +518,7 @@ Campos importantes:
 12. D+5, D+6 e D+7 sem milestone sao descartados intencionalmente das abas atuais.
 13. O modo personalizado exclui `fridge` no filtro real, mas o debug admin inclui `fridge`, o que pode gerar diferenca de contagem.
 14. O admin "TMDB Feed toggle" pode dar a impressao de funcionar, mas `setTmdbFeedEnabled()` e no-op.
-15. Comentarios antigos ainda falam em Supabase/cache Supabase em alguns lugares, mas o codigo atual usa Prisma/MySQL local.
+15. Comentarios antigos ainda falam em cache persistente/cache cache persistente em alguns lugares, mas o codigo atual usa Prisma/MySQL local.
 
 ## 14. Pontos de alteracao recomendados para proximas mudancas
 

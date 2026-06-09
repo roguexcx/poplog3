@@ -2,7 +2,7 @@
  * Helper de auth local — modo dev/desenvolvimento apenas.
  *
  * Ativado por POPLOG_LOCAL_AUTH_ENABLED=true.
- * Não substitui Supabase Auth em produção. Não implementa multiusuário.
+ * Não substitui o auth de produção. Não implementa multiusuário.
  * Resolve o usuário a partir de LOCAL_USER_ID (padrão: "local-user").
  */
 import { db } from "@/server/db/client";

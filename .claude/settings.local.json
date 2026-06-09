@@ -22,7 +22,6 @@
       "Bash(cd /I/poplog-v3 && find src/app/api -type f -name \"*.ts\" | head -20)",
       "Bash(xargs grep -l \"streaming_preferences\\\\|provider_preferences\")",
       "Bash(cd /I/poplog-v3 && grep -r \"getUserProviderPreferences\" src --include=\"*.ts\" -l)",
-      "Bash(find /I:/poplog-v3 -type f -name \"*.tsx\" -o -name \"*.ts\" | grep -E \"\\(api|supabase\\)\" | head -20)",
       "Bash(xargs grep -l \"HorizontalRail\")",
       "Bash(xargs grep -l \"poplog3_titles\\\\|user_title_state\")",
       "Bash(xargs basename -a)",
@@ -267,7 +266,9 @@
       "WebFetch(domain:api.balloonerismm.workers.dev)",
       "Bash(cd /I:/poplog-v3 && find . -type f -name \"*.ts\" -o -name \"*.tsx\" | head -20)",
       "Bash(xargs grep -l \"providers\")",
-      "Bash(xargs grep -l \"StreamingProvider\")"
+      "Bash(xargs grep -l \"StreamingProvider\")",
+      "Bash(git -C I:\\\\poplog-v3 branch -a)",
+      "PowerShell(cd I:\\\\poplog-v3; $localBranches = @\\(\"acompanhando-clean\", \"backup/pre-balloonerismm-migration\", \"codex/loca-db\", \"codex/novaagenda\", \"feature/poplog-engine\", \"main-antiga\"\\); foreach \\($b in $localBranches\\) { git branch -D $b 2>&1 })"
     ]
   }
 }

@@ -9,9 +9,9 @@
 //   Cinema: TMDB pode ser fonte ativa exclusivamente para estreias de filme
 //   (eventType: "movie_theatrical_release", source: "tmdb_cinema_release").
 //
-// Cache Supabase (tabela ics_agenda_cache, TTL 24h):
+// Cache persistente (tabela ics_agenda_cache, TTL 24h):
 //   - GET: le cache primeiro; se fresco (<24h) retorna imediatamente.
-//   - Se stale ou ausente: executa pipeline completo, salva no Supabase, retorna.
+//   - Se stale ou ausente: executa pipeline completo, salva no cache, retorna.
 // ──────────────────────────────────────────────────────────────────────────────
 
 import { NextRequest, NextResponse } from "next/server";
@@ -37,7 +37,7 @@ import {
   isTmdbFeedEnabled,
 } from "@/lib/radar/tmdb-trending-feed";
 
-// Nao usar cache do Next.js — gerenciamos o cache manualmente no Supabase
+// Nao usar cache do Next.js — gerenciamos o cache manualmente no banco
 export const revalidate = 0;
 
 const ICS_URL    = "http://bancodeseries.com.br/ical.php";
@@ -359,7 +359,7 @@ async function fetchCinemaReleasesBR(_token: string): Promise<CinemaReleaseGroup
   return [];
 }
 
-// ── Verificar cache Supabase ──────────────────────────────────────────────────
+// ── Verificar cache persistente ───────────────────────────────────────────────
 
 async function readCache(): Promise<{ payload: IcsAgendaResponse; cachedAt: string } | null> {
   try {
@@ -1597,7 +1597,7 @@ export async function GET(req: NextRequest) {
       );
     }
 
-    // Tenta usar cache Supabase
+    // Tenta usar cache persistente
     const cached = await readCache();
 
     if (cached) {

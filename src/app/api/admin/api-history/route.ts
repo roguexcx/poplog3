@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
 
   if (!data) {
     return NextResponse.json(
-      { ok: false, error: "Historico indisponivel. Verifique a conexao com Supabase." },
+      { ok: false, error: "Historico indisponivel. Verifique a conexao com o banco." },
       { status: 503 },
     );
   }

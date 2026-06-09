@@ -5,7 +5,7 @@ export async function GET() {
     {
       ok: false,
       removed: true,
-      message: "Rota de diff Supabase/local removida. Supabase foi removido do projeto. Use /api/poplog3/acompanhando diretamente.",
+      message: "Rota de diff removida. Use /api/poplog3/acompanhando diretamente.",
     },
     { status: 410 },
   );

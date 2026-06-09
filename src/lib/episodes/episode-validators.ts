@@ -135,7 +135,7 @@ export function hasUsableRuntime(
 
 /**
  * Filtra uma lista de episódios para apenas os válidos (aired, season > 0).
- * Versão tipada para uso em JS puro (não depende do schema do Supabase).
+ * Versão tipada para uso em JS puro (não depende do schema do banco).
  */
 export function filterValidAiredEpisodes<T extends EpisodeValidationInput>(
   episodes: T[],

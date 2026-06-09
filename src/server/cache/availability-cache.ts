@@ -57,7 +57,7 @@ export type UpsertAvailabilityInput = {
   } | null;
 };
 
-// Mapping between Supabase availability_type and Prisma ProviderType
+// Mapping between availability_type and Prisma ProviderType
 function availTypeToProviderType(t: AvailabilityType): string {
   if (t === "streaming") return "subscription";
   return t;

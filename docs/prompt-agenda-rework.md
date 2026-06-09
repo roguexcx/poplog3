@@ -7,7 +7,7 @@
 
 ## Contexto do projeto
 
-**POPLOG** é uma plataforma de acompanhamento cinematográfico e de séries construída em **Next.js 15 (App Router) + TypeScript + Supabase + TMDB API**.
+**POPLOG** é uma plataforma de acompanhamento cinematográfico e de séries construída em **Next.js 15 (App Router) + TypeScript + cache persistente + TMDB API**.
 
 ### Arquitetura atual relevante
 
@@ -172,7 +172,7 @@ export async function buildAgendaEngine(
 **2.1 — Carregar estado do usuário (se autenticado)**
 - Buscar `getUserTitleStates(userId)` → Map de estados por tmdbId
 - Extrair: `watchingIds`, `monitoredIds`, `behindIds`, `pausedIds`
-- Extrair `favoriteProviderIds` do perfil do usuário (Supabase)
+- Extrair `favoriteProviderIds` do perfil do usuário (cache persistente)
 
 **2.2 — Buscar episódios pessoais com prioridade**
 - Para cada título em `watching`: buscar `next_episode_to_air` e `last_episode_to_air` via TMDB detail (usar `getCachedSeason` quando possível)
