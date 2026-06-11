@@ -180,6 +180,14 @@ enum SourceConfidence {
   unverified
 }
 
+enum SearchQueryType {
+  text
+  imdb
+  tmdb
+  trakt
+  slug
+}
+
 model User {
   id            String    @id @default(cuid()) @db.VarChar(191)
   email         String?   @unique @db.VarChar(191)
@@ -493,27 +501,27 @@ model HeroSpotlightSession {
 }
 
 model Poplog3Title {
-  id               String    @id @default(cuid()) @db.VarChar(191)
-  tmdbId           Int       @map("tmdb_id")
-  traktId          BigInt?   @map("trakt_id")
-  imdbId           String?   @map("imdb_id") @db.VarChar(64)
-  slug             String?   @db.VarChar(191)
-  mediaType        MediaType @map("media_type")
-  title            String?   @db.VarChar(512)
-  originalTitle    String?   @map("original_title") @db.VarChar(512)
-  overview         String?   @db.Text
-  posterPath       String?   @map("poster_path") @db.VarChar(512)
-  backdropPath     String?   @map("backdrop_path") @db.VarChar(512)
-  releaseDate      DateTime? @map("release_date") @db.Date
-  firstAirDate     DateTime? @map("first_air_date") @db.Date
-  lastAirDate      DateTime? @map("last_air_date") @db.Date
-  year             Int?
-  runtime          Int?
-  episodeRunTime   Json?     @map("episode_run_time")
-  genres           Json?
-  popularity       Decimal?  @db.Decimal(12, 4)
-  voteAverage      Decimal?  @map("vote_average") @db.Decimal(4, 2)
-  voteCount        Int?      @map("vote_count")
+  id                 String    @id @default(cuid()) @db.VarChar(191)
+  tmdbId             Int       @map("tmdb_id")
+  traktId            BigInt?   @map("trakt_id")
+  imdbId             String?   @map("imdb_id") @db.VarChar(64)
+  slug               String?   @db.VarChar(191)
+  mediaType          MediaType @map("media_type")
+  title              String?   @db.VarChar(512)
+  originalTitle      String?   @map("original_title") @db.VarChar(512)
+  overview           String?   @db.Text
+  posterPath         String?   @map("poster_path") @db.VarChar(512)
+  backdropPath       String?   @map("backdrop_path") @db.VarChar(512)
+  releaseDate        DateTime? @map("release_date") @db.Date
+  firstAirDate       DateTime? @map("first_air_date") @db.Date
+  lastAirDate        DateTime? @map("last_air_date") @db.Date
+  year               Int?
+  runtime            Int?
+  episodeRunTime     Json?     @map("episode_run_time")
+  genres             Json?
+  popularity         Decimal?  @db.Decimal(12, 4)
+  voteAverage        Decimal?  @map("vote_average") @db.Decimal(4, 2)
+  voteCount          Int?      @map("vote_count")
   numberOfEpisodes   Int?      @map("number_of_episodes")
   numberOfSeasons    Int?      @map("number_of_seasons")
   originalLanguage   String?   @map("original_language") @db.VarChar(32)
@@ -522,14 +530,14 @@ model Poplog3Title {
   tmdbPayload        Json?     @map("tmdb_payload")
   sourcePayload      Json?     @map("source_payload")
   cacheStatus        String    @default("miss") @map("cache_status") @db.VarChar(32)
-  source           String    @default("trakt") @db.VarChar(32)
-  sourceVersion    String    @default("trakt-v2") @map("source_version") @db.VarChar(64)
-  lastFetchedAt    DateTime? @map("last_fetched_at")
-  expiresAt        DateTime? @map("expires_at")
-  staleAt          DateTime? @map("stale_at")
-  lastSyncedAt     DateTime? @map("last_synced_at")
-  createdAt        DateTime  @default(now()) @map("created_at")
-  updatedAt        DateTime  @updatedAt @map("updated_at")
+  source             String    @default("trakt") @db.VarChar(32)
+  sourceVersion      String    @default("trakt-v2") @map("source_version") @db.VarChar(64)
+  lastFetchedAt      DateTime? @map("last_fetched_at")
+  expiresAt          DateTime? @map("expires_at")
+  staleAt            DateTime? @map("stale_at")
+  lastSyncedAt       DateTime? @map("last_synced_at")
+  createdAt          DateTime  @default(now()) @map("created_at")
+  updatedAt          DateTime  @updatedAt @map("updated_at")
 
   @@unique([tmdbId, mediaType])
   @@unique([traktId, mediaType])
@@ -545,22 +553,22 @@ model Poplog3Title {
 }
 
 model PoplogRefreshQueue {
-  id          BigInt    @id @default(autoincrement())
-  cacheKey    String    @map("cache_key") @db.VarChar(191)
-  kind        String    @db.VarChar(64)
+  id          BigInt     @id @default(autoincrement())
+  cacheKey    String     @map("cache_key") @db.VarChar(191)
+  kind        String     @db.VarChar(64)
   mediaType   MediaType? @map("media_type")
-  poplogId    String?   @map("poplog_id") @db.VarChar(191)
-  traktId     BigInt?   @map("trakt_id")
-  imdbId      String?   @map("imdb_id") @db.VarChar(64)
-  slug        String?   @db.VarChar(191)
-  status      String    @default("queued") @db.VarChar(32)
-  priority    Int       @default(100)
-  attempts    Int       @default(0)
-  lockedUntil DateTime? @map("locked_until")
-  runAfter    DateTime  @default(now()) @map("run_after")
-  lastError   String?   @map("last_error") @db.Text
-  createdAt   DateTime  @default(now()) @map("created_at")
-  updatedAt   DateTime  @updatedAt @map("updated_at")
+  poplogId    String?    @map("poplog_id") @db.VarChar(191)
+  traktId     BigInt?    @map("trakt_id")
+  imdbId      String?    @map("imdb_id") @db.VarChar(64)
+  slug        String?    @db.VarChar(191)
+  status      String     @default("queued") @db.VarChar(32)
+  priority    Int        @default(100)
+  attempts    Int        @default(0)
+  lockedUntil DateTime?  @map("locked_until")
+  runAfter    DateTime   @default(now()) @map("run_after")
+  lastError   String?    @map("last_error") @db.Text
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
 
   @@unique([cacheKey, kind])
   @@index([status, runAfter, priority])
@@ -592,37 +600,37 @@ model TitleSeason {
 }
 
 model Poplog3Episode {
-  id             String    @id @default(cuid()) @db.VarChar(191)
-  seriesTmdbId   Int       @map("series_tmdb_id")
-  seasonNumber   Int       @map("season_number")
-  episodeNumber  Int       @map("episode_number")
-  tmdbEpisodeId  Int?      @map("tmdb_episode_id")
-  name           String?   @db.VarChar(512)
-  overview       String?   @db.Text
-  stillPath      String?   @map("still_path") @db.VarChar(512)
-  stillUrl       String?   @map("still_url") @db.VarChar(1024)
-  stillSource    String?   @map("still_source") @db.VarChar(64)
-  stillWidth     Int?      @map("still_width")
-  stillHeight    Int?      @map("still_height")
-  stillLanguage  String?   @map("still_language") @db.VarChar(32)
-  airDate        DateTime? @map("air_date") @db.Date
-  runtime        Int?
-  voteAverage    Decimal?  @map("vote_average") @db.Decimal(4, 2)
-  voteCount      Int?      @map("vote_count")
-  productionCode String?   @map("production_code") @db.VarChar(191)
-  episodeType     String?   @map("episode_type") @db.VarChar(64)
-  absoluteNumber  Int?      @map("absolute_number")
-  titleLanguage   String?   @map("title_language") @db.VarChar(32)
-  overviewLanguage String?  @map("overview_language") @db.VarChar(32)
-  originalTitle    String?  @map("original_title") @db.VarChar(512)
-  originalOverview String?  @map("original_overview") @db.Text
-  sourcePriority   Json?    @map("source_priority")
-  imageCandidatesJson Json? @map("image_candidates_json")
-  textCandidatesJson  Json? @map("text_candidates_json")
-  externalIdsJson Json?     @map("external_ids_json")
-  lastSyncedAt    DateTime? @map("last_synced_at")
-  createdAt       DateTime  @default(now()) @map("created_at")
-  updatedAt       DateTime  @updatedAt @map("updated_at")
+  id                  String    @id @default(cuid()) @db.VarChar(191)
+  seriesTmdbId        Int       @map("series_tmdb_id")
+  seasonNumber        Int       @map("season_number")
+  episodeNumber       Int       @map("episode_number")
+  tmdbEpisodeId       Int?      @map("tmdb_episode_id")
+  name                String?   @db.VarChar(512)
+  overview            String?   @db.Text
+  stillPath           String?   @map("still_path") @db.VarChar(512)
+  stillUrl            String?   @map("still_url") @db.VarChar(1024)
+  stillSource         String?   @map("still_source") @db.VarChar(64)
+  stillWidth          Int?      @map("still_width")
+  stillHeight         Int?      @map("still_height")
+  stillLanguage       String?   @map("still_language") @db.VarChar(32)
+  airDate             DateTime? @map("air_date") @db.Date
+  runtime             Int?
+  voteAverage         Decimal?  @map("vote_average") @db.Decimal(4, 2)
+  voteCount           Int?      @map("vote_count")
+  productionCode      String?   @map("production_code") @db.VarChar(191)
+  episodeType         String?   @map("episode_type") @db.VarChar(64)
+  absoluteNumber      Int?      @map("absolute_number")
+  titleLanguage       String?   @map("title_language") @db.VarChar(32)
+  overviewLanguage    String?   @map("overview_language") @db.VarChar(32)
+  originalTitle       String?   @map("original_title") @db.VarChar(512)
+  originalOverview    String?   @map("original_overview") @db.Text
+  sourcePriority      Json?     @map("source_priority")
+  imageCandidatesJson Json?     @map("image_candidates_json")
+  textCandidatesJson  Json?     @map("text_candidates_json")
+  externalIdsJson     Json?     @map("external_ids_json")
+  lastSyncedAt        DateTime? @map("last_synced_at")
+  createdAt           DateTime  @default(now()) @map("created_at")
+  updatedAt           DateTime  @updatedAt @map("updated_at")
 
   @@unique([seriesTmdbId, seasonNumber, episodeNumber])
   @@index([seriesTmdbId, airDate])
@@ -967,4 +975,101 @@ model IcsAgendaCache {
 
   @@index([cachedAt])
   @@map("ics_agenda_cache")
+}
+
+model PoplogPeopleCache {
+  id            String @id @default(cuid()) @db.VarChar(191)
+  personId      String @unique @map("person_id") @db.VarChar(191)
+  source        String @default("trakt") @db.VarChar(32)
+  sourceVersion String @default("people-v1") @map("source_version") @db.VarChar(64)
+
+  traktId   BigInt? @unique @map("trakt_id")
+  traktSlug String? @map("trakt_slug") @db.VarChar(191)
+  tmdbId    Int?    @unique @map("tmdb_id")
+  imdbId    String? @unique @map("imdb_id") @db.VarChar(64)
+
+  name         String  @db.VarChar(512)
+  originalName String? @map("original_name") @db.VarChar(512)
+
+  profileImage        String?   @map("profile_image") @db.VarChar(1024)
+  imageCandidatesJson Json?     @map("image_candidates_json")
+  imagesExpiresAt     DateTime? @map("images_expires_at")
+
+  payload        Json
+  traktPayload   Json? @map("trakt_payload")
+  balloonPayload Json? @map("balloon_payload")
+
+  language String @default("pt-BR") @db.VarChar(16)
+  region   String @default("BR") @db.VarChar(8)
+
+  staleAt       DateTime? @map("stale_at")
+  expiresAt     DateTime? @map("expires_at")
+  lastFetchedAt DateTime? @map("last_fetched_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@index([traktSlug])
+  @@index([expiresAt])
+  @@index([staleAt])
+  @@index([imagesExpiresAt])
+  @@map("poplog_people_cache")
+}
+
+model PoplogPersonCreditsCache {
+  id       String @id @default(cuid()) @db.VarChar(191)
+  personId String @map("person_id") @db.VarChar(191)
+
+  acting    Json?
+  directing Json?
+  writing   Json?
+  producing Json?
+  otherCrew Json? @map("other_crew")
+
+  payload        Json
+  sourceCoverage Json? @map("source_coverage")
+
+  language String @default("pt-BR") @db.VarChar(16)
+  region   String @default("BR") @db.VarChar(8)
+
+  staleAt       DateTime? @map("stale_at")
+  expiresAt     DateTime? @map("expires_at")
+  lastFetchedAt DateTime? @map("last_fetched_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([personId, language, region])
+  @@index([expiresAt])
+  @@index([staleAt])
+  @@map("poplog_person_credits_cache")
+}
+
+model PoplogSearchCache {
+  id String @id @default(cuid()) @db.VarChar(191)
+
+  query           String          @db.VarChar(512)
+  queryNormalized String          @map("query_normalized") @db.VarChar(512)
+  queryHash       String          @map("query_hash") @db.VarChar(64)
+  queryType       SearchQueryType @default(text) @map("query_type")
+
+  language String @default("pt-BR") @db.VarChar(16)
+  region   String @default("BR") @db.VarChar(8)
+
+  results        Json
+  resultCount    Int   @default(0) @map("result_count")
+  sourceCoverage Json? @map("source_coverage")
+
+  staleAt       DateTime? @map("stale_at")
+  expiresAt     DateTime  @map("expires_at")
+  lastFetchedAt DateTime? @map("last_fetched_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@unique([queryHash, queryType, language, region])
+  @@index([queryNormalized(length: 191)])
+  @@index([expiresAt])
+  @@index([staleAt])
+  @@map("poplog_search_cache")
 }

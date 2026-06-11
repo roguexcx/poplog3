@@ -5,45 +5,86 @@ import Link from "next/link";
 import { Clapperboard, Film, PenLine, Star, Tv, UserRound, Video } from "lucide-react";
 import PageShell from "@/components/layout/PageShell";
 import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
+import { buildTitleHref } from "@/lib/title-href";
+import type {
+  PoplogPersonCredit,
+  PoplogPersonPageData,
+} from "@/server/poplog-people/getPersonPageData";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
-type CreditItem = {
-  imdb_id?: string;
-  title: string;
-  media_type: "movie" | "tv";
-  year?: number | null;
-  character?: string;
-  job?: string;
-  department?: string;
-  poster_path?: string | null;
-};
-
-type PersonData = {
-  imdb_id: string;
-  name: string;
-  biography?: string | null;
-  birthday?: string | null;
-  deathday?: string | null;
-  place_of_birth?: string | null;
-  profile_path?: string | null;
-  known_for_department?: string | null;
-};
+type PersonInfo = NonNullable<PoplogPersonPageData["person"]>;
 
 type Props = {
-  person: PersonData;
-  acting: CreditItem[];
-  directing: CreditItem[];
-  writing: CreditItem[];
-  producing: CreditItem[];
-  otherCrew: CreditItem[];
+  person: PersonInfo;
+  acting: PoplogPersonCredit[];
+  directing: PoplogPersonCredit[];
+  writing: PoplogPersonCredit[];
+  producing: PoplogPersonCredit[];
+  otherCrew: PoplogPersonCredit[];
 };
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function creditHref(credit: CreditItem): string | null {
-  if (!credit.imdb_id) return null;
-  return `/title/${credit.media_type === "tv" ? "tv" : "movie"}/${credit.imdb_id}`;
+const DEPARTMENT_LABELS: Record<string, string> = {
+  acting: "Atuação",
+  directing: "Direção",
+  writing: "Roteiro",
+  production: "Produção",
+  editing: "Edição",
+  camera: "Fotografia",
+  sound: "Som",
+  art: "Arte",
+  crew: "Equipe técnica",
+  "costume & make-up": "Figurino e Maquiagem",
+  "visual effects": "Efeitos visuais",
+  creator: "Criação",
+};
+
+function departmentLabel(department: string | null | undefined): string {
+  if (!department) return "Cinema & TV";
+  return DEPARTMENT_LABELS[department.toLowerCase()] ?? department;
+}
+
+const JOB_LABELS: Record<string, string> = {
+  director: "Direção",
+  writer: "Roteiro",
+  screenplay: "Roteiro",
+  story: "História",
+  producer: "Produção",
+  "executive producer": "Produção executiva",
+  editor: "Edição",
+  creator: "Criação",
+  novel: "Obra original",
+};
+
+function jobLabel(job: string | null | undefined): string | null {
+  if (!job) return null;
+  return JOB_LABELS[job.toLowerCase()] ?? job;
+}
+
+function creditHref(credit: PoplogPersonCredit): string | null {
+  const ext = credit.externalIds;
+  const hasAnyId =
+    Boolean(ext?.imdbId) || Boolean(ext?.traktSlug) || ext?.traktId != null || ext?.tmdbId != null;
+  if (!hasAnyId) return null;
+  return buildTitleHref({
+    mediaType: credit.mediaType,
+    externalIds: {
+      imdbId: ext?.imdbId ?? null,
+      slug: ext?.traktSlug ?? null,
+      traktId: ext?.traktId ?? null,
+      tmdbId: ext?.tmdbId ?? null,
+    },
+  });
+}
+
+function creditYear(credit: PoplogPersonCredit): number | null {
+  if (credit.year != null) return credit.year;
+  const date = credit.releaseDate ?? credit.firstAirDate;
+  if (!date) return null;
+  const year = Number(date.slice(0, 4));
+  return Number.isFinite(year) && year > 1800 ? year : null;
 }
 
 function formatDate(iso: string | null | undefined): string | null {
@@ -61,11 +102,13 @@ function formatDate(iso: string | null | undefined): string | null {
 
 // ── CreditCard ────────────────────────────────────────────────────────────────
 
-function CreditCard({ credit, showRole = true }: { credit: CreditItem; showRole?: boolean }) {
+function CreditCard({ credit, showRole = true }: { credit: PoplogPersonCredit; showRole?: boolean }) {
   const href = creditHref(credit);
-  const poster = resolveCatalogImage(credit.poster_path, "w92");
-  const mediaLabel = credit.media_type === "tv" ? "Série" : "Filme";
-  const MediaIcon = credit.media_type === "tv" ? Tv : Film;
+  const poster = resolveCatalogImage(credit.posterUrl, "w92");
+  const year = creditYear(credit);
+  const mediaLabel = credit.mediaType === "tv" ? "Série" : "Filme";
+  const MediaIcon = credit.mediaType === "tv" ? Tv : Film;
+  const role = jobLabel(credit.job);
 
   const inner = (
     <article className="group flex gap-3 rounded-xl border border-white/[0.06] bg-white/[0.025] p-2.5 transition hover:border-white/[0.12] hover:bg-white/[0.05]">
@@ -85,13 +128,13 @@ function CreditCard({ credit, showRole = true }: { credit: CreditItem; showRole?
       <div className="min-w-0 py-0.5">
         <p className="truncate text-[13px] font-bold leading-snug text-white/90">{credit.title}</p>
         <p className="mt-0.5 text-[11px] text-white/40">
-          {credit.year ?? "—"} · {mediaLabel}
+          {year ?? "—"} · {mediaLabel}
         </p>
         {showRole && credit.character ? (
           <p className="mt-1 truncate text-[11px] text-white/35">como {credit.character}</p>
         ) : null}
-        {showRole && credit.job && !credit.character ? (
-          <p className="mt-1 truncate text-[11px] text-indigo-300/60">{credit.job}</p>
+        {showRole && role && !credit.character ? (
+          <p className="mt-1 truncate text-[11px] text-indigo-300/60">{role}</p>
         ) : null}
       </div>
     </article>
@@ -111,7 +154,7 @@ function CreditsSection({
 }: {
   title: string;
   icon: React.ElementType;
-  items: CreditItem[];
+  items: PoplogPersonCredit[];
   maxVisible?: number;
 }) {
   if (!items.length) return null;
@@ -125,12 +168,12 @@ function CreditsSection({
       </div>
       <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
         {shown.map((credit, i) => (
-          <CreditCard key={`${credit.imdb_id ?? credit.title}-${i}`} credit={credit} />
+          <CreditCard key={`${credit.id}-${i}`} credit={credit} />
         ))}
       </div>
       {items.length > maxVisible ? (
         <p className="text-[11px] text-white/30">
-          + {items.length - maxVisible} mais não exibidos
+          + {items.length - maxVisible} créditos não exibidos
         </p>
       ) : null}
     </section>
@@ -147,14 +190,13 @@ export default function PersonPageClient({
   producing,
   otherCrew,
 }: Props) {
-  const profileUrl = resolveCatalogImage(person.profile_path, "w300");
+  const profileUrl = resolveCatalogImage(person.profileImage, "w300");
   const birthday = formatDate(person.birthday);
   const deathday = formatDate(person.deathday);
   const totalActing = acting.length;
   const totalCrew = directing.length + writing.length + producing.length + otherCrew.length;
   const hasCrew = totalCrew > 0;
-
-  const departmentLabel = person.known_for_department ?? "Cinema & TV";
+  const hasAnyCredit = totalActing > 0 || hasCrew;
 
   return (
     <PageShell variant="wide">
@@ -184,7 +226,7 @@ export default function PersonPageClient({
           <div className="flex flex-col gap-3 sm:pt-2">
             <div>
               <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-indigo-300/70">
-                {departmentLabel}
+                {departmentLabel(person.knownForDepartment)}
               </p>
               <h1 className="mt-1.5 text-2xl font-black tracking-[-0.035em] text-white sm:text-4xl">
                 {person.name}
@@ -194,11 +236,15 @@ export default function PersonPageClient({
             <div className="flex flex-wrap gap-x-5 gap-y-1 text-[12px] text-white/40">
               {birthday ? <span>Nascimento: {birthday}</span> : null}
               {deathday ? <span>Falecimento: {deathday}</span> : null}
-              {person.place_of_birth ? <span>{person.place_of_birth}</span> : null}
+              {person.placeOfBirth ? <span>{person.placeOfBirth}</span> : null}
               {totalActing > 0 ? (
                 <span className="text-white/30">
                   {totalActing} atuaç{totalActing !== 1 ? "ões" : "ão"}
                   {hasCrew ? ` · ${totalCrew} crédito${totalCrew !== 1 ? "s" : ""} técnicos` : ""}
+                </span>
+              ) : hasCrew ? (
+                <span className="text-white/30">
+                  {totalCrew} crédito{totalCrew !== 1 ? "s" : ""} técnicos
                 </span>
               ) : null}
             </div>
@@ -207,7 +253,9 @@ export default function PersonPageClient({
               <p className="max-w-2xl text-[13px] leading-relaxed text-white/50 sm:text-sm sm:leading-7 line-clamp-6">
                 {person.biography}
               </p>
-            ) : null}
+            ) : (
+              <p className="text-[12px] italic text-white/30">Sem biografia disponível.</p>
+            )}
           </div>
         </section>
 
@@ -216,7 +264,7 @@ export default function PersonPageClient({
 
         {/* ── Credits ── */}
         <div className="flex flex-col gap-10">
-          <CreditsSection title="Atuações" icon={Clapperboard} items={acting} />
+          <CreditsSection title="Atuação" icon={Clapperboard} items={acting} />
 
           {acting.length > 0 && hasCrew ? (
             <div className="h-px bg-gradient-to-r from-transparent via-white/[0.05] to-transparent" />
@@ -228,11 +276,14 @@ export default function PersonPageClient({
           <CreditsSection title="Outros créditos" icon={Film} items={otherCrew} maxVisible={20} />
         </div>
 
-        {totalActing === 0 && !hasCrew ? (
+        {!hasAnyCredit ? (
           <div className="rounded-2xl border border-white/[0.06] bg-white/[0.025] px-6 py-10 text-center">
             <UserRound className="mx-auto mb-3 size-8 text-white/20" />
             <p className="text-sm font-medium text-white/40">
               Nenhum crédito encontrado no catálogo POPLOG para esta pessoa.
+            </p>
+            <p className="mt-1 text-[12px] text-white/25">
+              Os créditos podem aparecer aqui quando as fontes externas forem atualizadas.
             </p>
           </div>
         ) : null}

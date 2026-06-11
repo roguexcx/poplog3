@@ -1,6 +1,7 @@
 import Link from "next/link";
 
 import SectionHeader from "@/components/ui/SectionHeader";
+import { buildPersonHref } from "@/lib/routes/person";
 
 import type { TitleCrewMember } from "./types";
 
@@ -96,23 +97,35 @@ export default function TitleCrew({ crew, creators }: TitleCrewProps) {
               {group.label}
             </p>
             <ul className="mt-3 flex flex-col gap-1.5">
-              {group.members.slice(0, 4).map((p) => (
-                <li key={`${p.id}-${p.job}`}>
-                  <Link
-                    href={`/person/${p.id}`}
-                    className="group inline-flex items-baseline gap-2 text-[14px] leading-snug text-white/82 transition hover:text-white"
-                  >
-                    <span className="font-semibold tracking-[-0.01em] group-hover:underline group-hover:decoration-cyan-300/60 group-hover:decoration-2 group-hover:underline-offset-4">
-                      {p.name}
+              {group.members.slice(0, 4).map((p) => {
+                const href = buildPersonHref({ id: p.id });
+                const jobBadge =
+                  p.job !== group.label && p.job !== "Creator" ? (
+                    <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-white/35">
+                      {p.job}
                     </span>
-                    {p.job !== group.label && p.job !== "Creator" && (
-                      <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-white/35">
-                        {p.job}
+                  ) : null;
+                return (
+                  <li key={`${p.id}-${p.job}`}>
+                    {href ? (
+                      <Link
+                        href={href}
+                        className="group inline-flex items-baseline gap-2 text-[14px] leading-snug text-white/82 transition hover:text-white"
+                      >
+                        <span className="font-semibold tracking-[-0.01em] group-hover:underline group-hover:decoration-cyan-300/60 group-hover:decoration-2 group-hover:underline-offset-4">
+                          {p.name}
+                        </span>
+                        {jobBadge}
+                      </Link>
+                    ) : (
+                      <span className="inline-flex items-baseline gap-2 text-[14px] leading-snug text-white/82">
+                        <span className="font-semibold tracking-[-0.01em]">{p.name}</span>
+                        {jobBadge}
                       </span>
                     )}
-                  </Link>
-                </li>
-              ))}
+                  </li>
+                );
+              })}
             </ul>
           </div>
         ))}

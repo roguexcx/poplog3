@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 
 import SectionHeader from "@/components/ui/SectionHeader";
+import { buildPersonHref } from "@/lib/routes/person";
 
 import type { TitleCastMember } from "./types";
 
@@ -95,12 +96,9 @@ export default function TitleCast({ cast }: TitleCastProps) {
           ref={trackRef}
           className="-mx-1 flex gap-3 overflow-x-auto scroll-smooth px-1 pb-2 sm:gap-4 [-ms-overflow-style:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
-          {cast.map((person, i) => (
-            <Link
-              key={`${person.id}-${i}`}
-              href={`/person/${person.id}`}
-              className="group relative flex w-[120px] shrink-0 flex-col sm:w-[140px]"
-            >
+          {cast.map((person, i) => {
+            const href = buildPersonHref({ id: person.id });
+            const inner = (
               <article className="relative">
                 <div className="relative overflow-hidden rounded-[1.1rem] border border-white/[0.08] bg-white/[0.04] shadow-[0_14px_42px_rgba(0,0,0,0.36)] transition duration-300 group-hover:-translate-y-1 group-hover:border-white/[0.16] group-hover:bg-white/[0.07]">
                   <div className="relative aspect-[3/4] overflow-hidden bg-white/[0.04]">
@@ -140,8 +138,20 @@ export default function TitleCast({ cast }: TitleCastProps) {
                   )}
                 </div>
               </article>
-            </Link>
-          ))}
+            );
+
+            const className = "group relative flex w-[120px] shrink-0 flex-col sm:w-[140px]";
+
+            return href ? (
+              <Link key={`${person.id}-${i}`} href={href} className={className}>
+                {inner}
+              </Link>
+            ) : (
+              <div key={`${person.id}-${i}`} className={className}>
+                {inner}
+              </div>
+            );
+          })}
         </div>
       </div>
     </section>

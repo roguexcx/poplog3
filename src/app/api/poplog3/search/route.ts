@@ -7,10 +7,8 @@ import {
 } from "@/server/search/fuzzy-title-search";
 import {
   catalogSearch,
-  catalogSearchPeople,
   catalogSearchCompanies,
   isBalloonerismSearchEnabled,
-  type PersonSearchResult,
   type CompanySearchResult,
 } from "@/server/source-engine/engine";
 import {
@@ -18,6 +16,13 @@ import {
   resolveCatalogIdentityFields,
   type HydratedPoplogTitle,
 } from "@/server/source-engine/hydrate-catalog-results";
+import { searchEntities } from "@/server/poplog-search/searchEntities";
+import {
+  entityToLegacyTitle,
+  entityToLegacyPerson,
+  type LegacySearchPerson,
+} from "@/server/poplog-search/legacy-search-adapter";
+import type { PoplogSearchEntitiesResult } from "@/server/poplog-search/types";
 
 type SearchMediaType = "all" | "movie" | "tv";
 const TMDB_MAX_SEARCH_PAGE = 500;
@@ -48,28 +53,6 @@ function toCatalogMediaType(type: SearchMediaType): "movie" | "show" | undefined
 
 // ── Formatters ────────────────────────────────────────────────────────────────
 
-function formatPeople(people: PersonSearchResult[]) {
-  return people
-    .filter((p) => Boolean(p.name))
-    .map((p) => ({
-      // Use imdbId as id when available; fall back to name (React key only)
-      id: p.imdbId ?? p.name,
-      imdb_id: p.imdbId ?? null,
-      name: p.name,
-      profile_path: p.profilePath ?? null,
-      known_for_department: p.knownForDepartment ?? null,
-      known_for: (p.knownFor ?? []).map((kf) => ({
-        title: kf.title,
-        media_type: kf.mediaType,
-        year: kf.year ?? null,
-        poster_path: kf.posterPath ?? null,
-      })),
-      // Only linkable when we have an id the person page can use
-      href: p.imdbId ? `/person/${p.imdbId}` : null,
-    }))
-    .filter((p) => Boolean(p.href)); // drop people we can't navigate to
-}
-
 function formatCompanies(companies: CompanySearchResult[]) {
   return companies
     .filter((c) => Boolean(c.name))
@@ -80,6 +63,13 @@ function formatCompanies(companies: CompanySearchResult[]) {
       origin_country: c.originCountry ?? null,
       description: c.description ?? null,
     }));
+}
+
+/** Pessoas vêm sempre do resolver unificado (cache local + roteamento por id). */
+function peopleFromEntities(result: PoplogSearchEntitiesResult | null): LegacySearchPerson[] {
+  return (result?.grouped.people ?? [])
+    .map(entityToLegacyPerson)
+    .filter((p): p is LegacySearchPerson => p !== null);
 }
 
 /**
@@ -110,10 +100,11 @@ function deduplicateTitles(titles: HydratedPoplogTitle[]): HydratedPoplogTitle[]
 
 export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
-  const query = searchParams.get("q")?.trim();
+  const query = (searchParams.get("q") ?? searchParams.get("query"))?.trim();
   const mediaType = parseMediaType(searchParams.get("type"));
   const page = parsePage(searchParams.get("page"));
   const genre = parseGenre(searchParams.get("genre"));
+  const forceRefresh = searchParams.get("refresh") === "1";
   const debugSource = searchParams.get("debugSource") === "1";
 
   if (!query) {
@@ -123,14 +114,61 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // ── Resolver unificado: pessoas (todas as queries) + roteamento por id ─────────
+  let entitiesResult: PoplogSearchEntitiesResult | null = null;
   try {
-    // ── Balloonerismm primary path ─────────────────────────────────────────────
+    entitiesResult = await searchEntities({
+      query,
+      language: "pt-BR",
+      region: "BR",
+      forceRefresh,
+    });
+  } catch (err) {
+    console.warn(
+      "[poplog3/search] searchEntities failed:",
+      err instanceof Error ? err.message : err
+    );
+  }
+
+  const people = peopleFromEntities(entitiesResult);
+  const meta = entitiesResult?.meta ?? null;
+  const queryType = entitiesResult?.queryType ?? "text";
+
+  try {
+    // ── Query por ID (tt/nm/tmdb:/trakt:/slug:) → títulos do resolver ────────────
+    if (entitiesResult && queryType !== "text") {
+      const idTitles = [...entitiesResult.grouped.movies, ...entitiesResult.grouped.tv]
+        .filter((e) => mediaType === "all" || e.type === mediaType)
+        .map(entityToLegacyTitle);
+
+      return NextResponse.json({
+        ok: true,
+        query,
+        normalizedQuery: entitiesResult.queryNormalized,
+        type: mediaType,
+        genre,
+        page: 1,
+        totalPages: 1,
+        totalResults: idTitles.length + people.length,
+        count: idTitles.length,
+        fuzzyCount: 0,
+        peopleCount: people.length,
+        companiesCount: 0,
+        titles: idTitles,
+        people,
+        companies: [],
+        results: idTitles,
+        meta,
+        queryType,
+      });
+    }
+
+    // ── Busca textual: pipeline de hidratação (títulos ricos) ────────────────────
     if (isBalloonerismSearchEnabled() && page === 1) {
       try {
-        // Three independent searches run in parallel; each fails safely.
-        const [catalogResults, peopleResults, companyResults] = await Promise.all([
+        // Títulos + empresas em paralelo; pessoas já vieram do resolver unificado.
+        const [catalogResults, companyResults] = await Promise.all([
           catalogSearch({ query, mediaType: toCatalogMediaType(mediaType), page: 1 }).catch(() => []),
-          catalogSearchPeople(query).catch(() => [] as PersonSearchResult[]),
           catalogSearchCompanies(query).catch(() => [] as CompanySearchResult[]),
         ]);
 
@@ -164,7 +202,6 @@ export async function GET(request: NextRequest) {
           })),
         ];
 
-        const people = formatPeople(peopleResults);
         const companies = formatCompanies(companyResults);
 
         const hasResults = titleResults.length > 0 || people.length > 0 || companies.length > 0;
@@ -193,6 +230,8 @@ export async function GET(request: NextRequest) {
             companies,
             // Legacy compat alias
             results: titleResults,
+            meta,
+            queryType,
             ...(debugSource ? { debugSource: hydratedResult.debug } : {}),
           });
         }
@@ -224,25 +263,40 @@ export async function GET(request: NextRequest) {
       genre,
       page,
       totalPages: 1,
-      totalResults: results.length,
+      totalResults: results.length + people.length,
       count: results.length,
       fuzzyCount: fuzzyTitles.length,
-      peopleCount: 0,
+      peopleCount: people.length,
       companiesCount: 0,
       titles: results,
-      people: [],
+      people,
       companies: [],
       results,
+      meta,
+      queryType,
     });
   } catch (error) {
+    // Falha inesperada: resposta segura (200, arrays vazios) — não derruba a UI.
     console.error("[poplog3/search]", error);
-    return NextResponse.json(
-      {
-        ok: false,
-        error: "Failed to search titles",
-        details: error instanceof Error ? error.message : String(error),
-      },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      ok: true,
+      query,
+      normalizedQuery: normalizeSearchTerm(query),
+      type: mediaType,
+      genre,
+      page,
+      totalPages: 1,
+      totalResults: people.length,
+      count: 0,
+      fuzzyCount: 0,
+      peopleCount: people.length,
+      companiesCount: 0,
+      titles: [],
+      people,
+      companies: [],
+      results: [],
+      meta,
+      queryType,
+    });
   }
 }
