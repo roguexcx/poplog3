@@ -39,6 +39,27 @@ export type LegacySearchPerson = {
   href: string;
 };
 
+/** Departamento (Trakt/Balloonerismm vêm em inglês) → pt-BR para os cards. */
+const DEPARTMENT_LABELS_PT: Record<string, string> = {
+  acting: "Atuação",
+  directing: "Direção",
+  writing: "Roteiro",
+  production: "Produção",
+  crew: "Equipe técnica",
+  creator: "Criação",
+  sound: "Som",
+  camera: "Fotografia",
+  editing: "Edição",
+  art: "Arte",
+  "costume & make-up": "Figurino e maquiagem",
+  "visual effects": "Efeitos visuais",
+};
+
+function translateDepartment(department: string | null | undefined): string | null {
+  if (!department) return null;
+  return DEPARTMENT_LABELS_PT[department.trim().toLowerCase()] ?? department;
+}
+
 function compactExternalIds(ext: PoplogSearchEntity["externalIds"]): LegacySearchTitle["externalIds"] {
   const out: LegacySearchTitle["externalIds"] = {};
   if (ext?.tmdbId != null) out.tmdbId = ext.tmdbId;
@@ -85,7 +106,7 @@ export function entityToLegacyPerson(entity: PoplogSearchEntity): LegacySearchPe
     imdb_id: entity.externalIds?.imdbId ?? null,
     name: entity.name ?? entity.title ?? "",
     profile_path: entity.profileImage ?? null,
-    known_for_department: entity.knownForDepartment ?? null,
+    known_for_department: translateDepartment(entity.knownForDepartment),
     known_for: knownFor,
     href: entity.href,
   };

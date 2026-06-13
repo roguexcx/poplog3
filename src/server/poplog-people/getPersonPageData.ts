@@ -17,6 +17,7 @@
 
 import type { Prisma } from "@prisma/client";
 import { balloonerismGet } from "@/server/api-clients/balloonerismm/client";
+import { traktGet } from "@/server/api-clients/trakt/client";
 import type {
   BalloonerismPersonDetails,
   BalloonerismPersonCombinedCredits,
@@ -278,21 +279,110 @@ type ExternalFetchResult = {
   buckets: CreditBuckets | null;
   balloonProfileRaw: BalloonerismPersonDetails | null;
   balloonCreditsRaw: BalloonerismPersonCombinedCredits | null;
+  traktPersonRaw: unknown | null;
   sources: { trakt: boolean; balloonerismm: boolean };
 };
 
+// ─── Trakt (identidade + metadados de pessoa) ─────────────────────────────────
+
+type TraktPersonSearchItem = {
+  type?: string;
+  person?: {
+    name?: string;
+    ids?: { trakt?: number; slug?: string; imdb?: string; tmdb?: number };
+    biography?: string | null;
+    birthday?: string | null;
+    death?: string | null;
+    birthplace?: string | null;
+    known_for_department?: string | null;
+  };
+};
+
+type TraktPersonResult = {
+  name: string | null;
+  ids: { trakt: number | null; slug: string | null; imdb: string | null; tmdb: number | null };
+  biography: string | null;
+  birthday: string | null;
+  deathday: string | null;
+  placeOfBirth: string | null;
+  knownForDepartment: string | null;
+  raw: unknown;
+};
+
 /**
- * TODO(trakt-people): fonte principal planejada. Requer resolver o id canônico
- * para trakt id/slug (via /search/imdb/{nm}?type=person) e buscar
- * /people/{id}?extended=full + /people/{id}/movies|shows com traktGet.
- * Até lá retorna null e o Balloonerismm cobre o fluxo.
+ * Resolve pessoa no Trakt a partir do IMDb person id (nm...) via
+ * /search/imdb/{id}?type=person&extended=full. Trakt é a fonte principal de
+ * IDs (trakt/slug/tmdb) e preenche bio/datas quando o Balloonerismm não traz.
+ * Retorna null se não for um nm-id ou se o Trakt não responder.
  */
-async function fetchPersonFromTrakt(_id: string): Promise<{
-  person: PersonProfile;
-  buckets: CreditBuckets;
-  rawPayload: Prisma.InputJsonValue;
-} | null> {
-  return null;
+async function fetchPersonFromTrakt(id: string): Promise<TraktPersonResult | null> {
+  if (!/^nm\d+$/.test(id)) return null; // só temos lookup seguro por IMDb person id
+  const results = await traktGet<TraktPersonSearchItem[]>(`/search/imdb/${id}`, {
+    params: { type: "person", extended: "full" },
+    ttlSeconds: 86_400,
+  });
+  if (!results || results.length === 0) return null;
+  const match =
+    results.find((r) => r.person?.ids?.imdb === id)?.person ?? results[0]?.person;
+  if (!match) return null;
+  return {
+    name: match.name ?? null,
+    ids: {
+      trakt: match.ids?.trakt ?? null,
+      slug: match.ids?.slug ?? null,
+      imdb: match.ids?.imdb ?? id,
+      tmdb: match.ids?.tmdb ?? null,
+    },
+    biography: match.biography ?? null,
+    birthday: match.birthday ?? null,
+    deathday: match.death ?? null,
+    placeOfBirth: match.birthplace ?? null,
+    knownForDepartment: match.known_for_department ?? null,
+    raw: match,
+  };
+}
+
+/**
+ * Mescla os dados do Trakt no perfil base (Balloonerismm). Trakt manda nos IDs
+ * (trakt/slug/tmdb); Balloonerismm continua dono de imagem e créditos e tem
+ * prioridade em bio/datas pt-BR, com Trakt preenchendo lacunas.
+ */
+function mergeTraktIntoProfile(base: PersonProfile, trakt: TraktPersonResult): PersonProfile {
+  return {
+    ...base,
+    name: base.name || trakt.name || base.name,
+    biography: base.biography ?? trakt.biography,
+    birthday: base.birthday ?? trakt.birthday,
+    deathday: base.deathday ?? trakt.deathday,
+    placeOfBirth: base.placeOfBirth ?? trakt.placeOfBirth,
+    knownForDepartment: base.knownForDepartment ?? trakt.knownForDepartment,
+    externalIds: {
+      imdbId: base.externalIds?.imdbId ?? trakt.ids.imdb,
+      tmdbId: trakt.ids.tmdb ?? base.externalIds?.tmdbId ?? null,
+      traktId: trakt.ids.trakt ?? base.externalIds?.traktId ?? null,
+      traktSlug: trakt.ids.slug ?? base.externalIds?.traktSlug ?? null,
+    },
+  };
+}
+
+function emptyProfile(id: string, name: string | null): PersonProfile {
+  return {
+    id,
+    name: name ?? id,
+    originalName: null,
+    biography: null,
+    profileImage: null,
+    knownForDepartment: null,
+    birthday: null,
+    deathday: null,
+    placeOfBirth: null,
+    externalIds: {
+      imdbId: /^nm\d+$/.test(id) ? id : null,
+      tmdbId: null,
+      traktId: null,
+      traktSlug: null,
+    },
+  };
 }
 
 async function fetchPersonFromBalloonerismm(
@@ -318,24 +408,34 @@ async function fetchFromExternalSources(
 ): Promise<ExternalFetchResult> {
   const sources = { trakt: false, balloonerismm: false };
 
-  const trakt = await fetchPersonFromTrakt(id);
-  if (trakt) {
-    sources.trakt = true;
-    // Quando o Trakt entrar, o Balloonerismm passa a hidratação complementar.
-  }
+  // Trakt (identidade/metadados) e Balloonerismm (perfil/créditos) em paralelo;
+  // cada um falha de forma isolada e nunca derruba a página.
+  const [trakt, balloon] = await Promise.all([
+    fetchPersonFromTrakt(id).catch(() => null),
+    fetchPersonFromBalloonerismm(id, language),
+  ]);
 
-  const balloon = await fetchPersonFromBalloonerismm(id, language);
+  if (trakt) sources.trakt = true;
   if (balloon.profile) sources.balloonerismm = true;
 
-  const person = trakt?.person ?? (balloon.profile ? normalizePersonProfile(id, balloon.profile) : null);
-  const buckets =
-    trakt?.buckets ?? (balloon.credits ? buildCreditBuckets(balloon.credits) : null);
+  let person: PersonProfile | null = null;
+  if (balloon.profile) {
+    person = normalizePersonProfile(id, balloon.profile);
+    if (trakt) person = mergeTraktIntoProfile(person, trakt);
+  } else if (trakt) {
+    // Balloonerismm fora: monta perfil mínimo a partir do Trakt (sem imagem).
+    person = mergeTraktIntoProfile(emptyProfile(id, trakt.name), trakt);
+  }
+
+  // Créditos seguem sendo do Balloonerismm (Trakt não é consultado para créditos).
+  const buckets = balloon.credits ? buildCreditBuckets(balloon.credits) : null;
 
   return {
     person,
     buckets,
     balloonProfileRaw: balloon.profile,
     balloonCreditsRaw: balloon.credits,
+    traktPersonRaw: trakt?.raw ?? null,
     sources,
   };
 }
@@ -371,6 +471,7 @@ async function persistToCache(input: {
   buckets: CreditBuckets;
   balloonProfileRaw: BalloonerismPersonDetails | null;
   balloonCreditsRaw: BalloonerismPersonCombinedCredits | null;
+  traktPersonRaw: unknown | null;
   sources: { trakt: boolean; balloonerismm: boolean };
   language: string;
   region: string;
@@ -393,6 +494,9 @@ async function persistToCache(input: {
       payload: person as unknown as Prisma.InputJsonValue,
       balloonPayload: input.balloonProfileRaw
         ? (input.balloonProfileRaw as unknown as Prisma.InputJsonValue)
+        : undefined,
+      traktPayload: input.traktPersonRaw
+        ? (input.traktPersonRaw as Prisma.InputJsonValue)
         : undefined,
       language: input.language,
       region: input.region,
@@ -467,6 +571,7 @@ export async function getPersonPageData(input: {
         buckets,
         balloonProfileRaw: external.balloonProfileRaw,
         balloonCreditsRaw: external.balloonCreditsRaw,
+        traktPersonRaw: external.traktPersonRaw,
         sources: external.sources,
         language,
         region,
