@@ -12,33 +12,13 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { AVAILABILITY_UNAVAILABLE } from "@/server/source-engine/normalizers/normalize-availability";
-import { getAvailability } from "@/server/cache/availability-cache";
 import { resolvePoplogTitleIdentity } from "@/server/titles/poplog-title-identity";
-import { getBalloonerismWatchProviders } from "@/server/titles/balloonerismm-providers";
-import type { TitleProvider } from "@/features/title/types";
+import { getTitleAvailabilityWithDebug } from "@/server/availability";
 
 type MediaType = "movie" | "tv";
 
 function normalizeMediaType(value: string | null): MediaType | null {
   return value === "movie" || value === "tv" ? value : null;
-}
-
-function groupTitleProviders(providers: TitleProvider[]) {
-  const grouped = {
-    flatrate: [] as TitleProvider[],
-    rent:     [] as TitleProvider[],
-    buy:      [] as TitleProvider[],
-    ads:      [] as TitleProvider[],
-    free:     [] as TitleProvider[],
-  };
-  for (const p of providers) {
-    if (p.type === "streaming") grouped.flatrate.push(p);
-    else if (p.type === "rent")  grouped.rent.push(p);
-    else if (p.type === "buy")   grouped.buy.push(p);
-    else if (p.type === "ads")   grouped.ads.push(p);
-    else if (p.type === "free")  grouped.free.push(p);
-  }
-  return grouped;
 }
 
 export async function GET(request: NextRequest) {
@@ -47,6 +27,12 @@ export async function GET(request: NextRequest) {
   const region = (searchParams.get("region") ?? "BR").toUpperCase();
   const mediaType = normalizeMediaType(searchParams.get("media_type"));
   const debugSource = searchParams.get("debugSource") === "1";
+  const debug = searchParams.get("debug") === "1";
+  // Opção SÓ-dev: ignora a sentinela negativa do cache e força Balloonerismm + fallback
+  // JustWatch. Em produção é ignorada (segurança). Útil para depurar disponibilidade live.
+  const forceLive =
+    process.env.NODE_ENV !== "production" &&
+    (searchParams.get("force_live") === "1" || searchParams.get("bypass_negative_cache") === "1");
 
   if (!id || !mediaType) {
     return NextResponse.json(
@@ -69,61 +55,49 @@ export async function GET(request: NextRequest) {
     : identity.externalIds.balloonerismmId ? "balloonerismm_id"
     : identity.externalIds.slug ? "slug" : "input";
 
-  let providers: TitleProvider[] = [];
-  let providerSource = "not_configured";
+  // Camada global de disponibilidade — mesma usada por Biblioteca/Home/Title page.
+  const { summary: availability, debug: availabilityDebug } = await getTitleAvailabilityWithDebug({
+    mediaType,
+    imdbId: imdbId ?? null,
+    tmdbId: tmdbId ?? null,
+    traktId: identity.externalIds.traktId ?? null,
+    region,
+    // Título/ano para o fallback experimental JustWatch (busca por título).
+    title: identity.title ?? null,
+    year: identity.year ?? null,
+    // force_live/bypass_negative_cache (só-dev): ignora sentinela __none__ fresca.
+    bypassNegativeCache: forceLive,
+  });
 
-  // ── Fonte primária: Balloonerismm ──────────────────────────────────────────
-  if (imdbId) {
-    try {
-      providers = await getBalloonerismWatchProviders(imdbId, mediaType, region);
-      if (providers.length > 0) providerSource = "balloonerismm";
-    } catch {
-      providers = [];
-    }
+  const grouped = availability.providers;
+  const providerSource = availability.source;
+  const hasData = availability.status.isAvailableSomewhere;
+
+  // Modo debug: trace completo da resolução (IMDb→endpoint, cache, outcome, contagens).
+  if (debug) {
+    return NextResponse.json({
+      ok: true,
+      input: { id, mediaType, region },
+      resolved: {
+        ...availabilityDebug.resolved,
+        identityImdbId: imdbId ?? null,
+        identityTmdbId: tmdbId ?? null,
+        traktId: identity.externalIds.traktId ?? null,
+        balloonerismmId: identity.externalIds.balloonerismmId ?? null,
+        poplogId: identity.poplogId ?? null,
+      },
+      cache: availabilityDebug.cache,
+      forceLive,
+      providerRequest: availabilityDebug.providerRequest,
+      result: availabilityDebug.result,
+      // Trace claro do fallback experimental JustWatch (enabled/attempted/outcome/match/etc.).
+      justwatch: availabilityDebug.justwatch,
+      providerSource,
+      state: availability.state,
+      status: availability.status,
+      errors: availabilityDebug.errors,
+    });
   }
-
-  // ── Fallback: cache local ──────────────────────────────────────────────────
-  if (providers.length === 0) {
-    try {
-      if (tmdbId) {
-        const rows = await getAvailability(mediaType, tmdbId, region).catch(() => []);
-        if (rows.length > 0) {
-          providers = rows.map((row) => ({
-            name: row.provider_name,
-            logoUrl: null,
-            type: (row.availability_type === "streaming" ? "streaming" : row.availability_type) as TitleProvider["type"],
-            source: row.source,
-            country: row.country,
-            deepLink: row.deep_link,
-            quality: row.quality,
-          }));
-          providerSource = rows[0]?.source ?? "local";
-        }
-      } else if (imdbId) {
-        const local = await import("@/server/local-services/catalog-availability-local.service");
-        const localRows = await local.listAvailability({
-          imdbId,
-          mediaType,
-          providerRegion: region,
-        });
-        if (localRows.length > 0) {
-          providers = localRows.map((r) => ({
-            name: r.provider_name,
-            logoUrl: r.provider_logo_url ?? null,
-            type: (r.provider_type === "subscription" ? "streaming" : r.provider_type) as TitleProvider["type"],
-            source: r.source,
-            country: r.provider_region,
-          }));
-          providerSource = localRows[0]?.source ?? "local";
-        }
-      }
-    } catch {
-      // ignora — retorna vazio abaixo
-    }
-  }
-
-  const grouped = groupTitleProviders(providers);
-  const hasData = providers.length > 0;
 
   return NextResponse.json({
     ok: true,
@@ -135,6 +109,8 @@ export async function GET(request: NextRequest) {
     dataSource: hasData ? "balloonerismm" : "source_engine_unavailable",
     ...(hasData ? { available: true } : AVAILABILITY_UNAVAILABLE),
     providers: grouped,
+    status: availability.status,
+    state: availability.state,
     providerSource,
     usedTmdbApi: false,
     sourceIdUsed,

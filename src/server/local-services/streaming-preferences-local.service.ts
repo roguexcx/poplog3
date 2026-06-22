@@ -22,7 +22,6 @@ export async function listActiveStreamingProviders(country = "BR"): Promise<Stre
     where: {
       country,
       isActive: true,
-      tmdbProviderId: { not: null },
     },
     orderBy: { name: "asc" },
   });

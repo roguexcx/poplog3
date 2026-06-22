@@ -432,7 +432,7 @@ export default function AcompanhandoPage() {
         const aMinutes = a.remaining_minutes;
         const bMinutes = b.remaining_minutes;
 
-        // "Mais fáceis": menor tempo para terminar a temporada atual do título.
+        // "Por Temporada": menor tempo para terminar a temporada atual do título.
         if (aMinutes != null && bMinutes != null) {
           return (
             aMinutes - bMinutes ||
@@ -586,7 +586,7 @@ export default function AcompanhandoPage() {
                           : "text-white/45 hover:text-white/70",
                       ].join(" ")}
                     >
-                      Mais fáceis
+                      Por Temporada
                     </button>
                     <button
                       type="button"

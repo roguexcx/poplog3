@@ -4,6 +4,7 @@ import {
   runPremiumApiQueued,
 } from "@/server/rate-limits/premium-api-budget";
 import { debugLog, rateLimitedWarn } from "@/server/logging/log-control";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
 
 export type LeavingAvailabilityItem = {
   id: number;
@@ -118,7 +119,11 @@ export async function getLeavingSoonAvailabilityEvents(input?: {
       items.push({
         id: tmdbId,
         media_type: show.showType === "movie" ? "movie" : "tv",
-        title: show.title ?? `Título ${tmdbId}`,
+        title: resolveDisplayTitle({
+          title: show.title,
+          tmdbId,
+          mediaType: show.showType === "movie" ? "movie" : "tv",
+        }),
         poster_url: show.imageSet?.verticalPoster?.w360 ?? show.imageSet?.verticalPoster?.w240 ?? null,
         backdrop_url: show.imageSet?.horizontalBackdrop?.w720 ?? null,
         platform_name: change.service?.name ?? change.service?.id ?? "Streaming",

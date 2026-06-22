@@ -6,33 +6,14 @@
  * quanto pela route handler /api/poplog3/titles/[mediaType]/[id].
  */
 
-import type { AvailabilityProvider } from "@/server/streaming/availability-service";
-import {
-  availabilityStateFromTitle,
-  isValidSeason,
-  type TitleAvailabilityState,
-} from "@/lib/series";
-import { resolveRuntimeByMediaType } from "@/lib/runtime";
 import { getCurrentUser } from "@/server/auth/get-current-user";
-import { getExternalIds } from "@/server/cache/external-ids-cache";
 import { computeUserSeriesProgress } from "@/server/episodes/episode-progress-service";
-import {
-  getUserKnownTitleIds,
-  readTitleState,
-} from "@/server/state/user-title-state";
-import { getUserLibrary } from "@/server/library/library-service";
-import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
-import { getAvailabilityForDisplay } from "@/server/streaming/title-availability";
+import { readTitleState } from "@/server/state/user-title-state";
+import { getUserLibraryIdentifiers } from "@/server/library/library-service";
 import { withOrigin } from "@/server/engine-logger";
-import type { TmdbPayloadWithWatch } from "@/server/sync/sync-availability";
-import { findOfficialTrailerOnYouTube } from "@/server/trailers/youtube-trailer";
-import { getSeriesEpisodeRuntimes } from "@/server/runtime/series-episode-runtimes";
-import { rankRecommendationsByEditorialOrigin } from "@/server/recommendations/editorial-origin-ranker";
-import { getGeneralIndex } from "@/lib/ratings/general-index";
-import { getTitleFeedbackState, getUserFeedbackMap, type UserFeedbackMap } from "@/lib/personalization/feedback";
-import type { PoplogTitleDetails } from "@/server/types/title-details";
 import type { TitlePageData, TitleProvider, TitleSeasonInfo, TitleMetadataBlock } from "@/features/title/types";
-import type { UserRatingData } from "@/types/user";
+import { availabilityStateFromTitle } from "@/lib/series";
+import { attachBestProvider } from "@/server/availability/attach-best-provider";
 import { getUserRating } from "@/server/ratings/user-rating-service";
 import { getPublicRating } from "@/server/ratings/rating-aggregate-service";
 import { buildTmdbRawUrl } from "@/lib/images/url";
@@ -42,7 +23,7 @@ import {
   type PoplogTitleDetailsResult,
 } from "@/server/titles/poplog-title-details";
 import type { PoplogTitleSourceHint } from "@/server/titles/poplog-title-identity";
-import { traktAdapter, getTraktShowEnrichment, getTraktMovieEnrichment } from "@/server/source-engine/adapters/trakt-adapter";
+import { getTraktShowEnrichment, getTraktMovieEnrichment } from "@/server/source-engine/adapters/trakt-adapter";
 import {
   fetchBalloonerismForSeed,
   mergeBalloonCandidates,
@@ -68,20 +49,6 @@ import { hydrateSeriesEpisodesFromSources } from "@/server/source-engine/series-
 
 type MediaType = "movie" | "tv";
 
-function tmdbImage(path: string | null | undefined, size: string) {
-  return buildTmdbRawUrl(size, path);
-}
-
-function hasDetailFields(
-  title: PoplogTitleDetails | Record<string, unknown>,
-): title is PoplogTitleDetails {
-  return (
-    typeof title === "object" &&
-    title !== null &&
-    ("cast" in title || "recommendations" in title || "runtime" in title)
-  );
-}
-
 function uniqueNames(names: Array<string | null | undefined>, limit = 4) {
   return Array.from(
     new Set(
@@ -92,75 +59,29 @@ function uniqueNames(names: Array<string | null | undefined>, limit = 4) {
   ).slice(0, limit);
 }
 
-function filterValidSeasons(
-  seasons: PoplogTitleDetails["seasons"] | undefined,
-) {
-  if (!seasons || seasons.length === 0) return [];
-  return seasons
-    .filter(isValidSeason)
-    .sort((a, b) => a.season_number - b.season_number);
-}
-
+/**
+ * Providers para a title page — delega à camada GLOBAL de disponibilidade.
+ * Mantém UMA única fonte de verdade (Balloonerismm → cache persistente → local legado),
+ * a mesma usada pela Biblioteca, Home, Busca e demais grids.
+ */
 async function getProvidersFromCache(
   mediaType: MediaType,
   tmdbId: number | undefined,
   imdbId: string | undefined,
   country: string,
+  releaseDate?: string | null,
+  firstAirDate?: string | null,
 ): Promise<TitleProvider[]> {
-  const region = country.toUpperCase() || "BR";
-
-  // Fonte primária: Balloonerismm /watch/providers (ao vivo, cache de processo 1h)
-  if (imdbId) {
-    try {
-      const { getBalloonerismWatchProviders } = await import("@/server/titles/balloonerismm-providers");
-      const providers = await getBalloonerismWatchProviders(
-        imdbId,
-        mediaType as "movie" | "tv",
-        region,
-      );
-      if (providers.length > 0) return providers;
-    } catch {
-      // fallthrough para cache local
-    }
-  }
-
-  // Fallback: cache local (dados TMDB/Watchmode/MOTN já sincronizados)
-  try {
-    if (tmdbId) {
-      const { getAvailability } = await import("@/server/cache/availability-cache");
-      const rows = await getAvailability(mediaType, tmdbId, country);
-      if (rows.length > 0) {
-        return rows.map((row) => ({
-          name: row.provider_name,
-          logoUrl: null,
-          type: (row.availability_type === "streaming" ? "streaming" : row.availability_type) as TitleProvider["type"],
-          source: row.source,
-          country: row.country,
-          deepLink: row.deep_link,
-          quality: row.quality,
-        }));
-      }
-    }
-    if (imdbId) {
-      const local = await import("@/server/local-services/catalog-availability-local.service");
-      const rows = await local.listAvailability({
-        imdbId,
-        mediaType: mediaType as "movie" | "tv",
-        providerRegion: country,
-      });
-      return rows.map((row) => ({
-        name: row.provider_name,
-        logoUrl: row.provider_logo_url ?? null,
-        type: (row.provider_type === "subscription" ? "streaming" : row.provider_type) as TitleProvider["type"],
-        source: row.source,
-        country: row.provider_region,
-      }));
-    }
-  } catch {
-    // ignora
-  }
-
-  return [];
+  const { resolveTitleProviders } = await import("@/server/availability");
+  const { providers } = await resolveTitleProviders({
+    mediaType: mediaType as "movie" | "tv",
+    imdbId: imdbId ?? null,
+    tmdbId: tmdbId ?? null,
+    region: country.toUpperCase() || "BR",
+    releaseDate: releaseDate ?? null,
+    firstAirDate: firstAirDate ?? null,
+  });
+  return providers;
 }
 
 async function getSeasonSummariesFromDb(
@@ -484,7 +405,16 @@ function poplogDetailsToTitlePageData(
     voteAverage: details.voteAverage ?? null,
     genres: details.genres ?? [],
     status: details.status ?? null,
-    availabilityState: "unknown",
+    // P6: deriva o estado de lançamento REAL (filme: released/coming-soon; série:
+    // finished/in-season/episode-available/awaiting-next-season/coming-soon) a partir de
+    // mediaType + datas + status de produção — em vez do "unknown" hard-coded.
+    availabilityState: availabilityStateFromTitle({
+      media_type: details.mediaType,
+      first_air_date: details.mediaType === "tv" ? details.releaseDate ?? null : null,
+      last_air_date: details.lastAirDate ?? null,
+      release_date: details.mediaType === "movie" ? details.releaseDate ?? null : null,
+      status: details.status ?? null,
+    }),
     certification: null,
     trailer: trailerVideo
       ? {
@@ -601,12 +531,21 @@ async function getUnifiedRelated({
 
   return merged.map((c): CatalogSearchResult => {
     const resolved = imdbToTmdb.get(c.imdbId);
+    // mediaType POR CANDIDATO: confia no registro local (resolvido por imdbId) quando
+    // existir, não no mediaType da seed. Um candidato TV não pode herdar "movie" da seed,
+    // senão o link da recomendação aponta para /title/movie/<id> e a página não resolve.
+    const resolvedMediaType: "movie" | "show" =
+      resolved?.mediaType === "tv"
+        ? "show"
+        : resolved?.mediaType === "movie"
+          ? "movie"
+          : mediaType;
     return {
       ids: {
         imdbId:  c.imdbId,
         tmdbId:  resolved?.tmdbId ?? undefined,
       },
-      mediaType,
+      mediaType: resolvedMediaType,
       title:       c.title,
       year:        c.year ? (parseInt(c.year, 10) || undefined) : undefined,
       overview:    c.overview   ?? undefined,
@@ -751,23 +690,16 @@ async function filterRelatedOutsideUserLibrary(
 ): Promise<CatalogSearchResult[]> {
   if (!userId || related.length === 0) return related;
 
-  const library = await getUserLibrary(userId).catch((err) => {
+  // Leitura mínima de identificadores — NÃO hidrata disponibilidade nem busca
+  // títulos faltantes em APIs externas. Evita disparar a hidratação em lote da
+  // biblioteca inteira (e o cooldown do Balloonerismm) a cada página de título.
+  const { tmdbKeys: knownByTmdb, imdbKeys: knownByImdb } = await getUserLibraryIdentifiers(
+    userId,
+  ).catch((err) => {
     console.warn("[getTitlePageData] user library recommendation filter erro:", (err as Error)?.message);
-    return [];
+    return { tmdbKeys: new Set<string>(), imdbKeys: new Set<string>() };
   });
-  if (library.length === 0) return related;
-
-  // Exclusão por tmdbId (inclui abandonados — todos os status bloqueiam resultados)
-  const knownByTmdb = new Set(
-    library.map((item) => `${item.media_type}:${item.tmdb_id}`),
-  );
-  // Exclusão por imdbId: cobre itens Balloon-only (sem tmdbId real na recomendação)
-  // quando o usuário salvou o mesmo título com tmdbId positivo real.
-  const knownByImdb = new Set(
-    library
-      .filter((item) => item.imdb_id)
-      .map((item) => `${item.media_type}:${item.imdb_id}`),
-  );
+  if (knownByTmdb.size === 0 && knownByImdb.size === 0) return related;
 
   let removed = 0;
   const filtered = related.filter((item) => {
@@ -845,7 +777,7 @@ function buildTmdbFallbackBlockedPageData({
 export async function getTitlePageData(
   options: GetTitlePageDataOptions,
 ): Promise<TitlePageData | null> {
-  const { mediaType, id, sourceHint = "auto", force = false, country = "BR", debugSource = false } = options;
+  const { mediaType, id, sourceHint = "auto", country = "BR", debugSource = false } = options;
 
   if (mediaType !== "movie" && mediaType !== "tv") return null;
   const requestedId = String(id).trim();
@@ -858,8 +790,6 @@ export async function getTitlePageData(
         id: requestedId,
         sourceHint,
       });
-
-      const legacyTmdbId = poplogDetails?.externalIds.tmdbId;
 
       if (poplogDetails && poplogDetails.sourceMeta.primarySource !== "legacy") {
         const base = poplogDetailsToTitlePageData(poplogDetails, country);
@@ -879,7 +809,7 @@ export async function getTitlePageData(
 
         const [currentUser, providers, relatedRaw, seriesCanonical, traktEnrichment] = await Promise.all([
           getCurrentUser().catch(() => null),
-          getProvidersFromCache(resolvedMediaType, tmdbId, imdbId, country),
+          getProvidersFromCache(resolvedMediaType, tmdbId, imdbId, country, base.releaseDate, base.firstAirDate),
           getUnifiedRelated({
             mediaType: catalogMediaType,
             imdbId,
@@ -1042,9 +972,17 @@ export async function getTitlePageData(
         const relatedWithPtBrTitles = await enrichRelatedWithPtBrTitles(relatedOutsideLibrary);
         const relatedWithImages = await enrichRelatedWithLocalImages(relatedWithPtBrTitles);
 
-        const recommendations: TitleRecommendation[] = relatedWithImages
-          .slice(0, 12)
-          .map(recommendationFromCatalogResult);
+        // P7: badge de disponibilidade nas recomendações ("Mais como este") via fluxo
+        // canônico (cacheOnly — não atrasa o load da title page; aquece os frios).
+        const recommendations: TitleRecommendation[] = await attachBestProvider(
+          relatedWithImages.slice(0, 12).map(recommendationFromCatalogResult),
+          {
+            block: "title-related",
+            getMediaType: (r) => r.mediaType,
+            getTmdbId: (r) => r.tmdbId ?? null,
+            getImdbId: (r) => r.imdbId ?? null,
+          },
+        );
 
         // Log de entrega: breakdown por fonte nos itens finais
         const recTraktOnly   = recommendations.filter((r) => r.tmdbId && r.tmdbId > 0 && !r.imdbId).length;
@@ -1163,12 +1101,8 @@ export async function getTitlePageData(
       if (fallbackBlockedPageData) {
         return fallbackBlockedPageData;
       }
-      if (!legacyTmdbId) {
-        return null;
-      }
-
-      const id = legacyTmdbId;
-      return null; // TMDB legacy fallback removed
+      // TMDB legacy fallback removido — sem id legado resolvível, não há página.
+      return null;
     } catch (error) {
       console.error("[getTitlePageData] erro:", error);
       return null;

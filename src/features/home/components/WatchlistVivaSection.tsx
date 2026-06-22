@@ -195,6 +195,8 @@ function WatchlistCard({
   const mainProvider     = flatrateProvider ?? rentProvider ?? buyProvider ?? null;
   const providerTypeLabel = flatrateProvider ? null : rentProvider ? "Alugar" : buyProvider ? "Comprar" : null;
   const badge        = STATUS_BADGE[item.stream_status];
+  // Sem provider, só exibimos estados temporais confiáveis — evita o falso "Indisponível no BR".
+  const showTemporalBadge = item.stream_status === "cinemas" || item.stream_status === "chegando";
   const isMovie      = item.media_type === "movie";
   const THIS_YEAR    = String(new Date().getFullYear());
   const showYear     = item.year && item.year !== THIS_YEAR;
@@ -263,7 +265,10 @@ function WatchlistCard({
                   {providerTypeLabel ? `${providerTypeLabel} · ${mainProvider.name}` : mainProvider.name}
                 </span>
               </div>
-            ) : (
+            ) : showTemporalBadge ? (
+              // Sem provider: só exibimos estados TEMPORAIS confiáveis (Nos cinemas / Chegando).
+              // NUNCA o falso "Indisponível no BR" — a cobertura BR da fonte é incompleta e
+              // ausência de provider ≠ indisponível. Idem para o "Disponível" sem logo.
               <div className={[
                 "absolute bottom-2.5 left-2.5 z-20 rounded-[5px] border px-[7px] py-[2px]",
                 "text-[9px] font-bold uppercase tracking-[0.08em] backdrop-blur-[8px]",
@@ -271,7 +276,7 @@ function WatchlistCard({
               ].join(" ")}>
                 {badge.label}
               </div>
-            )}
+            ) : null}
 
             {(item._slot === "recent" || item._slot === "old") && (
               <div className="absolute right-2.5 top-2.5 z-20 rounded-full border border-white/[0.18] bg-black/[0.82] px-2 py-[3px] backdrop-blur-[10px]">

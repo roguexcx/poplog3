@@ -185,22 +185,24 @@ async function main() {
     cacheVersion: "local-services-smoke",
   }));
 
-  await continuitySectionCacheLocalService.writeContinuitySectionCache({
+  // Usa o usuário semeado (smokeUserId) — continuity_section_cache.user_id é FK para
+  // users(id), então escrever com um userId inexistente viola a constraint. E o
+  // resultado da escrita é asseverado (writeContinuitySectionCache agora retorna ok).
+  await assertBoolean("continuity cache write", await continuitySectionCacheLocalService.writeContinuitySectionCache({
     sectionKey: "local-services-smoke",
-    userId: continuityUserId,
+    userId: smokeUserId,
     region: "BR",
     language: "pt-BR",
     payload: { ok: true },
     ttlMs: 60_000,
-  });
-  console.log("[smoke:services] continuity cache write: ok");
+  }));
   await assertValue("continuity cache read", await continuitySectionCacheLocalService.readContinuitySectionCache("local-services-smoke", {
-    userId: continuityUserId,
+    userId: smokeUserId,
     region: "BR",
     language: "pt-BR",
   }));
   await assertBoolean("continuity cache invalidate", await continuitySectionCacheLocalService.invalidateContinuitySectionCacheLocal({
-    userId: continuityUserId,
+    userId: smokeUserId,
     sectionKey: "local-services-smoke",
   }));
 

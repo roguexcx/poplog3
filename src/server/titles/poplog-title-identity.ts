@@ -136,21 +136,31 @@ function identityFromRow(
   };
 }
 
+const POPLOG_TITLE_SELECT = {
+  id: true,
+  tmdbId: true,
+  traktId: true,
+  imdbId: true,
+  slug: true,
+  mediaType: true,
+  title: true,
+  originalTitle: true,
+  year: true,
+} as const;
+
 async function findByPoplogId(mediaType: MediaType, id: string) {
-  return db.poplog3Title.findFirst({
-    where: { id, mediaType },
-    select: {
-      id: true,
-      tmdbId: true,
-      traktId: true,
-      imdbId: true,
-      slug: true,
-      mediaType: true,
-      title: true,
-      originalTitle: true,
-      year: true,
-    },
-  }).catch(() => null);
+  const exact = await db.poplog3Title
+    .findFirst({ where: { id, mediaType }, select: POPLOG_TITLE_SELECT })
+    .catch(() => null);
+  if (exact) return exact;
+
+  // O poplogId (CUID) é globalmente único, independente do mediaType. Se o mediaType
+  // do path não bate (ex.: link de recomendação com mediaType errado), resolve pelo id
+  // sozinho — a página adapta para o mediaType real do registro. Evita cair no fallback
+  // de slug, que renderizaria o próprio CUID como título (página quebrada).
+  return db.poplog3Title
+    .findFirst({ where: { id }, select: POPLOG_TITLE_SELECT })
+    .catch(() => null);
 }
 
 async function findByTmdbId(mediaType: MediaType, tmdbId: number) {
@@ -288,7 +298,25 @@ export async function resolvePoplogTitleIdentity({
           )
           .catch(() => {});
       }
+      // Se a re-resolução por imdb não achou linha local (ex.: mapeamento de IDs
+      // externos ausente), recorre à própria linha sintética pelo tmdbId negativo
+      // — garante que a página carregue sempre que a linha existir no banco.
+      if (!resolved.poplogId) {
+        const localRow = await findByTmdbId(mediaType, n);
+        if (localRow) {
+          return enrichIdentity(
+            identityFromRow(localRow as TitleRow, "tmdb_id", 0.9, { tmdbId: n }),
+          );
+        }
+      }
       return resolved;
+    }
+    // Sem imdb derivável: tenta a linha local pelo tmdbId sintético.
+    const localRow = await findByTmdbId(mediaType, n);
+    if (localRow) {
+      return enrichIdentity(
+        identityFromRow(localRow as TitleRow, "tmdb_id", 0.9, { tmdbId: n }),
+      );
     }
   }
 

@@ -6,6 +6,7 @@ import {
   formatRemainingRuntimeLabel,
 } from "@/lib/domain-labels";
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import {
   scheduleContinuitySeasonRefresh,
   scheduleContinuityTitleRefresh,
@@ -59,6 +60,10 @@ export type ContinueItem = {
   season_watched: number;
   /** Total de episódios na temporada atual — de title_seasons; null se não sincronizado */
   season_total: number | null;
+  /** Badge de disponibilidade (Onde assistir) — mesmo contrato do card da Watchlist. */
+  best_provider_name?: string | null;
+  best_provider_type?: string | null;
+  best_provider_logo?: string | null;
 };
 
 type StateRow = {
@@ -72,6 +77,9 @@ type StateRow = {
   next_episode_air_date: string | null;
   last_watched_at: string | null;
   last_event_at: string;
+  best_provider_name: string | null;
+  best_provider_type: string | null;
+  best_provider_logo: string | null;
 };
 
 type TitleRow = {
@@ -219,7 +227,12 @@ async function buildLocalContinueItems(userId: string): Promise<NextResponse> {
       return {
         content_id: `tv-${state.tmdb_id}`,
         tmdb_id: state.tmdb_id,
-        title: title.title ?? title.original_title ?? `Série ${state.tmdb_id}`,
+        title: resolveDisplayTitle({
+          title: title.title,
+          originalTitle: title.original_title,
+          tmdbId: state.tmdb_id,
+          mediaType: "tv",
+        }),
         original_title: title.original_title ?? null,
         poster_path: title.poster_path ?? null,
         backdrop_path: title.backdrop_path ?? null,
@@ -243,6 +256,9 @@ async function buildLocalContinueItems(userId: string): Promise<NextResponse> {
         runtime_label: runtimeLabel,
         season_watched: state.next_episode - 1,
         season_total: seasonTotal,
+        best_provider_name: state.best_provider_name ?? null,
+        best_provider_type: state.best_provider_type ?? null,
+        best_provider_logo: state.best_provider_logo ?? null,
       };
     });
     markStage("response_build");

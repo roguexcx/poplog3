@@ -56,9 +56,18 @@ function logEngineSummary(entry: EngineLogEntry): void {
 
 function isNonFatalAdapterFailure(entry: EngineLogEntry): boolean {
   const reason = String(entry.error ?? entry.httpStatus ?? "").toLowerCase();
+  if (entry.api !== "balloonerismm") return false;
+  // Expected/recoverable failures that must NOT pollute the error channel:
+  //   - rate_limited / rate_limited_429: token bucket or HTTP 429 — handled via cooldown + stale cache
+  //   - cooldown_active: path already cooling down, request intentionally skipped
+  //   - timeout / abort: network-level transient failure
+  //   - 404: título não encontrado na fonte (normal para títulos raros ou sem cobertura BR)
   return (
-    entry.api === "balloonerismm" &&
-    (reason.includes("timeout") || reason.includes("abort") || entry.httpStatus === 404)
+    reason.includes("rate_limited") ||
+    reason.includes("cooldown_active") ||
+    reason.includes("timeout") ||
+    reason.includes("abort") ||
+    entry.httpStatus === 404
   );
 }
 

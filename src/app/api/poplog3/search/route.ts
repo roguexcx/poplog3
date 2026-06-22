@@ -17,6 +17,7 @@ import {
   type HydratedPoplogTitle,
 } from "@/server/source-engine/hydrate-catalog-results";
 import { searchEntities } from "@/server/poplog-search/searchEntities";
+import { attachBestProvider } from "@/server/availability/attach-best-provider";
 import {
   entityToLegacyTitle,
   entityToLegacyPerson,
@@ -26,6 +27,25 @@ import type { PoplogSearchEntitiesResult } from "@/server/poplog-search/types";
 
 type SearchMediaType = "all" | "movie" | "tv";
 const TMDB_MAX_SEARCH_PAGE = 500;
+
+/**
+ * P7: anexa disponibilidade (best_provider_*) aos resultados de busca via fluxo canônico.
+ * cacheOnly (busca é alta frequência → não disparar fetch ao vivo por tecla): reaproveita
+ * o cache global e aquece em background os títulos frios. Nunca bloqueia a resposta.
+ */
+async function withSearchAvailability<
+  T extends { tmdb_id: number; media_type: string },
+>(titles: T[]) {
+  return attachBestProvider(titles, {
+    block: "search",
+    getMediaType: (t) => (t.media_type === "tv" ? "tv" : "movie"),
+    getTmdbId: (t) => t.tmdb_id,
+    getImdbId: (t) =>
+      (t as { externalIds?: { imdbId?: string } }).externalIds?.imdbId ??
+      (t as { imdb_id?: string }).imdb_id ??
+      null,
+  });
+}
 
 function parseMediaType(value: string | null): SearchMediaType {
   if (value === "movie" || value === "tv") return value;
@@ -141,6 +161,8 @@ export async function GET(request: NextRequest) {
         .filter((e) => mediaType === "all" || e.type === mediaType)
         .map(entityToLegacyTitle);
 
+      const idTitlesWithAvail = await withSearchAvailability(idTitles);
+
       return NextResponse.json({
         ok: true,
         query,
@@ -154,10 +176,10 @@ export async function GET(request: NextRequest) {
         fuzzyCount: 0,
         peopleCount: people.length,
         companiesCount: 0,
-        titles: idTitles,
+        titles: idTitlesWithAvail,
         people,
         companies: [],
-        results: idTitles,
+        results: idTitlesWithAvail,
         meta,
         queryType,
       });
@@ -211,6 +233,8 @@ export async function GET(request: NextRequest) {
             `[poplog3/search] source=balloonerismm titles=${titleResults.length} people=${people.length} companies=${companies.length} fuzzy=${fuzzyTitles.length}`
           );
 
+          const titleResultsWithAvail = await withSearchAvailability(titleResults);
+
           return NextResponse.json({
             ok: true,
             query,
@@ -225,11 +249,11 @@ export async function GET(request: NextRequest) {
             peopleCount: people.length,
             companiesCount: companies.length,
             // Structured entities (new)
-            titles: titleResults,
+            titles: titleResultsWithAvail,
             people,
             companies,
             // Legacy compat alias
-            results: titleResults,
+            results: titleResultsWithAvail,
             meta,
             queryType,
             ...(debugSource ? { debugSource: hydratedResult.debug } : {}),
@@ -255,6 +279,8 @@ export async function GET(request: NextRequest) {
       ),
     }));
 
+    const resultsWithAvail = await withSearchAvailability(results);
+
     return NextResponse.json({
       ok: true,
       query,
@@ -268,10 +294,10 @@ export async function GET(request: NextRequest) {
       fuzzyCount: fuzzyTitles.length,
       peopleCount: people.length,
       companiesCount: 0,
-      titles: results,
+      titles: resultsWithAvail,
       people,
       companies: [],
-      results,
+      results: resultsWithAvail,
       meta,
       queryType,
     });

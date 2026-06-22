@@ -2,6 +2,12 @@ import Link from "next/link";
 import type { ReactNode } from "react";
 
 import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
+import {
+  friendlyTitlePlaceholder,
+  sanitizeDisplayTitle,
+  type MediaTypeLike,
+  type TitleTechnicalIds,
+} from "@/lib/titles/display-title";
 
 type ProgressCardProps = {
   /** Título principal (nome da série/filme) */
@@ -24,6 +30,10 @@ type ProgressCardProps = {
   /** Slot tag (StatusBadge geralmente) */
   badge?: ReactNode;
   className?: string;
+  /** Contexto opcional p/ placeholder amigável caso o título seja um ID. */
+  mediaType?: MediaTypeLike;
+  /** IDs técnicos conhecidos, para nunca exibi-los como nome. */
+  ids?: TitleTechnicalIds;
 };
 
 export default function ProgressCard({
@@ -38,7 +48,12 @@ export default function ProgressCard({
   action,
   badge,
   className = "",
+  mediaType,
+  ids,
 }: ProgressCardProps) {
+  // Defesa final: nunca renderizar um ID técnico como título.
+  const safeTitle =
+    sanitizeDisplayTitle(title, ids) ?? friendlyTitlePlaceholder(mediaType);
   const hasProgress = typeof progress === "number";
   const clampedProgress = hasProgress
     ? Math.max(0, Math.min(100, progress as number))
@@ -53,8 +68,8 @@ export default function ProgressCard({
           path={imagePath ?? null}
           fallbackPath={fallbackImagePath ?? null}
           size="w780"
-          alt={title}
-          fallbackLabel={title}
+          alt={safeTitle}
+          fallbackLabel={safeTitle}
           className="h-full w-full object-cover brightness-[0.78] saturate-[1.08] transition duration-500 group-hover:scale-[1.04] group-hover:brightness-[0.9]"
         />
 
@@ -68,7 +83,7 @@ export default function ProgressCard({
 
       <div className="relative -mt-12 px-4 pb-4 sm:px-5 sm:pb-5">
         <h3 className="line-clamp-1 text-base font-black tracking-[-0.03em] text-white sm:text-lg">
-          {title}
+          {safeTitle}
         </h3>
 
         {subtitle && (

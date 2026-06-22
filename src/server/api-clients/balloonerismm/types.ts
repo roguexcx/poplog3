@@ -213,6 +213,30 @@ export type BalloonerismWatchProvidersResponse = {
   results?: Record<string, BalloonerismWatchRegionData>;
 };
 
+/** Uma data de lançamento individual (formato TMDB). */
+export type BalloonerismReleaseDate = {
+  release_date?: string | null;
+  /** 1=Premiere, 2=Limited, 3=Theatrical, 4=Digital/Internet, 5=Physical, 6=TV */
+  type?: number | null;
+  type_label?: string | null;
+  note?: string | null;
+};
+
+/** Datas de lançamento por região (formato TMDB). */
+export type BalloonerismReleaseRegion = {
+  iso_3166_1?: string | null;
+  release_dates?: BalloonerismReleaseDate[] | null;
+};
+
+/**
+ * Resposta de GET /movie/{id}/release_dates e GET /tv/{id}/release_dates.
+ * Segue o formato TMDB com `results` como lista indexada por região.
+ */
+export type BalloonerismReleaseDatesResponse = {
+  id?: string;
+  results?: BalloonerismReleaseRegion[];
+};
+
 export type BalloonerismPerson = {
   imdb_id?: string;
   name: string;

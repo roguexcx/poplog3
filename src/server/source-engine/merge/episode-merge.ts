@@ -108,10 +108,14 @@ function imageCandidatesFrom(ep?: CatalogEpisode | null): EpisodeImageCandidate[
       ? ep.source.primary
       : undefined
   );
-  if (ep.stillUrl && source) {
+  // stillUrl é o campo de entrada canônico, mas stillPath também é uma referência
+  // de imagem válida (normalize-episode grava ambos). Usar stillPath como fallback
+  // evita perder silenciosamente a still quando só ele está preenchido.
+  const stillRef = ep.stillUrl ?? ep.stillPath;
+  if (stillRef && source) {
     candidates.push({
       source,
-      url: ep.stillUrl,
+      url: stillRef,
       width: ep.stillWidth,
       height: ep.stillHeight,
       language: ep.stillLanguage,

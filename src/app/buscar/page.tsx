@@ -1,4 +1,9 @@
 import SearchPageView from "@/features/search/SearchPageView";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Busca",
+};
 
 type BuscarPageProps = {
   searchParams?: Promise<{

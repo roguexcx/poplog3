@@ -22,6 +22,7 @@ export const EXTERNAL_IMAGE_DOMAINS = [
   "artworks.thetvdb.com",
   "lh3.googleusercontent.com",
   "img.youtube.com",
+  "images.justwatch.com",
   // Adicionar novos domínios aqui — nunca expor diretamente no <img>
 ] as const satisfies readonly string[];
 

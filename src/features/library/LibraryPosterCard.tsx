@@ -3,7 +3,9 @@ import Link from "next/link";
 
 import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
 import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";
+import { getComingSoonInfo, getTheatricalStatus } from "./library-coming-soon";
 
 const STATUS_BADGE: Record<string, string> = {
   watching: "border-violet-300/35 bg-violet-500/20 text-violet-100",
@@ -30,12 +32,24 @@ export default function LibraryPosterCard({
       : item.status === "watching" && item.computed_state === "in_progress";
   const progress =
     typeof item.progress_pct === "number" ? item.progress_pct : null;
-  const hasProvider = !!item.best_provider_logo;
 
-  const displayTitle =
-    title?.title ??
-    title?.original_title ??
-    `${item.media_type}/${item.tmdb_id}`;
+  // Badge de streaming: espelha a detail page (TitleProviders) — mostra o provider
+  // sempre que houver dado (logo OU apenas nome). Antes o badge era gated por logo,
+  // então providers sem logo (ex.: HBO Max → "Max") sumiam no card mas apareciam no
+  // detalhe. Agora: logo quando disponível, senão um chip com o nome do provider.
+  const providerLogoSrc = item.best_provider_logo
+    ? resolveCatalogImage(item.best_provider_logo, "original")
+    : null;
+  const providerName = item.best_provider_name ?? null;
+  const hasProvider = !!(providerLogoSrc || providerName);
+
+  const displayTitle = resolveDisplayTitle({
+    title: title?.title,
+    originalTitle: title?.original_title,
+    tmdbId: item.tmdb_id,
+    imdbId: item.imdb_id,
+    mediaType: item.media_type,
+  });
 
   const subtitle = getPosterSubtitle(item);
   const runtimeLabels = getRuntimeLabels(item);
@@ -91,7 +105,7 @@ export default function LibraryPosterCard({
                 STATUS_BADGE[item.status] ?? STATUS_BADGE.watched
               }`}
             >
-              {formatStatus(item.status)}
+              {formatStatus(item)}
             </div>
 
             <div className="absolute right-2 top-2 flex flex-col items-end gap-1.5 sm:right-3 sm:top-3">
@@ -106,16 +120,22 @@ export default function LibraryPosterCard({
               ) : null}
             </div>
 
-            {hasProvider && resolveCatalogImage(item.best_provider_logo, "original") && (
+            {hasProvider && (
               <div className="absolute bottom-2 right-2 overflow-hidden rounded-md border border-white/[0.14] bg-black/55 shadow-[0_4px_14px_rgba(0,0,0,0.45)] backdrop-blur-md sm:bottom-3 sm:right-3 sm:rounded-lg">
-                <Image
-                  src={resolveCatalogImage(item.best_provider_logo, "original")!}
-                  alt={item.best_provider_name ?? "Provider"}
-                  width={28}
-                  height={28}
-                  unoptimized
-                  className="h-6 w-6 object-cover sm:h-7 sm:w-7"
-                />
+                {providerLogoSrc ? (
+                  <Image
+                    src={providerLogoSrc}
+                    alt={providerName ?? "Provider"}
+                    width={28}
+                    height={28}
+                    unoptimized
+                    className="h-6 w-6 object-cover sm:h-7 sm:w-7"
+                  />
+                ) : (
+                  <span className="block max-w-[88px] truncate px-1.5 py-1 text-[8px] font-black uppercase tracking-[0.06em] text-white/85 sm:text-[9px]">
+                    {providerName}
+                  </span>
+                )}
               </div>
             )}
 
@@ -164,10 +184,26 @@ export default function LibraryPosterCard({
 }
 
 function getPosterSubtitle(item: Poplog3UserLibraryItem) {
-  const releaseTime = getReleaseTime(item);
+  const comingSoon = getComingSoonInfo(item);
+  const theatrical = getTheatricalStatus(item);
 
-  if (releaseTime && releaseTime > Date.now()) {
+  if (comingSoon.isComingSoon) {
+    // "Nos cinemas" tem prioridade de rótulo sobre "Aguardando VOD" na janela theatrical.
+    if (theatrical.inTheaters) return "Nos cinemas";
+    if (comingSoon.phase === "awaiting_vod") {
+      return comingSoon.displayDate ? "VOD previsto" : "Aguardando VOD";
+    }
+    if (comingSoon.phase === "critical_recheck") return "Revalidando VOD";
     return "Em breve";
+  }
+
+  // Status theatrical canônico (sinal ativo ou fallback temporal seguro).
+  if (theatrical.inTheaters) {
+    return "Nos cinemas";
+  }
+
+  if (item.availability_us?.state === "unavailable") {
+    return "Sem disponibilidade encontrada";
   }
 
   if (
@@ -187,7 +223,10 @@ function getPosterSubtitle(item: Poplog3UserLibraryItem) {
 
 function getRuntimeLabels(item: Poplog3UserLibraryItem) {
   if (item.media_type === "tv") {
-    const labels = [item.average_episode_runtime_label ?? null, item.runtime_label ?? null].filter(
+    const labels = [
+      item.remaining_runtime_label ?? null,
+      item.average_episode_runtime_label ?? item.runtime_label ?? null,
+    ].filter(
       (label): label is string => Boolean(label),
     );
     if (labels.length > 0) return labels;
@@ -211,20 +250,10 @@ function formatDurationBadge(minutes: number | null | undefined) {
   return mins > 0 ? `${hours}h${mins}min total` : `${hours}h total`;
 }
 
-function getReleaseTime(item: Poplog3UserLibraryItem) {
-  const title = item.title;
+function formatStatus(item: Poplog3UserLibraryItem) {
+  if (item.media_type === "tv" && item.computed_state === "up_to_date") return "Em dia";
+  if (item.media_type === "tv" && item.computed_state === "completed") return "Concluída";
 
-  const date =
-    item.media_type === "tv"
-      ? title?.first_air_date ?? title?.release_date
-      : title?.release_date ?? title?.first_air_date;
-
-  const time = date ? new Date(date).getTime() : 0;
-
-  return Number.isFinite(time) ? time : 0;
-}
-
-function formatStatus(status: string) {
   const labels: Record<string, string> = {
     watchlist: "Watchlist",
     watching: "Assistindo",
@@ -233,5 +262,5 @@ function formatStatus(status: string) {
     fridge: "Geladeira",
   };
 
-  return labels[status] ?? status;
+  return labels[item.status] ?? item.status;
 }

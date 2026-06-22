@@ -1,4 +1,9 @@
 import PageShell from "@/components/layout/PageShell";
+import type { Metadata } from "next";
+
+export const metadata: Metadata = {
+  title: "Biblioteca",
+};
 
 import LibraryPageView from "@/features/library/LibraryPage";
 import { getCurrentUser } from "@/server/auth/get-current-user";

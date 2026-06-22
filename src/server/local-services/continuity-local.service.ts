@@ -5,8 +5,12 @@ import {
   isSyntheticTmdbId,
   imdbIdFromSyntheticTmdbId,
 } from "@/lib/ids/synthetic-tmdb-id";
+import { isTechnicalIdLike } from "@/lib/titles/display-title";
+import { recoverTitleFromRowSync } from "@/server/titles/recover-canonical-title";
 import {
   upsertCachedTitleRow,
+  computeBulkSeriesProgress,
+  upsertUserTitleState,
 } from "@/server/repositories";
 
 // ── Public types ───────────────────────────────────────────────────────────────
@@ -78,6 +82,11 @@ export type LocalTitleRatingData = {
   source_payload: Record<string, unknown> | null;
 };
 
+/**
+ * @deprecated Formato da tabela LEGADA `poplog3_title_availability`. A disponibilidade
+ * canônica agora vem de `getTitleAvailability`/`hydrateManyTitleAvailability`
+ * (catalog_availability). Mantido apenas até a remoção da tabela legada.
+ */
 export type LocalAvailabilityData = {
   tmdb_id: number;
   media_type: "movie" | "tv";
@@ -141,6 +150,168 @@ function buildExternalIdentity(row: {
 
 // ── State rows ─────────────────────────────────────────────────────────────────
 
+// Per-user debounce: avoid re-syncing stale states more than once every 3 minutes.
+const staleSyncDebounce = new Map<string, number>();
+const STALE_SYNC_DEBOUNCE_MS = 3 * 60 * 1000;
+
+function mapStateRow(row: {
+  tmdbId: number;
+  mediaType: string;
+  status: string | null;
+  computedState: string | null;
+  watchedEpisodes: number;
+  airedEpisodes: number;
+  totalEpisodes: number | null;
+  progressPct: number;
+  nextSeason: number | null;
+  nextEpisode: number | null;
+  nextEpisodeAirDate: Date | null;
+  lastWatchedAt: Date | null;
+  watchedKeys: unknown;
+  bestProviderName: string | null;
+  bestProviderType: string | null;
+  bestProviderLogo: string | null;
+  lastEventAt: Date;
+}): ContinuityStateRow {
+  return {
+    tmdb_id: row.tmdbId,
+    media_type: row.mediaType as "tv" | "movie",
+    status: row.status as string | null,
+    computed_state: row.computedState as string | null,
+    watched_episodes: row.watchedEpisodes,
+    aired_episodes: row.airedEpisodes,
+    total_episodes: row.totalEpisodes,
+    progress_pct: row.progressPct,
+    next_season: row.nextSeason,
+    next_episode: row.nextEpisode,
+    next_episode_air_date: row.nextEpisodeAirDate
+      ? row.nextEpisodeAirDate.toISOString().slice(0, 10)
+      : null,
+    last_watched_at: row.lastWatchedAt ? row.lastWatchedAt.toISOString() : null,
+    watched_keys: Array.isArray(row.watchedKeys) ? (row.watchedKeys as string[]) : [],
+    best_provider_name: row.bestProviderName,
+    best_provider_type: row.bestProviderType,
+    best_provider_logo: row.bestProviderLogo,
+    last_event_at: row.lastEventAt.toISOString(),
+  };
+}
+
+function deriveComputedStateFromProgress(
+  status: string | null,
+  watchedCount: number,
+  airedEpisodes: number,
+): string {
+  if (!status) return "watchlist";
+  if (status === "watched") return "completed";
+  if (status === "abandoned" || status === "fridge" || status === "watchlist") return status;
+  if (watchedCount === 0) return "watchlist";
+  return watchedCount >= airedEpisodes && airedEpisodes > 0 ? "up_to_date" : "in_progress";
+}
+
+/**
+ * Detects series where the episode catalog has more aired episodes than what's
+ * cached in user_title_state, then recomputes and persists fresh progress.
+ * Only runs for "watching" TV series that are "up_to_date" or "in_progress".
+ * Returns the IDs of series that were updated.
+ */
+async function syncStaleEpisodeStates(
+  userId: string,
+  rows: ContinuityStateRow[],
+): Promise<number[]> {
+  // Only check series where new aired episodes could change the state
+  const candidates = rows.filter(
+    (r) =>
+      r.media_type === "tv" &&
+      r.status === "watching" &&
+      (r.computed_state === "up_to_date" || r.computed_state === "in_progress"),
+  );
+  if (candidates.length === 0) return [];
+
+  const candidateIds = candidates.map((r) => r.tmdb_id);
+
+  // Quick staleness check: count currently-aired episodes per series from catalog
+  const now = new Date();
+  const airedCounts = await db.poplog3Episode.groupBy({
+    by: ["seriesTmdbId"],
+    where: {
+      seriesTmdbId: { in: candidateIds },
+      seasonNumber: { gt: 0 },
+      airDate: { not: null, lte: now },
+    },
+    _count: { episodeNumber: true },
+  });
+
+  const freshAiredMap = new Map(airedCounts.map((r) => [r.seriesTmdbId, r._count.episodeNumber]));
+
+  // Which series have more aired episodes than what's cached?
+  const staleIds = candidates
+    .filter((r) => {
+      const freshAired = freshAiredMap.get(r.tmdb_id) ?? 0;
+      return freshAired > (r.aired_episodes ?? 0);
+    })
+    .map((r) => r.tmdb_id);
+
+  if (staleIds.length === 0) return [];
+
+  // Full recompute for stale series
+  const bulkResult = await computeBulkSeriesProgress({ userId, seriesTmdbIds: staleIds });
+  if (!bulkResult.ok) {
+    console.error("[continuity-local] bulk progress recompute failed", bulkResult.error);
+    return [];
+  }
+
+  const staleRowMap = new Map(candidates.filter((r) => staleIds.includes(r.tmdb_id)).map((r) => [r.tmdb_id, r]));
+  const updated: number[] = [];
+
+  await Promise.allSettled(
+    staleIds.map(async (seriesId) => {
+      const progress = bulkResult.data.get(seriesId);
+      if (!progress) return;
+      const cached = staleRowMap.get(seriesId);
+      if (!cached) return;
+
+      const computedState = deriveComputedStateFromProgress(
+        cached.status,
+        progress.watchedCount,
+        progress.airedEpisodes,
+      );
+      const progressPct =
+        progress.airedEpisodes > 0
+          ? Math.min(Math.round((progress.watchedCount / progress.airedEpisodes) * 100), 100)
+          : 0;
+
+      const result = await upsertUserTitleState({
+        userId,
+        tmdbId: seriesId,
+        mediaType: "tv",
+        status: cached.status as "watching" | "watchlist" | "watched" | "abandoned" | "fridge" | null,
+        computedState: computedState as "in_progress" | "up_to_date" | "watchlist" | "completed" | "watched" | "abandoned" | "fridge" | null,
+        watchedEpisodes: progress.watchedCount,
+        airedEpisodes: progress.airedEpisodes,
+        totalEpisodes: progress.totalEpisodes,
+        progressPct,
+        nextSeason: progress.nextEpisode?.seasonNumber ?? null,
+        nextEpisode: progress.nextEpisode?.episodeNumber ?? null,
+        nextEpisodeAirDate: progress.nextEpisode?.airDate ?? null,
+        lastWatchedAt: progress.lastWatchedAt,
+        watchedKeys: progress.watchedKeys,
+        // Preserva o best_provider_* já materializado: o recompute de episódios
+        // não recalcula disponibilidade, então omiti-lo apagaria o badge do provider.
+        bestProviderName: cached.best_provider_name,
+        bestProviderType: cached.best_provider_type,
+        bestProviderLogo: cached.best_provider_logo,
+      });
+
+      if (result.ok) updated.push(seriesId);
+    }),
+  );
+
+  if (updated.length > 0) {
+    console.log(`[continuity-local] synced ${updated.length} stale episode state(s) for user ${userId}`);
+  }
+  return updated;
+}
+
 export async function getLocalContinuityStateRows(
   userId: string,
 ): Promise<ContinuityStateRow[]> {
@@ -150,27 +321,26 @@ export async function getLocalContinuityStateRows(
       orderBy: { lastEventAt: "desc" },
       take: 500,
     });
-    return rows.map((row) => ({
-      tmdb_id: row.tmdbId,
-      media_type: row.mediaType as "tv" | "movie",
-      status: row.status as string | null,
-      computed_state: row.computedState as string | null,
-      watched_episodes: row.watchedEpisodes,
-      aired_episodes: row.airedEpisodes,
-      total_episodes: row.totalEpisodes,
-      progress_pct: row.progressPct,
-      next_season: row.nextSeason,
-      next_episode: row.nextEpisode,
-      next_episode_air_date: row.nextEpisodeAirDate
-        ? row.nextEpisodeAirDate.toISOString().slice(0, 10)
-        : null,
-      last_watched_at: row.lastWatchedAt ? row.lastWatchedAt.toISOString() : null,
-      watched_keys: Array.isArray(row.watchedKeys) ? (row.watchedKeys as string[]) : [],
-      best_provider_name: row.bestProviderName,
-      best_provider_type: row.bestProviderType,
-      best_provider_logo: row.bestProviderLogo,
-      last_event_at: row.lastEventAt.toISOString(),
-    }));
+    const mapped = rows.map(mapStateRow);
+
+    // Detect and fix stale episode counts (new aired episodes not yet reflected in user_title_state).
+    // Debounced per user to avoid hammering on rapid consecutive requests.
+    const lastSync = staleSyncDebounce.get(userId) ?? 0;
+    if (Date.now() - lastSync > STALE_SYNC_DEBOUNCE_MS) {
+      staleSyncDebounce.set(userId, Date.now());
+      const updated = await syncStaleEpisodeStates(userId, mapped);
+      if (updated.length > 0) {
+        // Re-read with fresh data so the current request sees updated states
+        const freshRows = await db.userTitleState.findMany({
+          where: { userId },
+          orderBy: { lastEventAt: "desc" },
+          take: 500,
+        });
+        return freshRows.map(mapStateRow);
+      }
+    }
+
+    return mapped;
   } catch (err) {
     console.error("[continuity-local] getLocalContinuityStateRows error", err);
     return [];
@@ -207,20 +377,31 @@ export async function getLocalTitlesBatch(
     const externalByKey = new Map(
       externalRows.map((row) => [externalKey(row.mediaType, row.tmdbId), row]),
     );
-    return rows.map((row) => ({
+    return rows.map((row) => {
+      const ext = externalByKey.get(externalKey(row.mediaType, row.tmdbId)) ?? null;
+      // Recuperação canônica LOCAL (sem rede): se o `title` for técnico/vazio,
+      // tenta payload/originalTitle antes de devolver — assim a UI nunca recebe
+      // um ID, e a hidratação em background trata o que sobrar.
+      const recovered = recoverTitleFromRowSync({
+        id: row.id,
+        tmdbId: row.tmdbId,
+        imdbId: row.imdbId ?? ext?.imdbId ?? null,
+        traktId: row.traktId ?? ext?.traktId ?? null,
+        slug: row.slug,
+        mediaType: row.mediaType as "tv" | "movie",
+        title: row.title,
+        originalTitle: row.originalTitle,
+        tmdbPayload: row.tmdbPayload,
+        sourcePayload: row.sourcePayload,
+      });
+      return {
       poplogId: row.id,
       tmdb_id: row.tmdbId,
       media_type: row.mediaType as "tv" | "movie",
-      externalIds: buildExternalIdentity(
-        externalByKey.get(externalKey(row.mediaType, row.tmdbId)) ?? null,
-      ),
-      identityUsed:
-        externalByKey.get(externalKey(row.mediaType, row.tmdbId))?.imdbId
-          ? "imdb_id"
-          : "poplog_id",
-      linkIdUsed:
-        externalByKey.get(externalKey(row.mediaType, row.tmdbId))?.imdbId ?? row.id,
-      title: row.title,
+      externalIds: buildExternalIdentity(ext),
+      identityUsed: ext?.imdbId ? "imdb_id" : "poplog_id",
+      linkIdUsed: ext?.imdbId ?? row.id,
+      title: recovered.title ?? row.title,
       original_title: row.originalTitle,
       overview: row.overview,
       poster_path: row.posterPath,
@@ -237,7 +418,8 @@ export async function getLocalTitlesBatch(
       number_of_episodes: row.numberOfEpisodes,
       number_of_seasons: row.numberOfSeasons,
       last_synced_at: row.lastSyncedAt ? row.lastSyncedAt.toISOString() : null,
-    }));
+      };
+    });
   } catch (err) {
     console.error("[continuity-local] getLocalTitlesBatch error", err);
     return [];
@@ -416,8 +598,15 @@ export async function getLocalUserLibraryTmdbIds(userId: string): Promise<{
   }
 }
 
-// ── Availability (for agenda enrichment) ──────────────────────────────────────
+// ── Availability (LEGADO — DEPRECATED) ────────────────────────────────────────
 
+/**
+ * @deprecated NÃO USAR. Lê a tabela legada `poplog3_title_availability`, que NÃO é mais
+ * escrita pelo código atual. A Agenda (último consumidor) foi migrada para o fluxo
+ * canônico `hydrateManyTitleAvailability(cacheOnly:true, warmCold:true)`. Esta função
+ * está sem chamadores e será REMOVIDA junto com a tabela `poplog3_title_availability`.
+ * Para disponibilidade, use SEMPRE `getTitleAvailability`/`hydrateManyTitleAvailability`.
+ */
 export async function getLocalTitleAvailabilityBatch(
   movieIds: number[],
   tvIds: number[],
@@ -555,7 +744,14 @@ export async function enrichNullTitlesBatch(
 ): Promise<LocalTitleData[]> {
   const candidates = tmdbIds.filter((id) => {
     const t = titleMap.get(id);
-    return t && !t.title && id > 0 && typeof t.externalIds?.imdbId === "string";
+    if (!t || id <= 0 || typeof t.externalIds?.imdbId !== "string") return false;
+    // Re-hidrata quando o título está vazio OU é um ID técnico (tt..., etc.).
+    return isTechnicalIdLike(t.title, {
+      tmdbId: id,
+      imdbId: t.externalIds?.imdbId,
+      traktId: t.externalIds?.traktId ?? null,
+      poplogId: t.poplogId,
+    });
   });
   if (candidates.length === 0) return [];
 

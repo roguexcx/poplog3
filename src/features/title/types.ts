@@ -113,6 +113,10 @@ export type TitleRecommendation = {
   year?: string | number | null;
   posterPath?: string | null;
   posterUrl?: string | null;
+  /** Badge de disponibilidade (Onde assistir) — mesmo contrato do card da Watchlist. */
+  best_provider_name?: string | null;
+  best_provider_type?: string | null;
+  best_provider_logo?: string | null;
 };
 
 export type TitleTrailer = {

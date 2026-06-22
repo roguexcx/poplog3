@@ -8,6 +8,7 @@ import {
 } from "@/server/repositories";
 import type { PoplogTitle } from "@/server/types/title";
 import type { PoplogTitleDetails } from "@/server/types/title-details";
+import { recoverTitleFromRowSync } from "@/server/titles/recover-canonical-title";
 
 type MediaType = "movie" | "tv";
 
@@ -72,11 +73,24 @@ export async function getCachedTitleWithPayload(
     }
   }
 
+  // Sem payload normalizável: recuperação canônica LOCAL antes de devolver.
+  const recovered = recoverTitleFromRowSync({
+    id: row.id,
+    tmdbId: row.tmdbId,
+    imdbId: row.imdbId,
+    traktId: row.traktId,
+    slug: row.slug,
+    mediaType: row.mediaType,
+    title: row.title,
+    originalTitle: row.originalTitle,
+    tmdbPayload: row.tmdbPayload,
+    sourcePayload: row.sourcePayload,
+  });
   return {
     title: {
       tmdb_id: row.tmdbId,
       media_type: row.mediaType,
-      title: row.title ?? "",
+      title: recovered.title ?? row.title ?? "",
       original_title: row.originalTitle,
       overview: row.overview,
       poster_path: row.posterPath,

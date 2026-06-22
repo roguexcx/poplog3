@@ -7,7 +7,10 @@ import { FEATURES } from "@/lib/features";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "POPLOG",
+  title: {
+    default: "POPLOG",
+    template: "POPLOG — %s",
+  },
   description:
     "Descubra, organize e acompanhe filmes e séries em uma experiência pessoal.",
 };

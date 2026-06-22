@@ -20,14 +20,13 @@ import {
   hydrateCatalogResultsWithDebug,
   resolveCatalogIdentityFields,
 } from "@/server/source-engine/hydrate-catalog-results";
+import { attachBestProvider } from "@/server/availability/attach-best-provider";
 import type { PoplogTitle } from "@/server/types/title";
 import { db } from "@/server/db/client";
 import { isTraktIndexEnabled } from "@/lib/trakt-index/engine";
-import {
-  getPoplogDailyTrendingIndex,
-  traktIndexCacheKey,
-} from "@/lib/trakt-index/canonical";
+import { getPoplogDailyTrendingIndex } from "@/lib/trakt-index/canonical";
 import type { TraktIndexItem } from "@/lib/trakt-index/types";
+import { isExcludedFormat } from "@/lib/content-format/excluded-formats";
 
 const TRENDING_CACHE_TTL_MS = 30 * 60_000;
 const TRENDING_DB_TIMEOUT_MS = 1_500;
@@ -94,7 +93,9 @@ async function fetchLocalTrending(): Promise<PoplogTitle[]> {
       },
     });
 
-    return rows.map((row) => ({
+    return rows
+      .filter((row) => !isExcludedFormat(row.genres))
+      .map((row) => ({
       tmdb_id: row.tmdbId,
       media_type: row.mediaType as "movie" | "tv",
       title: row.title ?? row.originalTitle ?? "",
@@ -178,7 +179,7 @@ async function enrichWithRuntime(titles: PoplogTitle[]) {
         )
       : new Map();
 
-  return titles.map((title) => {
+  const enriched = titles.map((title) => {
     const runtimeResolution = resolveRuntimeByMediaType({
       mediaType: title.media_type,
       runtimeMinutes: title.runtime ?? null,
@@ -206,6 +207,18 @@ async function enrichWithRuntime(titles: PoplogTitle[]) {
       runtime: runtimeResolution.minutes,
       runtime_label: runtimeLabel,
     };
+  });
+
+  // P7: anexa disponibilidade (best_provider_*) via fluxo canônico — mesmo contrato do
+  // card da Watchlist. Cache-first + warm; não bloqueia nem lê catalog_availability direto.
+  return attachBestProvider(enriched, {
+    block: "trending",
+    getMediaType: (t) => t.media_type,
+    getTmdbId: (t) => t.tmdb_id,
+    getImdbId: (t) => t.externalIds?.imdbId,
+    // Rail curado: cache-first com fetch dos faltantes para o badge no primeiro load.
+    // O resultado é persistido no cache global (compounding nas próximas cargas).
+    live: true,
   });
 }
 

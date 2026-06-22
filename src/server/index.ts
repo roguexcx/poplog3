@@ -15,5 +15,3 @@ export * from "./debug/logger";
 export * from "./types/title";
 export * from "./types/ratings";
 export * from "./types/api-log";
-
-export * from "./sync/sync-types";

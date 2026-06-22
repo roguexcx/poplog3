@@ -302,6 +302,10 @@ async function buildHeroPayload(input: {
       streaming_platform: cand.availability?.providerName ?? null,
       streaming_type: cand.availability?.type ?? null,
       streaming_is_subscription: cand.availability?.type === "subscription",
+      // Badge de disponibilidade (mesmo contrato dos demais cards) — logo + nome canônico.
+      best_provider_name: cand.availability?.providerName ?? null,
+      best_provider_type: cand.availability?.type ?? null,
+      best_provider_logo: cand.availability?.providerLogoPath ?? null,
       genres: cand.labels,
       serverEyebrow: (cand as any).serverEyebrow ?? {
         text: cand.contextLabel,

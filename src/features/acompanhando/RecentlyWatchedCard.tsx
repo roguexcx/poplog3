@@ -3,6 +3,7 @@
 import type { RecentlyWatchedItem } from "@/app/api/poplog3/continuity/recently-watched/route";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
 import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
+import CardProviderBadge from "@/components/ui/CardProviderBadge";
 
 export type { RecentlyWatchedItem };
 
@@ -66,6 +67,15 @@ export default function RecentlyWatchedCard({ item, onClick }: Props) {
         )}
         {/* Gradiente direito para fundir com o conteúdo */}
         <div className="absolute inset-y-0 right-0 w-4 bg-gradient-to-r from-transparent to-zinc-900/80 transition-colors group-hover:to-zinc-900" />
+        {item.best_provider_name && (
+          <div className="absolute bottom-1 left-1">
+            <CardProviderBadge
+              name={item.best_provider_name}
+              logoPath={item.best_provider_logo}
+              type={item.best_provider_type}
+            />
+          </div>
+        )}
       </div>
 
       {/* Info */}

@@ -5,14 +5,19 @@ import {
 } from "@/server/episodes/episode-progress-service";
 import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
 import { normalizeProviderPreferences } from "@/server/streaming/provider-preferences";
-import { normalizeProvider } from "@/server/streaming/provider-normalization";
 import {
+  normalizeProvider,
   normalizeAvailabilityTypeOrNull,
   resolveProviderConfidence,
-} from "@/server/streaming/availability-service";
+} from "@/server/streaming/provider-normalization";
+import { listActiveStreamingProviders } from "@/server/local-services/streaming-preferences-local.service";
+import { hydrateManyTitleAvailability } from "@/server/availability";
 import { applyHeroTemporalCooldown } from "./hero-impressions";
 import { getUserFeedbackMap, feedbackKey } from "@/lib/personalization/feedback";
 import { resolveEditorialPolicy } from "@/lib/personalization/editorial-policy";
+import { isExcludedFormat } from "@/lib/content-format/excluded-formats";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
+import { recoverTitleFromRowSync } from "@/server/titles/recover-canonical-title";
 
 import type {
   ContinuityAvailability,
@@ -59,6 +64,10 @@ type TitleRow = {
   tmdb_id: number;
   media_type: MediaType;
   title: string | null;
+  original_title?: string | null;
+  imdb_id?: string | null;
+  trakt_id?: string | number | bigint | null;
+  slug?: string | null;
   overview: string | null;
   poster_path: string | null;
   backdrop_path: string | null;
@@ -69,6 +78,7 @@ type TitleRow = {
   number_of_episodes: number | null;
   genres?: { id: number; name: string }[] | null;
   tmdb_payload: TmdbPayload | null;
+  source_payload?: unknown;
 };
 
 type AvailabilityRow = {
@@ -173,12 +183,21 @@ function isDiscoveryContext(context: ContinuityContext): boolean {
 }
 
 function getTitleName(title?: TitleRow | null): string | null {
-  return (
-    title?.title ??
-    title?.tmdb_payload?.title ??
-    title?.tmdb_payload?.name ??
-    null
-  );
+  if (!title) return null;
+  // Resolução canônica: checa title → originalTitle → tmdbPayload → sourcePayload,
+  // rejeitando IDs técnicos. Antes só olhava title + tmdb_payload, então séries
+  // cujo nome estava em originalTitle/sourcePayload ficavam "sem título".
+  return recoverTitleFromRowSync({
+    tmdbId: title.tmdb_id,
+    imdbId: title.imdb_id ?? null,
+    traktId: (title.trakt_id ?? null) as string | number | bigint | null,
+    slug: title.slug ?? null,
+    mediaType: title.media_type,
+    title: title.title,
+    originalTitle: title.original_title ?? null,
+    tmdbPayload: title.tmdb_payload,
+    sourcePayload: title.source_payload,
+  }).title;
 }
 function getOverview(title?: TitleRow | null): string | null {
   return title?.overview ?? title?.tmdb_payload?.overview ?? null;
@@ -223,6 +242,11 @@ function getTotalEpisodes(title?: TitleRow | null): number | null {
 function getGenreLabels(title?: TitleRow | null): string[] {
   const genres = title?.genres ?? title?.tmdb_payload?.genres ?? [];
   return genres.slice(0, 2).map((genre) => genre.name).filter(Boolean);
+}
+
+/** Gêneros crus do título ({id,name}[]) para o classificador de formatos excluídos. */
+function getGenresRaw(title?: TitleRow | null): Array<{ id?: number | null; name?: string | null }> {
+  return title?.genres ?? title?.tmdb_payload?.genres ?? [];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1173,6 +1197,10 @@ async function getLocalTitleMap(mediaType: MediaType, tmdbIds: number[]) {
     select: {
       tmdbId: true,
       title: true,
+      originalTitle: true,
+      imdbId: true,
+      traktId: true,
+      slug: true,
       overview: true,
       posterPath: true,
       backdropPath: true,
@@ -1182,6 +1210,7 @@ async function getLocalTitleMap(mediaType: MediaType, tmdbIds: number[]) {
       numberOfEpisodes: true,
       genres: true,
       tmdbPayload: true,
+      sourcePayload: true,
     },
   });
 
@@ -1204,6 +1233,10 @@ async function getLocalTitleMap(mediaType: MediaType, tmdbIds: number[]) {
       tmdb_id: row.tmdbId,
       media_type: mediaType,
       title: row.title,
+      original_title: row.originalTitle,
+      imdb_id: row.imdbId,
+      trakt_id: row.traktId,
+      slug: row.slug,
       overview: row.overview,
       poster_path: row.posterPath,
       backdrop_path: row.backdropPath,
@@ -1214,6 +1247,7 @@ async function getLocalTitleMap(mediaType: MediaType, tmdbIds: number[]) {
       number_of_episodes: row.numberOfEpisodes,
       genres,
       tmdb_payload: rawPayload,
+      source_payload: row.sourcePayload,
     });
   }
 
@@ -1229,51 +1263,52 @@ async function getLocalAvailabilityMap(input: {
   const map = new Map<number, ContinuityAvailability | null>();
   if (input.tmdbIds.length === 0) return map;
 
-  const { db } = await import("@/server/db/client");
-
-  const rows = await db.catalogAvailability.findMany({
-    where: {
-      tmdbId: { in: input.tmdbIds.map((id) => BigInt(id)) },
-      mediaType: input.mediaType,
-      providerRegion: input.region,
-    },
-    select: {
-      tmdbId: true,
-      providerName: true,
-      providerType: true,
-      providerRegion: true,
-      providerLogoUrl: true,
-      source: true,
-    },
-  });
-
-  const grouped = new Map<number, AvailabilityRow[]>();
-  for (const row of rows) {
-    if (!row.tmdbId) continue;
-    const tmdbIdNum = Number(row.tmdbId);
-    const list = grouped.get(tmdbIdNum) ?? [];
-    list.push({
-      tmdb_id: tmdbIdNum,
-      media_type: input.mediaType,
-      provider_id: null,
-      provider_name: row.providerName,
-      logo_path: logoPathFromUrl(row.providerLogoUrl),
-      availability_type: row.providerType as string,
-      country: row.providerRegion,
-      source: row.source as string,
-    });
-    grouped.set(tmdbIdNum, list);
+  // P4: disponibilidade pelo FLUXO CANÔNICO (cache-first + warm). Substitui a leitura
+  // direta de catalog_availability. A camada canônica é name-based, então aumentamos a
+  // lista de favoritos com os NOMES dos providers favoritos (resolvidos pelo catálogo),
+  // preservando a detecção de "preferred" em chooseBestAvailability.
+  const favoriteKeys = [...input.favoriteProviderIds];
+  if (input.favoriteProviderIds.length > 0) {
+    try {
+      const favSet = new Set(input.favoriteProviderIds.map(String));
+      const catalog = await listActiveStreamingProviders(input.region);
+      for (const p of catalog) {
+        if (p.tmdb_provider_id != null && favSet.has(String(p.tmdb_provider_id))) {
+          favoriteKeys.push(normalizeProvider(p.provider_name)?.name ?? p.provider_name);
+        }
+      }
+    } catch {
+      /* catálogo indisponível — segue só com ids (preferred best-effort) */
+    }
   }
 
+  const availabilityMap = await hydrateManyTitleAvailability(
+    input.tmdbIds.map((id) => ({
+      key: id,
+      input: { mediaType: input.mediaType, tmdbId: id, region: input.region },
+    })),
+    { cacheOnly: true, warmCold: true },
+  );
+
   for (const tmdbId of input.tmdbIds) {
-    map.set(
-      tmdbId,
-      chooseBestAvailability(
-        grouped.get(tmdbId) ?? [],
-        input.favoriteProviderIds,
-        input.region,
-      ),
-    );
+    const summary = availabilityMap.get(tmdbId);
+    const rows: AvailabilityRow[] = [];
+    if (summary) {
+      const g = summary.providers;
+      for (const p of [...g.flatrate, ...g.free, ...g.ads, ...g.rent, ...g.buy]) {
+        rows.push({
+          tmdb_id: tmdbId,
+          media_type: input.mediaType,
+          provider_id: null,
+          provider_name: p.name,
+          provider_logo_path: p.logoUrl ?? null,
+          availability_type: p.type,
+          country: input.region,
+          source: p.source ?? null,
+        });
+      }
+    }
+    map.set(tmdbId, chooseBestAvailability(rows, favoriteKeys, input.region));
   }
 
   return map;
@@ -1502,10 +1537,11 @@ export async function getHeroCandidates(
         id: "tv-" + series.seriesTmdbId,
         tmdbId: series.seriesTmdbId,
         mediaType: "tv",
-        title:
-          getTitleName(title) ??
-          series.title ??
-          `Série #${series.seriesTmdbId}`,
+        title: resolveDisplayTitle({
+          title: getTitleName(title) ?? series.title,
+          tmdbId: series.seriesTmdbId,
+          mediaType: "tv",
+        }),
         overview: getOverview(title),
         year: getYear(getFirstAirDate(title)),
         posterPath: series.posterPath ?? getPosterPath(title),
@@ -1630,7 +1666,11 @@ export async function getHeroCandidates(
         id: "tv-" + userTitle.tmdb_id,
         tmdbId: userTitle.tmdb_id,
         mediaType: "tv",
-        title: getTitleName(title) ?? `Série #${userTitle.tmdb_id}`,
+        title: resolveDisplayTitle({
+          title: getTitleName(title),
+          tmdbId: userTitle.tmdb_id,
+          mediaType: "tv",
+        }),
         overview: getOverview(title),
         year: getYear(firstAirDate),
         posterPath: getPosterPath(title),
@@ -1744,7 +1784,11 @@ export async function getHeroCandidates(
         id: "movie-" + userTitle.tmdb_id,
         tmdbId: userTitle.tmdb_id,
         mediaType: "movie",
-        title: getTitleName(title) ?? `Filme #${userTitle.tmdb_id}`,
+        title: resolveDisplayTitle({
+          title: getTitleName(title),
+          tmdbId: userTitle.tmdb_id,
+          mediaType: "movie",
+        }),
         overview: getOverview(title),
         year: getYear(releaseDate),
         posterPath: getPosterPath(title),
@@ -1789,12 +1833,24 @@ export async function getHeroCandidates(
     .filter((candidate) => candidate !== null)
     .filter((candidate) => candidate.score > 0) as HeroCandidate[];
 
+  // ─── CENSURA DE FORMATOS NÃO-ROTEIRIZADOS ────────────────────────────────
+  // Talk shows, variedades, realities, telejornais e game shows não entram no HERO,
+  // mesmo que estejam na biblioteca do usuário. Usa os gêneros do título resolvido.
+  const excludedFormatIds = new Set<number>();
+  for (const map of [seriesTitleMap, movieTitleMap]) {
+    for (const [tmdbId, title] of map) {
+      if (isExcludedFormat(getGenresRaw(title))) excludedFormatIds.add(tmdbId);
+    }
+  }
+
   // ─── PIPELINE DE RANKING ─────────────────────────────────────────────────
-  const rawWithFreshness = applyHeroFreshnessAndRotation([
-    ...seriesCandidates,
-    ...unstartedSeriesCandidates,
-    ...movieCandidates,
-  ]);
+  const rawWithFreshness = applyHeroFreshnessAndRotation(
+    [
+      ...seriesCandidates,
+      ...unstartedSeriesCandidates,
+      ...movieCandidates,
+    ].filter((candidate) => !excludedFormatIds.has(candidate.tmdbId)),
+  );
   const balancedCandidates = pickBalancedCandidates(
     rawWithFreshness,
     limit * 2,

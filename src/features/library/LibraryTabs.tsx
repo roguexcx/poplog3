@@ -1,4 +1,5 @@
 export type LibraryTab =
+  | "random"
   | "watchlist"
   | "favorites"
   | "watching"

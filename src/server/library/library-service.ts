@@ -1,6 +1,11 @@
 import {
   refreshTitleStateAvailability,
 } from "@/server/state/user-title-state";
+import { getTitleAvailability, type TitleAvailabilitySummary } from "@/server/availability";
+import {
+  isSyntheticTmdbId,
+  imdbIdFromSyntheticTmdbId,
+} from "@/lib/ids/synthetic-tmdb-id";
 
 import {
   Poplog3UserTitle,
@@ -28,6 +33,10 @@ export type Poplog3UserLibraryItem = Poplog3UserTitle & {
   best_provider_name?: string | null;
   best_provider_type?: string | null;
   best_provider_logo?: string | null;
+  /** Disponibilidade normalizada (camada global) — providers + status temporal. */
+  availability?: TitleAvailabilitySummary | null;
+  /** Disponibilidade US usada exclusivamente pela regra editorial de "Em breve". */
+  availability_us?: TitleAvailabilitySummary | null;
   /** IMDb ID derivado quando tmdb_id é sintético negativo — usado para links e display. */
   imdb_id?: string | null;
   title: {
@@ -59,6 +68,45 @@ async function getLocalLibraryService() {
 }
 
 /**
+ * Resolve a disponibilidade de um título via camada global e persiste o melhor
+ * provider no estado materializado (user_title_state). POPLOG-first: usa imdbId
+ * (sintético ou via external-ids cache) → Balloonerismm/cache; nunca chama TMDB.
+ */
+async function persistBestProviderFromGlobalLayer(
+  input: UpsertUserTitleInput,
+): Promise<void> {
+  let imdbId: string | null = null;
+  if (isSyntheticTmdbId(input.tmdbId)) {
+    imdbId = imdbIdFromSyntheticTmdbId(input.tmdbId);
+  } else if (input.tmdbId > 0) {
+    const { getExternalIds } = await import("@/server/cache/external-ids-cache");
+    const externalIds = await getExternalIds(input.mediaType, input.tmdbId).catch(() => null);
+    imdbId = externalIds?.imdb_id ?? null;
+  }
+
+  const summary = await getTitleAvailability({
+    mediaType: input.mediaType,
+    imdbId,
+    tmdbId: input.tmdbId > 0 ? input.tmdbId : null,
+    region: "BR",
+  });
+
+  const best = summary.bestProvider;
+  await refreshTitleStateAvailability(
+    input.userId,
+    input.tmdbId,
+    input.mediaType,
+    best
+      ? {
+          providerName: best.name,
+          providerType: best.type === "streaming" ? "subscription" : best.type,
+          providerLogo: best.logoUrl ?? null,
+        }
+      : null,
+  );
+}
+
+/**
  * Lê a biblioteca do usuário a partir de user_title_state (estado materializado).
  * Retorna null se o usuário não tiver linhas no state — o caller faz fallback para getUserLibrary.
  */
@@ -78,6 +126,22 @@ export async function getUserLibrary(
   return local.getUserLibrary(userId, status);
 }
 
+export type UserLibraryIdentifiers = {
+  tmdbKeys: Set<string>;
+  imdbKeys: Set<string>;
+};
+
+/**
+ * Identificadores da biblioteca (IDs apenas, sem disponibilidade). Leitura barata
+ * para filtros de descoberta — ver getUserLibraryIdentifiers no local service.
+ */
+export async function getUserLibraryIdentifiers(
+  userId: string,
+): Promise<UserLibraryIdentifiers> {
+  const local = await getLocalLibraryService();
+  return local.getUserLibraryIdentifiers(userId);
+}
+
 export async function getUserTitleStatus(
   userId: string,
   tmdbId: number,
@@ -93,40 +157,12 @@ export async function upsertUserTitleStatus(
   const local = await getLocalLibraryService();
   const result = await local.upsertUserTitleStatus(input);
 
-  import("@/server/streaming/title-availability")
-    .then(({ refreshAvailabilityForUserTitle }) =>
-      refreshAvailabilityForUserTitle({
-        userId: input.userId,
-        tmdbId: input.tmdbId,
-        mediaType: input.mediaType,
-        action: `library_status:${result.status}`,
-        endpoint: "/api/library/title",
-        contexts: ["library"],
-      }),
-    )
-    .then((availabilityResult) => {
-      const best = availabilityResult.availability.primaryProvider;
-      const providerType: string | null =
-        best && "normalizedType" in best
-          ? best.normalizedType ?? null
-          : best?.type === "streaming"
-            ? "subscription"
-            : best?.type ?? null;
-
-      return refreshTitleStateAvailability(
-        input.userId,
-        input.tmdbId,
-        input.mediaType,
-        best
-          ? {
-              providerName: best.name,
-              providerType,
-              providerLogo: best.logoUrl ?? null,
-            }
-          : null,
-      );
-    })
-    .catch((err) => console.error("[availability] refreshAvailabilityForUserTitle failed", err));
+  // Disponibilidade POPLOG-first via camada global (substitui o sync TMDB legado).
+  // Fire-and-forget: persiste best_provider no user_title_state para consumidores
+  // que leem o estado materializado (continuidade, acompanhando, etc.).
+  void persistBestProviderFromGlobalLayer(input).catch((err) =>
+    console.error("[availability] global layer refresh failed", err),
+  );
 
   return result;
 }

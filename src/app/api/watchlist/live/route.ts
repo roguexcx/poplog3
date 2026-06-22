@@ -6,12 +6,22 @@ import {
   translateGenreName,
 } from "@/lib/domain-labels";
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
+import { recoverTitleFromRowSync } from "@/server/titles/recover-canonical-title";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { db } from "@/server/db/client";
 import {
   readContinuitySectionCache,
   writeContinuitySectionCache,
 } from "@/server/continuity/continuity-section-cache";
+import {
+  hydrateManyTitleAvailability,
+  type TitleAvailabilitySummary,
+} from "@/server/availability";
+import {
+  isSyntheticTmdbId,
+  imdbIdFromSyntheticTmdbId,
+} from "@/lib/ids/synthetic-tmdb-id";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -49,15 +59,6 @@ type TitleRow = {
   episode_run_time: number[] | null;
   number_of_seasons: number | null;
   genres: Array<{ id: number; name: string }> | string[] | null;
-};
-
-type AvailabilityRow = {
-  tmdb_id: number;
-  media_type: MediaType;
-  provider_name: string;
-  provider_logo_path: string | null;
-  availability_type: string;
-  country: string;
 };
 
 type EnrichedTitle = {
@@ -113,34 +114,57 @@ const TABLE_READ_TIMEOUT_MS = 2_500;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
-function inferStreamStatus(
+/**
+ * Deriva o stream_status a partir do resumo CANÔNICO da camada global de
+ * disponibilidade (mesma fonte da Biblioteca, Página de Título e badges).
+ *
+ * Prioridade: cinema > lançamento futuro > streaming > VOD (aluguel/compra).
+ *
+ * Fallback seguro: quando a disponibilidade é DESCONHECIDA (Balloonerismm em
+ * cooldown/erro = state "provider_error", ou ID não resolvível = "unresolved",
+ * ou hidratação sem resultado), NUNCA marca "Indisponível". Cai na heurística de
+ * data de lançamento. Só marca "unavailable" quando o estado é genuinamente
+ * "unavailable" (checado, lançado e sem providers no BR).
+ */
+function streamStatusFromAvailability(
+  summary: TitleAvailabilitySummary | undefined,
   releaseDate: string | null,
   row: WatchlistRow,
-  availabilityStatus?: string,
 ): EnrichedTitle["stream_status"] {
-  if (availabilityStatus === "streaming_confirmed_br") return "streaming";
-  if (availabilityStatus === "vod_available_br") return "confirmado";
-  if (
-    availabilityStatus === "vod_available_us" ||
-    availabilityStatus === "pvod_available_us" ||
-    availabilityStatus === "streaming_confirmed_us" ||
-    availabilityStatus === "digital_prediction"
-  ) {
-    return "chegando";
+  const status = summary?.status;
+  if (status?.isInTheaters && row.media_type === "movie") return "cinemas";
+  if (status?.isFutureRelease) return "chegando";
+  if (status?.hasStreaming) return "streaming";
+  if (status?.hasRent || status?.hasBuy) return "confirmado";
+
+  const released = releaseDate ? new Date(releaseDate) <= new Date() : false;
+  const knownUnavailable = summary?.state === "unavailable";
+
+  if (!knownUnavailable) {
+    // Estado desconhecido (cooldown/erro/não resolvido/sem hidratação): fallback seguro.
+    if (!releaseDate) return "streaming";
+    return released ? "streaming" : row.media_type === "movie" ? "cinemas" : "chegando";
   }
-  if (availabilityStatus === "cinema") return "cinemas";
-  if (row.stream_status === "streaming" || row.stream_status === "confirmado") return "streaming";
-  if (row.stream_status === "chegando") return "chegando";
-  // Bug fix: não classificar séries como "cinemas" — séries vão direto para streaming
-  // "cinemas" só se aplica a filmes com lançamento em sala confirmado
-  if (row.stream_status === "cinemas" && row.media_type === "movie") return "cinemas";
+
+  // Genuinamente sem providers no BR.
   if (!releaseDate) return "unavailable";
-  const released = new Date(releaseDate) <= new Date();
-  if (!released) {
-    // Título ainda não lançado: filmes podem estar em cartaz, séries vão para streaming
-    return row.media_type === "movie" ? "cinemas" : "chegando";
+  if (!released) return row.media_type === "movie" ? "cinemas" : "chegando";
+  return "unavailable";
+}
+
+/** Converte os providers agrupados do resumo global para o formato do card. */
+function providersFromSummary(
+  summary: TitleAvailabilitySummary | undefined,
+): EnrichedTitle["providers"] {
+  if (!summary) return [];
+  const g = summary.providers;
+  const out: EnrichedTitle["providers"] = [];
+  for (const p of [...g.flatrate, ...g.free, ...g.ads]) {
+    out.push({ name: p.name, logo: p.logoUrl ?? "", type: "flatrate" });
   }
-  return "streaming";
+  for (const p of g.rent) out.push({ name: p.name, logo: p.logoUrl ?? "", type: "rent" });
+  for (const p of g.buy) out.push({ name: p.name, logo: p.logoUrl ?? "", type: "buy" });
+  return out;
 }
 
 function buildContextPool(title: string, mediaType: MediaType): string[] {
@@ -189,13 +213,6 @@ function normalizeGenres(genres: TitleRow["genres"]): string | null {
   return translateGenreName(first?.name) ?? first?.name ?? null;
 }
 
-function providerType(type: string): "flatrate" | "rent" | "buy" {
-  if (type === "subscription" || type === "streaming") return "flatrate";
-  if (type === "buy") return "buy";
-  if (type === "rent") return "rent";
-  return "flatrate";
-}
-
 function dateOnly(value: Date | null | undefined): string | null {
   return value ? value.toISOString().slice(0, 10) : null;
 }
@@ -233,6 +250,19 @@ function mapTitleRow(
   } | null,
 ): TitleRow {
   const externalIds = mapExternalIds(external ?? null);
+  // Recuperação canônica LOCAL (sem rede) a partir de payload/originalTitle.
+  const recovered = recoverTitleFromRowSync({
+    id: row.id,
+    tmdbId: row.tmdbId,
+    imdbId: row.imdbId ?? external?.imdbId ?? null,
+    traktId: row.traktId ?? external?.traktId ?? null,
+    slug: row.slug,
+    mediaType: row.mediaType,
+    title: row.title,
+    originalTitle: row.originalTitle,
+    tmdbPayload: row.tmdbPayload,
+    sourcePayload: row.sourcePayload,
+  });
   return {
     poplogId: row.id,
     tmdb_id: row.tmdbId,
@@ -240,7 +270,7 @@ function mapTitleRow(
     externalIds,
     identityUsed: external?.imdbId ? "imdb_id" : "poplog_id",
     linkIdUsed: external?.imdbId ?? row.id,
-    title: row.title,
+    title: recovered.title ?? row.title,
     original_title: row.originalTitle,
     poster_path: row.posterPath,
     release_date: dateOnly(row.releaseDate),
@@ -249,18 +279,6 @@ function mapTitleRow(
     episode_run_time: numericJsonArray(row.episodeRunTime),
     number_of_seasons: row.numberOfSeasons,
     genres: Array.isArray(row.genres) ? row.genres as Array<{ id: number; name: string }> | string[] : null,
-  };
-}
-
-function mapAvailabilityRow(row: Awaited<ReturnType<typeof db.catalogAvailability.findMany>>[number]): AvailabilityRow | null {
-  if (row.tmdbId === null) return null;
-  return {
-    tmdb_id: Number(row.tmdbId),
-    media_type: row.mediaType,
-    provider_name: row.providerName,
-    provider_logo_path: row.providerLogoUrl,
-    availability_type: row.providerType,
-    country: row.providerRegion,
   };
 }
 
@@ -358,9 +376,12 @@ export async function POST(request: Request) {
       });
       markStage(perf, stageRef, "cache_read");
 
-      if ((cached?.status === "hit" || cached?.status === "stale") && cached.payload.inputKey === inputKey) {
+      // Só serve cache FRESCO ("hit"). Um "stale" é regenerado: a hidratação cacheOnly é
+      // barata e evita servir indefinidamente um snapshot ruim congelado (ex.: lote que
+      // falhou sob carga marcando tudo como "Indisponível").
+      if (cached?.status === "hit" && cached.payload.inputKey === inputKey) {
         console.log("[watchlist/live/perf]", {
-          cacheStatus: cached.status === "hit" ? "persistent_hit" : "persistent_stale",
+          cacheStatus: "persistent_hit",
           returned: cached.payload.titles.length,
           external_sync: 0,
           ...perf,
@@ -369,7 +390,14 @@ export async function POST(request: Request) {
         // Sanitize: stale cache may have nested title objects from pre-fix data
         const sanitized = cached.payload.titles.map((t) => ({
           ...t,
-          title: extractTitleStr(t.title) ?? "Sem título",
+          title: resolveDisplayTitle({
+            title: extractTitleStr(t.title),
+            originalTitle: t.original_title_label,
+            tmdbId: t.externalIds?.tmdbId ?? t.tmdb_id,
+            imdbId: t.externalIds?.imdbId,
+            poplogId: t.poplogId,
+            mediaType: t.media_type,
+          }),
         }));
         return NextResponse.json({ titles: sanitized });
       }
@@ -378,9 +406,9 @@ export async function POST(request: Request) {
     }
 
     const ids = Array.from(new Set(rows.map((row) => row.tmdb_id)));
-    const [titlesResult, availabilityResult] = await withTimeout(
-      (async (): Promise<[TitleRow[], AvailabilityRow[]]> => {
-        const [titleRows, externalRows, availabilityRows] = await Promise.all([
+    const [titlesResult, imdbByTmdbKey] = await withTimeout(
+      (async (): Promise<[TitleRow[], Map<string, string>]> => {
+        const [titleRows, externalRows] = await Promise.all([
           db.poplog3Title.findMany({
             where: { tmdbId: { in: ids } },
           }),
@@ -394,26 +422,23 @@ export async function POST(request: Request) {
               traktId: true,
             },
           }),
-          db.catalogAvailability.findMany({
-            where: {
-              tmdbId: { in: ids.map((id) => BigInt(id)) },
-              providerRegion: "BR",
-              expiresAt: { gt: new Date() },
-            },
-          }),
         ]);
         const externalByKey = new Map(
           externalRows.map((row) => [externalKey(row.mediaType, row.tmdbId), row]),
         );
+        const imdbMap = new Map<string, string>();
+        for (const ext of externalRows) {
+          if (ext.imdbId) imdbMap.set(externalKey(ext.mediaType, ext.tmdbId), ext.imdbId);
+        }
         return [
           titleRows.map((row) =>
             mapTitleRow(row, externalByKey.get(externalKey(row.mediaType, row.tmdbId))),
           ),
-          availabilityRows.map(mapAvailabilityRow).filter((row): row is AvailabilityRow => row !== null),
+          imdbMap,
         ];
       })(),
       TABLE_READ_TIMEOUT_MS,
-      [[], []],
+      [[], new Map<string, string>()],
     );
     markStage(perf, stageRef, "cache_tables_read");
 
@@ -424,13 +449,48 @@ export async function POST(request: Request) {
       ]),
     );
 
-    const providersByKey = new Map<string, AvailabilityRow[]>();
-    for (const row of availabilityResult) {
-      const key = `${row.media_type}:${row.tmdb_id}`;
-      const list = providersByKey.get(key) ?? [];
-      list.push(row);
-      providersByKey.set(key, list);
+    // ── Disponibilidade via camada GLOBAL (cache-first, fonte única) ───────────
+    // Mesma fonte da Biblioteca/Página de Título/badges. Resolve imdbId por linha
+    // (row.imdb_id → titleExternalId → derivação sintética) e hidrata em lote.
+    // hydrateManyTitleAvailability é cache-first (catalog_availability por imdbId),
+    // então recargas são baratas; cold-start é limitado por concorrência.
+    function resolveRowImdbId(row: WatchlistRow): string | null {
+      if (row.imdb_id) return row.imdb_id;
+      if (row.externalIds?.imdbId) return row.externalIds.imdbId;
+      const fromExternal = imdbByTmdbKey.get(externalKey(row.media_type, row.tmdb_id));
+      if (fromExternal) return fromExternal;
+      if (isSyntheticTmdbId(row.tmdb_id)) return imdbIdFromSyntheticTmdbId(row.tmdb_id);
+      return null;
     }
+
+    const hydrationInputs = rows
+      .map((row) => {
+        const imdbId = resolveRowImdbId(row);
+        const tmdbId = row.tmdb_id > 0 ? row.tmdb_id : null;
+        if (!imdbId && !tmdbId) return null;
+        const details = titleMap.get(`${row.media_type}:${row.tmdb_id}`);
+        return {
+          key: row.id,
+          input: {
+            mediaType: row.media_type,
+            imdbId,
+            tmdbId,
+            region: "BR",
+            releaseDate: details?.release_date ?? null,
+            firstAirDate: details?.first_air_date ?? null,
+          },
+        };
+      })
+      .filter((entry): entry is { key: string; input: NonNullable<typeof entry>["input"] } => entry !== null);
+
+    const availabilityByRow = hydrationInputs.length
+      ? await withTimeout(
+          hydrateManyTitleAvailability(hydrationInputs, { cacheOnly: true, warmCold: true }),
+          TABLE_READ_TIMEOUT_MS,
+          new Map<string, TitleAvailabilitySummary>(),
+        ).catch(() => new Map<string, TitleAvailabilitySummary>())
+      : new Map<string, TitleAvailabilitySummary>();
+    markStage(perf, stageRef, "availability_hydrate");
 
     const enriched: EnrichedTitle[] = rows
       .map((row): EnrichedTitle | null => {
@@ -439,23 +499,8 @@ export async function POST(request: Request) {
         const releaseDate =
           details.release_date ?? details.first_air_date ??
           (row.release_year ? `${row.release_year}-01-01` : null);
-        const providerRows = providersByKey.get(`${row.media_type}:${row.tmdb_id}`) ?? [];
-        const providers: EnrichedTitle["providers"] = providerRows.map((provider) => ({
-          name: provider.provider_name,
-          logo: provider.provider_logo_path ?? "",
-          type: providerType(provider.availability_type),
-        }));
-        const hasSubscription = providerRows.some((provider) =>
-          ["streaming", "free", "ads"].includes(provider.availability_type),
-        );
-        const hasVod = providerRows.some((provider) =>
-          ["rent", "buy"].includes(provider.availability_type),
-        );
-        const availabilityStatus = hasSubscription
-          ? "streaming_confirmed_br"
-          : hasVod
-            ? "vod_available_br"
-            : undefined;
+        const summary = availabilityByRow.get(row.id);
+        const providers = providersFromSummary(summary);
         const seasons = row.media_type === "tv" ? (details.number_of_seasons ?? null) : null;
         const runtimeResolution = resolveRuntimeByMediaType({
           mediaType: row.media_type,
@@ -470,8 +515,16 @@ export async function POST(request: Request) {
             : formatRuntimeLabel(runtimeResolution.minutes, {
                 estimated: runtimeResolution.estimated,
               });
-        const streamStatus = inferStreamStatus(releaseDate, row, availabilityStatus);
-        const title = details.title ?? extractTitleStr(row.title) ?? "Sem título";
+        const streamStatus = streamStatusFromAvailability(summary, releaseDate, row);
+        const title = resolveDisplayTitle({
+          title: details.title ?? extractTitleStr(row.title),
+          originalTitle: details.original_title,
+          tmdbId: row.tmdb_id,
+          imdbId: row.imdb_id ?? row.externalIds?.imdbId,
+          poplogId: row.poplogId,
+          slug: row.slug,
+          mediaType: row.media_type,
+        });
 
         return {
           id: row.id,

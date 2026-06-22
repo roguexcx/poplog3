@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getCurrentUser } from "@/server/auth/get-current-user";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import {
   getLocalContinuityStateRows,
   getLocalTitlesBatch,
@@ -26,6 +27,9 @@ export type RecentlyWatchedItem = {
   last_episode: number | null;
   last_episode_name: string | null;
   watched_at: string;
+  best_provider_name?: string | null;
+  best_provider_type?: string | null;
+  best_provider_logo?: string | null;
 };
 
 type EpisodeRow = {
@@ -44,6 +48,9 @@ type StateRow = {
   watched_keys: string[] | null;
   last_watched_at: string | null;
   last_event_at: string;
+  best_provider_name: string | null;
+  best_provider_type: string | null;
+  best_provider_logo: string | null;
 };
 
 type TitleRow = {
@@ -55,13 +62,6 @@ type TitleRow = {
   backdrop_path: string | null;
 };
 
-type EpisodeMeta = {
-  series_tmdb_id: number;
-  season_number: number;
-  episode_number: number;
-  name: string | null;
-  still_path: string | null;
-};
 
 function parseEpisodeKey(key: string | null | undefined) {
   const match = /^S(\d+)E(\d+)$/i.exec(key ?? "");
@@ -190,9 +190,12 @@ async function buildLocalRecentlyWatched(userId: string): Promise<NextResponse> 
           content_id: `${state.media_type}-${state.tmdb_id}`,
           tmdb_id: state.tmdb_id,
           media_type: state.media_type,
-          title:
-            title.title ??
-            (state.media_type === "tv" ? `Série ${state.tmdb_id}` : `Filme ${state.tmdb_id}`),
+          title: resolveDisplayTitle({
+            title: title.title,
+            originalTitle: title.original_title,
+            tmdbId: state.tmdb_id,
+            mediaType: state.media_type,
+          }),
           original_title: title.original_title ?? null,
           poster_path: title.poster_path ?? null,
           backdrop_path: title.backdrop_path ?? null,
@@ -201,6 +204,9 @@ async function buildLocalRecentlyWatched(userId: string): Promise<NextResponse> 
           last_episode: ep?.episode_number ?? null,
           last_episode_name: epMeta?.name ?? null,
           watched_at: ep?.watched_at ?? (state as typeof state & { activity_at: string }).activity_at,
+          best_provider_name: state.best_provider_name ?? null,
+          best_provider_type: state.best_provider_type ?? null,
+          best_provider_logo: state.best_provider_logo ?? null,
         };
       });
     markStage("response_build");

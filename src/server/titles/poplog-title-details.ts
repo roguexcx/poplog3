@@ -1,5 +1,6 @@
 import { buildTmdbRawUrl } from "@/lib/images/url";
 import { translateGenreName } from "@/lib/domain-labels";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import {
   catalogGetMovie,
   catalogGetPeople,
@@ -13,7 +14,6 @@ import type { CatalogPeople, CatalogTitle, CatalogVideo } from "@/server/source-
 import { db } from "@/server/db/client";
 import {
   canonicalInputFromCatalogTitle,
-  enqueueCanonicalRefresh,
   upsertCanonicalTitle,
 } from "@/server/source-engine/canonical-store";
 import {
@@ -255,7 +255,13 @@ function localToDetails(
   return {
     poplogId: row.id,
     mediaType: row.mediaType,
-    title: row.title ?? row.originalTitle ?? "Sem titulo",
+    title: resolveDisplayTitle({
+      title: row.title,
+      originalTitle: row.originalTitle,
+      tmdbId: row.tmdbId,
+      poplogId: row.id,
+      mediaType: row.mediaType,
+    }),
     originalTitle: row.originalTitle,
     overview: row.overview,
     year: row.year,
@@ -512,7 +518,11 @@ export async function getPoplogTitleDetails({
     let remoteSource: Exclude<PoplogTitleDetailsSource, "local" | "legacy"> = "trakt";
     let effectiveMediaType: MediaType = mediaType;
 
-    if (mediaType === "movie" && lookupId.startsWith("tt")) {
+    if (lookupId.startsWith("tt")) {
+      // Resolução bidirecional: consulta os endpoints de filme E série em paralelo
+      // e corrige a mídia conforme a evidência. Antes só filmes faziam isso, então
+      // uma série cujo IMDb o Trakt só conhece como filme (ou vice-versa) caía em
+      // "legacy" e a PÁGINA NÃO CARREGAVA. Agência simétrica para ambos os tipos.
       const [movieCandidate, showCandidate] = await Promise.all([
         resolveMovieTitleCandidate({ imdbId: lookupId }),
         resolveShowTitleCandidate({ imdbId: lookupId, tvdbId: identity.externalIds.tvdbId }),
@@ -520,7 +530,25 @@ export async function getPoplogTitleDetails({
       const movieTitle = movieCandidate?.title ?? null;
       const showTitle = showCandidate?.title ?? null;
 
-      if (hasSeriesEvidence(showTitle) && (!movieTitle || showTitle?.ids.imdbId === movieTitle.ids.imdbId || showTitle?.title === movieTitle.title)) {
+      if (mediaType === "tv") {
+        // Solicitado série: prefere o show; cai para o filme só se não houver show.
+        if (showTitle) {
+          remoteTitle = showTitle;
+          remoteSource = showCandidate?.source ?? "trakt";
+          effectiveMediaType = "tv";
+        } else if (movieTitle) {
+          remoteTitle = movieTitle;
+          remoteSource = movieCandidate?.source ?? "trakt";
+          effectiveMediaType = "movie";
+          logMediaCorrection({
+            requested: mediaType,
+            resolved: effectiveMediaType,
+            id: lookupId,
+            reason: "show_endpoint_empty_movie_endpoint_valid",
+            showTitle: movieTitle,
+          });
+        }
+      } else if (hasSeriesEvidence(showTitle) && (!movieTitle || showTitle?.ids.imdbId === movieTitle.ids.imdbId || showTitle?.title === movieTitle.title)) {
         remoteTitle = showTitle;
         remoteSource = showCandidate?.source ?? "trakt";
         effectiveMediaType = "tv";

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { getCachedEpisode } from "@/server/cache/season-cache";
 import { db } from "@/server/db/client";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
 
 // Horizonte máximo: episódios até N dias à frente
 const MAX_DAYS_AHEAD = 90;
@@ -30,14 +31,6 @@ type StateRow = {
   next_season: number | null;
   next_episode: number | null;
   next_episode_air_date: string | null;
-};
-
-type TitleRow = {
-  tmdb_id: number;
-  title: string | null;
-  original_title: string | null;
-  poster_path: string | null;
-  backdrop_path: string | null;
 };
 
 function dateOnly(value: Date | string | null | undefined): string | null {
@@ -179,7 +172,12 @@ async function buildLocalUpcomingEpisodeItems(userId: string) {
       return {
         content_id: `tv-${state.tmdb_id}`,
         tmdb_id: state.tmdb_id,
-        title: title.title ?? `Série ${state.tmdb_id}`,
+        title: resolveDisplayTitle({
+          title: title.title,
+          originalTitle: title.originalTitle,
+          tmdbId: state.tmdb_id,
+          mediaType: "tv",
+        }),
         original_title: title.originalTitle ?? null,
         poster_path: title.posterPath ?? null,
         backdrop_path: title.backdropPath ?? null,

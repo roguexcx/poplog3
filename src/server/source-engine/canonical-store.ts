@@ -95,11 +95,6 @@ function computeStaleAt(ttlSeconds = DEFAULT_TTL_SECONDS): Date {
   return new Date(Date.now() + (ttlSeconds + STALE_WINDOW_SECONDS) * 1_000);
 }
 
-// Keep backward-compat alias
-function expiresAt(ttlSeconds = DEFAULT_TTL_SECONDS): Date {
-  return computeExpiresAt(ttlSeconds);
-}
-
 export async function upsertCanonicalTitle(input: CanonicalTitleInput) {
   const tmdbId = stableSyntheticId(input);
   const traktId = traktBigInt(input.ids.traktId);

@@ -9,6 +9,7 @@
  */
 
 import type { UserSeriesProgress } from "@/server/episodes/episode-progress-service";
+import { computeBulkSeriesProgress } from "@/server/repositories";
 import { formatError, rateLimitedWarn } from "@/server/logging/log-control";
 
 // ── Tipos públicos ────────────────────────────────────────────────────────────
@@ -154,23 +155,9 @@ async function getLocalUserTitleStateService() {
   return import("@/server/local-services/user-title-state-local.service");
 }
 
-function readSeasonNumberFromEpisode(value: unknown): number | null {
-  if (!value || typeof value !== "object") return null;
-  const seasonNumber = (value as Record<string, unknown>).season_number;
-  return typeof seasonNumber === "number" && Number.isFinite(seasonNumber) && seasonNumber > 0
-    ? Math.floor(seasonNumber)
-    : null;
-}
-
-function readAirDateFromEpisode(value: unknown): string | null {
-  if (!value || typeof value !== "object") return null;
-  const airDate = (value as Record<string, unknown>).air_date;
-  return typeof airDate === "string" && airDate.length > 0 ? airDate : null;
-}
-
 async function refreshTvCatalogForStateSync(
   tmdbId: number,
-  options: { force?: boolean } = {},
+  _options: { force?: boolean } = {},
 ): Promise<void> {
   const ttlMs = 10 * 60 * 1000;
   const cached = tvCatalogRefreshCache.get(tmdbId);
@@ -348,6 +335,21 @@ export async function syncUserTvTitleStates(
   });
   const failed: Array<{ tmdbId: number; error: string }> = [];
 
+  // Compute fresh progress from the episode catalog (not from cached state).
+  // This is what detects new aired episodes for up_to_date series.
+  const tmdbIds = states.map((s) => s.tmdb_id);
+  const bulkResult = await computeBulkSeriesProgress({ userId, seriesTmdbIds: tmdbIds });
+  const freshProgressMap = bulkResult.ok ? bulkResult.data : new Map<number, UserSeriesProgress>();
+
+  if (!bulkResult.ok) {
+    rateLimitedWarn(
+      "user-title-state:bulk-progress-failed",
+      5 * 60 * 1000,
+      "[user-title-state] bulk progress computation failed — falling back to cached values",
+      bulkResult.error,
+    );
+  }
+
   for (const state of states) {
     try {
       if (opts?.refreshCatalog) {
@@ -365,6 +367,33 @@ export async function syncUserTvTitleStates(
         }
       }
 
+      // Use fresh progress if available; fall back to cached state values.
+      const freshProgress = freshProgressMap.get(state.tmdb_id);
+      const seriesProgress = freshProgress
+        ? {
+            watchedCount: freshProgress.watchedCount,
+            airedEpisodes: freshProgress.airedEpisodes,
+            totalEpisodes: freshProgress.totalEpisodes,
+            nextEpisode: freshProgress.nextEpisode,
+            lastWatchedAt: freshProgress.lastWatchedAt,
+            watchedKeys: freshProgress.watchedKeys,
+          }
+        : {
+            watchedCount: state.watched_episodes,
+            airedEpisodes: state.aired_episodes,
+            totalEpisodes: state.total_episodes,
+            nextEpisode:
+              state.next_season !== null && state.next_episode !== null
+                ? {
+                    seasonNumber: state.next_season,
+                    episodeNumber: state.next_episode,
+                    airDate: state.next_episode_air_date,
+                  }
+                : null,
+            lastWatchedAt: state.last_watched_at,
+            watchedKeys: state.watched_keys,
+          };
+
       await local.upsertTitleState({
         userId,
         tmdbId: state.tmdb_id,
@@ -374,21 +403,7 @@ export async function syncUserTvTitleStates(
           favorite: state.favorite,
           liked: state.liked,
         },
-        seriesProgress: {
-          watchedCount: state.watched_episodes,
-          airedEpisodes: state.aired_episodes,
-          totalEpisodes: state.total_episodes,
-          nextEpisode:
-            state.next_season !== null && state.next_episode !== null
-              ? {
-                  seasonNumber: state.next_season,
-                  episodeNumber: state.next_episode,
-                  airDate: state.next_episode_air_date,
-                }
-              : null,
-          lastWatchedAt: state.last_watched_at,
-          watchedKeys: state.watched_keys,
-        },
+        seriesProgress,
       });
     } catch (err) {
       failed.push({

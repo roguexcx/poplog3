@@ -1,5 +1,8 @@
 import { db } from "@/server/db/client";
 import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
+import { listActiveStreamingProviders } from "@/server/local-services/streaming-preferences-local.service";
+import { normalizeProvider } from "@/server/streaming/provider-normalization";
+import { hydrateManyTitleAvailability } from "@/server/availability";
 import {
   catalogGetTrending,
   catalogGetPopular,
@@ -61,15 +64,6 @@ export type SorteioPoolResult = {
     poolSource: string;
     skippedReasons: string[];
   };
-};
-
-type AvailabilityRow = {
-  tmdb_id: number;
-  media_type: MediaType;
-  provider_name: string;
-  provider_logo_path: string | null;
-  availability_type: string | null;
-  tmdb_provider_id: number | null;
 };
 
 const INTENSE_GENRES = new Set([18, 80, 53, 27, 9648, 10752]);
@@ -160,15 +154,9 @@ function dateOnly(value: Date | null | undefined): string | null {
   return value ? value.toISOString().slice(0, 10) : null;
 }
 
-function availabilityScore(row: AvailabilityRow, favoriteProviderIds: Set<string>) {
-  const type = row.availability_type ?? "";
-  const isPreferred = row.tmdb_provider_id !== null && favoriteProviderIds.has(String(row.tmdb_provider_id));
-  let score = 0;
-  if (isPreferred) score += 1000;
-  if (STREAMING_TYPES.has(type)) score += 300;
-  if (DIGITAL_TYPES.has(type)) score += 60;
-  if (row.provider_logo_path) score += 10;
-  return score;
+/** Chave de comparação canônica para nomes de provider (alias-aware + lowercase). */
+function providerNameKey(name: string): string {
+  return (normalizeProvider(name)?.name ?? name).trim().toLowerCase();
 }
 
 function passesVibe(item: SorteioItem, vibe: SorteioVibeFilter) {
@@ -428,61 +416,45 @@ async function fetchWatchlistPool(userId: string): Promise<SorteioItem[]> {
   return mapped.filter((item): item is SorteioItem => item !== null);
 }
 
+/**
+ * P4: disponibilidade do Sorteio agora vem do FLUXO CANÔNICO
+ * (hydrateManyTitleAvailability, cacheOnly + warmCold) — sem ler catalog_availability direto.
+ */
 async function enrichAvailability(items: SorteioItem[], favoriteProviderIds: Set<string>, region: string) {
-  const movieIds = items.filter((item) => item.media_type === "movie").map((item) => item.id);
-  const tvIds = items.filter((item) => item.media_type === "tv").map((item) => item.id);
-  const [movieRows, tvRows] = await Promise.all([
-    movieIds.length
-      ? db.catalogAvailability.findMany({
-          where: {
-            mediaType: "movie",
-            tmdbId: { in: movieIds.map((id) => BigInt(id)) },
-            providerRegion: region,
-            expiresAt: { gt: new Date() },
-          },
-        })
-      : Promise.resolve([]),
-    tvIds.length
-      ? db.catalogAvailability.findMany({
-          where: {
-            mediaType: "tv",
-            tmdbId: { in: tvIds.map((id) => BigInt(id)) },
-            providerRegion: region,
-            expiresAt: { gt: new Date() },
-          },
-        })
-      : Promise.resolve([]),
-  ]);
+  if (items.length === 0) return;
 
-  const availabilityMap = new Map<string, AvailabilityRow>();
-  for (const availability of [...movieRows, ...tvRows]) {
-    if (availability.tmdbId === null) continue;
-    const row: AvailabilityRow = {
-      tmdb_id: Number(availability.tmdbId),
-      media_type: availability.mediaType,
-      provider_name: availability.providerName,
-      provider_logo_path: availability.providerLogoUrl,
-      availability_type: availability.providerType,
-      tmdb_provider_id: null,
-    };
-    const key = `${row.media_type}-${row.tmdb_id}`;
-    const current = availabilityMap.get(key);
-    if (!current || availabilityScore(row, favoriteProviderIds) > availabilityScore(current, favoriteProviderIds)) {
-      availabilityMap.set(key, row);
+  // "Preferred" por NOME canônico (a camada canônica é name-based, não tmdb-provider-id).
+  const favoriteProviderNames = new Set<string>();
+  if (favoriteProviderIds.size > 0) {
+    try {
+      const catalog = await listActiveStreamingProviders(region);
+      for (const p of catalog) {
+        if (p.tmdb_provider_id != null && favoriteProviderIds.has(String(p.tmdb_provider_id))) {
+          favoriteProviderNames.add(providerNameKey(p.provider_name));
+        }
+      }
+    } catch (err) {
+      console.warn("[sorteio] catálogo de providers indisponível p/ preferred:", err);
     }
   }
 
-  for (const item of items) {
-    const availability = availabilityMap.get(`${item.media_type}-${item.id}`);
-    if (!availability) continue;
-    const providerType = normalizeProviderType(availability.availability_type);
-    const isPreferred =
-      availability.tmdb_provider_id !== null &&
-      favoriteProviderIds.has(String(availability.tmdb_provider_id));
+  const availabilityMap = await hydrateManyTitleAvailability(
+    items.map((item) => ({
+      key: `${item.media_type}-${item.id}`,
+      input: { mediaType: item.media_type, tmdbId: item.id, region },
+    })),
+    { cacheOnly: true, warmCold: true },
+  );
 
-    item.best_provider_name = availability.provider_name;
+  for (const item of items) {
+    const best = availabilityMap.get(`${item.media_type}-${item.id}`)?.bestProvider ?? null;
+    if (!best) continue; // preserva best_provider já vindo do user_title_state
+    const providerType = normalizeProviderType(best.type);
+    const isPreferred = favoriteProviderNames.has(providerNameKey(best.name));
+
+    item.best_provider_name = best.name;
     item.best_provider_type = providerType;
-    item.best_provider_logo = availability.provider_logo_path;
+    item.best_provider_logo = best.logoUrl ?? null;
     item.is_preferred_provider = isPreferred;
     item.availability_scope = isPreferred
       ? "preferred"

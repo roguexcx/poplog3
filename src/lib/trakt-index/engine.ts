@@ -14,6 +14,7 @@
  */
 
 import { traktGet } from "@/server/api-clients/trakt/client";
+import { isExcludedFormat } from "@/lib/content-format/excluded-formats";
 import type {
   TraktIndexItem,
   TraktIndexIds,
@@ -416,8 +417,14 @@ export async function buildTraktIndex(
   // 2. Agrupa duplicatas por IDs confiáveis (imdb > tmdb > trakt > tvdb > slug > título+ano)
   const groups = mergeIntoGroups(flat);
 
+  // 2b. Censura formatos não-roteirizados (talk show, variedades, reality, telejornal,
+  // game show) do índice de trending/HERO. Usa os gêneros Trakt de qualquer item do grupo.
+  const filteredGroups = groups.filter(
+    (g) => !g.items.some((i) => isExcludedFormat(i.obj.genres)),
+  );
+
   // 3. Score + sort
-  const scored = groups
+  const scored = filteredGroups
     .map((g) => ({ ...g, score: scoreGroup(g.items) }))
     .sort((a, b) => b.score - a.score);
 

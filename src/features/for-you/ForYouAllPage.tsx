@@ -70,8 +70,12 @@ function ForYouActions({ item, onDismiss }: { item: ForYouItem; onDismiss?: () =
 
   async function handleAction(action: "addToWatchlist" | "removeFromWatchlist" | "markAsWatched" | "markAsUnwatched") {
     setSaving(true);
-    await executeAction(action);
+    const result = await executeAction(action);
     setSaving(false);
+    // Remove o item imediatamente ao marcar como visto, sem aguardar o re-fetch da biblioteca.
+    if (action === "markAsWatched" && (!("ok" in result) || result.ok)) {
+      onDismiss?.();
+    }
   }
 
   const feedback = useUserFeedbackToggle({
@@ -144,7 +148,7 @@ function ForYouCard({ item, onDismiss }: { item: ForYouItem; onDismiss?: () => v
         className="bottom-[4.5rem] left-2.5 top-auto group-hover:opacity-0 transition-opacity duration-200"
       />
 
-      {imagePath && (
+      {imagePath ? (
         <TmdbImage
           path={imagePath}
           kind={imageKind}
@@ -154,6 +158,12 @@ function ForYouCard({ item, onDismiss }: { item: ForYouItem; onDismiss?: () => v
           sizes="(max-width: 640px) 44vw, (max-width: 1024px) 28vw, 18vw"
           className="object-cover transition duration-700 group-hover:scale-110"
         />
+      ) : (
+        <div className="absolute inset-0 bg-gradient-to-br from-sky-950/60 via-zinc-900 to-zinc-950">
+          <div className="flex h-full items-center justify-center text-4xl font-black text-white/10 select-none">
+            {item.title.charAt(0).toUpperCase()}
+          </div>
+        </div>
       )}
 
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#020617] via-black/72 via-48% to-transparent" />

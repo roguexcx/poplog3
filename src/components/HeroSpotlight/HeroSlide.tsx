@@ -141,6 +141,9 @@ export default function HeroSlide({
 
   const genres = Array.isArray(item.genres) ? item.genres.join(" · ") : "";
   const platform = item.streaming_platform ?? "";
+  const platformLogo = item.best_provider_logo
+    ? resolveCatalogImage(item.best_provider_logo, "original")
+    : null;
   const yearStr = item.year?.toString() ?? "";
   const runtimeLabel = item.runtime_label;
 
@@ -250,7 +253,17 @@ export default function HeroSlide({
                 {yearStr || genres ? (
                   <span className="text-white/25">·</span>
                 ) : null}
-                <span className="rounded-md bg-white/10 px-2 py-0.5 font-medium text-white/70">
+                <span className="inline-flex items-center gap-1 rounded-md bg-white/10 px-2 py-0.5 font-medium text-white/70">
+                  {platformLogo ? (
+                    <Image
+                      src={platformLogo}
+                      alt={platform}
+                      width={14}
+                      height={14}
+                      unoptimized
+                      className="h-3.5 w-3.5 rounded-sm object-contain"
+                    />
+                  ) : null}
                   {platform}
                 </span>
               </>

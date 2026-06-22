@@ -15,6 +15,7 @@ import { usePoplogUserState } from "@/stores/user-states-store";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import SectionHeader from "@/components/ui/SectionHeader";
 import LibraryStateBadge from "@/components/ui/LibraryStateBadge";
+import CardProviderBadge from "@/components/ui/CardProviderBadge";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -44,6 +45,9 @@ interface TrendingItem {
   runtime_label: string | null;
   is_new: boolean;
   new_label: string | null;
+  best_provider_name: string | null;
+  best_provider_type: string | null;
+  best_provider_logo: string | null;
   userFeedback?: { notInterested?: boolean };
 }
 
@@ -64,6 +68,9 @@ interface RawItem {
   first_air_date?: string | null;
   last_air_date?: string | null;
   runtime_label?: string | null;
+  best_provider_name?: string | null;
+  best_provider_type?: string | null;
+  best_provider_logo?: string | null;
   userFeedback?: { notInterested?: boolean };
 }
 
@@ -113,6 +120,9 @@ function toTrendingItem(raw: RawItem): TrendingItem {
     runtime_label: raw.runtime_label ?? null,
     is_new,
     new_label,
+    best_provider_name: raw.best_provider_name ?? null,
+    best_provider_type: raw.best_provider_type ?? null,
+    best_provider_logo: raw.best_provider_logo ?? null,
     userFeedback: raw.userFeedback,
   };
 }
@@ -288,6 +298,17 @@ function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
               <span className="text-[8px] font-black text-violet-400/80 leading-none">#</span>
               <span className="text-[12px] font-black leading-none tracking-tight text-white tabular-nums">{rank}</span>
             </div>
+
+            {/* Badge de disponibilidade (Onde assistir) — mesmo contrato da Watchlist */}
+            {item.best_provider_name && (
+              <div className="absolute bottom-2.5 right-2.5 z-20">
+                <CardProviderBadge
+                  name={item.best_provider_name}
+                  logoPath={item.best_provider_logo}
+                  type={item.best_provider_type}
+                />
+              </div>
+            )}
 
             {/* Badge de estado da biblioteca — visível quando não está em hover (z-10 < z-30 dos botões) */}
             <LibraryStateBadge

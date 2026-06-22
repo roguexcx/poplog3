@@ -1,3 +1,4 @@
+import { EngineApi } from "@prisma/client";
 import {
   clearEngineLogEntries,
   createEngineLogEntry,
@@ -6,7 +7,10 @@ import {
 } from "@/server/repositories";
 import type { ApiName, EngineLogEntry, EngineStats } from "@/server/engine-logger/types";
 
-const API_NAMES: ApiName[] = ["tmdb", "omdb", "watchmode", "motn", "balloonerismm", "tvdb"];
+// Fonte única de verdade: deriva do enum EngineApi do Prisma (DB), para nunca
+// divergir do schema. A lista hardcoded anterior omitia "trakt", deixando
+// perApi[entry.api] undefined e quebrando buildStats em qualquer entrada Trakt.
+const API_NAMES = Object.values(EngineApi) as ApiName[];
 const PERSISTENCE_WINDOW_HOURS = 24;
 
 type PersistentSnapshot = {

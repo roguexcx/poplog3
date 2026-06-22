@@ -1,4 +1,4 @@
-import { IMAGE_SIZES, type ImageKind, type ImageSizeOf } from "./sizes";
+import { IMAGE_SIZES, type ImageKind } from "./sizes";
 
 const TMDB_IMAGE_BASE = "https://image.tmdb.org/t/p";
 
@@ -8,19 +8,6 @@ function normalizeAbsoluteImageUrl(path: string): string | null {
   if (/^[a-z0-9.-]+\.[a-z]{2,}\//i.test(value)) return `https://${value}`;
   if (/^\/[a-z0-9.-]+\.[a-z]{2,}\//i.test(value)) return `https://${value.slice(1)}`;
   return null;
-}
-
-export function buildTmdbUrl<K extends ImageKind>(
-  kind: K,
-  size: ImageSizeOf<K>,
-  path: string | null | undefined,
-): string | null {
-  if (!path) return null;
-  const absoluteUrl = normalizeAbsoluteImageUrl(path);
-  if (absoluteUrl) return absoluteUrl;
-  const sizeValue = (IMAGE_SIZES[kind] as Record<string, string>)[size as string];
-  if (!sizeValue) return null;
-  return `${TMDB_IMAGE_BASE}/${sizeValue}${path}`;
 }
 
 export function buildTmdbUrlLoose(

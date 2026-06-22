@@ -38,6 +38,9 @@ export default function TitleRecommendations({
             href={`/title/${item.mediaType}/${item.poplogId ?? item.id}`}
             accent="rose"
             source="recommendations"
+            bestProviderName={item.best_provider_name ?? null}
+            bestProviderType={item.best_provider_type ?? null}
+            bestProviderLogo={item.best_provider_logo ?? null}
           />
         ))}
       </div>

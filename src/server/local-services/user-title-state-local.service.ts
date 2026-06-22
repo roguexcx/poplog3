@@ -8,6 +8,9 @@ import {
   type UpsertUserTitleStateInput,
 } from "@/server/repositories";
 import type { ComputedState, LibraryStatus, MediaType, UserTitleState as PrismaUserTitleState } from "@prisma/client";
+import { db } from "@/server/db/client";
+import { computeUserSeriesProgress } from "@/server/repositories/episode-progress.repository";
+import { calculateRemainingSeriesRuntime } from "@/server/library/runtime-calculator";
 
 export type UserEventType =
   | "episode_watched"
@@ -132,10 +135,59 @@ function deriveComputedState(mediaType: MediaType, status: string | null, watche
 }
 
 export async function upsertTitleState(input: UpsertTitleStateInput): Promise<void> {
+  let seriesProgress = input.seriesProgress;
+  if (input.mediaType === "tv" && !seriesProgress) {
+    const progress = await computeUserSeriesProgress({
+      userId: input.userId,
+      seriesTmdbId: input.tmdbId,
+    });
+    if (progress.ok) seriesProgress = progress.data;
+  }
+
   const status = input.libraryEntry?.status ?? null;
-  const progressPct = input.seriesProgress?.airedEpisodes
-    ? Math.min(Math.round((input.seriesProgress.watchedCount / input.seriesProgress.airedEpisodes) * 100), 100)
+  const progressPct = seriesProgress?.airedEpisodes
+    ? Math.min(Math.round((seriesProgress.watchedCount / seriesProgress.airedEpisodes) * 100), 100)
     : 0;
+
+  let durationSortMinutes: number | null = null;
+  let durationSortUnavailable = false;
+
+  if (input.mediaType === "movie") {
+    const title = await db.poplog3Title.findFirst({
+      where: { tmdbId: input.tmdbId, mediaType: "movie" },
+      select: { runtime: true },
+    });
+    durationSortMinutes = title?.runtime && title.runtime > 0 ? title.runtime : null;
+    durationSortUnavailable = durationSortMinutes === null;
+  } else {
+    const [episodes, title] = await Promise.all([
+      db.poplog3Episode.findMany({
+        where: { seriesTmdbId: input.tmdbId, seasonNumber: { gt: 0 } },
+        select: { seasonNumber: true, episodeNumber: true, airDate: true, runtime: true },
+      }),
+      db.poplog3Title.findFirst({
+        where: { tmdbId: input.tmdbId, mediaType: "tv" },
+        select: { runtime: true },
+      }),
+    ]);
+    const remaining = calculateRemainingSeriesRuntime({
+      episodes,
+      watchedKeys: seriesProgress?.watchedKeys ?? [],
+      fallbackEpisodeRuntime: title?.runtime ?? null,
+    });
+    const pendingFromState = Math.max(
+      0,
+      (seriesProgress?.airedEpisodes ?? 0) - (seriesProgress?.watchedCount ?? 0),
+    );
+    const stateFallback =
+      episodes.length === 0 &&
+      (seriesProgress?.airedEpisodes ?? 0) > 0 &&
+      title?.runtime && title.runtime > 0
+        ? pendingFromState * title.runtime
+        : null;
+    durationSortMinutes = stateFallback ?? remaining.minutes;
+    durationSortUnavailable = remaining.unavailable && stateFallback === null;
+  }
 
   const payload: UpsertUserTitleStateInput = {
     userId: input.userId,
@@ -147,18 +199,20 @@ export async function upsertTitleState(input: UpsertTitleStateInput): Promise<vo
     computedState: deriveComputedState(
       input.mediaType,
       status,
-      input.seriesProgress?.watchedCount ?? 0,
-      input.seriesProgress?.airedEpisodes ?? 0,
+      seriesProgress?.watchedCount ?? 0,
+      seriesProgress?.airedEpisodes ?? 0,
     ),
-    watchedEpisodes: input.seriesProgress?.watchedCount ?? 0,
-    airedEpisodes: input.seriesProgress?.airedEpisodes ?? 0,
-    totalEpisodes: input.seriesProgress?.totalEpisodes ?? null,
+    watchedEpisodes: seriesProgress?.watchedCount ?? 0,
+    airedEpisodes: seriesProgress?.airedEpisodes ?? 0,
+    totalEpisodes: seriesProgress?.totalEpisodes ?? null,
     progressPct,
-    nextSeason: input.seriesProgress?.nextEpisode?.seasonNumber ?? null,
-    nextEpisode: input.seriesProgress?.nextEpisode?.episodeNumber ?? null,
-    nextEpisodeAirDate: input.seriesProgress?.nextEpisode?.airDate ?? null,
-    lastWatchedAt: input.seriesProgress?.lastWatchedAt ?? null,
-    watchedKeys: input.seriesProgress?.watchedKeys ?? [],
+    nextSeason: seriesProgress?.nextEpisode?.seasonNumber ?? null,
+    nextEpisode: seriesProgress?.nextEpisode?.episodeNumber ?? null,
+    nextEpisodeAirDate: seriesProgress?.nextEpisode?.airDate ?? null,
+    lastWatchedAt: seriesProgress?.lastWatchedAt ?? null,
+    watchedKeys: seriesProgress?.watchedKeys ?? [],
+    durationSortMinutes,
+    durationSortUnavailable,
   };
 
   const result = await upsertUserTitleState(payload);

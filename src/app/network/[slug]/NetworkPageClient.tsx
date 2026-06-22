@@ -74,7 +74,6 @@ export default function NetworkPageClient({
   displayName,
   initialTitles,
   initialTotal,
-  pageSize,
 }: NetworkPageClientProps) {
   const [titles, setTitles] = useState<NetworkTitle[]>(initialTitles);
   const [page, setPage] = useState(1);

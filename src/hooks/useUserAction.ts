@@ -100,8 +100,6 @@ export function useUserAction({
                 setUserState(effectiveKey, currentState);
               } else {
                 // Remove the optimistic entry we created
-                const { [effectiveKey]: _removed, ...rest } = userStatesById;
-                void _removed; // suppress unused var
                 setUserState(effectiveKey, null as unknown as PoplogUserState);
               }
               isSavingRef.current = false;

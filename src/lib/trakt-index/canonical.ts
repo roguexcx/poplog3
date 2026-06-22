@@ -19,7 +19,7 @@ import {
  * Incrementar este valor invalida todos os caches antigos, forçando reconstrução
  * a partir dos 7 sinais Trakt sem servir resultados do algoritmo anterior.
  */
-export const POPLOG_TRENDING_ALGORITHM_VERSION = "trakt-7-signals-daily-v1";
+export const POPLOG_TRENDING_ALGORITHM_VERSION = "trakt-7-signals-daily-v2";
 
 // ─── Chaves de cache ──────────────────────────────────────────────────────────
 

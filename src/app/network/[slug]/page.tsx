@@ -15,7 +15,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { slug } = await params;
   const name = networkDisplayName(slug);
   return {
-    title: `${name} — POPLOG`,
+    title: name,
     description: `Títulos originais de ${name} no POPLOG`,
   };
 }

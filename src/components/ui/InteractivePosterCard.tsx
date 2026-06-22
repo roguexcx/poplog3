@@ -4,6 +4,7 @@ import { useState } from "react";
 
 import { CardActionButton } from "@/components/ui/CardActionButton";
 import LibraryStateBadge from "@/components/ui/LibraryStateBadge";
+import CardProviderBadge from "@/components/ui/CardProviderBadge";
 import PosterCard from "@/components/ui/PosterCard";
 import { IconBookmark, IconCheck, IconX } from "@/components/ui/icons";
 import { useUserAction } from "@/hooks/useUserAction";
@@ -33,6 +34,10 @@ type InteractivePosterCardProps = {
   className?: string;
   source?: string;
   priority?: boolean;
+  /** Badge de disponibilidade (Onde assistir) — mesmo contrato do card da Watchlist. */
+  bestProviderName?: string | null;
+  bestProviderType?: string | null;
+  bestProviderLogo?: string | null;
 };
 
 function ActionButtons({
@@ -166,6 +171,9 @@ export default function InteractivePosterCard({
   className,
   source,
   priority = false,
+  bestProviderName,
+  bestProviderType,
+  bestProviderLogo,
 }: InteractivePosterCardProps) {
   const numericTmdbId =
     typeof tmdbId === "number" && Number.isInteger(tmdbId) && tmdbId !== 0
@@ -190,15 +198,26 @@ export default function InteractivePosterCard({
       className={className}
       priority={priority}
       directOverlay={
-        numericTmdbId !== undefined || poplogId ? (
-          <LibraryStateBadge
-            tmdbId={numericTmdbId}
-            poplogId={poplogId}
-            imdbId={imdbId}
-            mediaType={mediaType}
-            className="top-2.5 left-2.5 z-10 group-hover:opacity-0 transition-opacity duration-200"
-          />
-        ) : undefined
+        <>
+          {(numericTmdbId !== undefined || poplogId) && (
+            <LibraryStateBadge
+              tmdbId={numericTmdbId}
+              poplogId={poplogId}
+              imdbId={imdbId}
+              mediaType={mediaType}
+              className="top-2.5 left-2.5 z-10 group-hover:opacity-0 transition-opacity duration-200"
+            />
+          )}
+          {bestProviderName && (
+            <div className="absolute bottom-2.5 right-2.5 z-10 group-hover:opacity-0 transition-opacity duration-200">
+              <CardProviderBadge
+                name={bestProviderName}
+                logoPath={bestProviderLogo}
+                type={bestProviderType}
+              />
+            </div>
+          )}
+        </>
       }
       bottomOverlay={
         <ActionButtons

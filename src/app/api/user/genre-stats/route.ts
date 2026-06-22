@@ -23,17 +23,33 @@ function genreName(genre: unknown): string | null {
   return typeof name === "string" && name.trim() ? name : null;
 }
 
+const STATUS_WEIGHT: Record<string, number> = {
+  watched:   3,
+  watching:  2,
+  watchlist: 1,
+  fridge:    1,
+  abandoned: 0,
+};
+const FAVORITE_BONUS = 2;
+
 async function buildLocalGenreStats(userId: string) {
   const userTitles = await db.userTitle.findMany({
     where: { userId },
-    select: { tmdbId: true, mediaType: true },
+    select: { tmdbId: true, mediaType: true, status: true, favorite: true },
   });
 
   if (userTitles.length === 0) return { ok: true, genres: [] } satisfies GenreStatsPayload;
 
+  // Filtrar títulos irrelevantes (abandoned = peso 0)
+  const relevantTitles = userTitles.filter(
+    (t) => (STATUS_WEIGHT[t.status] ?? 0) > 0,
+  );
+
+  if (relevantTitles.length === 0) return { ok: true, genres: [] } satisfies GenreStatsPayload;
+
   const titleData = await db.poplog3Title.findMany({
     where: {
-      OR: userTitles.map((title) => ({
+      OR: relevantTitles.map((title) => ({
         tmdbId: title.tmdbId,
         mediaType: title.mediaType,
       })),
@@ -48,12 +64,13 @@ async function buildLocalGenreStats(userId: string) {
   );
   const genreCount: Record<string, number> = {};
 
-  for (const userTitle of userTitles) {
+  for (const userTitle of relevantTitles) {
     const genres = titleMap.get(`${userTitle.tmdbId}_${userTitle.mediaType}`);
     if (!genres) continue;
+    const weight = (STATUS_WEIGHT[userTitle.status] ?? 0) + (userTitle.favorite ? FAVORITE_BONUS : 0);
     for (const genre of genres) {
       const name = genreName(genre);
-      if (name) genreCount[name] = (genreCount[name] ?? 0) + 1;
+      if (name) genreCount[name] = (genreCount[name] ?? 0) + weight;
     }
   }
 

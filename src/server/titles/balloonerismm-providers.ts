@@ -80,7 +80,7 @@ function itemsToProviders(
 
 function normalizeRegionData(
   regionData: BalloonerismWatchRegionData,
-  region: string,
+  _region: string,
 ): TitleProvider[] {
   if (!regionData) return [];
 
@@ -99,17 +99,27 @@ function normalizeRegionData(
 // ─── Fetch principal ─────────────────────────────────────────────────────────
 
 /**
- * Busca watch providers do Balloonerismm para um título via IMDb ID.
+ * Resultado detalhado do fetch de providers, distinguindo a causa de um array vazio:
+ *   - "ok"    → resposta válida com providers.
+ *   - "empty" → resposta válida SEM providers para a região (negativo GENUÍNO → cacheável).
+ *   - "error" → falha de fetch (cooldown, 429, timeout, API inativa, null) → NÃO cachear negativo.
  *
- * - Sempre retorna BR como região padrão.
- * - Nunca lança — retorna [] em caso de erro ou indisponibilidade.
- * - Cache de processo: 1h por path.
+ * O endpoint Balloonerismm /watch/providers é IMDb-first (exige tt-id; valida /^tt\d+$/).
+ * Por isso o `imdbId` é passado direto — não há resolução para TMDB.
  */
-export async function getBalloonerismWatchProviders(
+export type WatchProvidersOutcome = "ok" | "empty" | "error";
+export type WatchProvidersResult = {
+  outcome: WatchProvidersOutcome;
+  providers: TitleProvider[];
+  /** Path realmente chamado (para debug). */
+  path: string;
+};
+
+export async function getBalloonerismWatchProvidersDetailed(
   imdbId: string,
   mediaType: "movie" | "tv",
   region = DEFAULT_REGION,
-): Promise<TitleProvider[]> {
+): Promise<WatchProvidersResult> {
   const segment = mediaType === "movie" ? "movie" : "tv";
   const path = `/${segment}/${imdbId}/watch/providers`;
 
@@ -118,18 +128,37 @@ export async function getBalloonerismWatchProviders(
     ttlSeconds: PROVIDERS_TTL,
   });
 
-  if (!data?.results) return [];
+  // null = fetch falhou / API inativa / cooldown sem cache / 429 / timeout.
+  // Isso é um ERRO, não "sem providers" — o caller não deve cachear negativo.
+  if (data === null) return { outcome: "error", providers: [], path };
 
-  // Tenta a região solicitada; se vazia, tenta qualquer região disponível como fallback
-  const regionData = data.results[region.toUpperCase()]
-    ?? data.results[region.toLowerCase()]
-    ?? null;
+  // Resposta válida, mas sem bloco results → genuinamente sem providers.
+  if (!data.results) return { outcome: "empty", providers: [], path };
 
-  if (regionData) return normalizeRegionData(regionData, region);
+  // Tenta a região solicitada; se vazia, tenta qualquer região disponível como fallback.
+  const regionData =
+    data.results[region.toUpperCase()] ?? data.results[region.toLowerCase()] ?? null;
 
-  // Fallback: se só há uma região disponível, usa ela
-  const available = Object.values(data.results);
-  if (available.length === 1) return normalizeRegionData(available[0], region);
+  let providers = regionData ? normalizeRegionData(regionData, region) : [];
 
-  return [];
+  // Fallback: se só há uma região disponível, usa ela.
+  if (providers.length === 0) {
+    const available = Object.values(data.results);
+    if (available.length === 1) providers = normalizeRegionData(available[0], region);
+  }
+
+  return { outcome: providers.length > 0 ? "ok" : "empty", providers, path };
+}
+
+/**
+ * Busca watch providers do Balloonerismm para um título via IMDb ID.
+ * Wrapper de compatibilidade — retorna apenas a lista (sem distinção de outcome).
+ */
+export async function getBalloonerismWatchProviders(
+  imdbId: string,
+  mediaType: "movie" | "tv",
+  region = DEFAULT_REGION,
+): Promise<TitleProvider[]> {
+  const { providers } = await getBalloonerismWatchProvidersDetailed(imdbId, mediaType, region);
+  return providers;
 }

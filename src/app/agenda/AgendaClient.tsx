@@ -7,7 +7,7 @@ import { useRouter } from "next/navigation";
 import ContextualAttribution from "@/components/attribution/ContextualAttribution";
 import PageShell from "@/components/layout/PageShell";
 import type { IcsSeriesGroup, MovieGroup, ContentCategory } from "@/lib/ics-engine";
-import { CATEGORY_PRIORITY, ALL_BLOCKED_CATEGORIES } from "@/lib/ics-engine";
+import { ALL_BLOCKED_CATEGORIES } from "@/lib/ics-engine";
 import type { IcsAgendaResponse } from "@/app/api/ics/agenda/route";
 import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 
@@ -93,10 +93,6 @@ function startOfWeek(date: Date): Date {
   return d;
 }
 
-function formatMonthYear(y: number, m: number) {
-  return new Date(y, m, 1).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
-}
-
 function formatWeekRange(start: Date) {
   const end = new Date(start); end.setDate(end.getDate() + 6);
   const o: Intl.DateTimeFormatOptions = { day: "2-digit", month: "short" };
@@ -120,16 +116,6 @@ function daysUntilDate(dateStr: string): number {
   const date = new Date(`${dateStr}T12:00:00`);
   const today = new Date(`${todayStr()}T12:00:00`);
   return Math.ceil((date.getTime() - today.getTime()) / 86_400_000);
-}
-
-function dateLabelFromDays(days: number): string {
-  if (days <= 0) return "Hoje";
-  if (days === 1) return "Amanhã";
-  if (days <= 7) return `Em ${days} dias`;
-  // Mais de 7 dias: mostra data formatada (ex: "12 de jun.")
-  const d = new Date();
-  d.setDate(d.getDate() + days);
-  return d.toLocaleDateString("pt-BR", { day: "numeric", month: "short" });
 }
 
 function getDaysInMonth(y: number, m: number) { return new Date(y, m + 1, 0).getDate(); }
@@ -359,7 +345,6 @@ function buildEditorialGroups(
     trendingWeek: Set<number>;
   },
 ): EditorialGroup[] {
-  const today = todayStr();
   // "month" agora é um feed editorial contínuo de 30 dias a partir de hoje.
   // "day" e "week" mantêm a lógica de navegação por datas existente.
   const { start: windowStart, end: windowEnd } = activeWindow();
@@ -547,232 +532,6 @@ function SectionEyebrow({ children, color = "sky" }: {
 
 function SectionDivider() {
   return <div className="h-px w-full bg-gradient-to-r from-transparent via-white/[0.06] to-transparent my-10" />;
-}
-
-// ── Phase indicator ────────────────────────────────────────────────────────────
-
-function PhaseBar({ phase, enrichProgress }: { phase: Phase; enrichProgress: number }) {
-  if (phase === "done") return null;
-  return (
-    <div className="flex items-center gap-3 mb-6 px-4 py-3 rounded-[22px] border border-white/[0.08] bg-white/[0.035] backdrop-blur-xl">
-      <span className="w-1.5 h-1.5 rounded-full bg-sky-400/80 animate-pulse shrink-0" />
-      <span className="text-[11px] font-bold text-white/40">{PHASE_LABELS[phase]}</span>
-      {phase === "enriching" && enrichProgress > 0 && (
-        <>
-          <div className="flex-1 h-px bg-white/[0.06] rounded-full overflow-hidden">
-            <div
-              className="h-full bg-sky-500/50 rounded-full transition-all duration-500"
-              style={{ width: `${Math.min(100, enrichProgress)}%` }}
-            />
-          </div>
-          <span className="text-[9px] font-bold text-white/20">{Math.round(enrichProgress)}%</span>
-        </>
-      )}
-    </div>
-  );
-}
-
-// ── Série card ─────────────────────────────────────────────────────────────────
-
-function SeriesCard({
-  group, href, compact = false,
-}: {
-  group: IcsSeriesGroup;
-  href: string;
-  compact?: boolean;
-}) {
-  const router = useRouter();
-  const tmdb = group.tmdb;
-  // Language-aware: JP/KR/CN series get backdrop instead of logo-heavy poster
-  const poster   = tmdb ? bestVerticalImg({ ...tmdb, poster_path: tmdb.poster_path ?? null, backdrop_path: tmdb.backdrop_path ?? null }) : null;
-  const backdrop = tmdb ? TMDB_IMG(tmdb.backdrop_path, "w780") : null;
-  const name     = tmdb?.name ?? group.rawTitle;
-  const { label: catLabel, color: catColor } = resolveCatLabel(group);
-
-  const nextDate = new Date(group.nextAirDate);
-  const daysUntil = Math.ceil((nextDate.getTime() - Date.now()) / 86_400_000);
-  const dateLabel =
-    daysUntil <= 0 ? "Hoje" :
-    daysUntil === 1 ? "Amanhã" :
-    daysUntil <= 7 ? `Em ${daysUntil} dias` :
-    nextDate.toLocaleDateString("pt-BR", { day: "2-digit", month: "short" });
-  const dateFull = nextDate.toLocaleDateString("pt-BR", { day: "2-digit", month: "2-digit", year: "numeric" });
-
-  const urgencyColor =
-    daysUntil <= 0  ? "text-rose-400" :
-    daysUntil <= 1  ? "text-amber-400" :
-    daysUntil <= 7  ? "text-sky-400" :
-    "text-white/30";
-
-  const handleClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    router.push(href);
-  };
-
-  if (compact) {
-    return (
-      <a
-        href={href}
-        onClick={handleClick}
-        className="group relative w-full text-left rounded-2xl border border-white/[0.07] bg-white/[0.02] hover:bg-white/[0.075] hover:border-white/[0.18] hover:-translate-y-0.5 transition-all duration-300 overflow-hidden p-3.5 block"
-      >
-        {backdrop && (
-          <div className="absolute inset-0 opacity-[0.07]">
-            <img src={backdrop} alt="" className="h-full w-full object-cover" />
-            <div className="absolute inset-0 bg-gradient-to-r from-black/80 to-transparent" />
-          </div>
-        )}
-        <div className="relative flex items-center gap-3.5">
-          <div className="relative w-[46px] h-[68px] rounded-2xl overflow-hidden bg-white/[0.05] shrink-0 border border-white/[0.08]">
-            {poster ? (
-              <img src={poster} alt={name} className="h-full w-full object-cover" loading="lazy" />
-            ) : (
-              <div className="h-full w-full flex items-center justify-center">
-                <span className="text-[9px] font-black text-white/15 text-center leading-tight px-1">
-                  {name.slice(0, 3).toUpperCase()}
-                </span>
-              </div>
-            )}
-          </div>
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-1.5 mb-1.5">
-              <span className={`text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${catColor}`}>
-                {catLabel}
-              </span>
-            </div>
-            <p className="text-[14px] font-black tracking-[-0.02em] text-white/88 leading-tight truncate">
-              {name}
-            </p>
-            <p className="text-[11px] text-white/35 mt-1">
-              {group.episodeCount} ep · S{group.seasons[0] ?? 1}
-            </p>
-          </div>
-          <div className="shrink-0 text-right">
-            <p className={`text-[12px] font-black tabular-nums ${urgencyColor}`}>{dateLabel}</p>
-            <p className="text-[9px] text-white/20 tabular-nums mt-0.5">{dateFull}</p>
-          </div>
-        </div>
-      </a>
-    );
-  }
-
-  // Card grande (carrossel) — poster is already language-aware via bestVerticalImg
-  const cardImg = poster ?? backdrop;
-  return (
-    <a
-      href={href}
-      onClick={handleClick}
-      className="group relative w-[160px] sm:w-[176px] text-left shrink-0 block"
-    >
-      <div className="relative aspect-[2/3] rounded-2xl overflow-hidden border border-white/[0.08] mb-3 bg-white/[0.04]">
-        {cardImg ? (
-          <img
-            src={cardImg} alt={name}
-            className="h-full w-full object-cover object-center transition-transform duration-500 group-hover:scale-[1.05]"
-            loading="lazy"
-          />
-        ) : (
-          <div className="h-full w-full flex flex-col items-center justify-center gap-3 p-4">
-            <div className="w-10 h-10 rounded-2xl border border-white/[0.08] bg-white/[0.04] flex items-center justify-center">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" className="w-5 h-5 text-white/20">
-                <rect x="2" y="3" width="20" height="14" rx="2" />
-                <path d="M8 21h8M12 17v4" />
-              </svg>
-            </div>
-            <p className="text-[11px] font-bold text-white/25 text-center leading-tight line-clamp-3">{name}</p>
-          </div>
-        )}
-        <div className="absolute inset-0 bg-gradient-to-t from-black/85 via-transparent to-transparent" />
-        <div className="absolute top-2.5 left-2.5 flex flex-col gap-1">
-          <span className={`text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-lg border ${catColor}`}>
-            {catLabel}
-          </span>
-          {group.streamingProvider && (
-            <span className="text-[9px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-lg border bg-emerald-500/15 text-emerald-300/80 border-emerald-500/20 self-start">
-              {group.streamingProvider.name}
-            </span>
-          )}
-        </div>
-        {tmdb?.vote_average && tmdb.vote_average > 0 && (
-          <div className="absolute top-2.5 right-2.5 flex items-center gap-1 bg-black/40 rounded-lg px-1.5 py-0.5">
-            <svg width="9" height="9" viewBox="0 0 24 24" fill="currentColor" className="text-amber-400">
-              <path d="M12 2l3.09 6.26L22 9.27l-5 4.87 1.18 6.88L12 17.77l-6.18 3.25L7 14.14 2 9.27l6.91-1.01L12 2z" />
-            </svg>
-            <span className="text-[10px] font-bold text-amber-300">{tmdb.vote_average.toFixed(1)}</span>
-          </div>
-        )}
-        <div className="absolute bottom-2.5 left-2.5 right-2.5">
-          <p className={`text-[10px] font-black ${urgencyColor}`}>{dateLabel}</p>
-          <p className="text-[9px] text-white/30 tabular-nums mt-0.5">{dateFull}</p>
-        </div>
-      </div>
-      <div className="px-0.5">
-        <p className="text-[13px] font-bold text-white/88 leading-tight tracking-[-0.02em] line-clamp-2 mb-1">{name}</p>
-        <p className="text-[11px] text-white/35">
-          {group.episodeCount} ep{group.episodeCount !== 1 ? "s" : ""} · S{group.seasons[0] ?? 1}
-        </p>
-      </div>
-    </a>
-  );
-}
-
-
-// ── ScrollRail ─────────────────────────────────────────────────────────────────
-
-function ScrollRail({ children }: { children: React.ReactNode }) {
-  const railRef = useRef<HTMLDivElement>(null);
-  const [canLeft, setCanLeft]   = useState(false);
-  const [canRight, setCanRight] = useState(false);
-
-  const sync = useCallback(() => {
-    const el = railRef.current;
-    if (!el) return;
-    setCanLeft(el.scrollLeft > 4);
-    setCanRight(el.scrollLeft + el.clientWidth < el.scrollWidth - 4);
-  }, []);
-
-  useEffect(() => {
-    const el = railRef.current;
-    if (!el) return;
-    sync();
-    el.addEventListener("scroll", sync, { passive: true });
-    const ro = new ResizeObserver(sync);
-    ro.observe(el);
-    return () => { el.removeEventListener("scroll", sync); ro.disconnect(); };
-  }, [sync]);
-
-  const nudge = (dir: 1 | -1) => {
-    const el = railRef.current;
-    if (el) el.scrollBy({ left: dir * Math.round(el.clientWidth * 0.65), behavior: "smooth" });
-  };
-
-  return (
-    <div className="relative group/rail -mx-4 sm:-mx-6 md:-mx-8 lg:mx-0">
-      <div className="absolute left-0 top-0 bottom-3 w-14 pointer-events-none z-10 transition-opacity duration-200"
-        style={{ opacity: canLeft ? 1 : 0, background: "linear-gradient(to right, #020617 25%, transparent)" }} />
-      {canLeft && (
-        <button type="button" onClick={() => nudge(-1)} aria-label="Anterior"
-          className="absolute left-2 top-1/2 -translate-y-[calc(50%+6px)] z-20 w-8 h-8 rounded-full border border-white/[0.12] bg-zinc-900/95 flex items-center justify-center text-white/60 hover:text-white hover:bg-zinc-800 transition-all duration-200 opacity-0 group-hover/rail:opacity-100 shadow-lg">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
-            <path d="M10 3L5 8l5 5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-      )}
-      <div ref={railRef} className="flex gap-3.5 overflow-x-auto px-4 sm:px-6 md:px-8 lg:px-0 pb-3 no-scrollbar [&>*]:shrink-0">
-        {children}
-      </div>
-      <div className="absolute right-0 top-0 bottom-3 w-14 pointer-events-none z-10 transition-opacity duration-200"
-        style={{ opacity: canRight ? 1 : 0, background: "linear-gradient(to left, #020617 25%, transparent)" }} />
-      {canRight && (
-        <button type="button" onClick={() => nudge(1)} aria-label="Próximo"
-          className="absolute right-2 top-1/2 -translate-y-[calc(50%+6px)] z-20 w-8 h-8 rounded-full border border-white/[0.12] bg-zinc-900/95 flex items-center justify-center text-white/60 hover:text-white hover:bg-zinc-800 transition-all duration-200 opacity-0 group-hover/rail:opacity-100 shadow-lg">
-          <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2" className="w-3.5 h-3.5">
-            <path d="M6 3l5 5-5 5" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
-      )}
-    </div>
-  );
 }
 
 // ── Spotlight Hero ─────────────────────────────────────────────────────────────

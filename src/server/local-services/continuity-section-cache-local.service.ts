@@ -37,8 +37,12 @@ export async function writeContinuitySectionCache<T>(input: {
   language?: string | null;
   payload: T;
   ttlMs: number;
-}): Promise<void> {
-  await writeRepositoryCache(input);
+}): Promise<boolean> {
+  // Repassa o resultado do repositório (ok/erro) — não engole a falha. Callers de
+  // produção fazem fire-and-forget (cache best-effort), mas testes/diagnósticos
+  // precisam saber se a escrita realmente persistiu.
+  const result = await writeRepositoryCache(input);
+  return result.ok;
 }
 
 export function invalidateContinuitySectionCache(userId: string): void {

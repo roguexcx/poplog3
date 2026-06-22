@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
 import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
+import CardProviderBadge from "@/components/ui/CardProviderBadge";
 
 export type ContinueStatusSignal =
   | "new_episode"
@@ -40,6 +41,9 @@ export type ContinueItem = {
   season_watched: number;
   /** Total de episódios na temporada atual — null se não sincronizado */
   season_total: number | null;
+  best_provider_name?: string | null;
+  best_provider_type?: string | null;
+  best_provider_logo?: string | null;
 };
 
 type TimeScope = "season" | "series";
@@ -183,6 +187,13 @@ export default function ContinueCard({ item, onClick }: Props) {
             <span className="rounded-full bg-indigo-500/25 px-2.5 py-0.5 text-[10px] font-black tracking-[0.06em] text-indigo-200/90 ring-1 ring-indigo-400/30">
               CONTINUAR
             </span>
+            {item.best_provider_name && (
+              <CardProviderBadge
+                name={item.best_provider_name}
+                logoPath={item.best_provider_logo}
+                type={item.best_provider_type}
+              />
+            )}
           </div>
 
           {/* Title + episode name */}

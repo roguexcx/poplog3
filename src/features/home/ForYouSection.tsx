@@ -15,6 +15,7 @@ import { useUserData } from "@/context/UserDataContext";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import TmdbImage from "@/components/images/TmdbImage";
 import SectionHeader from "@/components/ui/SectionHeader";
+import CardProviderBadge from "@/components/ui/CardProviderBadge";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -24,6 +25,9 @@ type ForYouItem = {
   poplogId?: string | null;
   /** ID canônico para o href do link — pode ser tmdbId numérico (string) ou imdbId ("tt...") */
   linkId?: string;
+  imdbId?: string | null;
+  traktId?: number | null;
+  slug?: string | null;
   title: string;
   originalTitle?: string | null;
   overview?: string;
@@ -35,6 +39,9 @@ type ForYouItem = {
   mediaLabel?: string;
   genreLabel?: string | null;
   reason?: string;
+  best_provider_name?: string | null;
+  best_provider_type?: string | null;
+  best_provider_logo?: string | null;
   userFeedback?: { notInterested?: boolean };
 };
 
@@ -70,8 +77,16 @@ function ForYouActions({ item, onDismiss }: { item: ForYouItem; onDismiss?: () =
 
   async function handleAction(action: "addToWatchlist" | "removeFromWatchlist" | "markAsWatched" | "markAsUnwatched") {
     setSaving(true);
-    await executeAction(action);
+    const result = await executeAction(action);
     setSaving(false);
+    // Ambos os estados fazem parte da biblioteca e são inelegíveis para o bloco.
+    // Remove imediatamente, sem aguardar a atualização assíncrona do contexto.
+    if (
+      (action === "markAsWatched" || action === "addToWatchlist") &&
+      (!("ok" in result) || result.ok)
+    ) {
+      onDismiss?.();
+    }
   }
 
   const feedback = useUserFeedbackToggle({
@@ -173,6 +188,13 @@ function FeaturedForYouCard({ item, onDismiss }: { item: ForYouItem; onDismiss?:
               {rating}
             </span>
           )}
+          {item.best_provider_name && (
+            <CardProviderBadge
+              name={item.best_provider_name}
+              logoPath={item.best_provider_logo}
+              type={item.best_provider_type}
+            />
+          )}
         </div>
 
         <LocalizedTitle
@@ -216,7 +238,7 @@ function SmallForYouCard({ item, onDismiss }: { item: ForYouItem; onDismiss?: ()
 
       <ForYouActions item={item} onDismiss={onDismiss} />
 
-      {imagePath && (
+      {imagePath ? (
         <TmdbImage
           path={imagePath}
           kind={imageKind}
@@ -226,6 +248,13 @@ function SmallForYouCard({ item, onDismiss }: { item: ForYouItem; onDismiss?: ()
           sizes="220px"
           className="object-cover transition duration-700 group-hover:scale-110"
         />
+      ) : (
+        // Fallback visual quando nenhuma imagem está disponível
+        <div className="absolute inset-0 bg-gradient-to-br from-sky-950/60 via-zinc-900 to-zinc-950">
+          <div className="flex h-full items-center justify-center text-4xl font-black text-white/10 select-none">
+            {item.title.charAt(0).toUpperCase()}
+          </div>
+        </div>
       )}
 
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-[#020617] via-black/72 via-48% to-transparent" />
@@ -233,12 +262,21 @@ function SmallForYouCard({ item, onDismiss }: { item: ForYouItem; onDismiss?: ()
       <div className="pointer-events-none absolute inset-0 opacity-0 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.28)] transition duration-300 group-hover:opacity-100" />
 
       <div className="pointer-events-none absolute inset-x-0 bottom-0 z-20 p-4">
-        {rating && (
-          <div className="mb-2 inline-flex items-center gap-[3px] rounded-full border border-white/[0.14] bg-black/75 px-2 py-[3px] text-[10px] font-semibold text-amber-400 backdrop-blur-[10px]">
-            <IconStar />
-            {rating}
-          </div>
-        )}
+        <div className="mb-2 flex items-center gap-1.5">
+          {rating && (
+            <div className="inline-flex items-center gap-[3px] rounded-full border border-white/[0.14] bg-black/75 px-2 py-[3px] text-[10px] font-semibold text-amber-400 backdrop-blur-[10px]">
+              <IconStar />
+              {rating}
+            </div>
+          )}
+          {item.best_provider_name && (
+            <CardProviderBadge
+              name={item.best_provider_name}
+              logoPath={item.best_provider_logo}
+              type={item.best_provider_type}
+            />
+          )}
+        </div>
 
         <LocalizedTitle
           as="h3"
@@ -300,16 +338,23 @@ export default function ForYouSection() {
   const [dismissedKeys, setDismissedKeys] = useState<Set<string>>(new Set());
 
   // Conjuntos de exclusão: itens em qualquer estado da biblioteca são ocultados.
-  const { libraryKeys, libraryImdbIds } = useMemo(() => {
-    const keys    = new Set<string>();
-    const imdbIds = new Set<string>();
+  const libraryIdentities = useMemo(() => {
+    const identities = new Set<string>();
+    const add = (mediaType: string, kind: string, value: unknown) => {
+      if (value === null || value === undefined) return;
+      const normalized = String(value).trim().toLowerCase();
+      if (normalized) identities.add(`${mediaType}:${kind}:${normalized}`);
+    };
     for (const t of titles) {
-      keys.add(`${t.tmdb_id}:${t.media_type}`);
+      add(t.media_type, "tmdb", t.tmdb_id);
+      add(t.media_type, "poplog", t.poplogId);
       const imdbId = (t as { imdb_id?: string | null }).imdb_id
         ?? (t as { externalIds?: { imdbId?: string } }).externalIds?.imdbId;
-      if (imdbId) imdbIds.add(`${t.media_type}:${imdbId}`);
+      add(t.media_type, "imdb", imdbId);
+      add(t.media_type, "trakt", t.externalIds?.traktId);
+      add(t.media_type, "slug", t.externalIds?.slug);
     }
-    return { libraryKeys: keys, libraryImdbIds: imdbIds };
+    return identities;
   }, [titles]);
 
   function dismissItem(id: number, mediaType: "movie" | "tv") {
@@ -320,14 +365,21 @@ export default function ForYouSection() {
   // Quando um item é marcado/dispensado, o próximo do buffer preenche automaticamente.
   const visiblePool = useMemo(() => {
     const all: ForYouItem[] = featured ? [featured, ...items] : [...items];
+    const seen = new Set<string>();
     return all.filter((item) => {
       const tmdbKey = `${item.id}:${item.mediaType}`;
-      const imdbKey = item.linkId?.startsWith("tt") ? `${item.mediaType}:${item.linkId}` : null;
-      return !libraryKeys.has(tmdbKey)
-        && !(imdbKey !== null && libraryImdbIds.has(imdbKey))
-        && !dismissedKeys.has(tmdbKey);
+      const aliases = [
+        `${item.mediaType}:tmdb:${item.id}`,
+        item.poplogId ? `${item.mediaType}:poplog:${item.poplogId.toLowerCase()}` : null,
+        item.imdbId ? `${item.mediaType}:imdb:${item.imdbId.toLowerCase()}` : null,
+        item.traktId ? `${item.mediaType}:trakt:${item.traktId}` : null,
+        item.slug ? `${item.mediaType}:slug:${item.slug.toLowerCase()}` : null,
+      ].filter((key): key is string => Boolean(key));
+      if (aliases.some((key) => libraryIdentities.has(key) || seen.has(key))) return false;
+      for (const key of aliases) seen.add(key);
+      return !dismissedKeys.has(tmdbKey);
     }).slice(0, DISPLAY_COUNT);
-  }, [featured, items, libraryKeys, libraryImdbIds, dismissedKeys]);
+  }, [featured, items, libraryIdentities, dismissedKeys]);
 
   const visibleFeatured = visiblePool[0] ?? null;
   const visibleItems    = visiblePool.slice(1);

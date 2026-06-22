@@ -2,6 +2,13 @@
 
 import { type ElementType } from "react";
 
+import {
+  friendlyTitlePlaceholder,
+  sanitizeDisplayTitle,
+  type MediaTypeLike,
+  type TitleTechnicalIds,
+} from "@/lib/titles/display-title";
+
 type TitleVariant = "hero" | "large" | "medium" | "compact" | "poster";
 
 type Props = {
@@ -10,6 +17,10 @@ type Props = {
   variant?: TitleVariant;
   as?: ElementType;
   className?: string;
+  /** Contexto opcional p/ placeholder amigável caso título/original sejam IDs. */
+  mediaType?: MediaTypeLike;
+  /** IDs técnicos conhecidos, para nunca exibi-los como nome. */
+  ids?: TitleTechnicalIds;
 };
 
 function normalizeTitle(value?: string | null): string {
@@ -38,29 +49,41 @@ export function getDisplayOriginalTitle(
 export function resolveRandomizedTitleDisplay(
   title: string,
   originalTitle?: string | null,
+  mediaType?: MediaTypeLike,
+  ids?: TitleTechnicalIds,
 ) {
-  const diffOriginal = getDisplayOriginalTitle(title, originalTitle);
+  // Defesa final: nunca deixar um ID técnico (tt..., tmdb:..., cuid) virar nome.
+  const cleanTitle = sanitizeDisplayTitle(title, ids);
+  const cleanOriginal = sanitizeDisplayTitle(originalTitle, ids);
+  const mainTitle =
+    cleanTitle ?? cleanOriginal ?? friendlyTitlePlaceholder(mediaType);
+  // Se o principal já veio do original, não repetir como subtítulo.
+  const safeOriginal = cleanTitle ? cleanOriginal : null;
+
+  const diffOriginal = getDisplayOriginalTitle(mainTitle, safeOriginal);
 
   if (!diffOriginal) {
     return {
-      mainTitle: title,
+      mainTitle,
       subTitle: null as string | null,
-      fullTitle: title,
+      fullTitle: mainTitle,
     };
   }
 
   return {
-    mainTitle: title,
+    mainTitle,
     subTitle: diffOriginal,
-    fullTitle: `${title} (${diffOriginal})`,
+    fullTitle: `${mainTitle} (${diffOriginal})`,
   };
 }
 
 export function useRandomizedTitleDisplay(
   title: string,
   originalTitle?: string | null,
+  mediaType?: MediaTypeLike,
+  ids?: TitleTechnicalIds,
 ) {
-  return resolveRandomizedTitleDisplay(title, originalTitle);
+  return resolveRandomizedTitleDisplay(title, originalTitle, mediaType, ids);
 }
 
 export default function LocalizedTitle({
@@ -69,10 +92,14 @@ export default function LocalizedTitle({
   variant = "medium",
   as: Tag = "div",
   className = "",
+  mediaType,
+  ids,
 }: Props) {
   const { mainTitle, subTitle, fullTitle } = resolveRandomizedTitleDisplay(
     title,
     originalTitle,
+    mediaType,
+    ids,
   );
 
   if (variant === "poster") {

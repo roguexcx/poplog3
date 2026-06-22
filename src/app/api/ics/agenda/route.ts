@@ -17,15 +17,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { parseIcsContent } from "@/lib/ics-parser";
 import {
-  runIcsEngine, computeStats, FEATURED_CATEGORIES, ALL_BLOCKED_CATEGORIES,
+  runIcsEngine, computeStats, ALL_BLOCKED_CATEGORIES,
   classifyTitle,
 } from "@/lib/ics-engine";
 import type { IcsSeriesGroup, IcsEngineStats, MovieGroup, CinemaReleaseGroup, TmdbEnrichment, TmdbNetwork, TmdbProductionCompany } from "@/lib/ics-engine";
-import { enrichSeriesGroups } from "@/lib/ics-enricher";
 import { refineCategoryFromTmdb } from "@/lib/radar/categories";
 import { db } from "@/server/db/client";
 import { classifyRealityBySignals } from "@/lib/radar/reality-classifier";
-import { applyRetrofill } from "@/lib/radar/tmdb-retrofill";
 import {
   classifyRadarEligibility,
   createEligibilityDiagnostics,
@@ -51,24 +49,6 @@ const DEBUG_TITLES = [/rupaul/i, /drag race/i, /tonight show/i, /jimmy fallon/i,
 let memoryCache:
   | { payload: IcsAgendaResponse; cachedAt: string; expiresAt: number }
   | null = null;
-
-// TmdbTvListItem removido — era usado por fetchTmdbTvList/fetchActiveTmdbSeries (desativados).
-
-type TmdbMovieListItem = {
-  id: number;
-  title: string;
-  original_title?: string;
-  release_date?: string;
-  backdrop_path?: string | null;
-  poster_path?: string | null;
-  popularity?: number;
-  vote_average?: number;
-  vote_count?: number;
-  original_language?: string;
-  overview?: string | null;
-  genre_ids?: number[];
-  origin_country?: string[];
-};
 
 const TV_GENRE_NAMES: Record<number, string> = {
   10759: "Acao & Aventura", 16: "Animacao", 35: "Comedia", 80: "Crime",
@@ -304,12 +284,6 @@ export interface IcsAgendaResponse {
 // fetchTmdbTvList — DESATIVADO.
 // Nao usar para series ativas. TMDB e apenas enriquecimento de titulos BDS.
 
-function dateAdd(days: number, base = new Date()): string {
-  const d = new Date(base);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().slice(0, 10);
-}
-
 // fetchActiveTmdbSeries — REMOVIDO PERMANENTEMENTE.
 //
 // Esta funcao injetava series TMDB como grupos ativos no Radar via:
@@ -334,30 +308,6 @@ function dateAdd(days: number, base = new Date()): string {
 //
 // Janela de busca: ultimos 10 dias ate +30 dias a partir de hoje.
 // Retorna apenas filmes com date confidence confirmada ou global — descarta uncertain.
-
-type TmdbReleaseDatesResponse = {
-  id: number;
-  results?: Array<{
-    iso_3166_1: string;
-    release_dates: Array<{
-      type: number;          // 1=Premiere 2=Limited 3=Theatrical 4=Digital 5=Physical 6=TV
-      release_date: string;  // ISO 8601
-      note?: string;
-    }>;
-  }>;
-};
-
-async function fetchMovieReleaseDateBR(
-  _tmdbId: number,
-  _token: string,
-  _globalReleaseDate: string | undefined,
-): Promise<{ date: string; confidence: CinemaReleaseGroup["dateConfidence"] } | null> {
-  return null;
-}
-
-async function fetchCinemaReleasesBR(_token: string): Promise<CinemaReleaseGroup[]> {
-  return [];
-}
 
 // ── Verificar cache persistente ───────────────────────────────────────────────
 
@@ -872,7 +822,6 @@ async function buildAgendaPayload(): Promise<IcsAgendaResponse> {
   const strM3    = dateOffset(-3);  // hoje - 3
   const strP1    = dateOffset(1);   // amanha
   const strP4    = dateOffset(4);   // hoje + 4
-  const strP7    = dateOffset(7);   // hoje + 7
   const strP8    = dateOffset(8);   // hoje + 8
   const strP30   = dateOffset(30);  // hoje + 30
   // Meio-dia de amanhã no horário de Brasília = 12:00 BRT = 15:00 UTC (BRT = UTC-3).

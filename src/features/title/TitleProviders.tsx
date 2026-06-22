@@ -4,7 +4,16 @@ import { resolveForRender } from "@/lib/images/proxy";
 import ContextualAttribution from "@/components/attribution/ContextualAttribution";
 import { getProviderSourceIds } from "@/attribution/helpers";
 import type { TitleProvider } from "./types";
-import type { AvailabilityProvider } from "@/server/streaming/availability-service";
+
+/**
+ * Forma mínima legada aceita aqui apenas para retrocompatibilidade de tipos:
+ * alguns call-sites antigos passavam providers com `normalizedType`. O fluxo
+ * atual entrega `TitleProvider` (camada global de availability), mas os guards
+ * `"normalizedType" in p` continuam para não quebrar dados legados em cache.
+ */
+type AvailabilityProvider = TitleProvider & {
+  normalizedType?: "subscription" | "rent" | "buy" | "free" | "ads";
+};
 
 type TitleProvidersProps = {
   providers?: AvailabilityProvider[] | TitleProvider[];

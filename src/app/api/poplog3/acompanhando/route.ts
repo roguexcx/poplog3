@@ -2,11 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { getUserTitleStatus, upsertUserTitleStatus } from "@/server/library/library-service";
 import { isValidSeason, mapSeriesStatus } from "@/lib/series";
-import {
-  isLocalCuradoriaEnabled,
-  isLocalCuradoriaStateEnabled,
-  isLocalUserPreferencesEnabled,
-} from "@/server/runtime/local-db-flags";
+import { isLocalCuradoriaStateEnabled } from "@/server/runtime/local-db-flags";
+import { hydrateManyTitleAvailability } from "@/server/availability";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import type {
   ContentType,
   SignalType,
@@ -330,11 +328,19 @@ async function getLocalOverlayBase(userId: string, parsed: ParsedContentId) {
   }
 
   const titleRecord = titleCache as Record<string, unknown>;
-  const title = typeof titleRecord.title === "string"
-    ? titleRecord.title
-    : typeof titleRecord.name === "string"
-      ? titleRecord.name
-      : null;
+  const originalTitle =
+    typeof titleRecord.original_title === "string"
+      ? titleRecord.original_title
+      : typeof titleRecord.original_name === "string"
+        ? titleRecord.original_name
+        : null;
+  const title = resolveDisplayTitle({
+    title: typeof titleRecord.title === "string" ? titleRecord.title : null,
+    name: typeof titleRecord.name === "string" ? titleRecord.name : null,
+    originalTitle,
+    tmdbId: parsed.tmdbId,
+    mediaType: parsed.mediaType,
+  });
   const genres = "genres" in titleCache ? titleCache.genres : null;
   const year = "year" in titleCache
     ? titleCache.year
@@ -503,7 +509,6 @@ async function getLocalAcompanhandoResponse(userId: string): Promise<NextRespons
 
   const uniqueTmdbIds = [...new Set(userTitleRows.map((r) => r.tmdbId))];
   const seriesIds = [...new Set(userTitleRows.filter((r) => r.mediaType === "tv").map((r) => r.tmdbId))];
-  const mediaTypes = [...new Set(userTitleRows.map((r) => r.mediaType))];
   const contentIds = userTitleRows.map((r) => toContentId(r.mediaType, r.tmdbId));
 
   const titleRows = await db.poplog3Title.findMany({
@@ -536,7 +541,6 @@ async function getLocalAcompanhandoResponse(userId: string): Promise<NextRespons
     watchedEpisodeRows,
     episodeCatalogRows,
     overlayResult,
-    availabilityRows,
   ] = await Promise.all([
     readCuradoriaPreference(userId),
 
@@ -565,22 +569,6 @@ async function getLocalAcompanhandoResponse(userId: string): Promise<NextRespons
     }),
 
     readCuradoriaOverlays(userId, contentIds),
-
-    db.catalogAvailability.findMany({
-      where: {
-        tmdbId: { in: uniqueTmdbIds.map((id) => BigInt(id)) },
-        mediaType: { in: mediaTypes },
-        providerRegion: { in: ["BR", "US"] },
-      },
-      select: {
-        tmdbId: true,
-        mediaType: true,
-        providerName: true,
-        providerType: true,
-        providerRegion: true,
-        checkedAt: true,
-      },
-    }),
   ]);
 
   if (preferencesResult.error) {
@@ -623,32 +611,57 @@ async function getLocalAcompanhandoResponse(userId: string): Promise<NextRespons
     overlayByContentId.set(ov.content_id, ov);
   }
 
+  // P4: disponibilidade pelo FLUXO CANÔNICO (hydrateManyTitleAvailability) — sem ler
+  // catalog_availability direto. BR é a região primária (streaming + VOD, com warm em
+  // background); US é consultado só-cache (sem warm) para o flag de VOD.
   const availabilityByContentId = new Map<string, AvailabilityOverlay>();
-  for (const row of availabilityRows) {
-    if (!row.tmdbId) continue;
-    const tmdbIdNum = Number(row.tmdbId);
-    const contentId = toContentId(row.mediaType, tmdbIdNum);
-    const current = availabilityByContentId.get(contentId) ?? {
-      streaming_platform: null,
-      streaming_available_since: null,
-      available_on_vod: false,
-      vod_available_since: null,
-    };
-    const isSubscription =
-      row.providerRegion === "BR" &&
-      (["subscription", "free", "ads"] as string[]).includes(row.providerType);
-    const isVod =
-      (["rent", "buy"] as string[]).includes(row.providerType) &&
-      (row.providerRegion === "BR" || row.providerRegion === "US");
+  // Badge de disponibilidade (best_provider_*) — MESMO contrato do card da Watchlist.
+  const bestProviderByContentId = new Map<
+    string,
+    { name: string; type: string | null; logo: string | null }
+  >();
+  {
+    const pairs = new Map<string, { tmdbId: number; mediaType: "movie" | "tv" }>();
+    for (const ut of userTitleRows) {
+      pairs.set(toContentId(ut.mediaType, ut.tmdbId), { tmdbId: ut.tmdbId, mediaType: ut.mediaType });
+    }
+    const baseItems = [...pairs.entries()].map(([key, p]) => ({ key, p }));
+    const [brMap, usMap] = await Promise.all([
+      hydrateManyTitleAvailability(
+        baseItems.map(({ key, p }) => ({ key, input: { mediaType: p.mediaType, tmdbId: p.tmdbId, region: "BR" } })),
+        { cacheOnly: true, warmCold: true },
+      ),
+      hydrateManyTitleAvailability(
+        baseItems.map(({ key, p }) => ({ key, input: { mediaType: p.mediaType, tmdbId: p.tmdbId, region: "US" } })),
+        { cacheOnly: true, warmCold: false },
+      ),
+    ]);
 
-    availabilityByContentId.set(contentId, {
-      streaming_platform: current.streaming_platform ?? (isSubscription ? row.providerName : null),
-      streaming_available_since:
-        current.streaming_available_since ?? (isSubscription ? row.checkedAt.toISOString() : null),
-      available_on_vod: current.available_on_vod || isVod,
-      vod_available_since:
-        current.vod_available_since ?? (isVod ? row.checkedAt.toISOString() : null),
-    });
+    for (const [contentId] of pairs) {
+      const br = brMap.get(contentId);
+      const us = usMap.get(contentId);
+      // Badge: melhor provider BR (qualquer tipo) — nome canônico + logo + tipo.
+      const best = br?.bestProvider ?? null;
+      if (best) {
+        bestProviderByContentId.set(contentId, {
+          name: best.name,
+          type: best.type === "streaming" ? "subscription" : best.type,
+          logo: best.logoUrl ?? null,
+        });
+      }
+      const streamingPlatform = br?.status.hasStreaming ? br.bestProvider?.name ?? null : null;
+      const brVod = Boolean(br?.status.hasRent || br?.status.hasBuy);
+      const usVod = Boolean(us?.status.hasRent || us?.status.hasBuy);
+      const availableOnVod = brVod || usVod;
+      if (!streamingPlatform && !availableOnVod) continue;
+
+      availabilityByContentId.set(contentId, {
+        streaming_platform: streamingPlatform,
+        streaming_available_since: streamingPlatform ? br?.checkedAt ?? null : null,
+        available_on_vod: availableOnVod,
+        vod_available_since: availableOnVod ? (brVod ? br?.checkedAt : us?.checkedAt) ?? null : null,
+      });
+    }
   }
 
   const items: UserWatching[] = [];
@@ -702,7 +715,12 @@ async function getLocalAcompanhandoResponse(userId: string): Promise<NextRespons
       content_id: contentId,
       content_type: contentType,
 
-      title: meta.title ?? "Sem título",
+      title: resolveDisplayTitle({
+        title: meta.title,
+        originalTitle: meta.original_title,
+        tmdbId: ut.tmdbId,
+        mediaType: ut.mediaType,
+      }),
       original_title: meta.original_title ?? null,
       poster_path: meta.poster_path ?? null,
       backdrop_path: meta.backdrop_path ?? null,
@@ -736,6 +754,11 @@ async function getLocalAcompanhandoResponse(userId: string): Promise<NextRespons
         availabilityOverlay?.available_on_vod ?? overlay?.available_on_vod ?? false,
       vod_available_since:
         availabilityOverlay?.vod_available_since ?? overlay?.vod_available_since ?? null,
+
+      // Badge de disponibilidade — mesmo contrato do card da Watchlist.
+      best_provider_name: bestProviderByContentId.get(contentId)?.name ?? null,
+      best_provider_type: bestProviderByContentId.get(contentId)?.type ?? null,
+      best_provider_logo: bestProviderByContentId.get(contentId)?.logo ?? null,
 
       tmdb_rating: meta.vote_average ?? null,
       user_rating: ut.rating ? Math.round(ut.rating) : null,

@@ -2,12 +2,10 @@ import {
   clearSeasonProgress as clearSeasonProgressRows,
   clearSeriesProgress as clearSeriesProgressRows,
   computeUserSeriesProgress as computeProgress,
-  createUserEvent,
   deleteWatchedEpisode,
   getWatchedEpisodesForSeries as getWatchedRows,
   getUserTitle,
   upsertUserTitle,
-  upsertUserTitleState,
   upsertWatchedEpisode,
 } from "@/server/repositories";
 import { db } from "@/server/db/client";
@@ -15,6 +13,7 @@ import type { UserEpisode } from "@prisma/client";
 import type { EpisodeKey, UserSeriesProgress } from "@/server/repositories/episode-progress.repository";
 import type { Poplog3LibraryStatus } from "@/server/library/types";
 import { hydrateSeriesEpisodesFromSources } from "@/server/source-engine/series-episode-hydrator";
+import { upsertTitleState, type UserEventType } from "@/server/state/user-title-state";
 
 export type { EpisodeKey, UserSeriesProgress };
 
@@ -77,11 +76,6 @@ function isValidAiredEpisode(row: {
   );
 }
 
-function eventComputedState(progress: UserSeriesProgress) {
-  if (progress.watchedCount === 0) return "watchlist";
-  return progress.nextEpisode ? "in_progress" : "up_to_date";
-}
-
 async function readProgress(userId: string, seriesTmdbId: number): Promise<UserSeriesProgress> {
   const progress = await computeProgress({ userId, seriesTmdbId });
   if (!progress.ok) throw new Error(progress.error);
@@ -102,7 +96,7 @@ async function syncState(input: {
   userId: string;
   seriesTmdbId: number;
   progress: UserSeriesProgress;
-  eventType: string;
+  eventType: UserEventType;
   payload?: Record<string, unknown>;
 }) {
   const existing = await readLibraryEntry(input.userId, input.seriesTmdbId);
@@ -121,32 +115,20 @@ async function syncState(input: {
     rating: existing?.rating ?? null,
     notes: existing?.notes ?? null,
   });
-  await upsertUserTitleState({
+  await upsertTitleState({
     userId: input.userId,
     tmdbId: input.seriesTmdbId,
     mediaType: "tv",
-    status,
-    favorite: existing?.favorite ?? false,
-    liked: existing?.liked ?? null,
-    computedState: status === "watched" ? "completed" : eventComputedState(input.progress),
-    watchedEpisodes: input.progress.watchedCount,
-    airedEpisodes: input.progress.airedEpisodes,
-    totalEpisodes: input.progress.totalEpisodes,
-    progressPct: input.progress.airedEpisodes > 0
-      ? Math.min(Math.round((input.progress.watchedCount / input.progress.airedEpisodes) * 100), 100)
-      : 0,
-    nextSeason: input.progress.nextEpisode?.seasonNumber ?? null,
-    nextEpisode: input.progress.nextEpisode?.episodeNumber ?? null,
-    nextEpisodeAirDate: input.progress.nextEpisode?.airDate ?? null,
-    lastWatchedAt: input.progress.lastWatchedAt,
-    watchedKeys: input.progress.watchedKeys,
-  });
-  await createUserEvent({
-    userId: input.userId,
-    tmdbId: input.seriesTmdbId,
-    mediaType: "tv",
-    eventType: input.eventType,
-    payload: input.payload ?? {},
+    libraryEntry: {
+      status,
+      favorite: existing?.favorite ?? false,
+      liked: existing?.liked ?? null,
+    },
+    seriesProgress: input.progress,
+    event: {
+      type: input.eventType,
+      payload: input.payload ?? {},
+    },
   });
 }
 

@@ -25,6 +25,8 @@ import {
   type ScoreBreakdown,
 } from "@/server/recommendations/balloon-engine";
 import { withOrigin } from "@/server/engine-logger";
+import { attachBestProvider } from "@/server/availability/attach-best-provider";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import type { UserTitle } from "@/types/user";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
@@ -169,6 +171,42 @@ type RecCandidate = {
   _scoreBreakdown?: ScoreBreakdown;
 };
 
+type IdentityKind = "tmdb" | "imdb" | "trakt" | "slug" | "poplog";
+
+function identityKey(
+  mediaType: "movie" | "tv" | string,
+  kind: IdentityKind,
+  value: string | number | bigint | null | undefined,
+): string | null {
+  if (value === null || value === undefined) return null;
+  const normalized = String(value).trim().toLowerCase();
+  return normalized ? `${mediaType}:${kind}:${normalized}` : null;
+}
+
+function addIdentity(
+  identities: Set<string>,
+  mediaType: "movie" | "tv" | string,
+  kind: IdentityKind,
+  value: string | number | bigint | null | undefined,
+): void {
+  const key = identityKey(mediaType, kind, value);
+  if (key) identities.add(key);
+}
+
+function candidateIdentityKeys(candidate: RecCandidate): string[] {
+  return [
+    identityKey(candidate.mediaType, "tmdb", candidate.tmdbId),
+    identityKey(candidate.mediaType, "imdb", candidate.imdbId),
+    identityKey(candidate.mediaType, "trakt", candidate.traktId),
+    identityKey(candidate.mediaType, "slug", candidate.traktSlug),
+    identityKey(candidate.mediaType, "poplog", candidate._poplogId),
+  ].filter((key): key is string => Boolean(key));
+}
+
+function isInIdentitySet(candidate: RecCandidate, identities: Set<string>): boolean {
+  return candidateIdentityKeys(candidate).some((key) => identities.has(key));
+}
+
 
 // The canonical payload item returned to the client
 export type ForYouApiItem = {
@@ -190,6 +228,14 @@ export type ForYouApiItem = {
   reason: string;
   sourceSeed?: string;
   debug?: string;
+  /** imdbId quando conhecido — usado para hidratar disponibilidade. */
+  imdbId?: string | null;
+  traktId?: number | null;
+  slug?: string | null;
+  /** Disponibilidade (Onde assistir) — mesmo contrato do card da Watchlist. */
+  best_provider_name?: string | null;
+  best_provider_type?: string | null;
+  best_provider_logo?: string | null;
 };
 
 // ─── Seed building ─────────────────────────────────────────────────────────────
@@ -478,21 +524,17 @@ function normTitle(s: string): string {
 }
 
 class Deduper {
-  private tmdb  = new Set<string>();
-  private imdb  = new Set<string>();
+  private identities = new Set<string>();
   private title = new Set<string>();
 
   seen(c: RecCandidate): boolean {
-    const k1 = `${c.mediaType}:${c.tmdbId}`;
-    const k2 = c.imdbId ? `${c.mediaType}:${c.imdbId}` : null;
+    const identityKeys = candidateIdentityKeys(c);
     const k3 = `${c.mediaType}:${normTitle(c.title)}:${c.year ?? ""}`;
 
-    if (this.tmdb.has(k1))             return true;
-    if (k2 && this.imdb.has(k2))       return true;
+    if (identityKeys.some((key) => this.identities.has(key))) return true;
     if (this.title.has(k3))            return true;
 
-    this.tmdb.add(k1);
-    if (k2) this.imdb.add(k2);
+    for (const key of identityKeys) this.identities.add(key);
     this.title.add(k3);
     return false;
   }
@@ -540,16 +582,185 @@ function weightedSample<T>(items: T[], getW: (i: T) => number, n: number): T[] {
 // Key: primeiros 10 tmdbIds ordenados + limit. TTL curto (3s) para capturar bursts.
 
 const ROUTE_IN_FLIGHT = new Map<string, Promise<unknown>>();
-const ROUTE_CACHE     = new Map<string, { data: unknown; ts: number }>();
-const ROUTE_DEDUP_TTL = 3_000; // ms
 
-function buildRouteKey(titles: UserTitle[], limit: number): string {
+function buildRouteKey(titles: UserTitle[], limit: number, excludeKeys: Set<string>): string {
   const ids = titles
-    .slice(0, 10)
-    .map((t) => `${t.media_type}:${t.tmdb_id}`)
+    .map((t) => [
+      t.media_type,
+      t.tmdb_id,
+      t.poplogId ?? "",
+      t.imdb_id ?? t.externalIds?.imdbId ?? "",
+      t.externalIds?.traktId ?? "",
+      t.externalIds?.slug ?? "",
+    ].join(":"))
     .sort()
     .join(",");
-  return `fy:${ids}:limit=${limit}`;
+  return `fy:${ids}:exclude=${[...excludeKeys].sort().join(",")}:limit=${limit}`;
+}
+
+// ─── Candidate pool cache ─────────────────────────────────────────────────────
+// O gargalo de performance do "Pra você" são as chamadas externas (Balloonerismm
+// /recommendations+/similar por seed + hidratação Trakt + traduções). Esse pool de
+// candidatos elegíveis depende apenas da BIBLIOTECA do usuário, não da seleção
+// aleatória final nem do `exclude` de sessão. Cacheamos o pool por assinatura da
+// biblioteca; a amostragem ponderada (weightedSample) e o filtro de `exclude` rodam
+// frescos a cada request, preservando a variedade entre recargas.
+
+const POOL_CACHE     = new Map<string, { eligible: RecCandidate[]; ts: number }>();
+const POOL_CACHE_TTL = 10 * 60_000; // 10 min
+const POOL_CACHE_MAX = 200;
+
+function buildPoolKey(titles: UserTitle[], userId: string | null): string {
+  const sig = titles
+    .map((t) => `${t.media_type}:${t.tmdb_id}:${t.status ?? ""}:${t.favorite ? 1 : 0}`)
+    .sort()
+    .join(",");
+  return `pool:${userId ?? "anon"}:${sig}`;
+}
+
+function readPoolCache(key: string): RecCandidate[] | null {
+  const hit = POOL_CACHE.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.ts > POOL_CACHE_TTL) {
+    POOL_CACHE.delete(key);
+    return null;
+  }
+  return hit.eligible;
+}
+
+function writePoolCache(key: string, eligible: RecCandidate[]): void {
+  if (POOL_CACHE.size >= POOL_CACHE_MAX) {
+    // Evicção simples: remove a entrada mais antiga.
+    let oldestKey: string | null = null;
+    let oldestTs = Infinity;
+    for (const [k, v] of POOL_CACHE) {
+      if (v.ts < oldestTs) { oldestTs = v.ts; oldestKey = k; }
+    }
+    if (oldestKey) POOL_CACHE.delete(oldestKey);
+  }
+  POOL_CACHE.set(key, { eligible, ts: Date.now() });
+}
+
+// ─── Gate de qualidade mínima ─────────────────────────────────────────────────
+// Bloqueia candidatos sem metadados suficientes para exibir um card útil.
+// Aplicado ANTES de cachear o pool para que itens fracos não contaminem o cache.
+//
+// Critérios (qualquer falha descarta o candidato):
+//   1. Título ausente
+//   2. Sem imagem alguma (poster E backdrop ausentes)
+//   3. voteCount conhecido E abaixo de 5 (título praticamente sem dados)
+//   4. Sem overview E rating < 4.5 (metadados insuficientes + qualidade baixa)
+
+function passesQualityGate(c: RecCandidate): boolean {
+  // 1. Título
+  if (!c.title?.trim()) return false;
+  // 2. Imagem obrigatória — sem imagem o card fica em branco
+  if (!c.posterUrl && !c.backdropUrl) return false;
+  // 3. voteCount muito baixo → dados incompletos (new releases: voteCount null → permite)
+  const knownLowVotes =
+    c.voteCount !== null && c.voteCount !== undefined && c.voteCount < 5;
+  if (knownLowVotes) return false;
+  // 4. Sem overview + baixa qualidade → provável título fraco / irrelevante
+  const hasOverview = c.overview != null && c.overview.trim().length >= 20;
+  if (!hasOverview && (c.voteAverage ?? 10) < 4.5) return false;
+  return true;
+}
+
+// ─── Seleção final (Fases 8/10/11) ────────────────────────────────────────────
+// Extraída para reuso tanto no caminho normal quanto no cache-hit do pool.
+// Aplica o filtro de sessão (`exclude`), preferência por imagens e amostragem.
+
+// Número mínimo de slots visuais primários na Home (1 featured + 5 small).
+// O pool prefere imagens se tiver pelo menos CORE_DISPLAY candidatos com imagem,
+// garantindo que o buffer de renovação (posições 7+) também tenha imagens.
+const CORE_DISPLAY = 6;
+
+async function buildForYouResponse(
+  eligible: RecCandidate[],
+  excludeKeys: Set<string>,
+  libraryIdentities: Set<string>,
+  FINAL_COUNT: number,
+  source: string,
+): Promise<unknown> {
+  // Filtro de sessão (`exclude`) — por request, nunca cacheado.
+  // A biblioteca também é reaplicada aqui para proteger o caminho de cache-hit.
+  const responseDeduper = new Deduper();
+  const notExcluded = eligible.filter((c) =>
+    !excludeKeys.has(`${c.mediaType}:${c.tmdbId}`) &&
+    !isInIdentitySet(c, libraryIdentities) &&
+    !responseDeduper.seen(c)
+  );
+
+  // Pool com preferência por imagens.
+  // Usa apenas candidatos com imagem se houver >= CORE_DISPLAY, garantindo que
+  // os slots de renovação (após o primeiro dismiss) também tenham imagem.
+  const withImages = notExcluded.filter((c) => c.posterUrl || c.backdropUrl);
+  const pool = withImages.length >= CORE_DISPLAY ? withImages : notExcluded;
+
+  if (!pool.length) {
+    return { featured: null, items: [], recommendationSource: source };
+  }
+
+  // Seleção ponderada (roulette-wheel sem reposição).
+  const selected = weightedSample(pool, score, Math.min(FINAL_COUNT, pool.length));
+
+  const items: ForYouApiItem[] = selected.map((c) => {
+    const genreLabel = c.genreIds?.[0] ? (GENRE_MAP[c.genreIds[0]] ?? null) : null;
+    // Prioridade de linkId: Poplog CUID (rota garantida) > tmdbId local > imdbId externo.
+    // Usar imdbId como linkId só quando o título não está no DB local — e nesse caso
+    // é a única opção viável para abrir a página do título.
+    const linkId = c._poplogId
+      ?? (c._inLocalDb ? String(c.tmdbId) : (c.imdbId ?? String(c.tmdbId)));
+
+    return {
+      id:            c.tmdbId,
+      poplogId:      c._poplogId ?? null,
+      linkId,
+      title:         resolveDisplayTitle({
+        title: c.title,
+        originalTitle: c.originalTitle,
+        tmdbId: c.tmdbId,
+        imdbId: c.imdbId,
+        poplogId: c._poplogId,
+        mediaType: c.mediaType,
+      }),
+      originalTitle: c.originalTitle !== c.title ? (c.originalTitle ?? null) : null,
+      overview:      c.overview ?? undefined,
+      posterUrl:     c.posterUrl   ?? null,
+      backdropUrl:   c.backdropUrl ?? null,
+      rating:        c.voteAverage ?? undefined,
+      year:          c.year,
+      mediaType:     c.mediaType,
+      mediaLabel:    c.mediaType === "movie" ? "Filme" : "Série",
+      genreLabel,
+      reason:        c.reason,
+      sourceSeed:    c.seedEffectiveWeight > 0 ? undefined : "popular",
+      imdbId:        c.imdbId ?? null,
+      traktId:       c.traktId ?? null,
+      slug:          c.traktSlug ?? null,
+    } as ForYouApiItem;
+  });
+
+  // P7: anexa disponibilidade (best_provider_*) via fluxo canônico — mesmo contrato do
+  // card da Watchlist. Cache-first + warm; não bloqueia nem lê catalog_availability direto.
+  const itemsWithProviders = await attachBestProvider(items, {
+    block: "for-you",
+    getMediaType: (it) => it.mediaType,
+    getTmdbId: (it) => it.id,
+    getImdbId: (it) => it.imdbId ?? null,
+    // Rail pequeno e curado (≤ ~12 itens): busca cache-first dos faltantes para o badge
+    // aparecer já no primeiro load (e persiste, ficando barato nas próximas vezes).
+    live: true,
+  });
+
+  // Featured = maior rating com backdrop; senão o primeiro item.
+  const withBackdrop = itemsWithProviders.filter((it) => it.backdropUrl);
+  const featured = withBackdrop.length > 0
+    ? [...withBackdrop].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))[0]
+    : (itemsWithProviders[0] ?? null);
+  const rest = featured ? itemsWithProviders.filter((it) => it !== featured) : itemsWithProviders;
+
+  return { featured, items: rest, recommendationSource: source };
 }
 
 // ─── Pipeline ─────────────────────────────────────────────────────────────────
@@ -564,6 +775,11 @@ async function runForYouPipeline(
     // Auth primeiro — necessário para lookup autoritativo da biblioteca no DB.
     const user = await getCurrentUser().catch(() => null);
 
+    // A chave ainda permite reaproveitar o trabalho externo, mas a biblioteca
+    // autoritativa é carregada antes de qualquer cache-hit para nunca servir um
+    // título recém-adicionado ou representado por outro alias.
+    const poolKey = buildPoolKey(titles, user?.id ?? null);
+
     // ── Conjuntos de exclusão da biblioteca ─────────────────────────────────────
     // Estratégia tri-camada para cobrir diferentes mapeamentos de ID entre fontes.
     // REGRA: qualquer item na biblioteca (qualquer status) jamais aparece como recomendação.
@@ -573,11 +789,17 @@ async function runForYouPipeline(
     const libraryTmdbIds = new Set(titles.map((t) => t.tmdb_id));
     const libraryImdbIds = new Set<string>();
     const libraryTraktIds = new Set<string>();
+    const libraryIdentities = new Set<string>();
 
     for (const t of titles) {
       const imdbId = safeStr(t.imdb_id) ?? safeStr(t.externalIds?.imdbId);
       if (imdbId) libraryImdbIds.add(`${t.media_type}:${imdbId}`);
       if (t.externalIds?.traktId) libraryTraktIds.add(`${t.media_type}:${t.externalIds.traktId}`);
+      addIdentity(libraryIdentities, t.media_type, "tmdb", t.tmdb_id);
+      addIdentity(libraryIdentities, t.media_type, "imdb", imdbId);
+      addIdentity(libraryIdentities, t.media_type, "trakt", t.externalIds?.traktId);
+      addIdentity(libraryIdentities, t.media_type, "slug", t.externalIds?.slug);
+      addIdentity(libraryIdentities, t.media_type, "poplog", t.poplogId);
     }
 
     // Camada 2: DB autoritativo em paralelo
@@ -603,6 +825,7 @@ async function runForYouPipeline(
     for (const row of dbLibItems) {
       libraryKeys.add(`${row.mediaType}:${row.tmdbId}`);
       libraryTmdbIds.add(row.tmdbId);
+      addIdentity(libraryIdentities, row.mediaType, "tmdb", row.tmdbId);
     }
     for (const row of extIdRows) {
       if (row.imdbId) libraryImdbIds.add(`${row.mediaType}:${row.imdbId}`);
@@ -624,6 +847,7 @@ async function runForYouPipeline(
       // Adiciona os imdbIds sintéticos diretamente — captura cross-source mesmo sem DB match
       for (const x of syntheticInLibrary) {
         libraryImdbIds.add(`${x.media_type}:${x.imdbId}`);
+        addIdentity(libraryIdentities, x.media_type, "imdb", x.imdbId);
       }
 
       const realIdRows = await db.titleExternalId.findMany({
@@ -640,8 +864,65 @@ async function runForYouPipeline(
         if (realTmdbId) {
           libraryKeys.add(`${x.media_type}:${realTmdbId}`);
           libraryTmdbIds.add(realTmdbId);
+          addIdentity(libraryIdentities, x.media_type, "tmdb", realTmdbId);
         }
       }
+    }
+
+    // Expansão canônica final: parte de todos os itens do cliente + DB e traz o
+    // conjunto completo de aliases conhecido localmente. A checagem do par
+    // mediaType/tmdbId evita colisão entre os espaços numéricos de filmes e séries.
+    const libraryPairs = new Set(libraryKeys);
+    const positiveLibraryTmdbIds = [...libraryTmdbIds].filter((id) => id > 0);
+    const plainLibraryImdbIds = [...libraryImdbIds]
+      .map((key) => key.slice(key.indexOf(":") + 1))
+      .filter(Boolean);
+
+    const [canonicalRows, allExternalRows] = await Promise.all([
+      db.poplog3Title.findMany({
+        where: {
+          OR: [
+            ...(positiveLibraryTmdbIds.length ? [{ tmdbId: { in: positiveLibraryTmdbIds } }] : []),
+            ...(plainLibraryImdbIds.length ? [{ imdbId: { in: plainLibraryImdbIds } }] : []),
+          ],
+        },
+        select: { id: true, tmdbId: true, mediaType: true, imdbId: true, traktId: true, slug: true },
+      }).catch(() => []),
+      positiveLibraryTmdbIds.length
+        ? db.titleExternalId.findMany({
+            where: { tmdbId: { in: positiveLibraryTmdbIds } },
+            select: { tmdbId: true, mediaType: true, imdbId: true, traktId: true },
+          }).catch(() => [])
+        : Promise.resolve([]),
+    ]);
+
+    for (const row of canonicalRows) {
+      const tmdbPair = `${row.mediaType}:${row.tmdbId}`;
+      const imdbPair = row.imdbId ? `${row.mediaType}:${row.imdbId}` : null;
+      if (!libraryPairs.has(tmdbPair) && !(imdbPair && libraryImdbIds.has(imdbPair))) continue;
+      addIdentity(libraryIdentities, row.mediaType, "tmdb", row.tmdbId);
+      addIdentity(libraryIdentities, row.mediaType, "imdb", row.imdbId);
+      addIdentity(libraryIdentities, row.mediaType, "trakt", row.traktId);
+      addIdentity(libraryIdentities, row.mediaType, "slug", row.slug);
+      addIdentity(libraryIdentities, row.mediaType, "poplog", row.id);
+    }
+    for (const row of allExternalRows) {
+      if (!libraryPairs.has(`${row.mediaType}:${row.tmdbId}`)) continue;
+      addIdentity(libraryIdentities, row.mediaType, "tmdb", row.tmdbId);
+      addIdentity(libraryIdentities, row.mediaType, "imdb", row.imdbId);
+      addIdentity(libraryIdentities, row.mediaType, "trakt", row.traktId);
+    }
+
+    const cachedEligible = readPoolCache(poolKey);
+    if (cachedEligible) {
+      console.log(`[for-you] pool_cache_hit key candidates=${cachedEligible.length}`);
+      return await buildForYouResponse(
+        cachedEligible,
+        excludeKeys,
+        libraryIdentities,
+        FINAL_COUNT,
+        "balloon_primary",
+      );
     }
 
     // ── FASE 1 — SEMENTES ────────────────────────────────────────────────────
@@ -807,12 +1088,20 @@ async function runForYouPipeline(
         h.hydrationSource === "trakt" && hasFanart  ? "trakt:fanart"  :
         hasPoster                                    ? "balloon:poster" : "pending";
 
-      // Multi-seed reason: if appeared from multiple seeds, mention top 2
+      // Reason: base no seed + contexto de gênero do candidato para melhorar explicabilidade.
+      // "Drama · Porque você favoritou 'The Pitt'" deixa claro a conexão ao usuário.
+      const candidateGenreLabel = h.genreIds?.[0] ? (GENRE_MAP[h.genreIds[0]] ?? null) : null;
+
       let reason = h.seedReason;
       if (h.appearedFromSeeds > 1 && h.seedOrigins.length > 1) {
         const top  = h.seedOrigins[0];
         const rest = h.appearedFromSeeds - 1;
         reason = `${top.seedReason} e mais ${rest} título${rest > 1 ? "s" : ""} que você gostou`;
+      }
+      // Prefixo de gênero: só para recomendações single-seed onde o gênero acrescenta contexto.
+      // Multi-seed já tem razão composta; não sobrecarregar com mais info.
+      if (candidateGenreLabel && h.appearedFromSeeds === 1) {
+        reason = `${candidateGenreLabel} · ${reason}`;
       }
 
       rawCandidates.push({
@@ -844,8 +1133,9 @@ async function runForYouPipeline(
     }
 
     // ── FASE 5 — Deduplicação + filtro biblioteca ──────────────────────────────
+    // NOTA: o filtro de sessão (`exclude`) NÃO é aplicado aqui — ele roda por request
+    // em buildForYouResponse, para que o pool cacheado seja independente da sessão.
     let libRemoved = 0;
-    let excluded   = 0;
     let deduped    = 0;
     const deduper    = new Deduper();
     const candidates: RecCandidate[] = [];
@@ -855,6 +1145,7 @@ async function runForYouPipeline(
       const imdbKey    = rec.imdbId  ? `${rec.mediaType}:${rec.imdbId}`  : null;
       const traktIdKey = rec.traktId ? `${rec.mediaType}:${rec.traktId}` : null;
       const inLibrary =
+        isInIdentitySet(rec, libraryIdentities) ||
         libraryKeys.has(k) ||
         (imdbKey    && libraryImdbIds.has(imdbKey))    ||
         (traktIdKey && libraryTraktIds.has(traktIdKey));
@@ -863,7 +1154,6 @@ async function runForYouPipeline(
         console.log(`[for-you:filter] excludedReason=in-library imdb=${rec.imdbId ?? "?"} title="${rec.title}"`);
         continue;
       }
-      if (excludeKeys.has(k)) { excluded++;  rec._discardReason = "session-exclude"; continue; }
       if (deduper.seen(rec))  { deduped++;   rec._discardReason = "dedup"; continue; }
       candidates.push(rec);
     }
@@ -875,6 +1165,24 @@ async function runForYouPipeline(
     // NOTA: row.title da DB é o título original (inglês). Não é pt-BR.
     // Fase 6b busca pt-BR via endpoint dedicado do Trakt.
     await enrichFromDb(candidates);
+
+    // O enriquecimento revela poplogId e outros aliases locais que não estavam
+    // necessariamente presentes na resposta externa. Revalida e deduplica após
+    // essa canonicalização para impedir escapes por alias cruzado.
+    const canonicalDeduper = new Deduper();
+    const canonicalCandidates = candidates.filter((candidate) => {
+      if (isInIdentitySet(candidate, libraryIdentities)) {
+        libRemoved++;
+        return false;
+      }
+      if (canonicalDeduper.seen(candidate)) {
+        deduped++;
+        return false;
+      }
+      return true;
+    });
+    candidates.length = 0;
+    candidates.push(...canonicalCandidates);
 
     // ── FASE 6b — Localização pt-BR via endpoint dedicado Trakt ───────────────
     // Para candidatos ainda sem pt-BR (inline Trakt não retornou ou DB não tinha),
@@ -899,120 +1207,32 @@ async function runForYouPipeline(
     }
 
     const eligible = candidates.filter(
-      (c) => !notIntSet.has(`${c.mediaType}:${c.tmdbId}`),
+      (c) => !notIntSet.has(`${c.mediaType}:${c.tmdbId}`) && passesQualityGate(c),
     );
-
-    // ── FASE 8 — Pool com preferência por imagens ─────────────────────────────
-    const withImages = eligible.filter((c) => c.posterUrl || c.backdropUrl);
-    // Suplementação por DB local genérico removida: não preenchemos com populares
-    // sem relação semântica com os seeds do usuário.
-    const pool = withImages.length >= FINAL_COUNT ? withImages : eligible;
 
     // ── LOG SUMMARY ───────────────────────────────────────────────────────────
     const source = hadBalloonCandidates ? "balloon_primary" : "empty";
+    const withImagesCount = eligible.filter((c) => c.posterUrl || c.backdropUrl).length;
     console.log(
       `[for-you] context=user-for-you seeds=${picks.length} ` +
       `balloon_seeds=${balloonSeedResults.length} candidates=${candidates.length} ` +
-      `lib_removed=${libRemoved} excluded=${excluded} deduped=${deduped} ` +
-      `with_images=${withImages.length} pool=${pool.length} source=${source} ` +
+      `lib_removed=${libRemoved} deduped=${deduped} ` +
+      `with_images=${withImagesCount} eligible=${eligible.length} source=${source} ` +
       `exclusion_keys=tmdbId(client+db)+imdbId(client+db)+traktId(client+db)+syntheticExpansion` +
       ` lib_db=${dbLibItems.length} ext_enriched=${extIdRows.length}`,
     );
 
-    if (!pool.length) {
-      return { featured: null, items: [], recommendationSource: source };
-    }
+    // Cacheia o pool elegível (independente de sessão/seleção) para recargas baratas.
+    if (eligible.length > 0) writePoolCache(poolKey, eligible);
 
-    // ── FASE 10 — Seleção ponderada ───────────────────────────────────────────
-    const selected = weightedSample(pool, score, Math.min(FINAL_COUNT, pool.length));
-
-    // ── FASE 11 — Payload canônico (campos finais, sem dados brutos) ──────────
-    const items: ForYouApiItem[] = selected.map((c) => {
-      const genreLabel = c.genreIds?.[0] ? (GENRE_MAP[c.genreIds[0]] ?? null) : null;
-
-      const isPtBr       = c._langSource.startsWith("pt-BR");
-      const titleOriginal = isPtBr ? (c.originalTitle ?? c.title) : c.title;
-      const titlePtBr     = isPtBr ? c.title : "n/a";
-      const overviewPtBr  = isPtBr && Boolean(c.overview) ? "yes" : "no";
-      const transSource   =
-        c._langSource === "pt-BR:trakt"       ? "trakt-inline" :
-        c._langSource === "pt-BR:trakt-trans" ? "trakt-trans"  :
-        c._langSource === "pt-BR:db"          ? "db"           : "none";
-      const fallbackReason = isPtBr ? "—" : `no-pt-BR-translation (${c._langSource})`;
-
-      console.log(
-        `[for-you:item] tmdb=${c.tmdbId} imdb=${c.imdbId ?? "?"} ` +
-        `titleOriginal="${titleOriginal}" titlePtBr="${titlePtBr}" ` +
-        `overviewPtBr=${overviewPtBr} langSource=${transSource} ` +
-        `fallbackReason=${fallbackReason} ` +
-        `image=${c._imageSource} ` +
-        `balloonSource=${c._balloonSource ?? "?"} ` +
-        `hydrationSource=${c._hydrationSource ?? "?"} ` +
-        `appearedFromSeeds=${c._appearedFromSeeds ?? 1} ` +
-        `seedWeight=${c.seedEffectiveWeight} ` +
-        `userLibrary=false ` +
-        `${!c.posterUrl && !c.backdropUrl ? "⚠ sem-imagem " : ""}` +
-        `reason="${c.reason}"`,
-      );
-
-      // linkId canônico:
-      // - título está no DB local (enrichFromDb marcou _inLocalDb) → tmdbId (link direto)
-      // - não está no DB → imdbId (página carrega via Balloonerismm)
-      // - fallback: String(tmdbId) (sintético)
-      const linkId = c._inLocalDb ? String(c.tmdbId) : (c.imdbId ?? String(c.tmdbId));
-
-      return {
-        id:           c.tmdbId,
-        poplogId:     c._poplogId ?? null,
-        linkId,
-        title:        c.title,
-        originalTitle: c.originalTitle !== c.title ? (c.originalTitle ?? null) : null,
-        overview:     c.overview ?? undefined,
-        posterUrl:    c.posterUrl   ?? null,
-        backdropUrl:  c.backdropUrl ?? null,
-        rating:       c.voteAverage ?? undefined,
-        year:         c.year,
-        mediaType:    c.mediaType,
-        mediaLabel:   c.mediaType === "movie" ? "Filme" : "Série",
-        genreLabel,
-        reason:       c.reason,
-        sourceSeed:   c.seedEffectiveWeight > 0 ? undefined : "popular",
-        debug:        [
-          `${c._imageSource}|${c._langSource}`,
-          `balloon=${c._balloonSource ?? "?"}`,
-          `seeds=${c._appearedFromSeeds ?? 1}`,
-          `w=${c.seedEffectiveWeight}`,
-          c._scoreBreakdown
-            ? `score=[final=${c._scoreBreakdown.finalScore.toFixed(3)},internalBalloon=${c._scoreBreakdown.internalScore.toFixed(3)},srcMult=${c._scoreBreakdown.sourceMultiplier},penalty=${c._scoreBreakdown.hydrationPenalty}]`
-            : "",
-        ].filter(Boolean).join("|"),
-      };
-    });
-
-    // Featured = highest rating with backdrop; else first item
-    const withBackdrop = items.filter((it) => it.backdropUrl);
-    const featured     = withBackdrop.length > 0
-      ? [...withBackdrop].sort((a, b) => (b.rating ?? 0) - (a.rating ?? 0))[0]
-      : (items[0] ?? null);
-    const rest = featured ? items.filter((it) => it !== featured) : items;
-
-    // Breakdown por fonte Balloon nos itens selecionados
-    const recsOnly  = selected.filter((c) => c._balloonSource === "recommendations").length;
-    const simOnly   = selected.filter((c) => c._balloonSource === "similar").length;
-    const both      = selected.filter((c) => c._balloonSource === "both").length;
-    const hydrTrkt  = selected.filter((c) => c._hydrationSource === "trakt").length;
-    console.log(
-      `[for-you] final=${selected.length}` +
-      ` balloon_recs=${recsOnly} balloon_sim=${simOnly} balloon_both=${both}` +
-      ` hydrated_trakt=${hydrTrkt}` +
-      ` featured="${featured?.title ?? "none"}" source=${source}`,
+    // ── FASES 8/10/11 — Filtro de sessão + amostragem + payload ───────────────
+    return await buildForYouResponse(
+      eligible,
+      excludeKeys,
+      libraryIdentities,
+      FINAL_COUNT,
+      source,
     );
-
-    return {
-      featured,
-      items:                rest,
-      recommendationSource: source,
-    };
 }
 
 // ─── Handler ──────────────────────────────────────────────────────────────────
@@ -1035,12 +1255,7 @@ export async function POST(req: NextRequest) {
   }
 
   // ── Route-level dedup (burst protection) ─────────────────────────────────
-  const routeKey    = buildRouteKey(titles, FINAL_COUNT);
-  const cachedRoute = ROUTE_CACHE.get(routeKey);
-  if (cachedRoute && Date.now() - cachedRoute.ts < ROUTE_DEDUP_TTL) {
-    console.log(`[for-you] dedup_hit key="${routeKey}" age=${Date.now() - cachedRoute.ts}ms`);
-    return NextResponse.json(cachedRoute.data);
-  }
+  const routeKey = buildRouteKey(titles, FINAL_COUNT, excludeKeys);
   const inflight = ROUTE_IN_FLIGHT.get(routeKey);
   if (inflight) {
     console.log(`[for-you] dedup_inflight key="${routeKey}"`);
@@ -1048,7 +1263,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(data);
   }
 
-  // ── Run pipeline with origin context ─────────────────────────────────────
+  // Run pipeline with origin context
   const pipelinePromise: Promise<unknown> = withOrigin("for-you", () =>
     runForYouPipeline(titles, FINAL_COUNT, excludeKeys)
   ).catch((err: unknown) => {
@@ -1059,6 +1274,5 @@ export async function POST(req: NextRequest) {
   ROUTE_IN_FLIGHT.set(routeKey, pipelinePromise);
   const data = await pipelinePromise;
   ROUTE_IN_FLIGHT.delete(routeKey);
-  ROUTE_CACHE.set(routeKey, { data, ts: Date.now() });
   return NextResponse.json(data);
 }

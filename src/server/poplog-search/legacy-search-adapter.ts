@@ -7,6 +7,7 @@
  * dentro das entidades; aqui só remapeamos os nomes de campos.
  */
 
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import type { PoplogSearchEntity } from "./types";
 
 export type LegacySearchTitle = {
@@ -78,7 +79,16 @@ export function entityToLegacyTitle(entity: PoplogSearchEntity): LegacySearchTit
     poplogId: null,
     externalIds: compactExternalIds(entity.externalIds),
     media_type: mediaType,
-    title: entity.title ?? entity.name ?? "",
+    title: resolveDisplayTitle({
+      title: entity.title,
+      name: entity.name,
+      originalTitle: entity.originalTitle,
+      tmdbId: entity.externalIds?.tmdbId,
+      imdbId: entity.externalIds?.imdbId,
+      traktId: entity.externalIds?.traktId,
+      slug: entity.externalIds?.traktSlug,
+      mediaType,
+    }),
     original_title: entity.originalTitle ?? null,
     release_date: mediaType === "movie" ? dateStr : null,
     first_air_date: mediaType === "tv" ? dateStr : null,

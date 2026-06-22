@@ -1,4 +1,5 @@
 import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";
 
 type LibraryHeroProps = {
@@ -12,7 +13,15 @@ export default function LibraryHero({ library, totalCount }: LibraryHeroProps) {
     library.find((item) => item.title?.poster_path) ??
     null;
 
-  const heroTitle = heroItem?.title?.title ?? "Biblioteca";
+  const heroTitle = heroItem
+    ? resolveDisplayTitle({
+        title: heroItem.title?.title,
+        originalTitle: heroItem.title?.original_title,
+        tmdbId: heroItem.tmdb_id,
+        imdbId: heroItem.imdb_id,
+        mediaType: heroItem.media_type,
+      })
+    : "Biblioteca";
 
   return (
     <section className="relative w-full">

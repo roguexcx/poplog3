@@ -59,6 +59,10 @@ export interface UserWatching {
   // Streaming
   streaming_platform: string | null;
   streaming_available_since: string | null;
+  /** Badge de disponibilidade (Onde assistir) — mesmo contrato do card da Watchlist. */
+  best_provider_name?: string | null;
+  best_provider_type?: string | null;
+  best_provider_logo?: string | null;
   available_on_vod: boolean;
   vod_available_since: string | null;
 

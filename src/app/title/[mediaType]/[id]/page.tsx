@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { Metadata } from "next";
 import { redirect, permanentRedirect } from "next/navigation";
 
 import ActionButton from "@/components/ui/ActionButton";
@@ -6,7 +7,6 @@ import EmptyState from "@/components/ui/EmptyState";
 import TitlePageView from "@/features/title/TitlePageView";
 import { getTitlePageData } from "@/server/titles/get-title-page-data";
 import { formatDuration, logger } from "@/server/logging/logger";
-import { isCanonicalPoplogId } from "@/lib/title-href";
 import type { PoplogTitleSourceHint } from "@/server/titles/poplog-title-identity";
 
 type MediaType = "movie" | "tv";
@@ -18,6 +18,20 @@ type PageProps = {
   }>;
   searchParams?: Promise<Record<string, string | string[] | undefined>>;
 };
+
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const { mediaType, id } = await params;
+
+  if (mediaType !== "movie" && mediaType !== "tv") {
+    return { title: "Título" };
+  }
+
+  const title = await getTitlePageData({ mediaType, id, sourceHint: "auto" });
+
+  return {
+    title: title?.title ?? "Título",
+  };
+}
 
 function pickFlag(value: string | string[] | undefined): boolean {
   if (Array.isArray(value)) return value.some((v) => v === "1" || v === "true");

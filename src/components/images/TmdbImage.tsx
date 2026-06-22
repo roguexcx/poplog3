@@ -1,48 +1,59 @@
 "use client";
 
-import Image, { type ImageProps } from "next/image";
-import { useState, type ReactNode } from "react";
+/**
+ * TmdbImage — wrapper de compatibilidade.
+ *
+ * O nome "Tmdb" é histórico (pré-migração POPLOG). A renderização e a resolução
+ * de URL são UNIFICADAS em {@link CatalogImage}/{@link CatalogPoster} — este
+ * arquivo apenas adapta a API antiga (`path`/`kind`) para a canônica (`src`),
+ * mantendo os ~20 call-sites existentes sem alteração.
+ *
+ * Para código novo, prefira importar `CatalogImage` diretamente.
+ */
 
-import { resolveForRender } from "@/lib/images/proxy";
+import type { ImageProps } from "next/image";
+import { type ReactNode } from "react";
+
 import type { ImageKind } from "@/lib/images/sizes";
+import type { CatalogImageSize } from "@/lib/images/resolve";
+import CatalogImage, { CatalogPoster } from "./CatalogImage";
 
-// ─── V2-style default export (para componentes migrados do V2) ────────────────
+// ─── API V2 (default export) ──────────────────────────────────────────────────
 
 export type TmdbImageProps = Omit<ImageProps, "src" | "alt"> & {
   path: string | null | undefined;
   alt: string;
-  kind: ImageKind;
+  /** Mantido por compatibilidade; a resolução de URL não depende do kind. */
+  kind?: ImageKind;
   size: string;
   fallback?: ReactNode;
 };
 
-// eslint-disable-next-line @typescript-eslint/no-unused-vars
-export default function TmdbImage({ path, kind, size,
+export default function TmdbImage({
+  path,
+  size,
   alt,
   fallback = null,
+  kind: _kind,
   ...rest
 }: TmdbImageProps) {
-  const [errored, setErrored] = useState(false);
-
-  const src = resolveForRender(path, size);
-  if (!src || errored) return <>{fallback}</>;
-
   return (
-    <Image
-      src={src}
+    <CatalogImage
+      src={path}
+      size={size as CatalogImageSize}
       alt={alt}
-      onError={() => setErrored(true)}
+      fallback={fallback}
       {...rest}
     />
   );
 }
 
-// ─── V3-style named export (backward compat para componentes existentes do V3) ─
+// ─── API V3 (named export) ──────────────────────────────────────────────────
 
 type TmdbImageV3Props = {
   path: string | null;
   fallbackPath?: string | null;
-  size?: "w185" | "w300" | "w342" | "w500" | "w780" | "w1280" | "original";
+  size?: CatalogImageSize;
   alt?: string;
   className?: string;
   priority?: boolean;
@@ -58,27 +69,15 @@ export function TmdbImageLegacy({
   priority = false,
   fallbackLabel = "Sem imagem",
 }: TmdbImageV3Props) {
-  const src = resolveForRender(path ?? fallbackPath, size);
-
-  if (!src) {
-    return (
-      <div
-        className={`flex h-full w-full items-center justify-center bg-gradient-to-br from-zinc-900 via-zinc-950 to-black p-4 text-center text-xs font-semibold uppercase tracking-[0.18em] text-white/35 ${className}`}
-      >
-        {fallbackLabel}
-      </div>
-    );
-  }
-
   return (
-    <Image
-      src={src}
+    <CatalogPoster
+      src={path}
+      fallbackSrc={fallbackPath}
+      size={size}
       alt={alt}
-      fill
-      priority={priority}
-      unoptimized
-      sizes="(max-width: 768px) 50vw, (max-width: 1280px) 20vw, 16vw"
       className={className}
+      priority={priority}
+      fallbackLabel={fallbackLabel}
     />
   );
 }

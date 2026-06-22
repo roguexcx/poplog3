@@ -1,7 +1,10 @@
+import { EngineApi } from "@prisma/client";
 import type { ApiName, EngineLogEntry, EngineStats } from "./types";
 
 const MAX = 500;
-const API_NAMES: ApiName[] = ["tmdb", "omdb", "watchmode", "motn", "balloonerismm", "tvdb", "trakt"];
+// Fonte única de verdade: deriva do enum EngineApi do Prisma para nunca divergir
+// do schema/DB (mesma regra do engine-logger-local.service).
+const API_NAMES = Object.values(EngineApi) as ApiName[];
 
 type Counter = {
   calls: number;

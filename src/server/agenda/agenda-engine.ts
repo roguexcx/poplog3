@@ -1,15 +1,12 @@
 import type { NewEpisodeItem } from "@/app/api/poplog3/continuity/new-episodes/route";
 import type { UpcomingEpisodeItem } from "@/app/api/poplog3/continuity/upcoming-episodes/route";
-import type { DiscoverMediaItem } from "@/server/agenda/discover-service";
 import { normalizeTmdbPopularity, popularityToVisualWeight } from "@/lib/score/tmdb-popularity";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import {
   editorialBalanceEngine,
   type EditorialContext,
 } from "@/server/agenda/editorial-balance-engine";
-import {
-  computeBrazilianProductionBonus,
-  applyLegacyBrazilianBonus,
-} from "@/server/agenda/editorial-regional-bonus";
+import { computeBrazilianProductionBonus } from "@/server/agenda/editorial-regional-bonus";
 import {
   buildTemporalTimeline,
   classifyAirDate,
@@ -31,92 +28,19 @@ import { formatEpisodeRuntimeLabel } from "@/lib/domain-labels";
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
 import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
 import { getLeavingSoonAvailabilityEvents } from "@/server/streaming/availability-events";
-import { editorialCacheTTL } from "@/server/cache/cache-config";
-
-type TmdbPageResult<T> = {
-  page: number;
-  results: T[];
-  total_pages: number;
-  total_results: number;
-};
-
-type TmdbMovie = DiscoverMediaItem & {
-  title: string;
-  release_date: string;
-};
-
-type TmdbTv = DiscoverMediaItem & {
-  name: string;
-  first_air_date: string;
-};
 
 type AgendaEngineOptions = {
   region?: string;
 };
 
 const DAY_MS = 86_400_000;
-const WITHOUT_TALK = "10767,10763";
 
 function dateAdd(days: number, base = new Date()): string {
   return new Date(base.getTime() + days * DAY_MS).toISOString().slice(0, 10);
 }
 
-function mergeDedup<T extends { id: number }>(
-  ...settled: PromiseSettledResult<TmdbPageResult<T>>[]
-): T[] {
-  const seen = new Set<number>();
-  const out: T[] = [];
-  for (const result of settled) {
-    if (result.status !== "fulfilled") continue;
-    for (const item of result.value.results) {
-      if (seen.has(item.id)) continue;
-      seen.add(item.id);
-      out.push(item);
-    }
-  }
-  return out;
-}
-
-function isTalkOrNews(item: { genre_ids: number[] }): boolean {
-  return item.genre_ids.some((genreId) => genreId === 10767 || genreId === 10763);
-}
-
 function dateOnly(value: Date | null | undefined): string | null {
   return value ? value.toISOString().slice(0, 10) : null;
-}
-
-function normalizeMovie(movie: TmdbMovie): LegacyAgendaMovie {
-  return {
-    id: movie.id,
-    media_type: "movie",
-    title: movie.title,
-    original_language: movie.original_language,
-    poster_path: movie.poster_path,
-    backdrop_path: movie.backdrop_path,
-    release_date: movie.release_date ?? "",
-    vote_average: movie.vote_average,
-    vote_count: movie.vote_count,
-    popularity: movie.popularity,
-    overview: movie.overview,
-    genre_ids: movie.genre_ids,
-  };
-}
-
-function normalizeTv(tv: TmdbTv): LegacyAgendaTv {
-  return {
-    id: tv.id,
-    media_type: "tv",
-    title: tv.name,
-    original_language: tv.original_language,
-    poster_path: tv.poster_path,
-    backdrop_path: tv.backdrop_path,
-    first_air_date: tv.first_air_date ?? "",
-    vote_average: tv.vote_average,
-    vote_count: tv.vote_count,
-    popularity: tv.popularity,
-    overview: tv.overview,
-    genre_ids: tv.genre_ids,
-  };
 }
 
 function eventFromLegacyMovie(
@@ -251,7 +175,12 @@ async function buildNewEpisodeItems(userId: string | null): Promise<NewEpisodeIt
     return {
       content_id: `tv-${state.tmdb_id}`,
       tmdb_id: state.tmdb_id,
-      title: typeof title?.title === "string" ? title.title : `Série ${state.tmdb_id}`,
+      title: resolveDisplayTitle({
+        title: typeof title?.title === "string" ? title.title : null,
+        originalTitle: typeof title?.original_title === "string" ? title.original_title : null,
+        tmdbId: state.tmdb_id,
+        mediaType: "tv",
+      }),
       original_title: typeof title?.original_title === "string" ? title.original_title : null,
       poster_path: typeof title?.poster_path === "string" ? title.poster_path : null,
       backdrop_path: typeof title?.backdrop_path === "string" ? title.backdrop_path : null,
@@ -335,7 +264,12 @@ async function buildUpcomingEpisodeItems(userId: string | null): Promise<Upcomin
     return {
       content_id: `tv-${state.tmdb_id}`,
       tmdb_id: state.tmdb_id,
-      title: typeof title?.title === "string" ? title.title : `Série ${state.tmdb_id}`,
+      title: resolveDisplayTitle({
+        title: typeof title?.title === "string" ? title.title : null,
+        originalTitle: typeof title?.original_title === "string" ? title.original_title : null,
+        tmdbId: state.tmdb_id,
+        mediaType: "tv",
+      }),
       poster_path: typeof title?.poster_path === "string" ? title.poster_path : null,
       backdrop_path: typeof title?.backdrop_path === "string" ? title.backdrop_path : null,
       status: state.status ?? "watching",
@@ -452,7 +386,12 @@ async function fetchAvailabilityAgendaEvents(input: {
         type: input.eventType,
         tmdbId: row.tmdb_id,
         mediaType: row.media_type,
-        title: title?.title ?? `Título ${row.tmdb_id}`,
+        title: resolveDisplayTitle({
+          title: title?.title,
+          originalTitle: title?.original_title,
+          tmdbId: row.tmdb_id,
+          mediaType: row.media_type,
+        }),
         originalTitle: title?.original_title ?? null,
         posterPath: title?.poster_path ?? null,
         backdropPath: title?.backdrop_path ?? null,

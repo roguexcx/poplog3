@@ -5,9 +5,12 @@ import { db } from "@/server/db/client";
 import { applyLegacyBrazilianBonus } from "@/server/agenda/editorial-regional-bonus";
 import { normalizeTmdbPopularity } from "@/lib/score/tmdb-popularity";
 import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
+import { listActiveStreamingProviders } from "@/server/local-services/streaming-preferences-local.service";
+import { normalizeProvider } from "@/server/streaming/provider-normalization";
+import { hydrateManyTitleAvailability } from "@/server/availability";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import {
   getLocalUserLibraryIds,
-  getLocalTitleAvailabilityBatch,
   getLocalAgendaStateBatch,
 } from "@/server/local-services/continuity-local.service";
 import {
@@ -112,7 +115,13 @@ function rowToMovie(row: TitleRow): AgendaMovie {
   return {
     id: row.tmdbId,
     media_type: "movie",
-    title: row.title ?? "",
+    title: resolveDisplayTitle({
+      title: row.title,
+      originalTitle: row.originalTitle,
+      tmdbId: row.tmdbId,
+      imdbId: row.imdbId,
+      mediaType: "movie",
+    }),
     poster_path: row.posterPath,
     backdrop_path: row.backdropPath,
     release_date: row.releaseDate ? row.releaseDate.toISOString().slice(0, 10) : "",
@@ -128,7 +137,13 @@ function rowToTv(row: TitleRow): AgendaTv {
   return {
     id: row.tmdbId,
     media_type: "tv",
-    title: row.title ?? "",
+    title: resolveDisplayTitle({
+      title: row.title,
+      originalTitle: row.originalTitle,
+      tmdbId: row.tmdbId,
+      imdbId: row.imdbId,
+      mediaType: "tv",
+    }),
     original_language: row.originalLanguage ?? undefined,
     poster_path: row.posterPath,
     backdrop_path: row.backdropPath,
@@ -284,15 +299,6 @@ async function getTrendingTv(): Promise<{ shows: AgendaTv[]; source: string }> {
 
 // ── Availability + user state enrichment (local DB only) ──────────────────────
 
-type AvailabilityRow = {
-  tmdb_id: number;
-  media_type: "movie" | "tv";
-  provider_name: string;
-  provider_logo_path: string | null;
-  availability_type: string | null;
-  tmdb_provider_id: number | null;
-};
-
 type StateRow = {
   tmdb_id: number;
   media_type: "movie" | "tv";
@@ -305,25 +311,22 @@ type StateRow = {
 
 type EnrichableAgendaItem = AgendaMovie | AgendaTv;
 
-function availabilityScore(row: AvailabilityRow, favoriteProviderIds: Set<string>) {
-  const type = row.availability_type ?? "";
-  const isPreferred = row.tmdb_provider_id !== null && favoriteProviderIds.has(String(row.tmdb_provider_id));
-  const isStreaming = STREAMING_TYPES.has(type);
-  let score = 0;
-  if (isPreferred) score += 1000;
-  if (isStreaming) score += 300;
-  if (type === "rent") score += 80;
-  if (type === "buy") score += 60;
-  if (row.provider_logo_path) score += 10;
-  return score;
-}
-
 function normalizeProviderType(type?: string | null) {
   if (!type) return null;
   if (type === "flatrate" || type === "subscription") return "streaming";
   return type;
 }
 
+/** Chave de comparação canônica para nomes de provider (alias-aware + lowercase). */
+function providerNameKey(name: string): string {
+  return (normalizeProvider(name)?.name ?? name).trim().toLowerCase();
+}
+
+/**
+ * P4: disponibilidade da Agenda agora vem do FLUXO CANÔNICO
+ * (hydrateManyTitleAvailability, cacheOnly + warmCold) — sem ler poplog3_title_availability.
+ * User state (status/computed_state + best_provider_* materializado) segue como fallback.
+ */
 async function enrichAgendaItems(input: {
   userId: string | null;
   items: EnrichableAgendaItem[];
@@ -337,24 +340,35 @@ async function enrichAgendaItems(input: {
   const favoriteProviderIds = new Set(preferences.favoriteProviderIds ?? []);
   const region = preferences.region ?? "BR";
 
-  const availabilityRows = await getLocalTitleAvailabilityBatch(movieIds, tvIds, region);
-
-  const availabilityMap = new Map<string, AvailabilityRow>();
-  for (const row of availabilityRows) {
-    const key = `${row.media_type}-${row.tmdb_id}`;
-    const current = availabilityMap.get(key);
-    const candidate: AvailabilityRow = {
-      tmdb_id: row.tmdb_id,
-      media_type: row.media_type,
-      provider_name: row.provider_name,
-      provider_logo_path: row.provider_logo_path,
-      availability_type: row.availability_type,
-      tmdb_provider_id: row.tmdb_provider_id,
-    };
-    if (!current || availabilityScore(candidate, favoriteProviderIds) > availabilityScore(current, favoriteProviderIds)) {
-      availabilityMap.set(key, candidate);
+  // "Preferred" por NOME canônico: mapeia os tmdb provider ids favoritos → nome via
+  // catálogo local de providers (a camada canônica é name-based, não tmdb-provider-id).
+  const favoriteProviderNames = new Set<string>();
+  if (favoriteProviderIds.size > 0) {
+    try {
+      const catalog = await listActiveStreamingProviders(region);
+      for (const p of catalog) {
+        if (p.tmdb_provider_id != null && favoriteProviderIds.has(String(p.tmdb_provider_id))) {
+          favoriteProviderNames.add(providerNameKey(p.provider_name));
+        }
+      }
+    } catch (err) {
+      console.warn("[agenda] catálogo de providers indisponível p/ preferred:", err);
     }
   }
+
+  // Disponibilidade canônica (cache-first; aquece em background os frios/negativos legados).
+  const availabilityMap = await hydrateManyTitleAvailability(
+    items.map((item) => ({
+      key: `${item.media_type}-${item.id}`,
+      input: {
+        mediaType: item.media_type,
+        // tmdbId positivo (TMDB) ou sintético negativo — a camada resolve o imdbId.
+        tmdbId: item.id,
+        region,
+      },
+    })),
+    { cacheOnly: true, warmCold: true },
+  );
 
   const stateRows = userId ? await getLocalAgendaStateBatch(userId, movieIds, tvIds) : [];
   const stateMap = new Map<string, StateRow>();
@@ -365,14 +379,14 @@ async function enrichAgendaItems(input: {
   for (const item of items) {
     const key = `${item.media_type}-${item.id}`;
     const state = stateMap.get(key);
-    const availability = availabilityMap.get(key);
-    const providerName = state?.best_provider_name ?? availability?.provider_name ?? null;
-    const providerType = normalizeProviderType(state?.best_provider_type ?? availability?.availability_type ?? null);
-    const providerLogo = state?.best_provider_logo ?? availability?.provider_logo_path ?? null;
-    const isPreferred =
-      availability?.tmdb_provider_id !== null &&
-      availability?.tmdb_provider_id !== undefined &&
-      favoriteProviderIds.has(String(availability.tmdb_provider_id));
+    const best = availabilityMap.get(key)?.bestProvider ?? null;
+
+    // Prioridade: camada canônica (mais fresca) → best_provider materializado no state.
+    const providerName = best?.name ?? state?.best_provider_name ?? null;
+    const providerType = normalizeProviderType(best?.type ?? state?.best_provider_type ?? null);
+    const providerLogo = best?.logoUrl ?? state?.best_provider_logo ?? null;
+
+    const isPreferred = providerName ? favoriteProviderNames.has(providerNameKey(providerName)) : false;
     const isStreaming = STREAMING_TYPES.has(providerType ?? "");
 
     item.user_status = state?.status ?? null;

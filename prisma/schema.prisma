@@ -169,6 +169,10 @@ enum CatalogAvailabilitySource {
   local
   manual
   future_provider
+  // Fallback experimental via GraphQL não oficial da JustWatch (ver
+  // justwatch-graphql-unofficial-source.ts). Tag distinta para rastreabilidade —
+  // confiança menor que balloonerismm; substituível por Partner API licenciada.
+  justwatch
 }
 
 enum SourceConfidence {
@@ -795,6 +799,12 @@ model UserStreamingPreference {
   @@map("user_streaming_preferences")
 }
 
+/// DEPRECATED — tabela legada de disponibilidade. NÃO é mais escrita nem lida pelo código
+/// atual (último consumidor, a Agenda, foi migrado para o fluxo canônico
+/// getTitleAvailability/hydrateManyTitleAvailability → catalog_availability).
+/// Mantida temporariamente apenas para não exigir migração destrutiva imediata.
+/// PLANO DE REMOÇÃO: após confirmar em produção que nenhum fluxo depende dela, dropar a
+/// tabela (migração) e remover getLocalTitleAvailabilityBatch/LocalAvailabilityData.
 model Poplog3TitleAvailability {
   id                    String             @id @default(cuid()) @db.VarChar(191)
   tmdbId                Int                @map("tmdb_id")

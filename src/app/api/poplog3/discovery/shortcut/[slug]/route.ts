@@ -5,6 +5,7 @@ import {
   findTrending,
 } from "@/lib/discovery/shortcuts-config";
 import { filterTraktItems, normSlug } from "@/lib/discovery/genre-filter";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import {
   getPoplogDailyTrendingIndex,
 } from "@/lib/trakt-index/canonical";
@@ -94,7 +95,13 @@ async function fetchByGenreFromDB(
     hasPoplogId: true,
     normalizedFrom: "legacy",
     legacyCompatibilityUsed: false,
-    title: row.title ?? "",
+    title: resolveDisplayTitle({
+      title: row.title,
+      originalTitle: row.original_title,
+      tmdbId: row.tmdb_id,
+      poplogId: row.id,
+      mediaType: row.media_type as "movie" | "tv",
+    }),
     original_title: row.original_title ?? null,
     overview: row.overview ?? null,
     poster_path: row.poster_path ?? null,

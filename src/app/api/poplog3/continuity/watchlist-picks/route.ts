@@ -7,6 +7,7 @@ import {
   formatRuntimeLabel,
 } from "@/lib/domain-labels";
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import { scheduleContinuityTitleRefresh } from "@/server/continuity/continuity-background-refresh";
 import {
   readContinuitySectionCache,
@@ -635,7 +636,12 @@ async function buildLocalWatchlistPicks(
         content_id: `${state.media_type}-${state.tmdb_id}`,
         tmdb_id: state.tmdb_id,
         media_type: state.media_type,
-        title: title.title ?? `Título ${state.tmdb_id}`,
+        title: resolveDisplayTitle({
+          title: title.title,
+          originalTitle: title.original_title,
+          tmdbId: state.tmdb_id,
+          mediaType: state.media_type,
+        }),
         original_title: title.original_title ?? null,
         poster_path: title.poster_path ?? null,
         backdrop_path: title.backdrop_path ?? null,

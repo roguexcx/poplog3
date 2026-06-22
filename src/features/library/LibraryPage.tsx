@@ -13,6 +13,7 @@ import {
 import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
 import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import SectionHeader from "@/components/ui/SectionHeader";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";
 
@@ -21,12 +22,18 @@ import LibraryGrid from "./LibraryGrid";
 import LibraryHero from "./LibraryHero";
 import LibraryPosterCard from "./LibraryPosterCard";
 import { type LibraryTab } from "./LibraryTabs";
+import {
+  getComingSoonInfo,
+  getConfirmedReleaseDate,
+  getTheatricalStatus,
+} from "./library-coming-soon";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 type MediaFilter = "all" | "movie" | "tv";
 
 type SortBy =
+  | "random"
   | "release-desc"
   | "recent"
   | "title-asc"
@@ -48,8 +55,6 @@ type ExtendedStats = {
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
-const THEATER_WINDOW_DAYS = 45;
-
 const MEDIA_OPTIONS: { id: MediaFilter; label: string }[] = [
   { id: "all",   label: "Tudo"   },
   { id: "movie", label: "Filmes" },
@@ -57,6 +62,7 @@ const MEDIA_OPTIONS: { id: MediaFilter; label: string }[] = [
 ];
 
 const SORT_OPTIONS: { value: SortBy; label: string }[] = [
+  { value: "random",          label: "Aleatório"          },
   { value: "popularity-desc", label: "Popularidade"       },
   { value: "recent",          label: "Adicionados recente" },
   { value: "release-desc",    label: "Lançamento (+ novo)" },
@@ -68,6 +74,7 @@ const SORT_OPTIONS: { value: SortBy; label: string }[] = [
 
 const TAB_OPTIONS: { id: LibraryTab; label: string }[] = [
   { id: "all",          label: "Tudo"        },
+  { id: "random",       label: "Aleatório"   },
   { id: "watchlist",    label: "Watchlist"   },
   { id: "favorites",    label: "Favoritos"   },
   { id: "watching",     label: "Maratonando" },
@@ -106,12 +113,20 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
   const [activeTab,         setActiveTab]         = useState<LibraryTab>(defaultTab);
   const [mediaFilter,       setMediaFilter]       = useState<MediaFilter>("all");
   const [yearFilter,        setYearFilter]        = useState<number | null>(null);
-  const [sortBy,            setSortBy]            = useState<SortBy>("popularity-desc");
+  const [sortBy,            setSortBy]            = useState<SortBy>("random");
+  const [randomSeed,        setRandomSeed]        = useState<number | null>(null);
   const [page,              setPage]              = useState(1);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   const gridSectionRef = useRef<HTMLDivElement>(null);
   const itemsPerPage   = useLibraryItemsPerPage();
+
+  useEffect(() => {
+    const seed = typeof crypto !== "undefined" && "getRandomValues" in crypto
+      ? crypto.getRandomValues(new Uint32Array(1))[0]
+      : Date.now() >>> 0;
+    setRandomSeed(seed);
+  }, []);
 
   useWatchlistHydration(library, activeTab);
 
@@ -179,7 +194,7 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
   const comingSoonItems = useMemo(() =>
     library
       .filter(isComingSoon)
-      .sort((a, b) => getReleaseTime(a) - getReleaseTime(b))
+      .sort((a, b) => compareReleaseTime(a, b, "asc"))
       .slice(0, 6),
     [library]);
 
@@ -201,7 +216,8 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
       items = items.filter(isComingSoon);
     } else {
       items = items.filter((i) => !isComingSoon(i));
-      if      (activeTab === "favorites") items = items.filter((i) => i.favorite === true);
+      if      (activeTab === "random")    { /* Todos os estados, em ordem aleatória. */ }
+      else if (activeTab === "favorites") items = items.filter((i) => i.favorite === true);
       else if (activeTab === "watching")  items = items.filter(isMarathoning);
       else if (activeTab === "watched")   items = items.filter(isCompletedOrUpToDate);
       else if (activeTab === "watchlist") items = items.filter(isPureWatchlist);
@@ -211,9 +227,10 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
     if (mediaFilter !== "all")    items = items.filter((i) => i.media_type === mediaFilter);
     if (yearFilter  !== null)     items = items.filter((i) => i.title?.year === yearFilter);
 
-    items.sort((a, b) => sortLibraryItems(a, b, sortBy));
+    const effectiveSort = activeTab === "random" ? "random" : sortBy;
+    items.sort((a, b) => sortLibraryItems(a, b, effectiveSort, randomSeed));
     return items;
-  }, [library, activeTab, mediaFilter, yearFilter, sortBy]);
+  }, [library, activeTab, mediaFilter, yearFilter, sortBy, randomSeed]);
 
   const totalPages     = Math.max(1, Math.ceil(filteredLibrary.length / itemsPerPage));
   const safePage       = Math.min(page, totalPages);
@@ -789,16 +806,32 @@ function ComingSoonCard({
   priority?: boolean;
 }) {
   const title        = item.title;
-  const displayTitle = title?.title ?? title?.original_title ?? "—";
+  const displayTitle = resolveDisplayTitle({
+    title: title?.title,
+    originalTitle: title?.original_title,
+    tmdbId: item.tmdb_id,
+    imdbId: item.imdb_id,
+    mediaType: item.media_type,
+  });
   const type         = item.media_type === "movie" ? "Filme" : "Série";
   const rating       = title?.vote_average;
 
-  const rawDate =
-    item.media_type === "tv"
-      ? title?.first_air_date ?? title?.release_date
-      : title?.release_date  ?? title?.first_air_date;
-
-  const releaseLabel = rawDate ? formatComingSoonDate(rawDate) : null;
+  const comingSoon = getComingSoonInfo(item);
+  const theatrical = getTheatricalStatus(item);
+  const releaseLabel = theatrical.inTheaters
+    // "Nos cinemas" tem prioridade; anexa o VOD previsto quando houver data.
+    ? comingSoon.phase === "awaiting_vod" && comingSoon.displayDate
+      ? `Nos cinemas · VOD ${formatComingSoonDate(comingSoon.displayDate)}`
+      : "Nos cinemas"
+    : comingSoon.displayDate
+      ? comingSoon.phase === "awaiting_vod"
+        ? `VOD previsto · ${formatComingSoonDate(comingSoon.displayDate)}`
+        : comingSoon.phase === "critical_recheck"
+          ? `Revalidando VOD · ${formatComingSoonDate(comingSoon.displayDate)}`
+          : formatComingSoonDate(comingSoon.displayDate)
+      : comingSoon.phase === "awaiting_vod"
+        ? "VOD: sem disponibilidade encontrada"
+        : null;
   const linkId = item.imdb_id ?? item.tmdb_id;
 
   return (
@@ -856,11 +889,20 @@ function formatComingSoonDate(dateStr: string): string {
 
 function SpotlightCard({ item }: { item: Poplog3UserLibraryItem }) {
   const title        = item.title;
-  const displayTitle = title?.title ?? title?.original_title ?? "—";
+  const displayTitle = resolveDisplayTitle({
+    title: title?.title,
+    originalTitle: title?.original_title,
+    tmdbId: item.tmdb_id,
+    imdbId: item.imdb_id,
+    mediaType: item.media_type,
+  });
   const progress     = typeof item.progress_pct === "number" ? item.progress_pct : null;
   const isWatching   = isMarathoning(item);
   const badgeClass   = STATUS_BADGE_CLASSES[item.status] ?? STATUS_BADGE_CLASSES.watchlist;
   const badgeLabel   = STATUS_LABEL[item.status] ?? item.status;
+  const spotlightProviderLogo = item.best_provider_logo
+    ? resolveCatalogImage(item.best_provider_logo, "original")
+    : null;
 
   const metaParts: string[] = [
     title?.year?.toString() ?? "",
@@ -907,17 +949,24 @@ function SpotlightCard({ item }: { item: Poplog3UserLibraryItem }) {
           </span>
         </div>
 
-        {/* Provider — top right */}
-        {resolveCatalogImage(item.best_provider_logo, "original") && (
+        {/* Provider — top right. Mostra logo quando há; senão chip com o nome
+            (espelha a detail page e o LibraryPosterCard). */}
+        {(spotlightProviderLogo || item.best_provider_name) && (
           <div className="absolute right-3 top-3 overflow-hidden rounded-lg border border-white/[0.14] bg-black/55 shadow-[0_4px_14px_rgba(0,0,0,0.45)] backdrop-blur-md sm:right-4 sm:top-4">
-            <Image
-              src={resolveCatalogImage(item.best_provider_logo, "original")!}
-              alt={item.best_provider_name ?? ""}
-              width={28}
-              height={28}
-              unoptimized
-              className="h-7 w-7 object-cover"
-            />
+            {spotlightProviderLogo ? (
+              <Image
+                src={spotlightProviderLogo}
+                alt={item.best_provider_name ?? ""}
+                width={28}
+                height={28}
+                unoptimized
+                className="h-7 w-7 object-cover"
+              />
+            ) : (
+              <span className="block max-w-[110px] truncate px-2 py-1 text-[9px] font-black uppercase tracking-[0.08em] text-white/85">
+                {item.best_provider_name}
+              </span>
+            )}
           </div>
         )}
 
@@ -1440,11 +1489,17 @@ function useWatchlistHydration(library: Poplog3UserLibraryItem[], activeTab: str
 
 // ── Sorting ───────────────────────────────────────────────────────────────────
 
-function sortLibraryItems(a: Poplog3UserLibraryItem, b: Poplog3UserLibraryItem, sortBy: SortBy) {
+function sortLibraryItems(
+  a: Poplog3UserLibraryItem,
+  b: Poplog3UserLibraryItem,
+  sortBy: SortBy,
+  randomSeed: number | null,
+) {
   switch (sortBy) {
+    case "random":          return compareRandom(a, b, randomSeed);
     case "title-asc":      return getTitle(a).localeCompare(getTitle(b), "pt-BR");
-    case "release-desc":   return getReleaseTime(b) - getReleaseTime(a);
-    case "release-asc":    return getReleaseTime(a) - getReleaseTime(b);
+    case "release-desc":   return compareReleaseTime(a, b, "desc");
+    case "release-asc":    return compareReleaseTime(a, b, "asc");
     case "popularity-desc": return getPopularity(b) - getPopularity(a);
     case "runtime-asc":    return compareRuntime(a, b, "asc");
     case "runtime-desc":   return compareRuntime(a, b, "desc");
@@ -1453,21 +1508,62 @@ function sortLibraryItems(a: Poplog3UserLibraryItem, b: Poplog3UserLibraryItem, 
   }
 }
 
-function getTitle(item: Poplog3UserLibraryItem) {
-  return item.title?.title ?? item.title?.original_title ?? "";
+function compareRandom(
+  a: Poplog3UserLibraryItem,
+  b: Poplog3UserLibraryItem,
+  seed: number | null,
+) {
+  if (seed === null) return 0;
+  const delta = randomScore(a, seed) - randomScore(b, seed);
+  return delta || getTitle(a).localeCompare(getTitle(b), "pt-BR");
 }
 
-function getReleaseTime(item: Poplog3UserLibraryItem) {
-  const t   = item.title;
-  const now = Date.now();
-  const date =
-    item.media_type === "tv"
-      ? t?.last_air_date ?? t?.first_air_date ?? t?.release_date
-      : t?.release_date  ?? t?.first_air_date;
-  if (!date) return 0;
-  const time = new Date(date).getTime();
-  if (!Number.isFinite(time) || time <= 0) return 0;
-  return Math.min(time, now);
+function randomScore(item: Poplog3UserLibraryItem, seed: number): number {
+  let value = (item.tmdb_id ^ seed ^ (item.media_type === "tv" ? 0x9e3779b9 : 0x85ebca6b)) >>> 0;
+  value = Math.imul(value ^ (value >>> 16), 0x45d9f3b);
+  value = Math.imul(value ^ (value >>> 16), 0x45d9f3b);
+  return (value ^ (value >>> 16)) >>> 0;
+}
+
+function getTitle(item: Poplog3UserLibraryItem) {
+  return resolveDisplayTitle({
+    title: item.title?.title,
+    originalTitle: item.title?.original_title,
+    tmdbId: item.tmdb_id,
+    imdbId: item.imdb_id,
+    mediaType: item.media_type,
+  });
+}
+
+function getReleaseTime(item: Poplog3UserLibraryItem): number | null {
+  const date = getConfirmedReleaseDate(item);
+
+  if (date) {
+    const time = new Date(date).getTime();
+    if (Number.isFinite(time) && time > 0) return time;
+  }
+
+  // Sem dia confirmado, o ano ainda oferece uma ordenação previsível.
+  const year = item.title?.year;
+  if (typeof year === "number" && year > 1900) {
+    return new Date(year, 0, 1).getTime();
+  }
+
+  return null;
+}
+
+function compareReleaseTime(
+  a: Poplog3UserLibraryItem,
+  b: Poplog3UserLibraryItem,
+  direction: "asc" | "desc",
+) {
+  const aTime = getReleaseTime(a);
+  const bTime = getReleaseTime(b);
+  if (aTime === null && bTime === null) return getTitle(a).localeCompare(getTitle(b), "pt-BR");
+  if (aTime === null) return 1;
+  if (bTime === null) return -1;
+  const delta = direction === "asc" ? aTime - bTime : bTime - aTime;
+  return delta || getTitle(a).localeCompare(getTitle(b), "pt-BR");
 }
 
 function compareRuntime(a: Poplog3UserLibraryItem, b: Poplog3UserLibraryItem, direction: "asc" | "desc") {
@@ -1481,15 +1577,30 @@ function compareRuntime(a: Poplog3UserLibraryItem, b: Poplog3UserLibraryItem, di
 }
 
 function getTotalRuntime(item: Poplog3UserLibraryItem) {
+  const t = item.title;
+  const epRuntime = t?.runtime ?? t?.runtime_minutes ?? null;
+  const totalEps  = t?.number_of_episodes ?? null;
+  const watched   = item.watched_episodes ?? 0;
+
+  // Duração restante calculada pelo backend (inclui progresso do usuário)
+  if (typeof item.remaining_runtime_minutes === "number" && Number.isFinite(item.remaining_runtime_minutes) && item.remaining_runtime_minutes >= 0) {
+    return item.remaining_runtime_minutes;
+  }
+  // Duração de sort explícita do backend
+  if (typeof item.duration_sort_minutes === "number" && Number.isFinite(item.duration_sort_minutes) && item.duration_sort_minutes >= 0) {
+    return item.duration_sort_minutes;
+  }
+  // Para séries: calcular tempo restante com base em episódios pendentes × runtime por ep
+  if (item.media_type === "tv" && epRuntime != null && epRuntime > 0 && totalEps != null && totalEps > 0) {
+    const remaining = Math.max(0, totalEps - watched);
+    return remaining * epRuntime;
+  }
+  // Fallback: total pré-calculado (filmes) ou runtime bruto
   const candidates = [
-    item.duration_sort_minutes,
-    item.media_type === "tv" && item.watched_episodes && item.watched_episodes > 0
-      ? item.remaining_runtime_minutes
-      : item.total_runtime_minutes,
-    item.remaining_runtime_minutes,
-    item.title?.total_runtime_minutes,
-    item.title?.runtime_minutes,
-    item.title?.runtime,
+    item.total_runtime_minutes,
+    t?.total_runtime_minutes,
+    t?.runtime_minutes,
+    t?.runtime,
   ];
   for (const r of candidates) {
     if (typeof r === "number" && Number.isFinite(r) && r >= 0) return r;
@@ -1510,49 +1621,67 @@ function getAddedTime(item: Poplog3UserLibraryItem) {
 
 // ── Predicates ────────────────────────────────────────────────────────────────
 
-function isUnreleased(item: Poplog3UserLibraryItem): boolean {
-  const t    = item.title;
-  const date = item.media_type === "tv"
-    ? t?.first_air_date ?? t?.release_date
-    : t?.release_date  ?? t?.first_air_date;
-  if (!date) return false;
-  const time = new Date(date).getTime();
-  return Number.isFinite(time) && time > Date.now();
-}
-
-function isInTheaterWindow(item: Poplog3UserLibraryItem): boolean {
-  if (item.media_type !== "movie") return false;
-  if (item.best_provider_logo || item.best_provider_name) return false;
-  const releaseDate = item.title?.release_date;
-  if (!releaseDate) return false;
-  const releasedAt = new Date(releaseDate).getTime();
-  if (!Number.isFinite(releasedAt)) return false;
-  const now              = Date.now();
-  const daysSinceRelease = (now - releasedAt) / (1000 * 60 * 60 * 24);
-  return daysSinceRelease >= 0 && daysSinceRelease < THEATER_WINDOW_DAYS;
-}
-
 function isComingSoon(item: Poplog3UserLibraryItem): boolean {
-  // Already available on a streaming platform — never "coming soon"
-  if (item.best_provider_logo || item.best_provider_name || item.best_provider_type) return false;
-  // High vote_average means the title has already been widely seen and rated
-  if ((item.title?.vote_average ?? 0) >= 8.5) return false;
-  return isUnreleased(item) || isInTheaterWindow(item);
+  return getComingSoonInfo(item).isComingSoon;
 }
 
 function isMarathoning(item: Poplog3UserLibraryItem): boolean {
-  if (item.media_type === "movie") return item.status === "watching";
-  if (item.status !== "watching") return false;
-  return (item.watched_episodes ?? 0) > 0 || item.computed_state === "in_progress";
+  if (isComingSoon(item)) return false;
+  if (item.media_type !== "tv") return false;
+  if (item.status === "abandoned" || item.status === "fridge") return false;
+
+  const pending = getPendingEpisodeCount(item);
+  const hasStarted =
+    item.status === "watching" ||
+    item.status === "watched" ||
+    (item.watched_episodes ?? 0) > 0 ||
+    item.computed_state === "in_progress";
+
+  if (!hasStarted) return false;
+  if (pending !== null) return pending > 0;
+  return item.computed_state === "in_progress";
 }
 
 function isCompletedOrUpToDate(item: Poplog3UserLibraryItem): boolean {
+  if (isComingSoon(item)) return false;
   if (item.media_type === "movie") return item.status === "watched";
+  if (item.status === "abandoned" || item.status === "fridge") return false;
+
+  const pending = getPendingEpisodeCount(item);
+  const hasStartedOrCompleted =
+    item.status === "watching" ||
+    item.status === "watched" ||
+    (item.watched_episodes ?? 0) > 0 ||
+    item.computed_state === "completed" ||
+    item.computed_state === "up_to_date";
+
+  if (!hasStartedOrCompleted) return false;
+  if (pending !== null) return pending === 0;
   return (
     item.status === "watched" ||
     item.computed_state === "completed" ||
     item.computed_state === "up_to_date"
   );
+}
+
+function getPendingEpisodeCount(item: Poplog3UserLibraryItem): number | null {
+  if (item.media_type !== "tv") return null;
+
+  const watched = item.watched_episodes;
+  const aired = item.aired_episodes;
+  if (
+    typeof watched === "number" && Number.isFinite(watched) && watched >= 0 &&
+    typeof aired === "number" && Number.isFinite(aired) && aired > 0
+  ) {
+    return Math.max(0, aired - watched);
+  }
+
+  const remainingMinutes = item.remaining_runtime_minutes;
+  if (typeof remainingMinutes === "number" && Number.isFinite(remainingMinutes)) {
+    return remainingMinutes > 0 ? 1 : 0;
+  }
+
+  return null;
 }
 
 function isPureWatchlist(item: Poplog3UserLibraryItem): boolean {
@@ -1561,7 +1690,7 @@ function isPureWatchlist(item: Poplog3UserLibraryItem): boolean {
 
 function isValidLibraryTab(value?: string): value is LibraryTab {
   return [
-    "watchlist", "favorites", "watching",
+    "watchlist", "favorites", "watching", "random",
     "coming-soon", "watched", "all",
     "abandoned", "fridge",
   ].includes(value ?? "");

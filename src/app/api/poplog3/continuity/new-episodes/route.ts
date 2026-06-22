@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { formatEpisodeRuntimeLabel } from "@/lib/domain-labels";
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import {
   scheduleContinuitySeasonRefresh,
   scheduleContinuityTitleRefresh,
@@ -48,6 +49,9 @@ export type NewEpisodeItem = {
   season_watched: number | null;
   /** Total de episódios na temporada atual — null se não sincronizado */
   season_total: number | null;
+  best_provider_name?: string | null;
+  best_provider_type?: string | null;
+  best_provider_logo?: string | null;
 };
 
 type StateRow = {
@@ -61,6 +65,9 @@ type StateRow = {
   next_episode: number | null;
   next_episode_air_date: string | null;
   last_event_at: string;
+  best_provider_name: string | null;
+  best_provider_type: string | null;
+  best_provider_logo: string | null;
 };
 
 type TitleRow = {
@@ -121,7 +128,14 @@ async function buildLocalNewEpisodes(userId: string): Promise<NextResponse> {
           state.next_episode != null && state.next_episode > 0
         );
       }
-      if (cs === "up_to_date" && state.status === "watching") return true;
+      // up_to_date: all aired episodes are watched — only include if next episode already aired
+      // (stale state that should have transitioned to in_progress via the sync)
+      if (cs === "up_to_date" && state.status === "watching") {
+        const nextAirDate = state.next_episode_air_date;
+        if (!nextAirDate) return false;
+        const today = new Date().toISOString().slice(0, 10);
+        return nextAirDate <= today;
+      }
       return (
         (cs === "watchlist" || state.status === "watchlist") &&
         watched === 0 && aired > 0 && aired <= MAX_AIRED_FOR_WATCHLIST
@@ -187,6 +201,17 @@ async function buildLocalNewEpisodes(userId: string): Promise<NextResponse> {
 
       if (cs === "in_progress" && episodesBehind > MAX_EPISODES_BEHIND) skipBehindLimit++;
 
+      // up_to_date with a next_episode_air_date that has already passed: stale state that the
+      // sync didn't catch yet for this request. Show it with episode 1 of the next season/episode.
+      if (
+        cs === "up_to_date" && state.status === "watching" &&
+        state.next_episode_air_date != null && state.next_episode_air_date <= cutoffStr &&
+        state.next_season != null && state.next_episode != null
+      ) {
+        eligible.push({ ...state, ...title, tmdb_id: state.tmdb_id, effectiveNextSeason: state.next_season, effectiveNextEpisode: state.next_episode, episodesBehind: 1 });
+        continue;
+      }
+
       if (
         (cs === "watchlist" || state.status === "watchlist") &&
         watched === 0 && aired > 0 && aired <= MAX_AIRED_FOR_WATCHLIST &&
@@ -223,7 +248,11 @@ async function buildLocalNewEpisodes(userId: string): Promise<NextResponse> {
       return {
         content_id: `tv-${item.tmdb_id}`,
         tmdb_id: item.tmdb_id,
-        title: item.title ?? `Série ${item.tmdb_id}`,
+        title: resolveDisplayTitle({
+          title: item.title,
+          tmdbId: item.tmdb_id,
+          mediaType: "tv",
+        }),
         poster_path: item.poster_path ?? null,
         backdrop_path: item.backdrop_path ?? null,
         computed_state: item.computed_state ?? null,
@@ -242,6 +271,9 @@ async function buildLocalNewEpisodes(userId: string): Promise<NextResponse> {
         runtime_label: runtimeLabel,
         season_watched: item.effectiveNextEpisode > 1 ? item.effectiveNextEpisode - 1 : 0,
         season_total: seasonMap.get(`${item.tmdb_id}:${item.effectiveNextSeason}`)?.episode_count ?? null,
+        best_provider_name: item.best_provider_name ?? null,
+        best_provider_type: item.best_provider_type ?? null,
+        best_provider_logo: item.best_provider_logo ?? null,
       };
     });
     markStage("response_build");

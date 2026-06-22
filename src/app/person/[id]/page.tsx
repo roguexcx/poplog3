@@ -19,7 +19,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     ? person.biography.slice(0, 155) + (person.biography.length > 155 ? "..." : "")
     : `Filmografia e créditos de ${name} no catálogo POPLOG.`;
   return {
-    title: `${name} — POPLOG`,
+    title: name,
     description,
   };
 }

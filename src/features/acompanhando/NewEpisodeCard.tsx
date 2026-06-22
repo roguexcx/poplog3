@@ -2,6 +2,7 @@
 
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
 import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
+import CardProviderBadge from "@/components/ui/CardProviderBadge";
 
 export type NewEpisodeItem = {
   content_id: string;
@@ -26,6 +27,9 @@ export type NewEpisodeItem = {
   runtime_label: string | null;
   season_watched: number | null;
   season_total: number | null;
+  best_provider_name?: string | null;
+  best_provider_type?: string | null;
+  best_provider_logo?: string | null;
 };
 
 type Props = {
@@ -39,6 +43,19 @@ function episodeTag(
 ): string | null {
   if (season == null || episode == null) return null;
   return `T${season}E${episode}`;
+}
+
+// Limite em dias para exibir o badge "NOVO". Acima disso, exibe "DISPONÍVEL".
+const NEW_EPISODE_BADGE_DAYS = 7;
+
+function resolveEpisodeBadge(nextEpAirDate: string | null, daysSince: number | null): string | null {
+  const refDate = nextEpAirDate ?? null;
+  const days = refDate
+    ? Math.max(0, Math.floor((Date.now() - new Date(refDate).getTime()) / 86_400_000))
+    : daysSince;
+  if (days === null) return "NOVO"; // sem data → assume novo para não suprimir
+  if (days <= NEW_EPISODE_BADGE_DAYS) return "NOVO";
+  return "DISPONÍVEL";
 }
 
 export default function NewEpisodeCard({ item, onClick }: Props) {
@@ -55,6 +72,7 @@ export default function NewEpisodeCard({ item, onClick }: Props) {
       ? Math.min(100, Math.round((item.season_watched / item.season_total) * 100))
       : null;
   const progressPct = seasonPct ?? Math.min(100, Math.max(0, item.progress_pct));
+  const newEpisodeBadge = resolveEpisodeBadge(item.next_episode_air_date, item.days_since_new_episode);
 
   return (
     <button
@@ -90,14 +108,31 @@ export default function NewEpisodeCard({ item, onClick }: Props) {
 
         <div className="min-w-0 flex-1">
           <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-            <span className="inline-flex items-center rounded-full bg-rose-500 px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] text-white shadow-sm">
-              NOVO
-            </span>
+            {newEpisodeBadge && (
+              <span
+                className={[
+                  "inline-flex items-center rounded-full px-2 py-0.5 text-[9px] font-black uppercase tracking-[0.14em] shadow-sm",
+                  newEpisodeBadge === "NOVO"
+                    ? "bg-rose-500 text-white"
+                    : "border border-white/[0.18] bg-white/[0.06] text-white/55",
+                ].join(" ")}
+              >
+                {newEpisodeBadge}
+              </span>
+            )}
 
             {epTag && (
               <span className="rounded-full border border-white/[0.15] bg-white/[0.07] px-2 py-0.5 text-[10px] font-bold text-white/75">
                 {epTag}
               </span>
+            )}
+
+            {item.best_provider_name && (
+              <CardProviderBadge
+                name={item.best_provider_name}
+                logoPath={item.best_provider_logo}
+                type={item.best_provider_type}
+              />
             )}
           </div>
 
@@ -144,4 +179,4 @@ export default function NewEpisodeCard({ item, onClick }: Props) {
       </div>
     </button>
   );
-}
+}

@@ -2,7 +2,11 @@ import {
   resolvePoplogTitleIdentity,
   type PoplogTitleExternalIds,
 } from "@/server/titles/poplog-title-identity";
-import { syntheticTmdbFromImdbId, isSyntheticTmdbId } from "@/lib/ids/synthetic-tmdb-id";
+import {
+  syntheticTmdbFromImdbId,
+  isSyntheticTmdbId,
+  imdbIdFromSyntheticTmdbId,
+} from "@/lib/ids/synthetic-tmdb-id";
 import type { MediaType, RatingMediaType } from "@/types/user";
 
 export type UserStateIdentityInput = {
@@ -84,7 +88,12 @@ export async function resolveUserStateIdentity(
       ? String(input.poplogId)
       : stringValue(input.poplogId);
   const tmdbId = anyTmdbId(input.tmdbId); // accepts negative synthetic IDs
-  const imdbId = stringValue(input.imdbId);
+  // A negative synthetic tmdbId encodes an imdbId (e.g. -9419884 -> tt9419884).
+  // Recover it so the title still resolves when the synthetic id is the only
+  // identifier supplied -- otherwise inputId would fall through to null below.
+  const syntheticImdbId =
+    tmdbId && isSyntheticTmdbId(tmdbId) ? imdbIdFromSyntheticTmdbId(tmdbId) : null;
+  const imdbId = stringValue(input.imdbId) ?? syntheticImdbId;
   const slug = stringValue(input.slug);
   const title = stringValue(input.title) ?? undefined;
   const year = yearValue(input.year);

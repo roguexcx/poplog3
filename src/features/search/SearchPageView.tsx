@@ -41,10 +41,10 @@ type SearchTitle = {
   backdrop_path?: string | null;
   vote_average?: number | null;
   overview?: string | null;
+  best_provider_name?: string | null;
+  best_provider_type?: string | null;
+  best_provider_logo?: string | null;
 };
-
-// keep legacy alias so shortcut/discovery code still compiles
-type SearchResult = SearchTitle;
 
 type SearchPerson = {
   id: string;
@@ -177,6 +177,9 @@ function TitleGrid({ titles }: { titles: SearchTitle[] }) {
           year={getYear(title)}
           source="search"
           priority={index < 2}
+          bestProviderName={title.best_provider_name ?? null}
+          bestProviderType={title.best_provider_type ?? null}
+          bestProviderLogo={title.best_provider_logo ?? null}
         />
       ))}
     </div>

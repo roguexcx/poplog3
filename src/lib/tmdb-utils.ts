@@ -1,7 +1,20 @@
 import type { TMDBItem, TMDBMediaType } from "@/types/tmdb";
+import { resolveDisplayTitle } from "@/lib/titles/display-title";
 
 export function getTitle(item: TMDBItem): string {
-  return item.title ?? item.name ?? "Título desconhecido";
+  return resolveDisplayTitle({
+    title: item.title,
+    name: item.name,
+    originalTitle: item.original_title,
+    originalName: item.original_name,
+    tmdbId: item.externalIds?.tmdbId ?? item.id,
+    imdbId: item.externalIds?.imdbId,
+    traktId: item.externalIds?.traktId,
+    tvdbId: item.externalIds?.tvdbId,
+    poplogId: item.poplogId,
+    slug: item.externalIds?.slug,
+    mediaType: item.media_type,
+  });
 }
 
 export function getOriginalTitle(item: TMDBItem): string | null {

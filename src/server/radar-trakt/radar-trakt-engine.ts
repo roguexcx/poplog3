@@ -1,5 +1,4 @@
 import { db } from "@/server/db/client";
-import type { TraktMovieFull } from "@/server/api-clients/trakt/types";
 import {
   fetchRadarCalendarWindow,
   fetchRadarDiscovery,
