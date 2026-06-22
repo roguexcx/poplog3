@@ -378,6 +378,7 @@ async function attachProgressData(userId: string, items: Poplog3UserLibraryItem[
       const epRuntime = item.title?.runtime ?? item.title?.runtime_minutes ?? null;
       item.watched_episodes = watched;
       item.total_episodes   = total != null && total > 0 ? total : null;
+      // progress_pct é atualizado abaixo se staleCatalog for detectado
       item.progress_pct = state?.progressPct ?? (aired > 0 ? Math.min(100, Math.round((watched / aired) * 100)) : 0);
 
       const watchedKeys = Array.isArray(state?.watchedKeys)
@@ -392,6 +393,56 @@ async function attachProgressData(userId: string, items: Poplog3UserLibraryItem[
       item.aired_episodes = runtime.airedEpisodes > 0 ? runtime.airedEpisodes : aired;
       item.computed_state = state?.computedState ?? null;
 
+      // ── Detecção de catálogo desatualizado ──────────────────────────────────
+      // Se title.last_air_date > MAX(episódio no catálogo local), a série exibiu
+      // um episódio novo que ainda não está em poplog3Episode. Nesse caso:
+      //   1. Ajusta pendingEpisodes para 1 (estimado) para mostrar a barra.
+      //   2. Dispara rehidratação + recompute de estado em background.
+      const titleLastAirDate = item.title?.last_air_date ? new Date(item.title.last_air_date) : null;
+      const epMaxAirDate = seriesEpisodes.length > 0
+        ? seriesEpisodes.reduce<Date | null>((max, ep) => {
+            if (!ep.airDate) return max;
+            const d = ep.airDate instanceof Date ? ep.airDate : new Date(String(ep.airDate));
+            return !max || d > max ? d : max;
+          }, null)
+        : null;
+      const staleCatalog =
+        item.status === "watching" &&
+        watched > 0 &&
+        runtime.remainingEpisodes === 0 &&
+        titleLastAirDate !== null &&
+        epMaxAirDate !== null &&
+        titleLastAirDate > epMaxAirDate;
+
+      if (staleCatalog) {
+        // Ajusta progress_pct para watched/(watched+1): mostra a barra como "quase completo
+        // mas não 100%" — indica que há pelo menos 1 ep novo pendente.
+        item.progress_pct = Math.min(99, Math.round((watched / (watched + 1)) * 100));
+
+        // Fire-and-forget: rehidrata episódios e atualiza state para o próximo render
+        void (async () => {
+          try {
+            const { hydrateSeriesEpisodesFromSources } = await import(
+              "@/server/source-engine/series-episode-hydrator"
+            );
+            const { upsertTitleState } = await import("@/server/state/user-title-state");
+            await hydrateSeriesEpisodesFromSources({ seriesTmdbId: item.tmdb_id, force: true });
+            await upsertTitleState({
+              userId,
+              tmdbId: item.tmdb_id,
+              mediaType: "tv",
+              libraryEntry: {
+                status: item.status,
+                favorite: item.favorite ?? false,
+                liked: item.liked ?? null,
+              },
+            });
+          } catch (err) {
+            console.warn(`[library] background hydration falhou para série ${item.tmdb_id}:`, err);
+          }
+        })();
+      }
+
       // Quando o catálogo de episódios ainda não está hidratado, usa apenas os
       // episódios já exibidos informados pelo estado — nunca o total futuro.
       const fallbackRemainingEpisodes = Math.max(0, aired - watched);
@@ -400,9 +451,10 @@ async function attachProgressData(userId: string, items: Poplog3UserLibraryItem[
           ? fallbackRemainingEpisodes * epRuntime
           : null;
       const remainingMinutes = fallbackMinutes ?? runtime.minutes;
-      const estimated = runtime.estimated || fallbackMinutes !== null;
+      const estimated = runtime.estimated || fallbackMinutes !== null || staleCatalog;
+      // Catálogo stale: trata como 1 ep pendente (estimado) até a rehidratação concluir
       const pendingEpisodes = seriesEpisodes.length > 0
-        ? runtime.remainingEpisodes
+        ? (staleCatalog ? 1 : runtime.remainingEpisodes)
         : aired > 0
           ? fallbackRemainingEpisodes
           : null;

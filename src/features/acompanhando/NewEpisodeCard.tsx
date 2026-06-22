@@ -1,5 +1,7 @@
 "use client";
 
+import Image from "next/image";
+
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
 import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 import CardProviderBadge from "@/components/ui/CardProviderBadge";
@@ -60,6 +62,7 @@ function resolveEpisodeBadge(nextEpAirDate: string | null, daysSince: number | n
 
 export default function NewEpisodeCard({ item, onClick }: Props) {
   const backdropUrl =
+    resolveCatalogImage(item.next_episode_still_path, "w780") ??
     resolveCatalogImage(item.backdrop_path, "w780") ??
     resolveCatalogImage(item.poster_path, "w780");
 
@@ -82,9 +85,12 @@ export default function NewEpisodeCard({ item, onClick }: Props) {
     >
       {backdropUrl && (
         <div className="absolute inset-0 -z-0">
-          <img
+          <Image
             src={backdropUrl}
             alt=""
+            fill
+            unoptimized
+            sizes="(max-width: 768px) 100vw, 50vw"
             className="h-full w-full object-cover object-center opacity-35 brightness-75 transition-opacity group-hover:opacity-45"
           />
           <div className="absolute inset-0 bg-gradient-to-r from-zinc-950/85 via-zinc-950/50 to-zinc-950/20" />
@@ -95,12 +101,15 @@ export default function NewEpisodeCard({ item, onClick }: Props) {
       <div className="relative flex min-h-[72px] items-center gap-3 px-4 py-3.5 sm:gap-4 sm:px-5 sm:py-4">
         {posterUrl && (
           <div
-            className="hidden shrink-0 overflow-hidden rounded-lg border border-white/[0.10] sm:block"
+            className="relative hidden shrink-0 overflow-hidden rounded-lg border border-white/[0.10] sm:block"
             style={{ width: 40, height: 58 }}
           >
-            <img
+            <Image
               src={posterUrl}
               alt=""
+              fill
+              unoptimized
+              sizes="40px"
               className="h-full w-full object-cover"
             />
           </div>

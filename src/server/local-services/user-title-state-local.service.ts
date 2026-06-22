@@ -129,7 +129,11 @@ function deriveComputedState(mediaType: MediaType, status: string | null, watche
   if (!status) return null;
   if (status === "abandoned" || status === "fridge" || status === "watchlist") return status;
   if (mediaType === "movie") return status === "watching" ? "in_progress" : "watched";
-  if (status === "watched") return "completed";
+  // A série pode ter sido concluída e depois ganhar episódio/temporada nova.
+  // Nesse caso, o catálogo canônico prevalece sobre o status histórico.
+  if (status === "watched") {
+    return watched > 0 && aired > watched ? "in_progress" : "completed";
+  }
   if (watched === 0) return "watchlist";
   return watched >= aired && aired > 0 ? "up_to_date" : "in_progress";
 }

@@ -426,6 +426,99 @@ export async function syncUserTvTitleStates(
 }
 
 /**
+ * Recalcula todos os usuários afetados por uma mudança no catálogo canônico de
+ * episódios. Séries antes concluídas voltam para `watching` quando surge um
+ * episódio exibido e ainda não visto.
+ */
+export async function recomputeUserTitleStatesForSeries(
+  seriesTmdbId: number,
+): Promise<{ processed: number; reopened: number; failed: Array<{ userId: string; error: string }> }> {
+  const { db } = await import("@/server/db/client");
+  const local = await getLocalUserTitleStateService();
+
+  const [libraryEntries, existingStates] = await Promise.all([
+    db.userTitle.findMany({
+      where: { tmdbId: seriesTmdbId, mediaType: "tv" },
+      select: { userId: true, status: true, favorite: true, liked: true },
+    }),
+    db.userTitleState.findMany({
+      where: { tmdbId: seriesTmdbId, mediaType: "tv" },
+      select: { userId: true, status: true, favorite: true, liked: true },
+    }),
+  ]);
+
+  const targets = new Map<
+    string,
+    { status: string | null; favorite: boolean; liked: boolean | null; hasLibraryEntry: boolean }
+  >();
+  for (const state of existingStates) {
+    targets.set(state.userId, {
+      status: state.status,
+      favorite: state.favorite,
+      liked: state.liked,
+      hasLibraryEntry: false,
+    });
+  }
+  for (const entry of libraryEntries) {
+    targets.set(entry.userId, {
+      status: entry.status,
+      favorite: entry.favorite,
+      liked: entry.liked,
+      hasLibraryEntry: true,
+    });
+  }
+
+  let reopened = 0;
+  const failed: Array<{ userId: string; error: string }> = [];
+
+  for (const [userId, target] of targets) {
+    try {
+      const progressResult = await computeBulkSeriesProgress({
+        userId,
+        seriesTmdbIds: [seriesTmdbId],
+      });
+      if (!progressResult.ok) throw new Error(progressResult.error);
+
+      const progress = progressResult.data.get(seriesTmdbId);
+      if (!progress) continue;
+
+      const shouldReopen =
+        target.status === "watched" &&
+        progress.watchedCount > 0 &&
+        progress.airedEpisodes > progress.watchedCount;
+      const effectiveStatus = shouldReopen ? "watching" : target.status;
+
+      if (shouldReopen && target.hasLibraryEntry) {
+        await db.userTitle.updateMany({
+          where: { userId, tmdbId: seriesTmdbId, mediaType: "tv", status: "watched" },
+          data: { status: "watching", finishedAt: null },
+        });
+        reopened += 1;
+      }
+
+      await local.upsertTitleState({
+        userId,
+        tmdbId: seriesTmdbId,
+        mediaType: "tv",
+        libraryEntry: {
+          status: effectiveStatus,
+          favorite: target.favorite,
+          liked: target.liked,
+        },
+        seriesProgress: progress,
+      });
+    } catch (error) {
+      failed.push({
+        userId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  return { processed: targets.size, reopened, failed };
+}
+
+/**
  * Atualiza o campo de melhor streaming disponível.
  * Chamado separadamente após sync de availability ou mudança de preferências.
  * Não bloqueia o fluxo principal de marcação.

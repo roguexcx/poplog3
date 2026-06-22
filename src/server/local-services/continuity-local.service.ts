@@ -202,7 +202,9 @@ function deriveComputedStateFromProgress(
   airedEpisodes: number,
 ): string {
   if (!status) return "watchlist";
-  if (status === "watched") return "completed";
+  if (status === "watched") {
+    return watchedCount > 0 && airedEpisodes > watchedCount ? "in_progress" : "completed";
+  }
   if (status === "abandoned" || status === "fridge" || status === "watchlist") return status;
   if (watchedCount === 0) return "watchlist";
   return watchedCount >= airedEpisodes && airedEpisodes > 0 ? "up_to_date" : "in_progress";
@@ -211,19 +213,21 @@ function deriveComputedStateFromProgress(
 /**
  * Detects series where the episode catalog has more aired episodes than what's
  * cached in user_title_state, then recomputes and persists fresh progress.
- * Only runs for "watching" TV series that are "up_to_date" or "in_progress".
+ * Also checks completed TV series so a return after hiatus can reopen them.
  * Returns the IDs of series that were updated.
  */
 async function syncStaleEpisodeStates(
   userId: string,
   rows: ContinuityStateRow[],
 ): Promise<number[]> {
-  // Only check series where new aired episodes could change the state
+  // Active and previously completed series can both change when the canonical
+  // episode catalog receives a new aired episode.
   const candidates = rows.filter(
     (r) =>
       r.media_type === "tv" &&
-      r.status === "watching" &&
-      (r.computed_state === "up_to_date" || r.computed_state === "in_progress"),
+      ((r.status === "watching" &&
+        (r.computed_state === "up_to_date" || r.computed_state === "in_progress")) ||
+        (r.status === "watched" && r.computed_state === "completed")),
   );
   if (candidates.length === 0) return [];
 
@@ -242,6 +246,115 @@ async function syncStaleEpisodeStates(
   });
 
   const freshAiredMap = new Map(airedCounts.map((r) => [r.seriesTmdbId, r._count.episodeNumber]));
+
+  // ── Detecção de catálogo desatualizado ────────────────────────────────────
+  // Se poplog3Title.lastAirDate > MAX(poplog3Episode.airDate), a série exibiu
+  // um episódio novo que ainda não está no catálogo local. Precisa rehidratar.
+  const [titleDates, episodeMaxDates] = await Promise.all([
+    db.poplog3Title.findMany({
+      where: { tmdbId: { in: candidateIds }, mediaType: "tv" },
+      select: { tmdbId: true, lastAirDate: true, numberOfSeasons: true, lastSyncedAt: true },
+    }),
+    db.poplog3Episode.groupBy({
+      by: ["seriesTmdbId"],
+      where: {
+        seriesTmdbId: { in: candidateIds },
+        seasonNumber: { gt: 0 },
+        airDate: { not: null },
+      },
+      _max: { airDate: true },
+    }),
+  ]);
+
+  const titleDateMap = new Map(titleDates.map((t) => [t.tmdbId, t]));
+  const epMaxDateMap = new Map(episodeMaxDates.map((r) => [r.seriesTmdbId, r._max.airDate]));
+
+  const STALE_TITLE_SYNC_DAYS = 7;
+  const staleSyncThreshold = new Date(Date.now() - STALE_TITLE_SYNC_DAYS * 86_400_000);
+
+  // Grupo 1 — trigger por data: title.lastAirDate > epMaxDate → hidrata SÍNCRONO
+  // (o request aguarda e já retorna o estado atualizado)
+  const dateTriggeredIds = candidateIds.filter((id) => {
+    const title = titleDateMap.get(id);
+    if (!title?.lastAirDate) return false;
+    const epMaxDate = epMaxDateMap.get(id);
+    if (!epMaxDate) return true;
+    return title.lastAirDate > epMaxDate;
+  });
+
+  // Grupo 2 — trigger temporal: série up_to_date não sincronizada há > 7 dias → hidrata ASYNC
+  // (Cobre o caso em que lastAirDate E epMaxDate estão ambos defasados.)
+  const timeTriggeredIds = candidateIds.filter((id) => {
+    if (dateTriggeredIds.includes(id)) return false; // já no grupo 1
+    const title = titleDateMap.get(id);
+    const candidate = candidates.find((r) => r.tmdb_id === id);
+    return (
+      (candidate?.computed_state === "up_to_date" || candidate?.computed_state === "completed") &&
+      title?.lastSyncedAt != null &&
+      title.lastSyncedAt < staleSyncThreshold
+    );
+  });
+
+  // Hidratação externa (Trakt API) — debounced para não estourar rate limit
+  // O count de DB acima sempre roda; só a chamada externa tem throttle.
+  const lastHydration = staleSyncDebounce.get(userId) ?? 0;
+  const canHydrate = Date.now() - lastHydration > STALE_SYNC_DEBOUNCE_MS;
+
+  // Fire-and-forget para o grupo temporal (não bloqueia o request atual)
+  if (canHydrate && timeTriggeredIds.length > 0) {
+    staleSyncDebounce.set(userId, Date.now());
+    console.log(`[continuity-local] trigger temporal para ${timeTriggeredIds.length} série(s): ${timeTriggeredIds.join(", ")}`);
+    void import("@/server/source-engine/series-episode-hydrator").then(({ hydrateSeriesEpisodesFromSources }) => {
+      void Promise.allSettled(
+        timeTriggeredIds.slice(0, 3).map((id) => {
+          const title = titleDateMap.get(id);
+          return hydrateSeriesEpisodesFromSources({
+            seriesTmdbId: id,
+            numberOfSeasons: title?.numberOfSeasons ?? undefined,
+            force: true,
+          }).catch((err: unknown) =>
+            console.warn(`[continuity-local] hidratação temporal falhou para série ${id}:`, err),
+          );
+        }),
+      );
+    });
+  }
+
+  const staleCatalogIds = canHydrate ? dateTriggeredIds : []; // síncrono: apenas trigger por data, se não debounced
+
+  if (staleCatalogIds.length > 0) {
+    staleSyncDebounce.set(userId, Date.now());
+    console.log(`[continuity-local] catálogo desatualizado para ${staleCatalogIds.length} série(s): ${staleCatalogIds.join(", ")}`);
+    const { hydrateSeriesEpisodesFromSources } = await import(
+      "@/server/source-engine/series-episode-hydrator"
+    );
+    // Rehidrata até 3 séries por request para não estourar latência
+    await Promise.allSettled(
+      staleCatalogIds.slice(0, 3).map((id) => {
+        const title = titleDateMap.get(id);
+        return hydrateSeriesEpisodesFromSources({
+          seriesTmdbId: id,
+          numberOfSeasons: title?.numberOfSeasons ?? undefined,
+          force: true,
+        }).catch((err: unknown) =>
+          console.warn(`[continuity-local] hidratação falhou para série ${id}:`, err),
+        );
+      }),
+    );
+    // Reconta episódios exibidos após hidratação
+    const freshAiredAfter = await db.poplog3Episode.groupBy({
+      by: ["seriesTmdbId"],
+      where: {
+        seriesTmdbId: { in: staleCatalogIds },
+        seasonNumber: { gt: 0 },
+        airDate: { not: null, lte: now },
+      },
+      _count: { episodeNumber: true },
+    });
+    for (const r of freshAiredAfter) {
+      freshAiredMap.set(r.seriesTmdbId, r._count.episodeNumber);
+    }
+  }
 
   // Which series have more aired episodes than what's cached?
   const staleIds = candidates
@@ -270,8 +383,26 @@ async function syncStaleEpisodeStates(
       const cached = staleRowMap.get(seriesId);
       if (!cached) return;
 
+      const shouldReopen =
+        cached.status === "watched" &&
+        progress.watchedCount > 0 &&
+        progress.airedEpisodes > progress.watchedCount;
+      const effectiveStatus = shouldReopen ? "watching" : cached.status;
+
+      if (shouldReopen) {
+        await db.userTitle.updateMany({
+          where: {
+            userId,
+            tmdbId: seriesId,
+            mediaType: "tv",
+            status: "watched",
+          },
+          data: { status: "watching", finishedAt: null },
+        });
+      }
+
       const computedState = deriveComputedStateFromProgress(
-        cached.status,
+        effectiveStatus,
         progress.watchedCount,
         progress.airedEpisodes,
       );
@@ -284,7 +415,7 @@ async function syncStaleEpisodeStates(
         userId,
         tmdbId: seriesId,
         mediaType: "tv",
-        status: cached.status as "watching" | "watchlist" | "watched" | "abandoned" | "fridge" | null,
+        status: effectiveStatus as "watching" | "watchlist" | "watched" | "abandoned" | "fridge" | null,
         computedState: computedState as "in_progress" | "up_to_date" | "watchlist" | "completed" | "watched" | "abandoned" | "fridge" | null,
         watchedEpisodes: progress.watchedCount,
         airedEpisodes: progress.airedEpisodes,
@@ -324,20 +455,16 @@ export async function getLocalContinuityStateRows(
     const mapped = rows.map(mapStateRow);
 
     // Detect and fix stale episode counts (new aired episodes not yet reflected in user_title_state).
-    // Debounced per user to avoid hammering on rapid consecutive requests.
-    const lastSync = staleSyncDebounce.get(userId) ?? 0;
-    if (Date.now() - lastSync > STALE_SYNC_DEBOUNCE_MS) {
-      staleSyncDebounce.set(userId, Date.now());
-      const updated = await syncStaleEpisodeStates(userId, mapped);
-      if (updated.length > 0) {
-        // Re-read with fresh data so the current request sees updated states
-        const freshRows = await db.userTitleState.findMany({
-          where: { userId },
-          orderBy: { lastEventAt: "desc" },
-          take: 500,
-        });
-        return freshRows.map(mapStateRow);
-      }
+    // DB count always runs (cheap); external hydration is debounced inside syncStaleEpisodeStates.
+    const updated = await syncStaleEpisodeStates(userId, mapped);
+    if (updated.length > 0) {
+      // Re-read with fresh data so the current request sees updated states
+      const freshRows = await db.userTitleState.findMany({
+        where: { userId },
+        orderBy: { lastEventAt: "desc" },
+        take: 500,
+      });
+      return freshRows.map(mapStateRow);
     }
 
     return mapped;
@@ -463,7 +590,7 @@ export async function getLocalEpisodesBatch(
       season_number: row.seasonNumber,
       episode_number: row.episodeNumber,
       name: row.name,
-      still_path: row.stillPath,
+      still_path: row.stillUrl ?? row.stillPath,
       air_date: dateToStr(row.airDate),
       runtime: row.runtime,
     }));
@@ -782,16 +909,7 @@ export async function enrichNullTitlesBatch(
         numberOfEpisodes: details.numberOfEpisodes ?? null,
         releaseDate: mediaType === "movie" ? (details.releaseDate ?? null) : null,
         firstAirDate: mediaType === "tv" ? (details.releaseDate ?? null) : null,
-        lastAirDate: details.lastAirDate ?? null,
-      }).catch(() => {});
-
-      results.push({
-        ...existing,
-        title: details.title,
-        original_title: details.originalTitle ?? existing.original_title,
-        overview: details.overview ?? existing.overview,
-        poster_path: details.posterUrl ?? existing.poster_path,
-        backdrop_path: details.backdropUrl ?? existing.backdrop_path,
+        lastAirDate: mediaType === "tv" ? (details.lastAirDate ?? null) : null,
       });
     }),
   );

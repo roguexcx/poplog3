@@ -130,9 +130,11 @@ async function buildLocalNewEpisodes(userId: string): Promise<NextResponse> {
       }
       // up_to_date: all aired episodes are watched — only include if next episode already aired
       // (stale state that should have transitioned to in_progress via the sync)
+      // Also include tentatively when next_episode_air_date is null so we can check
+      // title.last_air_date in the eligibility loop (stale catalog path).
       if (cs === "up_to_date" && state.status === "watching") {
         const nextAirDate = state.next_episode_air_date;
-        if (!nextAirDate) return false;
+        if (!nextAirDate) return true; // tentativo — filtrado pelo last_air_date no loop
         const today = new Date().toISOString().slice(0, 10);
         return nextAirDate <= today;
       }
@@ -209,6 +211,30 @@ async function buildLocalNewEpisodes(userId: string): Promise<NextResponse> {
         state.next_season != null && state.next_episode != null
       ) {
         eligible.push({ ...state, ...title, tmdb_id: state.tmdb_id, effectiveNextSeason: state.next_season, effectiveNextEpisode: state.next_episode, episodesBehind: 1 });
+        continue;
+      }
+
+      // up_to_date sem next_episode_air_date → catálogo possivelmente desatualizado.
+      // Se a série teve episódio nos últimos 30 dias (last_air_date recente), está em exibição ativa
+      // e pode ter um episódio novo que ainda não entrou no catálogo local.
+      // Inclui com estimativa de 1 ep pendente e dispara rehidratação em background.
+      if (
+        cs === "up_to_date" && state.status === "watching" &&
+        state.next_episode_air_date == null &&
+        seriesLastAirDate != null && seriesLastAirDate >= cutoffStr
+      ) {
+        const estSeason = state.next_season ?? 1;
+        const estEpisode = state.next_episode ?? 1;
+        void import("@/server/source-engine/series-episode-hydrator").then(
+          ({ hydrateSeriesEpisodesFromSources }) =>
+            hydrateSeriesEpisodesFromSources({ seriesTmdbId: state.tmdb_id, force: true }).catch(() => null),
+        );
+        eligible.push({
+          ...state, ...title, tmdb_id: state.tmdb_id,
+          effectiveNextSeason: estSeason,
+          effectiveNextEpisode: estEpisode,
+          episodesBehind: 1,
+        });
         continue;
       }
 

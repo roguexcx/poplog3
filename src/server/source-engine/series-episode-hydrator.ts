@@ -6,6 +6,7 @@ import {
 } from "@/lib/ids/synthetic-tmdb-id";
 
 import { resolveCanonicalSeason } from "./canonical-season-resolver";
+import { traktAdapter } from "./adapters/trakt-adapter";
 
 export type SeriesEpisodeHydrationLog = {
   stage: string;
@@ -162,11 +163,32 @@ export async function hydrateSeriesEpisodesFromSources(input: {
     };
   }
 
-  const maxSeason = Math.max(1, knownSeasonCount ?? 1);
+  // Discover the current season list at the external boundary. This is what
+  // makes returns after a hiatus and brand-new seasons visible even when the
+  // locally cached title still has an old numberOfSeasons.
+  const discoveredSeasons = imdbId
+    ? await traktAdapter.getSeasons({ imdbId }).catch((error: Error) => {
+        log(logs, "season-list", "falha ao descobrir temporadas no Trakt", {
+          error: error.message,
+        });
+        return [];
+      })
+    : [];
+  const maxSeason = Math.max(
+    1,
+    knownSeasonCount ?? 1,
+    ...discoveredSeasons.map((season) => season.number),
+  );
   const seasonNumbers = [
     ...(input.includeSpecials ? [0] : []),
     ...Array.from({ length: maxSeason }, (_, index) => index + 1),
   ];
+
+  log(logs, "season-list", "temporadas alvo resolvidas", {
+    cachedSeasonCount: knownSeasonCount,
+    traktSeasonNumbers: discoveredSeasons.map((season) => season.number),
+    seasonNumbers,
+  });
 
   let seasonsSaved = 0;
   let episodesSaved = 0;

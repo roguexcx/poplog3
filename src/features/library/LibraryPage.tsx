@@ -16,6 +16,11 @@ import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import SectionHeader from "@/components/ui/SectionHeader";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";
+import {
+  resolveLibraryPopularityScore,
+  deserializeTraktScoreMap,
+  type TraktScoreMap,
+} from "@/lib/score/library-popularity";
 
 import LibraryEmptyState from "./LibraryEmptyState";
 import LibraryGrid from "./LibraryGrid";
@@ -103,12 +108,21 @@ const STATUS_LABEL: Record<string, string> = {
 // ── Main component ────────────────────────────────────────────────────────────
 
 type LibraryPageProps = {
-  library:     Poplog3UserLibraryItem[];
-  initialTab?: string;
+  library:      Poplog3UserLibraryItem[];
+  initialTab?:  string;
+  /** Mapa serializado de scores Trakt Index (imdbId/tmdbKey → score). Construído no servidor. */
+  traktScores?: Record<string, number>;
 };
 
-export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
+export default function LibraryPage({ library, initialTab, traktScores }: LibraryPageProps) {
   const defaultTab: LibraryTab = isValidLibraryTab(initialTab) ? initialTab : "all";
+
+  // Reconstrói o TraktScoreMap uma vez (ref estável — traktScores não muda após o mount).
+  const traktScoreMap = useMemo<TraktScoreMap>(
+    () => (traktScores ? deserializeTraktScoreMap(traktScores) : new Map()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
 
   const [activeTab,         setActiveTab]         = useState<LibraryTab>(defaultTab);
   const [mediaFilter,       setMediaFilter]       = useState<MediaFilter>("all");
@@ -164,9 +178,9 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
   const watchlistItems = useMemo(() =>
     library
       .filter((i) => isPureWatchlist(i) && !isComingSoon(i))
-      .sort((a, b) => getPopularity(b) - getPopularity(a))
+      .sort((a, b) => getPopularity(b, traktScoreMap) - getPopularity(a, traktScoreMap))
       .slice(0, 12),
-    [library]);
+    [library, traktScoreMap]);
 
   const recentItems = useMemo(() =>
     library
@@ -187,9 +201,9 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
   const favoritesItems = useMemo(() =>
     library
       .filter((i) => i.favorite === true && !isComingSoon(i))
-      .sort((a, b) => getPopularity(b) - getPopularity(a))
+      .sort((a, b) => getPopularity(b, traktScoreMap) - getPopularity(a, traktScoreMap))
       .slice(0, 10),
-    [library]);
+    [library, traktScoreMap]);
 
   const comingSoonItems = useMemo(() =>
     library
@@ -228,9 +242,9 @@ export default function LibraryPage({ library, initialTab }: LibraryPageProps) {
     if (yearFilter  !== null)     items = items.filter((i) => i.title?.year === yearFilter);
 
     const effectiveSort = activeTab === "random" ? "random" : sortBy;
-    items.sort((a, b) => sortLibraryItems(a, b, effectiveSort, randomSeed));
+    items.sort((a, b) => sortLibraryItems(a, b, effectiveSort, randomSeed, traktScoreMap));
     return items;
-  }, [library, activeTab, mediaFilter, yearFilter, sortBy, randomSeed]);
+  }, [library, activeTab, mediaFilter, yearFilter, sortBy, randomSeed, traktScoreMap]);
 
   const totalPages     = Math.max(1, Math.ceil(filteredLibrary.length / itemsPerPage));
   const safePage       = Math.min(page, totalPages);
@@ -1494,13 +1508,14 @@ function sortLibraryItems(
   b: Poplog3UserLibraryItem,
   sortBy: SortBy,
   randomSeed: number | null,
+  traktScoreMap: TraktScoreMap,
 ) {
   switch (sortBy) {
     case "random":          return compareRandom(a, b, randomSeed);
     case "title-asc":      return getTitle(a).localeCompare(getTitle(b), "pt-BR");
     case "release-desc":   return compareReleaseTime(a, b, "desc");
     case "release-asc":    return compareReleaseTime(a, b, "asc");
-    case "popularity-desc": return getPopularity(b) - getPopularity(a);
+    case "popularity-desc": return getPopularity(b, traktScoreMap) - getPopularity(a, traktScoreMap);
     case "runtime-asc":    return compareRuntime(a, b, "asc");
     case "runtime-desc":   return compareRuntime(a, b, "desc");
     case "recent":
@@ -1608,9 +1623,10 @@ function getTotalRuntime(item: Poplog3UserLibraryItem) {
   return null;
 }
 
-function getPopularity(item: Poplog3UserLibraryItem) {
-  const p = item.title?.popularity;
-  return typeof p === "number" ? p : 0;
+function getPopularity(item: Poplog3UserLibraryItem, traktScoreMap: TraktScoreMap) {
+  // Delega ao resolver canônico: Trakt Index → vote_average → TMDB popularity (legado).
+  // Veja: src/lib/score/library-popularity.ts
+  return resolveLibraryPopularityScore(item, traktScoreMap);
 }
 
 function getAddedTime(item: Poplog3UserLibraryItem) {

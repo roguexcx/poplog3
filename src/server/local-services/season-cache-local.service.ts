@@ -136,6 +136,19 @@ export async function getCachedSeason(
 export async function upsertSeason(input: UpsertSeasonInput): Promise<void> {
   const ok = await upsertSeasonCache(input);
   if (!ok) throw new Error(`Falha ao persistir temporada local ${input.seriesTmdbId}/${input.seasonNumber}`);
+
+  // Episode writes can reopen a completed series or move an up-to-date series
+  // back to in-progress. Materialize that change immediately for every affected
+  // user so Biblioteca and Acompanhando read the same canonical catalog.
+  const { recomputeUserTitleStatesForSeries } = await import(
+    "@/server/state/user-title-state"
+  );
+  await recomputeUserTitleStatesForSeries(input.seriesTmdbId).catch((error) => {
+    console.warn(
+      `[season-cache-local] falha ao recalcular estados da série ${input.seriesTmdbId}`,
+      error instanceof Error ? error.message : String(error),
+    );
+  });
 }
 
 export async function deleteCachedSeason(seriesTmdbId: number, seasonNumber: number): Promise<boolean> {

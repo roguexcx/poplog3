@@ -129,6 +129,7 @@ function incompleteSeasonPayload(input: {
 // ── Cache validation ───────────────────────────────────────────────────────────
 
 const PLACEHOLDER_EP_REGEX = /^Episode #\d+\.\d+$/i;
+const AIRED_PLACEHOLDER_EP_REGEX = /^(?:Episode \d+|Epis[oó]dio \d+)$/i;
 const SEASON_CACHE_MAX_AGE_DAYS = 7;
 
 function isRecentSeasonCache(lastSyncedAt: string | null | undefined) {
@@ -163,6 +164,13 @@ function cachedSeasonProblem(season: PoplogSeason): string | null {
   const airedEps = season.episodes.filter(
     (e) => e.air_date && new Date(e.air_date).getTime() <= now,
   );
+
+  const hasAiredPlaceholder = airedEps.some((episode) =>
+    episode.name ? AIRED_PLACEHOLDER_EP_REGEX.test(episode.name.trim()) : false,
+  );
+  if (hasAiredPlaceholder && cacheAgeMs > 6 * 60 * 60 * 1000) {
+    return "aired_placeholder_title";
+  }
 
   // Re-fetch if all aired episodes are missing stills (cache populated before stills arrived).
   const allAiredMissingStills =

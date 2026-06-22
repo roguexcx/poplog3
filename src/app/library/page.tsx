@@ -12,6 +12,12 @@ import {
   getUserLibraryState,
   type Poplog3UserLibraryItem,
 } from "@/server/library/library-service";
+import { isTraktIndexEnabled } from "@/lib/trakt-index/engine";
+import { getPoplogDailyTrendingIndex } from "@/lib/trakt-index/canonical";
+import {
+  buildTraktScoreMapFromIndex,
+  serializeTraktScoreMap,
+} from "@/lib/score/library-popularity";
 
 async function getLibrary(): Promise<Poplog3UserLibraryItem[]> {
   const user = await getCurrentUser();
@@ -20,8 +26,6 @@ async function getLibrary(): Promise<Poplog3UserLibraryItem[]> {
     return [];
   }
 
-  // Fast path: lê do estado materializado (status, progresso, computed_state, best_provider).
-  // Fallback para getUserLibrary apenas se o state ainda não tiver dados para este usuário.
   const stateItems = await getUserLibraryState(user.id);
   if (stateItems !== null) return stateItems;
 
@@ -34,10 +38,26 @@ type LibraryPageProps = {
   }>;
 };
 
+// Busca o mapa de scores Trakt Index para enriquecer a ordenacao "Popularidade" da Biblioteca.
+// Falha silenciosamente -- a biblioteca continua funcional com fallback (vote_average / TMDB popularity).
+async function getTraktScores(): Promise<Record<string, number>> {
+  if (!isTraktIndexEnabled()) return {};
+  try {
+    const items = await getPoplogDailyTrendingIndex();
+    const map = buildTraktScoreMapFromIndex(items);
+    return serializeTraktScoreMap(map);
+  } catch {
+    return {};
+  }
+}
+
 export default async function LibraryPage({
   searchParams,
 }: LibraryPageProps) {
-  const library = await getLibrary();
+  const [library, traktScores] = await Promise.all([
+    getLibrary(),
+    getTraktScores(),
+  ]);
 
   const resolvedSearchParams = await searchParams;
 
@@ -52,6 +72,7 @@ export default async function LibraryPage({
         key={initialTab ?? "all"}
         library={library}
         initialTab={initialTab}
+        traktScores={traktScores}
       />
     </PageShell>
   );

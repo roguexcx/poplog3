@@ -319,11 +319,12 @@ export const traktAdapter: CatalogAdapter = {
         const pt = ep.translations?.find((t) => t.language === "pt");
         const bestPtTr = ptBr ?? pt;
 
-        const title = bestPtTr?.title?.trim() || ep.title || undefined;
-        const overview = bestPtTr?.overview?.trim() || ep.overview || undefined;
-        const hasPtBrText = Boolean(bestPtTr?.title || bestPtTr?.overview);
-        const titleLanguage = hasPtBrText ? "pt-BR" : "eng";
-        const overviewLanguage = hasPtBrText ? "pt-BR" : "eng";
+        const translatedTitle = bestPtTr?.title?.trim() || undefined;
+        const translatedOverview = bestPtTr?.overview?.trim() || undefined;
+        const title = translatedTitle || ep.title || undefined;
+        const overview = translatedOverview || ep.overview || undefined;
+        const titleLanguage = translatedTitle ? "pt-BR" : "eng";
+        const overviewLanguage = translatedOverview ? "pt-BR" : "eng";
 
         return normalizeEpisode(
           {
@@ -336,12 +337,12 @@ export const traktAdapter: CatalogAdapter = {
             season: ep.season,
             number: ep.number,
             title,
-            originalTitle: hasPtBrText ? ep.title ?? undefined : undefined,
+            originalTitle: translatedTitle ? ep.title ?? undefined : undefined,
             overview,
-            originalOverview: hasPtBrText ? ep.overview ?? undefined : undefined,
+            originalOverview: translatedOverview ? ep.overview ?? undefined : undefined,
             titleLanguage,
             overviewLanguage,
-            textLanguage: titleLanguage,
+            textLanguage: titleLanguage === overviewLanguage ? titleLanguage : undefined,
             firstAired: ep.first_aired ?? undefined,
             runtime: ep.runtime ?? undefined,
             episodeType: ep.episode_type ?? undefined,

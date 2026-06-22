@@ -565,6 +565,7 @@ async function getLocalAcompanhandoResponse(userId: string): Promise<NextRespons
         airDate: true,
         runtime: true,
         stillPath: true,
+        stillUrl: true,
       },
     }),
 
@@ -601,7 +602,7 @@ async function getLocalAcompanhandoResponse(userId: string): Promise<NextRespons
       name: row.name,
       air_date: row.airDate ? row.airDate.toISOString().slice(0, 10) : null,
       runtime: row.runtime,
-      still_path: row.stillPath,
+      still_path: row.stillUrl ?? row.stillPath,
     });
     episodesBySeries.set(row.seriesTmdbId, list);
   }

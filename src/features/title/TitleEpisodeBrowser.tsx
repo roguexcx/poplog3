@@ -1071,7 +1071,7 @@ function EpisodeCard({
           />
         ) : (
           <div className="grid h-full w-full place-items-center bg-gradient-to-br from-zinc-900 to-zinc-950 text-[10px] uppercase tracking-[0.2em] text-white/30">
-            Sem thumb
+            Sem imagem
           </div>
         )}
 

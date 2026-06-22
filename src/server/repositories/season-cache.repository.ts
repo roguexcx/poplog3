@@ -244,6 +244,60 @@ export async function upsertSeasonCache(input: UpsertSeasonCacheInput): Promise<
       }
     }
 
+    // poplog3_episodes is the canonical episode catalog. Keep the parent title in
+    // sync with the greatest *aired* date already persisted, independently of
+    // which route or hydrator called upsertSeason.
+    const [airedCatalog, seasonCatalog] = await Promise.all([
+      db.poplog3Episode.aggregate({
+        where: {
+          seriesTmdbId: input.seriesTmdbId,
+          seasonNumber: { gt: 0 },
+          airDate: { not: null, lte: now },
+        },
+        _max: { airDate: true },
+        _count: { _all: true },
+      }),
+      db.titleSeason.aggregate({
+        where: { seriesTmdbId: input.seriesTmdbId, seasonNumber: { gt: 0 } },
+        _max: { seasonNumber: true },
+      }),
+    ]);
+
+    if (airedCatalog._max.airDate) {
+      const title = await db.poplog3Title.findUnique({
+        where: {
+          tmdbId_mediaType: {
+            tmdbId: input.seriesTmdbId,
+            mediaType: "tv",
+          },
+        },
+        select: { lastAirDate: true, numberOfEpisodes: true, numberOfSeasons: true },
+      });
+
+      if (title) {
+        await db.poplog3Title.update({
+          where: {
+            tmdbId_mediaType: {
+              tmdbId: input.seriesTmdbId,
+              mediaType: "tv",
+            },
+          },
+          data: {
+            ...(title.lastAirDate === null || title.lastAirDate < airedCatalog._max.airDate
+              ? { lastAirDate: airedCatalog._max.airDate }
+              : {}),
+            ...(title.numberOfEpisodes === null || title.numberOfEpisodes < airedCatalog._count._all
+              ? { numberOfEpisodes: airedCatalog._count._all }
+              : {}),
+            ...(seasonCatalog._max.seasonNumber !== null &&
+            (title.numberOfSeasons === null || title.numberOfSeasons < seasonCatalog._max.seasonNumber)
+              ? { numberOfSeasons: seasonCatalog._max.seasonNumber }
+              : {}),
+          },
+        });
+      }
+    }
+
     return true;
   } catch (error) {
     console.warn("[season-cache.repository] upsert failed", messageFromError(error));

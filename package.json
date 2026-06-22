@@ -20,6 +20,7 @@
     "db:smoke:library-state": "tsx -r tsconfig-paths/register scripts/smoke-test-library-state-flags.ts",
     "db:smoke:episode-progress": "tsx -r tsconfig-paths/register scripts/smoke-test-episode-progress.ts",
     "db:smoke:series-engine": "tsx -r tsconfig-paths/register scripts/smoke-test-series-engine.ts",
+    "db:smoke:canonical-episodes": "tsx -r tsconfig-paths/register scripts/smoke-test-canonical-episode-sync.ts",
     "db:smoke:user-ratings": "tsx -r tsconfig-paths/register scripts/smoke-test-user-ratings.ts",
     "db:smoke:rating-aggregates": "tsx -r tsconfig-paths/register scripts/smoke-test-rating-aggregates.ts",
     "db:smoke:feedback": "tsx -r tsconfig-paths/register scripts/smoke-test-feedback.ts",
