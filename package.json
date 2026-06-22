@@ -46,7 +46,8 @@
     "fix:media-type:dry": "tsx -r tsconfig-paths/register scripts/fix-media-type-mismatches.ts",
     "fix:media-type": "tsx -r tsconfig-paths/register scripts/fix-media-type-mismatches.ts --apply",
     "smoke:display-title": "tsx -r tsconfig-paths/register scripts/smoke-test-display-title.ts",
-    "smoke:synthetic-id": "tsx -r tsconfig-paths/register scripts/smoke-test-synthetic-id.ts"
+    "smoke:synthetic-id": "tsx -r tsconfig-paths/register scripts/smoke-test-synthetic-id.ts",
+    "smoke:library-identity": "tsx -r tsconfig-paths/register scripts/smoke-test-library-identity.ts"
   },
   "dependencies": {
     "@auth/prisma-adapter": "^2.11.2",

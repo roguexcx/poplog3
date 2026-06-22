@@ -16,6 +16,7 @@ import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import TmdbImage from "@/components/images/TmdbImage";
 import SectionHeader from "@/components/ui/SectionHeader";
 import CardProviderBadge from "@/components/ui/CardProviderBadge";
+import { titleIdentityKeys, userTitleIdentityKeys } from "@/lib/user-title-identity";
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -339,22 +340,7 @@ export default function ForYouSection() {
 
   // Conjuntos de exclusão: itens em qualquer estado da biblioteca são ocultados.
   const libraryIdentities = useMemo(() => {
-    const identities = new Set<string>();
-    const add = (mediaType: string, kind: string, value: unknown) => {
-      if (value === null || value === undefined) return;
-      const normalized = String(value).trim().toLowerCase();
-      if (normalized) identities.add(`${mediaType}:${kind}:${normalized}`);
-    };
-    for (const t of titles) {
-      add(t.media_type, "tmdb", t.tmdb_id);
-      add(t.media_type, "poplog", t.poplogId);
-      const imdbId = (t as { imdb_id?: string | null }).imdb_id
-        ?? (t as { externalIds?: { imdbId?: string } }).externalIds?.imdbId;
-      add(t.media_type, "imdb", imdbId);
-      add(t.media_type, "trakt", t.externalIds?.traktId);
-      add(t.media_type, "slug", t.externalIds?.slug);
-    }
-    return identities;
+    return new Set(titles.flatMap(userTitleIdentityKeys));
   }, [titles]);
 
   function dismissItem(id: number, mediaType: "movie" | "tv") {
@@ -368,13 +354,14 @@ export default function ForYouSection() {
     const seen = new Set<string>();
     return all.filter((item) => {
       const tmdbKey = `${item.id}:${item.mediaType}`;
-      const aliases = [
-        `${item.mediaType}:tmdb:${item.id}`,
-        item.poplogId ? `${item.mediaType}:poplog:${item.poplogId.toLowerCase()}` : null,
-        item.imdbId ? `${item.mediaType}:imdb:${item.imdbId.toLowerCase()}` : null,
-        item.traktId ? `${item.mediaType}:trakt:${item.traktId}` : null,
-        item.slug ? `${item.mediaType}:slug:${item.slug.toLowerCase()}` : null,
-      ].filter((key): key is string => Boolean(key));
+      const aliases = titleIdentityKeys({
+        mediaType: item.mediaType,
+        tmdbId: item.id,
+        poplogId: item.poplogId,
+        imdbId: item.imdbId,
+        traktId: item.traktId,
+        slug: item.slug,
+      });
       if (aliases.some((key) => libraryIdentities.has(key) || seen.has(key))) return false;
       for (const key of aliases) seen.add(key);
       return !dismissedKeys.has(tmdbKey);

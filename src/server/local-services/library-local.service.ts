@@ -3,6 +3,8 @@ import {
   deleteUserTitleState,
   getExternalIdsCache,
   getCachedTitleRow,
+  getManyTitleCacheRows,
+  getManyExternalIdsCache,
   getUserLibraryItems,
   getUserTitle,
   removeUserTitle as removeUserTitleRow,
@@ -253,9 +255,15 @@ async function fetchAndCacheSyntheticTitle(
   }
 }
 
-async function enrichLibraryItem(row: UserTitle): Promise<Poplog3UserLibraryItem> {
+type PrefetchedLibraryData = {
+  titleCacheMap: Map<string, TitleCacheRow>;
+  externalIdsMap: Map<string, { tmdbId: number; mediaType: string; imdbId: string | null; tvdbId: string | null; traktId: string | null }>;
+};
+
+async function enrichLibraryItem(row: UserTitle, prefetched?: PrefetchedLibraryData): Promise<Poplog3UserLibraryItem> {
   const base = mapUserTitle(row);
-  let titleRow = await getCachedTitleRow(row.mediaType, row.tmdbId);
+  const cacheKey = `${row.mediaType}:${row.tmdbId}`;
+  let titleRow = prefetched?.titleCacheMap.get(cacheKey) ?? await getCachedTitleRow(row.mediaType, row.tmdbId);
   let imdbId: string | null = null;
 
   // Considera a linha INCOMPLETA quando falta poster ou o título é técnico/vazio.
@@ -282,7 +290,7 @@ async function enrichLibraryItem(row: UserTitle): Promise<Poplog3UserLibraryItem
     if (fetched) titleRow = fetched;
   }
 
-  const externalRow = await getExternalIdsCache(row.mediaType, row.tmdbId);
+  const externalRow = prefetched?.externalIdsMap.get(cacheKey) ?? await getExternalIdsCache(row.mediaType, row.tmdbId);
   const tvdbId = externalRow?.tvdbId ? Number(externalRow.tvdbId) : undefined;
   const externalImdbId = externalRow?.imdbId ?? imdbId ?? undefined;
   const externalIds = {
@@ -628,7 +636,15 @@ export async function getUserLibrary(
   });
   if (!result.ok) throw new Error(result.error);
 
-  const items = await Promise.all(result.data.map(enrichLibraryItem));
+  // Pré-carrega title cache e external IDs em 2 queries batch (elimina N*2 queries individuais).
+  const keys = result.data.map((r) => ({ mediaType: r.mediaType, tmdbId: r.tmdbId }));
+  const [titleCacheMap, externalIdsMap] = await Promise.all([
+    getManyTitleCacheRows(keys),
+    getManyExternalIdsCache(keys),
+  ]);
+  const prefetched: PrefetchedLibraryData = { titleCacheMap, externalIdsMap };
+
+  const items = await Promise.all(result.data.map((row) => enrichLibraryItem(row, prefetched)));
 
   await attachProgressData(userId, items);
   await attachAvailabilityData(userId, items);

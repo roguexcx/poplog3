@@ -1,6 +1,5 @@
 "use client";
 
-import { useState } from "react";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
 import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 import CardProviderBadge from "@/components/ui/CardProviderBadge";
@@ -46,11 +45,11 @@ export type ContinueItem = {
   best_provider_logo?: string | null;
 };
 
-type TimeScope = "season" | "series";
-
 type Props = {
   item: ContinueItem;
   onClick: () => void;
+  /** Modo de ordenação da seção — afeta qual tempo é priorizado no badge inferior */
+  sortMode?: "recent" | "season" | "series";
 };
 
 function formatCatchUpLabel(label?: string | null) {
@@ -84,7 +83,6 @@ const SIGNAL_CONFIG: Record<
 };
 
 export default function ContinueCard({ item, onClick }: Props) {
-  const [timeScope, setTimeScope] = useState<TimeScope>("series");
   const { mainTitle } = useRandomizedTitleDisplay(item.title, item.original_title);
 
   const posterUrl = resolveCatalogImage(item.poster_path, "w185");
@@ -107,29 +105,19 @@ export default function ContinueCard({ item, onClick }: Props) {
 
   const isNewEp = item.status_signal === "new_episode";
 
-  // Tempo restante para exibição conforme scope selecionado
-  const hasSeriesTime =
-    item.series_remaining_minutes != null &&
-    item.series_remaining_minutes !== item.remaining_minutes;
-  const activeRuntimeLabel =
-    timeScope === "series" && hasSeriesTime
-      ? item.series_remaining_runtime_label
-      : item.remaining_runtime_label;
+  // Badge inferior: sempre mostra o tempo restante da temporada atual
+  const activeRuntimeLabel = item.remaining_runtime_label
+    ? item.remaining_runtime_label.replace(/\s*restantes$/i, " restantes na temporada")
+    : null;
+  // Badge ao lado do título: tempo total para ficar em dia com a série
   const catchUpRuntimeLabel = formatCatchUpLabel(
     item.series_remaining_runtime_label ?? item.remaining_runtime_label,
   );
-  const activeScopeLabel =
-    timeScope === "series" && hasSeriesTime ? "total" : `T${item.next_season}`;
   const seasonProgressLabel =
     item.season_total != null
       ? `${item.season_watched} de ${item.season_total} eps na T${item.next_season}`
       : null;
 
-  function handleTimeScopeToggle(e: React.MouseEvent) {
-    if (!hasSeriesTime) return;
-    e.stopPropagation();
-    setTimeScope((prev) => (prev === "season" ? "series" : "season"));
-  }
 
   return (
     <button
@@ -222,26 +210,8 @@ export default function ContinueCard({ item, onClick }: Props) {
                   <span className="shrink-0">{seasonProgressLabel}</span>
                 )}
                 {activeRuntimeLabel && (
-                  // span em vez de button — ContinueCard já é um <button>, não pode aninhar
-                  <span
-                    role={hasSeriesTime ? "button" : undefined}
-                    tabIndex={hasSeriesTime ? 0 : undefined}
-                    onClick={hasSeriesTime ? handleTimeScopeToggle : undefined}
-                    onKeyDown={hasSeriesTime ? (e) => { if (e.key === "Enter" || e.key === " ") { e.stopPropagation(); setTimeScope((p) => p === "season" ? "series" : "season"); } } : undefined}
-                    title={hasSeriesTime ? (timeScope === "season" ? "Ver tempo total da série" : "Ver tempo da temporada") : undefined}
-                    className={[
-                      "inline-flex shrink-0 items-center gap-0.5 rounded-full px-1.5 py-px transition-all",
-                      hasSeriesTime
-                        ? "cursor-pointer border border-white/[0.12] bg-white/[0.06] hover:border-white/[0.22] hover:bg-white/[0.12] hover:text-white/70"
-                        : "cursor-default",
-                    ].join(" ")}
-                  >
+                  <span className="inline-flex shrink-0 items-center rounded-full px-1.5 py-px">
                     <span className="font-medium">{activeRuntimeLabel}</span>
-                    {hasSeriesTime && (
-                      <span className="text-[8px] font-bold uppercase tracking-wide opacity-60">
-                        {activeScopeLabel}
-                      </span>
-                    )}
                   </span>
                 )}
               </p>

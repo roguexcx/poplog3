@@ -1,9 +1,14 @@
 import type { MediaType, UserTitle } from "@/types/user";
+import {
+  imdbIdFromSyntheticTmdbId,
+  isSyntheticTmdbId,
+} from "@/lib/ids/synthetic-tmdb-id";
 
 export type TitleIdentityInput = {
   tmdbId?: number | null;
   poplogId?: string | number | null;
   imdbId?: string | null;
+  traktId?: string | number | bigint | null;
   slug?: string | null;
   mediaType: MediaType;
 };
@@ -24,13 +29,19 @@ export function titleIdentityKeys(input: TitleIdentityInput): string[] {
   const mediaType = input.mediaType;
   const poplogId = stringOrNull(input.poplogId);
   const imdbId = stringOrNull(input.imdbId);
+  const traktId = stringOrNull(input.traktId);
   const slug = stringOrNull(input.slug);
   const tmdbId = numberOrNull(input.tmdbId);
 
-  if (poplogId) keys.add(`${mediaType}:poplog:${poplogId}`);
+  if (poplogId) keys.add(`${mediaType}:poplog:${poplogId.toLowerCase()}`);
   if (imdbId) keys.add(`${mediaType}:imdb:${imdbId.toLowerCase()}`);
+  if (traktId) keys.add(`${mediaType}:trakt:${traktId.toLowerCase()}`);
   if (slug) keys.add(`${mediaType}:slug:${slug.toLowerCase()}`);
   if (tmdbId) keys.add(`${mediaType}:tmdb:${tmdbId}`);
+  if (tmdbId && isSyntheticTmdbId(tmdbId)) {
+    const syntheticImdbId = imdbIdFromSyntheticTmdbId(tmdbId);
+    if (syntheticImdbId) keys.add(`${mediaType}:imdb:${syntheticImdbId.toLowerCase()}`);
+  }
 
   return Array.from(keys);
 }
@@ -41,6 +52,7 @@ export function userTitleIdentityKeys(title: UserTitle): string[] {
     tmdbId: title.externalIds?.tmdbId ?? title.tmdb_id,
     poplogId: title.poplogId,
     imdbId: title.externalIds?.imdbId ?? title.imdb_id,
+    traktId: title.externalIds?.traktId,
     slug: title.externalIds?.slug,
   });
 }

@@ -12,6 +12,7 @@ import { useOptionalUserData } from "@/context/UserDataContext";
 import { useUserAction } from "@/hooks/useUserAction";
 import { useUserFeedbackToggle } from "@/hooks/useUserFeedbackToggle";
 import { usePoplogUserState } from "@/stores/user-states-store";
+import { titleIdentityKeys, userTitleIdentityKeys } from "@/lib/user-title-identity";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -21,6 +22,9 @@ type ForYouItem = {
   poplogId?: string | null;
   /** ID canônico para o href do link — pode ser tmdbId numérico (string) ou imdbId ("tt...") */
   linkId?: string;
+  imdbId?: string | null;
+  traktId?: number | null;
+  slug?: string | null;
   title: string;
   originalTitle?: string | null;
   overview?: string;
@@ -72,8 +76,11 @@ function ForYouActions({ item, onDismiss }: { item: ForYouItem; onDismiss?: () =
     setSaving(true);
     const result = await executeAction(action);
     setSaving(false);
-    // Remove o item imediatamente ao marcar como visto, sem aguardar o re-fetch da biblioteca.
-    if (action === "markAsWatched" && (!("ok" in result) || result.ok)) {
+    // Qualquer entrada na biblioteca torna o título inelegível imediatamente.
+    if (
+      (action === "markAsWatched" || action === "addToWatchlist") &&
+      (!("ok" in result) || result.ok)
+    ) {
       onDismiss?.();
     }
   }
@@ -259,7 +266,7 @@ function NotLoggedInState() {
 
 export default function ForYouAllPage() {
   const userData = useOptionalUserData();
-  const titles = userData?.titles ?? [];
+  const titles = useMemo(() => userData?.titles ?? [], [userData?.titles]);
   const titlesLoading = userData?.loading ?? false;
   const [items, setItems] = useState<ForYouItem[]>([]);
   const [loading, setLoading] = useState(true);
@@ -268,17 +275,10 @@ export default function ForYouAllPage() {
   const [initialized, setInitialized] = useState(false);
   const [dismissedKeys, setDismissedKeys] = useState<Set<string>>(new Set());
 
-  const { libraryKeys, libraryImdbIds } = useMemo(() => {
-    const keys    = new Set<string>();
-    const imdbIds = new Set<string>();
-    for (const t of titles) {
-      keys.add(`${t.tmdb_id}:${t.media_type}`);
-      const imdbId = (t as { imdb_id?: string | null }).imdb_id
-        ?? (t as { externalIds?: { imdbId?: string } }).externalIds?.imdbId;
-      if (imdbId) imdbIds.add(`${t.media_type}:${imdbId}`);
-    }
-    return { libraryKeys: keys, libraryImdbIds: imdbIds };
-  }, [titles]);
+  const libraryIdentities = useMemo(
+    () => new Set(titles.flatMap(userTitleIdentityKeys)),
+    [titles],
+  );
 
   function dismissItem(id: number, mediaType: "movie" | "tv") {
     setDismissedKeys((prev) => new Set([...prev, `${id}:${mediaType}`]));
@@ -286,9 +286,15 @@ export default function ForYouAllPage() {
 
   function isHidden(item: ForYouItem): boolean {
     const tmdbKey = `${item.id}:${item.mediaType}`;
-    const imdbKey = item.linkId?.startsWith("tt") ? `${item.mediaType}:${item.linkId}` : null;
-    return libraryKeys.has(tmdbKey)
-      || (imdbKey !== null && libraryImdbIds.has(imdbKey))
+    const aliases = titleIdentityKeys({
+      mediaType: item.mediaType,
+      tmdbId: item.id,
+      poplogId: item.poplogId,
+      imdbId: item.imdbId ?? (item.linkId?.startsWith("tt") ? item.linkId : null),
+      traktId: item.traktId,
+      slug: item.slug,
+    });
+    return aliases.some((key) => libraryIdentities.has(key))
       || dismissedKeys.has(tmdbKey);
   }
 
@@ -334,9 +340,16 @@ export default function ForYouAllPage() {
           const next = isLoadMore ? [...prev, ...allItems] : allItems;
           const seen = new Set<string>();
           return next.filter((item) => {
-            const k = `${item.mediaType}-${item.id}`;
-            if (seen.has(k)) return false;
-            seen.add(k);
+            const aliases = titleIdentityKeys({
+              mediaType: item.mediaType,
+              tmdbId: item.id,
+              poplogId: item.poplogId,
+              imdbId: item.imdbId,
+              traktId: item.traktId,
+              slug: item.slug,
+            });
+            if (aliases.some((key) => seen.has(key))) return false;
+            for (const key of aliases) seen.add(key);
             return true;
           });
         });

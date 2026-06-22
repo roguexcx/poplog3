@@ -1,149 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { filterValidTitles } from "@/server/utils/filter-valid-titles";
-import {
-  formatEpisodeRuntimeLabel,
-  formatRuntimeLabel,
-} from "@/lib/domain-labels";
-import { resolveRuntimeByMediaType } from "@/lib/runtime";
-import { getSeriesEpisodeRuntimesMap } from "@/server/runtime/series-episode-runtimes";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { getUserFeedbackMap } from "@/lib/personalization/feedback";
 import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
-import {
-  readContinuitySectionCache,
-  writeContinuitySectionCache,
-} from "@/server/continuity/continuity-section-cache";
-import {
-  catalogGetTrending,
-} from "@/server/source-engine/engine";
-import {
-  hydrateCatalogResultsWithDebug,
-  resolveCatalogIdentityFields,
-} from "@/server/source-engine/hydrate-catalog-results";
-import { attachBestProvider } from "@/server/availability/attach-best-provider";
-import type { PoplogTitle } from "@/server/types/title";
-import { db } from "@/server/db/client";
-import { isTraktIndexEnabled } from "@/lib/trakt-index/engine";
-import { getPoplogDailyTrendingIndex } from "@/lib/trakt-index/canonical";
-import type { TraktIndexItem } from "@/lib/trakt-index/types";
-import { isExcludedFormat } from "@/lib/content-format/excluded-formats";
+import { getTrendingFeed, withTimeout } from "@/features/home/trending-feed";
 
-const TRENDING_CACHE_TTL_MS = 30 * 60_000;
-const TRENDING_DB_TIMEOUT_MS = 1_500;
 const TRENDING_AUTH_TIMEOUT_MS = 500;
-const TRENDING_TRAKT_LIMIT = 15;
-const TRENDING_MIN_RESULTS = 5;
-const TRENDING_LOCAL_FALLBACK_LIMIT = 20;
-const TRAKT_INDEX_TIMEOUT_MS = 14_000;
-
-/** Converte TraktIndexItem para o formato PoplogTitle esperado pela UI. */
-function traktIndexToPoplogTitle(item: TraktIndexItem): PoplogTitle {
-  return {
-    tmdb_id: item.tmdb_id,
-    media_type: item.media_type,
-    poplogId: null,
-    externalIds: item.externalIds,
-    identityUsed: item.identityUsed,
-    linkIdUsed: item.linkIdUsed,
-    hasPoplogId: false,
-    normalizedFrom: item.normalizedFrom,
-    legacyCompatibilityUsed: true,
-    title: item.title,
-    original_title: item.original_title,
-    overview: item.overview,
-    poster_path: item.poster_path,
-    backdrop_path: item.backdrop_path,
-    release_date: item.release_date,
-    first_air_date: item.first_air_date,
-    year: item.year,
-    runtime: item.runtime,
-    genres: [],
-    popularity: item.popularity,
-    vote_average: item.vote_average,
-    vote_count: item.vote_count,
-  };
-}
-
-async function fetchLocalTrending(): Promise<PoplogTitle[]> {
-  try {
-    const rows = await db.poplog3Title.findMany({
-      where: { posterPath: { not: null } },
-      orderBy: { popularity: "desc" },
-      take: TRENDING_LOCAL_FALLBACK_LIMIT,
-      select: {
-        id: true,
-        tmdbId: true,
-        mediaType: true,
-        title: true,
-        originalTitle: true,
-        overview: true,
-        posterPath: true,
-        backdropPath: true,
-        releaseDate: true,
-        firstAirDate: true,
-        lastAirDate: true,
-        year: true,
-        runtime: true,
-        episodeRunTime: true,
-        genres: true,
-        popularity: true,
-        voteAverage: true,
-        voteCount: true,
-        originalLanguage: true,
-      },
-    });
-
-    return rows
-      .filter((row) => !isExcludedFormat(row.genres))
-      .map((row) => ({
-      tmdb_id: row.tmdbId,
-      media_type: row.mediaType as "movie" | "tv",
-      title: row.title ?? row.originalTitle ?? "",
-      original_title: row.originalTitle ?? null,
-      overview: row.overview ?? null,
-      poster_path: row.posterPath ?? null,
-      backdrop_path: row.backdropPath ?? null,
-      release_date: row.mediaType === "movie" ? (row.releaseDate?.toISOString().slice(0, 10) ?? null) : null,
-      first_air_date: row.mediaType === "tv" ? (row.firstAirDate?.toISOString().slice(0, 10) ?? null) : null,
-      last_air_date: row.mediaType === "tv" ? (row.lastAirDate?.toISOString().slice(0, 10) ?? null) : null,
-      year: row.year ?? null,
-      runtime: row.mediaType === "movie" ? row.runtime ?? null : null,
-      episode_run_time: row.mediaType === "tv" ? (Array.isArray(row.episodeRunTime) ? row.episodeRunTime as number[] : null) : null,
-      genres: Array.isArray(row.genres) ? (row.genres as number[]) : [],
-      popularity: row.popularity != null ? Number(row.popularity) : null,
-      vote_average: row.voteAverage != null ? Number(row.voteAverage) : null,
-      vote_count: row.voteCount ?? null,
-      original_language: row.originalLanguage ?? null,
-      imdb_id: undefined,
-      poplogId: row.id,
-      externalIds: { tmdbId: row.tmdbId },
-      ...resolveCatalogIdentityFields({ tmdb_id: row.tmdbId, media_type: row.mediaType as "movie" | "tv", poplogId: row.id }, "legacy"),
-      normalizedFrom: "legacy" as const,
-    }));
-  } catch {
-    return [];
-  }
-}
-
-type TrendingCachePayload = {
-  results: unknown[];
-  generatedAt: string;
-};
 
 function markStage(perf: Record<string, number>, stageRef: { value: number }, stage: string) {
   perf[stage] = Date.now() - stageRef.value;
   stageRef.value = Date.now();
-}
-
-async function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  fallback: T,
-): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((resolve) => setTimeout(() => resolve(fallback), timeoutMs)),
-  ]);
 }
 
 async function resolveUserFeedback() {
@@ -161,373 +26,41 @@ async function resolveUserFeedback() {
   return { userId, feedbackMap };
 }
 
-/**
- * Enriquece PoplogTitle[] com runtime_label para o componente TrendingNowSection.
- * Reutiliza a mesma lógica do caminho legado TMDB.
- */
-async function enrichWithRuntime(titles: PoplogTitle[]) {
-  const tvIds = titles
-    .filter((t) => t.media_type === "tv")
-    .map((t) => t.tmdb_id);
-
-  const episodeRuntimesBySeries =
-    tvIds.length > 0
-      ? await withTimeout(
-          getSeriesEpisodeRuntimesMap(tvIds),
-          TRENDING_DB_TIMEOUT_MS,
-          new Map()
-        )
-      : new Map();
-
-  const enriched = titles.map((title) => {
-    const runtimeResolution = resolveRuntimeByMediaType({
-      mediaType: title.media_type,
-      runtimeMinutes: title.runtime ?? null,
-      episodeRunTime: title.episode_run_time ?? null,
-      episodes: episodeRuntimesBySeries.get(title.tmdb_id) ?? null,
-    });
-    const runtimeLabel =
-      title.media_type === "tv"
-        ? formatEpisodeRuntimeLabel(runtimeResolution.minutes, {
-            estimated: runtimeResolution.estimated,
-          })
-        : formatRuntimeLabel(runtimeResolution.minutes, {
-            estimated: runtimeResolution.estimated,
-          });
-
-    // Itens do Trakt Index já têm identity resolvida — não sobrescrever com resolveCatalogIdentityFields
-    const identityOverride = title.normalizedFrom === "trakt_index"
-      ? {}
-      : resolveCatalogIdentityFields(title, title.normalizedFrom === "cache-fuzzy" ? "cache-fuzzy" : "trakt");
-
-    return {
-      ...title,
-      id: title.tmdb_id,
-      ...identityOverride,
-      runtime: runtimeResolution.minutes,
-      runtime_label: runtimeLabel,
-    };
-  });
-
-  // P7: anexa disponibilidade (best_provider_*) via fluxo canônico — mesmo contrato do
-  // card da Watchlist. Cache-first + warm; não bloqueia nem lê catalog_availability direto.
-  return attachBestProvider(enriched, {
-    block: "trending",
-    getMediaType: (t) => t.media_type,
-    getTmdbId: (t) => t.tmdb_id,
-    getImdbId: (t) => t.externalIds?.imdbId,
-    // Rail curado: cache-first com fetch dos faltantes para o badge no primeiro load.
-    // O resultado é persistido no cache global (compounding nas próximas cargas).
-    live: true,
-  });
-}
-
-/**
- * Interleave movies and tv results: [movie1, tv1, movie2, tv2, ...]
- * Preserves Trakt popularity order within each type.
- */
-function interleaveTrending(movies: PoplogTitle[], tv: PoplogTitle[]): PoplogTitle[] {
-  const result: PoplogTitle[] = [];
-  const len = Math.max(movies.length, tv.length);
-  for (let i = 0; i < len; i++) {
-    if (i < movies.length) result.push(movies[i]);
-    if (i < tv.length) result.push(tv[i]);
-  }
-  return result;
-}
-
 export async function GET(request: NextRequest) {
   const debugSource = request.nextUrl.searchParams.get("debugSource") === "1";
   const totalStartedAt = Date.now();
   const perf: Record<string, number> = { request_parse: 0 };
   const stageRef = { value: totalStartedAt };
-  const sectionKey = "home_trending";
 
   try {
     const { userId, feedbackMap } = await resolveUserFeedback();
     markStage(perf, stageRef, "auth");
 
-    // Quando Trakt Index está ativo, o cache `home_trending` genérico é ignorado para evitar
-    // servir resultados antigos no lugar dos 50 do Trakt Index.
-    // O cache específico `trakt_index_top50_daily` é lido dentro do bloco Trakt Index abaixo.
-    const useGeneralCache = !isTraktIndexEnabled();
-    const cached = useGeneralCache
-      ? await readContinuitySectionCache<TrendingCachePayload>(sectionKey, {
-          region: "BR",
-          language: "pt-BR",
-        })
-      : null;
-    markStage(perf, stageRef, "cache_read");
+    // Fonte única: pipeline canônico compartilhado com o Hero rotativo da Home.
+    const feed = await getTrendingFeed({
+      recordStage: (stage) => markStage(perf, stageRef, stage),
+    });
 
-    if (cached?.payload.results?.length && (cached.status === "hit" || cached.status === "stale")) {
-      const results = applyUserFeedbackScoring(cached.payload.results as Array<{
-        id: number;
-        media_type?: "movie" | "tv";
-        popularity?: number | null;
-        vote_average?: number | null;
-        vote_count?: number | null;
-      }>, { userId, feedbackMap, context: "trending" });
-      markStage(perf, stageRef, "response_build");
-      console.log("[trending/perf]", {
-        cacheStatus: cached.status === "hit" ? "persistent_hit" : "persistent_stale",
-        returned: cached.payload.results.length,
-        external_fetch: 0,
-        normalization: 0,
-        db_write: 0,
-        ...perf,
-        total: Date.now() - totalStartedAt,
-      });
-
-      return NextResponse.json({
-        ok: true,
-        cacheStatus: cached.status,
-        count: results.length,
-        results,
-        ...(debugSource
-          ? {
-              debugSource: {
-                source: "cache",
-                fallbackUsed: false,
-                usedTmdbApi: false,
-                usedLegacy: false,
-                normalizedFrom: "continuity_section_cache",
-                identityUsed: "cached_payload",
-                legacyCompatibilityUsed: true,
-                cacheStatus: cached.status,
-              },
-            }
-          : {}),
-      });
-    }
-
-    // ── Trakt Index primary path ──────────────────────────────────────────────
-    if (isTraktIndexEnabled()) {
-      try {
-        const traktItems = await withTimeout(
-          getPoplogDailyTrendingIndex(),
-          TRAKT_INDEX_TIMEOUT_MS,
-          [] as TraktIndexItem[],
-        );
-        markStage(perf, stageRef, "external_fetch");
-
-        if (traktItems.length >= TRENDING_MIN_RESULTS) {
-          const titles = traktItems.map(traktIndexToPoplogTitle);
-          const withRuntime = await enrichWithRuntime(titles);
-          markStage(perf, stageRef, "cache_tables_read");
-
-          const results = applyUserFeedbackScoring(withRuntime, { userId, feedbackMap, context: "trending" });
-          markStage(perf, stageRef, "response_build");
-
-          void writeContinuitySectionCache({
-            sectionKey,
-            region: "BR",
-            language: "pt-BR",
-            ttlMs: TRENDING_CACHE_TTL_MS,
-            payload: { results: withRuntime, generatedAt: new Date().toISOString() } satisfies TrendingCachePayload,
-          });
-
-          console.log("[trending/perf]", {
-            cacheStatus: "trakt_index_primary",
-            period: "daily",
-            returned: results.length,
-            ...perf,
-            total: Date.now() - totalStartedAt,
-          });
-
-          return NextResponse.json({
-            ok: true,
-            count: results.length,
-            results,
-            ...(debugSource ? { debugSource: { source: "trakt_index", period: "daily", fallbackUsed: false } } : {}),
-          });
-        }
-
-        console.log("[trending] source=trakt_index_fallback reason=%s",
-          traktItems.length === 0 ? "empty" : "insufficient");
-      } catch (err) {
-        console.warn("[trending] source=trakt_index_fallback reason=error",
-          err instanceof Error ? err.message : err);
-        markStage(perf, stageRef, "external_fetch");
-      }
-    }
-
-    // ── Trakt adapter path ───────────────────────────────────────────────────
-    {
-      try {
-        const [movieResults, tvResults] = await Promise.all([
-          catalogGetTrending({ mediaType: "movie", limit: TRENDING_TRAKT_LIMIT }),
-          catalogGetTrending({ mediaType: "show", limit: TRENDING_TRAKT_LIMIT }),
-        ]);
-        markStage(perf, stageRef, "external_fetch");
-
-        const [movieHydrated, tvHydrated] = await Promise.all([
-          hydrateCatalogResultsWithDebug(movieResults),
-          hydrateCatalogResultsWithDebug(tvResults),
-        ]);
-        const merged = interleaveTrending(movieHydrated.titles, tvHydrated.titles);
-        const traktDebug = {
-          source: "trakt",
-          rawCount: movieHydrated.debug.rawCount + tvHydrated.debug.rawCount,
-          normalizedCount:
-            movieHydrated.debug.normalizedCount + tvHydrated.debug.normalizedCount,
-          poplogResolvedCount:
-            movieHydrated.debug.poplogResolvedCount + tvHydrated.debug.poplogResolvedCount,
-          searchCompatibleCount:
-            movieHydrated.debug.searchCompatibleCount + tvHydrated.debug.searchCompatibleCount,
-          fallbackUsed: false,
-          fallbackReason: null as string | null,
-          usedTmdbApi: false,
-          normalizedFrom: "trakt",
-          identityUsed: "poplog_id_or_best_alias",
-          legacyCompatibilityUsed: true,
-          externalIdStats: {
-            imdbId:
-              movieHydrated.debug.externalIdStats.imdbId + tvHydrated.debug.externalIdStats.imdbId,
-            tmdbId:
-              movieHydrated.debug.externalIdStats.tmdbId + tvHydrated.debug.externalIdStats.tmdbId,
-            tvdbId:
-              movieHydrated.debug.externalIdStats.tvdbId + tvHydrated.debug.externalIdStats.tvdbId,
-            traktId:
-              movieHydrated.debug.externalIdStats.traktId + tvHydrated.debug.externalIdStats.traktId,
-            slug:
-              movieHydrated.debug.externalIdStats.slug + tvHydrated.debug.externalIdStats.slug,
-            poplogResolved:
-              movieHydrated.debug.externalIdStats.poplogResolved +
-              tvHydrated.debug.externalIdStats.poplogResolved,
-            temporaryCandidates:
-              movieHydrated.debug.externalIdStats.temporaryCandidates +
-              tvHydrated.debug.externalIdStats.temporaryCandidates,
-          },
-        };
-        markStage(perf, stageRef, "normalization");
-
-        const validTitles = filterValidTitles(merged);
-
-        if (validTitles.length >= TRENDING_MIN_RESULTS) {
-          const withRuntime = await enrichWithRuntime(validTitles);
-          markStage(perf, stageRef, "cache_tables_read");
-
-          const results = applyUserFeedbackScoring(withRuntime, {
-            userId,
-            feedbackMap,
-            context: "trending",
-          });
-          markStage(perf, stageRef, "response_build");
-
-          void writeContinuitySectionCache({
-            sectionKey,
-            region: "BR",
-            language: "pt-BR",
-            ttlMs: TRENDING_CACHE_TTL_MS,
-            payload: {
-              results: withRuntime,
-              generatedAt: new Date().toISOString(),
-            } satisfies TrendingCachePayload,
-          });
-
-          console.log("[trending/perf]", {
-            cacheStatus: "trakt_primary",
-            returned: results.length,
-            ...perf,
-            total: Date.now() - totalStartedAt,
-          });
-
-          return NextResponse.json({
-            ok: true,
-            count: results.length,
-            results,
-            ...(debugSource ? { debugSource: traktDebug } : {}),
-          });
-        }
-
-        traktDebug.fallbackUsed = true;
-        traktDebug.fallbackReason =
-          validTitles.length < TRENDING_MIN_RESULTS ? "insufficient" : "empty";
-        console.log(
-          `[trending] source=trakt_fallback reason=${validTitles.length < TRENDING_MIN_RESULTS ? "insufficient" : "empty"}`
-        );
-      } catch (err) {
-        console.warn(
-          "[trending] source=trakt_fallback reason=error",
-          err instanceof Error ? err.message : err
-        );
-        markStage(perf, stageRef, "external_fetch");
-      }
-    }
-
-    // ── Local DB fallback ─────────────────────────────────────────────────────
-    const localTitles = await withTimeout(
-      fetchLocalTrending(),
-      TRENDING_DB_TIMEOUT_MS,
-      [],
-    );
-    const localValid = filterValidTitles(localTitles);
-    markStage(perf, stageRef, "local_fallback");
-
-    if (localValid.length > 0) {
-      const withRuntime = await enrichWithRuntime(localValid);
-      const results = applyUserFeedbackScoring(withRuntime, {
-        userId,
-        feedbackMap,
-        context: "trending",
-      });
-      markStage(perf, stageRef, "response_build");
-
-      console.log("[trending/perf]", {
-        cacheStatus: "local_db_fallback",
-        returned: results.length,
-        ...perf,
-        total: Date.now() - totalStartedAt,
-      });
-
-      return NextResponse.json({
-        ok: true,
-        count: results.length,
-        results,
-        ...(debugSource
-          ? {
-              debugSource: {
-                source: "local_db",
-                fallbackUsed: true,
-                fallbackReason: "trakt_insufficient_or_failed",
-                usedTmdbApi: false,
-                usedLegacy: false,
-                normalizedFrom: "local_cache",
-                identityUsed: "poplog_id",
-                legacyCompatibilityUsed: true,
-              },
-            }
-          : {}),
-      });
-    }
-
+    const results = applyUserFeedbackScoring(feed.items, {
+      userId,
+      feedbackMap,
+      context: "trending",
+    });
     markStage(perf, stageRef, "response_build");
 
     console.log("[trending/perf]", {
-      cacheStatus: "all_sources_empty",
-      returned: 0,
+      cacheStatus: feed.cacheStatus,
+      returned: results.length,
       ...perf,
       total: Date.now() - totalStartedAt,
     });
 
     return NextResponse.json({
       ok: true,
-      count: 0,
-      results: [],
-      ...(debugSource
-        ? {
-            debugSource: {
-              source: "unavailable",
-              fallbackUsed: true,
-              fallbackReason: "all_sources_empty",
-              usedTmdbApi: false,
-              usedLegacy: false,
-              normalizedFrom: "none",
-              identityUsed: "none",
-              legacyCompatibilityUsed: true,
-            },
-          }
-        : {}),
+      count: results.length,
+      results,
+      ...(feed.fromCache ? { cacheStatus: feed.cacheReadStatus } : {}),
+      ...(debugSource ? { debugSource: feed.debugSource } : {}),
     });
   } catch (error) {
     console.error("[trending route]", error);

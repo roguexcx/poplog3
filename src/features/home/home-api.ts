@@ -1,12 +1,13 @@
 import type { TMDBItem, TMDBDetails } from "@/types/tmdb";
-import { catalogGetMovie, catalogGetShow, catalogGetTrending } from "@/server/source-engine/engine";
-import { hydrateCatalogResultsWithDebug } from "@/server/source-engine/hydrate-catalog-results";
-import { filterValidTitles } from "@/server/utils/filter-valid-titles";
+import { catalogGetMovie, catalogGetShow } from "@/server/source-engine/engine";
 import { filterOutLibraryItems } from "@/lib/discovery/library-filter";
 import { db } from "@/server/db/client";
-import { isTraktIndexEnabled } from "@/lib/trakt-index/engine";
-import { getPoplogDailyTrendingIndex } from "@/lib/trakt-index/canonical";
-import type { TraktIndexItem } from "@/lib/trakt-index/types";
+import { getUserFeedbackMap } from "@/lib/personalization/feedback";
+import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
+import {
+  getTrendingFeed,
+  type EnrichedTrendingTitle,
+} from "@/features/home/trending-feed";
 
 export type { TMDBDetails };
 
@@ -62,94 +63,57 @@ async function localPopularQuery(mediaType: "movie" | "tv", limit: number): Prom
     });
 }
 
-function traktIndexToTMDBItem(item: TraktIndexItem): TMDBItem {
+/**
+ * Converte um item canônico de trending (já enriquecido) para o TMDBItem
+ * consumido pelo Hero. Os gêneros numéricos vão para `genre_ids`; o Hero
+ * resolve gêneros legíveis via `getFeaturedDetails`.
+ */
+function trendingTitleToTMDBItem(t: EnrichedTrendingTitle): TMDBItem {
   return {
-    id: item.tmdb_id,
-    poplogId: null,
-    externalIds: item.externalIds,
-    identityUsed: item.identityUsed,
-    linkIdUsed: item.linkIdUsed,
-    hasPoplogId: false,
-    normalizedFrom: item.normalizedFrom,
-    legacyCompatibilityUsed: true,
-    media_type: item.media_type,
-    title: item.title,
-    original_title: item.original_title ?? undefined,
-    overview: item.overview ?? undefined,
-    poster_path: item.poster_path,
-    backdrop_path: item.backdrop_path ?? undefined,
-    release_date: item.release_date ?? undefined,
-    first_air_date: item.first_air_date ?? undefined,
-    vote_average: item.vote_average ?? undefined,
-    popularity: item.popularity ?? undefined,
-    // Gêneros em string[] do Trakt (ex: ["drama","thriller"]) — usados como fallback no Hero
-    genres: item.genres.length > 0 ? item.genres : undefined,
+    id: t.id ?? t.tmdb_id,
+    poplogId: t.poplogId,
+    externalIds: t.externalIds,
+    identityUsed: t.identityUsed,
+    linkIdUsed: t.linkIdUsed,
+    hasPoplogId: t.hasPoplogId,
+    normalizedFrom: t.normalizedFrom,
+    legacyCompatibilityUsed: t.legacyCompatibilityUsed,
+    media_type: t.media_type,
+    title: t.title,
+    original_title: t.original_title ?? undefined,
+    overview: t.overview ?? undefined,
+    poster_path: t.poster_path ?? null,
+    backdrop_path: t.backdrop_path ?? undefined,
+    release_date: t.release_date ?? undefined,
+    first_air_date: t.first_air_date ?? undefined,
+    last_air_date: t.last_air_date ?? undefined,
+    vote_average: t.vote_average ?? undefined,
+    popularity: t.popularity ?? undefined,
+    genre_ids: Array.isArray(t.genres) ? (t.genres as number[]) : undefined,
   };
 }
 
+/**
+ * Alimenta o Hero rotativo com a MESMA base do bloco "Em alta agora":
+ * fonte, exclusões, região/disponibilidade, fallback e scoring de feedback
+ * são compartilhados via `getTrendingFeed`. O Hero não mantém fonte paralela,
+ * lista independente, deduplicação própria nem critérios de validade distintos.
+ * As regras de exibição do Hero (rotação a cada F5) permanecem na Home.
+ */
 export async function getTrending(userId?: string | null): Promise<TMDBItem[]> {
-  // ── Trakt Index (fonte primária) ──────────────────────────────────────────
-  if (isTraktIndexEnabled()) {
-    try {
-      const traktItems: TraktIndexItem[] = await getPoplogDailyTrendingIndex();
-      if (traktItems.length >= 3) {
-        const results = traktItems.map(traktIndexToTMDBItem);
-        return filterOutLibraryItems(userId, results);
-      }
-    } catch {
-      // fall through to Trakt adapter/local
-    }
-  }
+  const feed = await getTrendingFeed();
 
-  // ── Trakt adapter fallback ────────────────────────────────────────────────
-  try {
-    const [movieResults, tvResults] = await Promise.all([
-      catalogGetTrending({ mediaType: "movie", limit: 25 }),
-      catalogGetTrending({ mediaType: "show", limit: 25 }),
-    ]);
-    const [movieHydrated, tvHydrated] = await Promise.all([
-      hydrateCatalogResultsWithDebug(movieResults),
-      hydrateCatalogResultsWithDebug(tvResults),
-    ]);
-    const merged = [...movieHydrated.titles, ...tvHydrated.titles];
-    const valid = filterValidTitles(merged);
+  const feedbackMap = userId
+    ? await getUserFeedbackMap(userId).catch(() => undefined)
+    : undefined;
 
-    if (valid.length >= 3) {
-      const results = valid.map((t): TMDBItem => ({
-        id: t.tmdb_id,
-        poplogId: t.poplogId,
-        externalIds: t.externalIds,
-        identityUsed: t.identityUsed,
-        linkIdUsed: t.linkIdUsed,
-        hasPoplogId: t.hasPoplogId,
-        normalizedFrom: t.normalizedFrom,
-        legacyCompatibilityUsed: t.legacyCompatibilityUsed,
-        media_type: t.media_type,
-        title: t.title,
-        original_title: t.original_title ?? undefined,
-        overview: t.overview ?? undefined,
-        poster_path: t.poster_path,
-        backdrop_path: t.backdrop_path,
-        release_date: t.release_date ?? undefined,
-        first_air_date: t.first_air_date ?? undefined,
-        last_air_date: t.last_air_date ?? undefined,
-        vote_average: t.vote_average ?? undefined,
-        popularity: t.popularity ?? undefined,
-      }));
-      return filterOutLibraryItems(userId, results);
-    }
-  } catch {
-    // fall through to local fallback
-  }
+  const scored = applyUserFeedbackScoring(feed.items, {
+    userId,
+    feedbackMap,
+    context: "trending",
+  });
 
-  // ── Local DB fallback ─────────────────────────────────────────────────────
-  try {
-    const movies = await localPopularQuery("movie", 25);
-    const tv = await localPopularQuery("tv", 25);
-    return filterOutLibraryItems(userId, [...movies, ...tv]);
-  } catch {
-    return [];
-  }
+  return scored.map(trendingTitleToTMDBItem);
 }
 
 export async function getPopularMovies(userId?: string | null): Promise<TMDBItem[]> {

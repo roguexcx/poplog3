@@ -169,3 +169,45 @@ export async function deleteCachedTitleRow(mediaType: MediaType, tmdbId: number)
     return false;
   }
 }
+
+/**
+ * Batch fetch de múltiplos titles por (mediaType, tmdbId).
+ * Substitui N chamadas individuais a getCachedTitleRow por uma única query.
+ * Retorna Map com chave `${mediaType}:${tmdbId}`.
+ */
+export async function getManyTitleCacheRows(
+  keys: Array<{ mediaType: MediaType; tmdbId: number }>,
+): Promise<Map<string, TitleCacheRow>> {
+  const result = new Map<string, TitleCacheRow>();
+  if (keys.length === 0) return result;
+
+  try {
+    // Agrupa por mediaType para queries eficientes com índice composto.
+    const byType = new Map<MediaType, number[]>();
+    for (const { mediaType, tmdbId } of keys) {
+      const ids = byType.get(mediaType) ?? [];
+      ids.push(tmdbId);
+      byType.set(mediaType, ids);
+    }
+
+    const queries: Promise<TitleCacheRow[]>[] = [];
+    for (const [mediaType, tmdbIds] of byType) {
+      queries.push(
+        db.poplog3Title.findMany({
+          where: { mediaType, tmdbId: { in: tmdbIds } },
+        }),
+      );
+    }
+
+    const results = await Promise.all(queries);
+    for (const rows of results) {
+      for (const row of rows) {
+        result.set(`${row.mediaType}:${row.tmdbId}`, row);
+      }
+    }
+  } catch (error) {
+    console.warn("[title-cache.repository] batch read failed", messageFromError(error));
+  }
+
+  return result;
+}

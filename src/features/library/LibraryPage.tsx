@@ -1638,6 +1638,9 @@ function getAddedTime(item: Poplog3UserLibraryItem) {
 // ── Predicates ────────────────────────────────────────────────────────────────
 
 function isComingSoon(item: Poplog3UserLibraryItem): boolean {
+  // Itens já assistidos nunca aparecem em "Em Breve" — o usuário pode ter assistido
+  // no cinema, por outros meios, etc.
+  if (item.status === "watched") return false;
   return getComingSoonInfo(item).isComingSoon;
 }
 

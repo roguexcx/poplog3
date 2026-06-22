@@ -9,7 +9,10 @@
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { computeUserSeriesProgress } from "@/server/episodes/episode-progress-service";
 import { readTitleState } from "@/server/state/user-title-state";
-import { getUserLibraryIdentifiers } from "@/server/library/library-service";
+import {
+  getUserLibraryIdentityIndex,
+  hasTitleIdentity,
+} from "@/server/library/library-identity-index";
 import { withOrigin } from "@/server/engine-logger";
 import type { TitlePageData, TitleProvider, TitleSeasonInfo, TitleMetadataBlock } from "@/features/title/types";
 import { availabilityStateFromTitle } from "@/lib/series";
@@ -693,25 +696,25 @@ async function filterRelatedOutsideUserLibrary(
   // Leitura mínima de identificadores — NÃO hidrata disponibilidade nem busca
   // títulos faltantes em APIs externas. Evita disparar a hidratação em lote da
   // biblioteca inteira (e o cooldown do Balloonerismm) a cada página de título.
-  const { tmdbKeys: knownByTmdb, imdbKeys: knownByImdb } = await getUserLibraryIdentifiers(
-    userId,
-  ).catch((err) => {
+  const libraryIdentities = await getUserLibraryIdentityIndex(userId).catch((err) => {
     console.warn("[getTitlePageData] user library recommendation filter erro:", (err as Error)?.message);
-    return { tmdbKeys: new Set<string>(), imdbKeys: new Set<string>() };
+    return null;
   });
-  if (knownByTmdb.size === 0 && knownByImdb.size === 0) return related;
+  // Recommendation surfaces fail closed when authoritative library state cannot
+  // be read; returning no rail is preferable to leaking already-saved titles.
+  if (!libraryIdentities) return [];
+  if (libraryIdentities.size === 0) return related;
 
   let removed = 0;
   const filtered = related.filter((item) => {
     const mediaType = item.mediaType === "show" ? "tv" : "movie";
-    const tmdbId    = item.ids.tmdbId ?? null;
-    const syntheticId = item.ids.imdbId ? syntheticTmdbFromImdbId(item.ids.imdbId) : null;
-    const imdbKey   = item.ids.imdbId ? `${mediaType}:${item.ids.imdbId}` : null;
-
-    const inLibrary =
-      (tmdbId     && knownByTmdb.has(`${mediaType}:${tmdbId}`)) ||
-      (syntheticId && knownByTmdb.has(`${mediaType}:${syntheticId}`)) ||
-      (imdbKey    && knownByImdb.has(imdbKey));
+    const inLibrary = hasTitleIdentity(libraryIdentities, {
+      mediaType,
+      tmdbId: item.ids.tmdbId ?? (item.ids.imdbId ? syntheticTmdbFromImdbId(item.ids.imdbId) : null),
+      imdbId: item.ids.imdbId,
+      traktId: item.ids.traktId,
+      slug: item.ids.traktSlug,
+    });
 
     if (inLibrary) removed++;
     return !inLibrary;

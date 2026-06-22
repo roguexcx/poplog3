@@ -9,7 +9,6 @@ import LibraryPageView from "@/features/library/LibraryPage";
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import {
   getUserLibrary,
-  getUserLibraryState,
   type Poplog3UserLibraryItem,
 } from "@/server/library/library-service";
 import { isTraktIndexEnabled } from "@/lib/trakt-index/engine";
@@ -21,14 +20,7 @@ import {
 
 async function getLibrary(): Promise<Poplog3UserLibraryItem[]> {
   const user = await getCurrentUser();
-
-  if (!user) {
-    return [];
-  }
-
-  const stateItems = await getUserLibraryState(user.id);
-  if (stateItems !== null) return stateItems;
-
+  if (!user) return [];
   return getUserLibrary(user.id);
 }
 

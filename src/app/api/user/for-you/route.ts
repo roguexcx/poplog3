@@ -28,6 +28,12 @@ import { withOrigin } from "@/server/engine-logger";
 import { attachBestProvider } from "@/server/availability/attach-best-provider";
 import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import type { UserTitle } from "@/types/user";
+import {
+  getUserLibraryIdentityIndex,
+  hasTitleIdentity,
+  type LibraryIdentityIndex,
+} from "@/server/library/library-identity-index";
+import { titleIdentityKeys } from "@/lib/user-title-identity";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -171,46 +177,33 @@ type RecCandidate = {
   _scoreBreakdown?: ScoreBreakdown;
 };
 
-type IdentityKind = "tmdb" | "imdb" | "trakt" | "slug" | "poplog";
-
-function identityKey(
-  mediaType: "movie" | "tv" | string,
-  kind: IdentityKind,
-  value: string | number | bigint | null | undefined,
-): string | null {
-  if (value === null || value === undefined) return null;
-  const normalized = String(value).trim().toLowerCase();
-  return normalized ? `${mediaType}:${kind}:${normalized}` : null;
-}
-
-function addIdentity(
-  identities: Set<string>,
-  mediaType: "movie" | "tv" | string,
-  kind: IdentityKind,
-  value: string | number | bigint | null | undefined,
-): void {
-  const key = identityKey(mediaType, kind, value);
-  if (key) identities.add(key);
-}
-
 function candidateIdentityKeys(candidate: RecCandidate): string[] {
-  return [
-    identityKey(candidate.mediaType, "tmdb", candidate.tmdbId),
-    identityKey(candidate.mediaType, "imdb", candidate.imdbId),
-    identityKey(candidate.mediaType, "trakt", candidate.traktId),
-    identityKey(candidate.mediaType, "slug", candidate.traktSlug),
-    identityKey(candidate.mediaType, "poplog", candidate._poplogId),
-  ].filter((key): key is string => Boolean(key));
+  return titleIdentityKeys({
+    mediaType: candidate.mediaType,
+    tmdbId: candidate.tmdbId,
+    imdbId: candidate.imdbId,
+    traktId: candidate.traktId,
+    slug: candidate.traktSlug,
+    poplogId: candidate._poplogId,
+  });
 }
 
-function isInIdentitySet(candidate: RecCandidate, identities: Set<string>): boolean {
-  return candidateIdentityKeys(candidate).some((key) => identities.has(key));
+function isInIdentitySet(candidate: RecCandidate, identities: LibraryIdentityIndex): boolean {
+  return hasTitleIdentity(identities, {
+    mediaType: candidate.mediaType,
+    tmdbId: candidate.tmdbId,
+    imdbId: candidate.imdbId,
+    traktId: candidate.traktId,
+    slug: candidate.traktSlug,
+    poplogId: candidate._poplogId,
+  });
 }
 
 
 // The canonical payload item returned to the client
 export type ForYouApiItem = {
   id: number;
+  poplogId?: string | null;
   /** ID canônico para uso em links: imdbId (e.g. "tt6264654") quando o título não está
    *  cacheado localmente sob o tmdbId, ou String(tmdbId) quando está. Garante que a
    *  página de títulos sempre consiga carregar o conteúdo independente do estado do cache. */
@@ -519,23 +512,15 @@ async function enrichWithTraktTranslations(candidates: RecCandidate[]): Promise<
 
 // ─── Deduplication ────────────────────────────────────────────────────────────
 
-function normTitle(s: string): string {
-  return s.toLowerCase().replace(/[^a-z0-9]/g, "");
-}
-
 class Deduper {
   private identities = new Set<string>();
-  private title = new Set<string>();
 
   seen(c: RecCandidate): boolean {
     const identityKeys = candidateIdentityKeys(c);
-    const k3 = `${c.mediaType}:${normTitle(c.title)}:${c.year ?? ""}`;
 
     if (identityKeys.some((key) => this.identities.has(key))) return true;
-    if (this.title.has(k3))            return true;
 
     for (const key of identityKeys) this.identities.add(key);
-    this.title.add(k3);
     return false;
   }
 }
@@ -678,7 +663,7 @@ const CORE_DISPLAY = 6;
 async function buildForYouResponse(
   eligible: RecCandidate[],
   excludeKeys: Set<string>,
-  libraryIdentities: Set<string>,
+  libraryIdentities: LibraryIdentityIndex,
   FINAL_COUNT: number,
   source: string,
 ): Promise<unknown> {
@@ -780,138 +765,21 @@ async function runForYouPipeline(
     // título recém-adicionado ou representado por outro alias.
     const poolKey = buildPoolKey(titles, user?.id ?? null);
 
-    // ── Conjuntos de exclusão da biblioteca ─────────────────────────────────────
-    // Estratégia tri-camada para cobrir diferentes mapeamentos de ID entre fontes.
-    // REGRA: qualquer item na biblioteca (qualquer status) jamais aparece como recomendação.
-
-    // Camada 1: Títulos enviados pelo cliente (rápido, inclui metadata de sementes)
-    const libraryKeys    = new Set(titles.map((t) => `${t.media_type}:${t.tmdb_id}`));
-    const libraryTmdbIds = new Set(titles.map((t) => t.tmdb_id));
-    const libraryImdbIds = new Set<string>();
-    const libraryTraktIds = new Set<string>();
-    const libraryIdentities = new Set<string>();
-
-    for (const t of titles) {
-      const imdbId = safeStr(t.imdb_id) ?? safeStr(t.externalIds?.imdbId);
-      if (imdbId) libraryImdbIds.add(`${t.media_type}:${imdbId}`);
-      if (t.externalIds?.traktId) libraryTraktIds.add(`${t.media_type}:${t.externalIds.traktId}`);
-      addIdentity(libraryIdentities, t.media_type, "tmdb", t.tmdb_id);
-      addIdentity(libraryIdentities, t.media_type, "imdb", imdbId);
-      addIdentity(libraryIdentities, t.media_type, "trakt", t.externalIds?.traktId);
-      addIdentity(libraryIdentities, t.media_type, "slug", t.externalIds?.slug);
-      addIdentity(libraryIdentities, t.media_type, "poplog", t.poplogId);
-    }
-
-    // Camada 2: DB autoritativo em paralelo
-    // (a) todos os tmdbIds do usuário direto do DB → captura stale no cliente
-    // (b) imdbId/traktId via titleExternalId → cross-ID matching (item salvo com tmdbId real,
-    //     recomendação chega com imdbId de fonte diferente)
-    const positiveTmdbIds = titles.map((t) => t.tmdb_id).filter((id) => id > 0);
-    const [dbLibItems, extIdRows] = await Promise.all([
-      user
-        ? db.userTitle.findMany({
-            where: { userId: user.id },
-            select: { tmdbId: true, mediaType: true },
-          }).catch(() => [] as { tmdbId: number; mediaType: string }[])
-        : Promise.resolve([] as { tmdbId: number; mediaType: string }[]),
-      positiveTmdbIds.length > 0
-        ? db.titleExternalId.findMany({
-            where: { tmdbId: { in: positiveTmdbIds } },
-            select: { tmdbId: true, mediaType: true, imdbId: true, traktId: true },
-          }).catch(() => [] as { tmdbId: number; mediaType: string; imdbId: string | null; traktId: string | null }[])
-        : Promise.resolve([] as { tmdbId: number; mediaType: string; imdbId: string | null; traktId: string | null }[]),
-    ]);
-
-    for (const row of dbLibItems) {
-      libraryKeys.add(`${row.mediaType}:${row.tmdbId}`);
-      libraryTmdbIds.add(row.tmdbId);
-      addIdentity(libraryIdentities, row.mediaType, "tmdb", row.tmdbId);
-    }
-    for (const row of extIdRows) {
-      if (row.imdbId) libraryImdbIds.add(`${row.mediaType}:${row.imdbId}`);
-      if (row.traktId) libraryTraktIds.add(`${row.mediaType}:${row.traktId}`);
-    }
-
-    // Camada 3: Expansão de IDs sintéticos → reais
-    // Cenário: usuário salvou via Balloonerismm (tmdb_id negativo, e.g. -5788792).
-    // O Trakt retorna o mesmo título com o ID real (e.g. 257994). Sem essa expansão o
-    // filtro falha e o título aparece em "Para você" mesmo já estando na biblioteca.
-    const syntheticInLibrary = titles
-      .filter((t) => isSyntheticTmdbId(t.tmdb_id))
-      .flatMap((t) => {
-        const imdbId = imdbIdFromSyntheticTmdbId(t.tmdb_id);
-        return imdbId ? [{ tmdb_id: t.tmdb_id, media_type: t.media_type, imdbId }] : [];
-      });
-
-    if (syntheticInLibrary.length > 0) {
-      // Adiciona os imdbIds sintéticos diretamente — captura cross-source mesmo sem DB match
-      for (const x of syntheticInLibrary) {
-        libraryImdbIds.add(`${x.media_type}:${x.imdbId}`);
-        addIdentity(libraryIdentities, x.media_type, "imdb", x.imdbId);
-      }
-
-      const realIdRows = await db.titleExternalId.findMany({
-        where: { imdbId: { in: syntheticInLibrary.map((x) => x.imdbId) }, tmdbId: { gt: 0 } },
-        select: { tmdbId: true, mediaType: true, imdbId: true },
-      }).catch(() => [] as { tmdbId: number; mediaType: string; imdbId: string | null }[]);
-
-      const imdbKeyToReal = new Map(
-        realIdRows.map((r) => [`${r.mediaType}:${r.imdbId}`, r.tmdbId]),
-      );
-
-      for (const x of syntheticInLibrary) {
-        const realTmdbId = imdbKeyToReal.get(`${x.media_type}:${x.imdbId}`);
-        if (realTmdbId) {
-          libraryKeys.add(`${x.media_type}:${realTmdbId}`);
-          libraryTmdbIds.add(realTmdbId);
-          addIdentity(libraryIdentities, x.media_type, "tmdb", realTmdbId);
-        }
-      }
-    }
-
-    // Expansão canônica final: parte de todos os itens do cliente + DB e traz o
-    // conjunto completo de aliases conhecido localmente. A checagem do par
-    // mediaType/tmdbId evita colisão entre os espaços numéricos de filmes e séries.
-    const libraryPairs = new Set(libraryKeys);
-    const positiveLibraryTmdbIds = [...libraryTmdbIds].filter((id) => id > 0);
-    const plainLibraryImdbIds = [...libraryImdbIds]
-      .map((key) => key.slice(key.indexOf(":") + 1))
-      .filter(Boolean);
-
-    const [canonicalRows, allExternalRows] = await Promise.all([
-      db.poplog3Title.findMany({
-        where: {
-          OR: [
-            ...(positiveLibraryTmdbIds.length ? [{ tmdbId: { in: positiveLibraryTmdbIds } }] : []),
-            ...(plainLibraryImdbIds.length ? [{ imdbId: { in: plainLibraryImdbIds } }] : []),
-          ],
-        },
-        select: { id: true, tmdbId: true, mediaType: true, imdbId: true, traktId: true, slug: true },
-      }).catch(() => []),
-      positiveLibraryTmdbIds.length
-        ? db.titleExternalId.findMany({
-            where: { tmdbId: { in: positiveLibraryTmdbIds } },
-            select: { tmdbId: true, mediaType: true, imdbId: true, traktId: true },
-          }).catch(() => [])
-        : Promise.resolve([]),
-    ]);
-
-    for (const row of canonicalRows) {
-      const tmdbPair = `${row.mediaType}:${row.tmdbId}`;
-      const imdbPair = row.imdbId ? `${row.mediaType}:${row.imdbId}` : null;
-      if (!libraryPairs.has(tmdbPair) && !(imdbPair && libraryImdbIds.has(imdbPair))) continue;
-      addIdentity(libraryIdentities, row.mediaType, "tmdb", row.tmdbId);
-      addIdentity(libraryIdentities, row.mediaType, "imdb", row.imdbId);
-      addIdentity(libraryIdentities, row.mediaType, "trakt", row.traktId);
-      addIdentity(libraryIdentities, row.mediaType, "slug", row.slug);
-      addIdentity(libraryIdentities, row.mediaType, "poplog", row.id);
-    }
-    for (const row of allExternalRows) {
-      if (!libraryPairs.has(`${row.mediaType}:${row.tmdbId}`)) continue;
-      addIdentity(libraryIdentities, row.mediaType, "tmdb", row.tmdbId);
-      addIdentity(libraryIdentities, row.mediaType, "imdb", row.imdbId);
-      addIdentity(libraryIdentities, row.mediaType, "trakt", row.traktId);
-    }
+    // Índice canônico compartilhado por todas as superfícies de descoberta.
+    // Une user_titles + user_title_state (qualquer status) e percorre aliases
+    // poplog/TMDB/IMDb/Trakt/slug até um ponto fixo. Os títulos enviados pelo
+    // cliente entram apenas como aliases adicionais; o DB é autoritativo.
+    const suppliedIdentities = titles.map((t) => ({
+      mediaType: t.media_type,
+      tmdbId: t.externalIds?.tmdbId ?? t.tmdb_id,
+      poplogId: t.poplogId,
+      imdbId: safeStr(t.imdb_id) ?? safeStr(t.externalIds?.imdbId),
+      traktId: t.externalIds?.traktId,
+      slug: t.externalIds?.slug,
+    }));
+    const libraryIdentities = user
+      ? await getUserLibraryIdentityIndex(user.id, suppliedIdentities)
+      : new Set(suppliedIdentities.flatMap(titleIdentityKeys));
 
     const cachedEligible = readPoolCache(poolKey);
     if (cachedEligible) {
@@ -1141,14 +1009,7 @@ async function runForYouPipeline(
     const candidates: RecCandidate[] = [];
 
     for (const rec of rawCandidates) {
-      const k          = `${rec.mediaType}:${rec.tmdbId}`;
-      const imdbKey    = rec.imdbId  ? `${rec.mediaType}:${rec.imdbId}`  : null;
-      const traktIdKey = rec.traktId ? `${rec.mediaType}:${rec.traktId}` : null;
-      const inLibrary =
-        isInIdentitySet(rec, libraryIdentities) ||
-        libraryKeys.has(k) ||
-        (imdbKey    && libraryImdbIds.has(imdbKey))    ||
-        (traktIdKey && libraryTraktIds.has(traktIdKey));
+      const inLibrary = isInIdentitySet(rec, libraryIdentities);
       if (inLibrary)          {
         libRemoved++;
         console.log(`[for-you:filter] excludedReason=in-library imdb=${rec.imdbId ?? "?"} title="${rec.title}"`);
@@ -1218,8 +1079,8 @@ async function runForYouPipeline(
       `balloon_seeds=${balloonSeedResults.length} candidates=${candidates.length} ` +
       `lib_removed=${libRemoved} deduped=${deduped} ` +
       `with_images=${withImagesCount} eligible=${eligible.length} source=${source} ` +
-      `exclusion_keys=tmdbId(client+db)+imdbId(client+db)+traktId(client+db)+syntheticExpansion` +
-      ` lib_db=${dbLibItems.length} ext_enriched=${extIdRows.length}`,
+      `exclusion_keys=canonical(poplog+tmdb+imdb+trakt+slug) ` +
+      `library_aliases=${libraryIdentities.size}`,
     );
 
     // Cacheia o pool elegível (independente de sessão/seleção) para recargas baratas.

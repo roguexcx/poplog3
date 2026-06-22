@@ -1,30 +1,36 @@
-import { getUserKnownTitleIds } from "@/server/state/user-title-state";
+import {
+  getUserLibraryIdentityIndex,
+  hasTitleIdentity,
+} from "@/server/library/library-identity-index";
+import type { TitleIdentityInput } from "@/lib/user-title-identity";
 
 type FilterableItem = {
   externalIds?: {
     tmdbId?: number | null;
+    imdbId?: string | null;
+    traktId?: string | number | null;
+    slug?: string | null;
   };
+  poplogId?: string | number | null;
+  imdb_id?: string | null;
   tmdb_id?: number | null;
   id?: number | null;
   media_type?: string | null;
   mediaType?: string | null;
 };
 
-/**
- * Cria uma chave de lookup para o Set de títulos conhecidos.
- * Formato: "{tmdbId}:{mediaType}"
- */
-function itemKey(item: FilterableItem): string | null {
-  const tmdbId =
-    item.externalIds?.tmdbId ??
-    item.tmdb_id ??
-    item.id;
-  const mediaType =
-    item.media_type ??
-    item.mediaType;
-
-  if (!tmdbId || !mediaType) return null;
-  return `${tmdbId}:${mediaType}`;
+/** Normaliza todos os aliases disponíveis para a identidade compartilhada. */
+function itemIdentity(item: FilterableItem): TitleIdentityInput | null {
+  const mediaType = item.media_type ?? item.mediaType;
+  if (mediaType !== "movie" && mediaType !== "tv") return null;
+  return {
+    mediaType,
+    tmdbId: item.externalIds?.tmdbId ?? item.tmdb_id ?? item.id,
+    poplogId: item.poplogId,
+    imdbId: item.externalIds?.imdbId ?? item.imdb_id,
+    traktId: item.externalIds?.traktId,
+    slug: item.externalIds?.slug,
+  };
 }
 
 /**
@@ -48,19 +54,17 @@ export async function filterOutLibraryItems<T extends FilterableItem>(
 ): Promise<T[]> {
   if (!userId || items.length === 0) return items;
 
-  let known: Set<string>;
   try {
-    known = await getUserKnownTitleIds(userId);
+    const known = await getUserLibraryIdentityIndex(userId);
+    return items.filter((item) => {
+      const identity = itemIdentity(item);
+      return !identity || !hasTitleIdentity(known, identity);
+    });
   } catch {
-    return items;
+    // Discovery is fail-closed: leaking a saved title is worse than temporarily
+    // hiding a recommendation rail while the authoritative state is unavailable.
+    return [];
   }
-
-  if (known.size === 0) return items;
-
-  return items.filter((item) => {
-    const key = itemKey(item);
-    return !key || !known.has(key);
-  });
 }
 
 /**
@@ -73,7 +77,7 @@ export function filterOutLibraryItemsSync<T extends FilterableItem>(
   if (knownIds.size === 0) return items;
 
   return items.filter((item) => {
-    const key = itemKey(item);
-    return !key || !knownIds.has(key);
+    const identity = itemIdentity(item);
+    return !identity || !hasTitleIdentity(knownIds, identity);
   });
 }
