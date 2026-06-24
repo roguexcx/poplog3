@@ -309,7 +309,7 @@ function ResultCard({
   const { mainTitle, subTitle } = useRandomizedTitleDisplay(item.title, item.original_title);
 
   return (
-    <section className="relative overflow-hidden rounded-[22px] border border-white/12 bg-[#070a12] shadow-2xl shadow-black/50 sm:rounded-[28px]">
+    <section className="relative isolate overflow-hidden rounded-[22px] border border-white/12 bg-[#070a12] shadow-2xl shadow-black/50 sm:rounded-[28px]">
       {backdrop && (
         <div className="absolute inset-0">
           <img src={backdrop} alt="" className="h-full w-full object-cover opacity-24" />
@@ -318,8 +318,8 @@ function ResultCard({
         </div>
       )}
 
-      <div className="relative grid gap-0 md:grid-cols-[minmax(180px,260px)_1fr]">
-        <div className="absolute left-4 top-4 z-10 aspect-[2/3] w-[96px] overflow-hidden rounded-[16px] border border-white/10 shadow-xl shadow-black/35 min-[390px]:w-[108px] md:relative md:left-auto md:top-auto md:mx-0 md:mt-0 md:min-h-[520px] md:w-auto md:rounded-none md:border-0 md:shadow-none">
+      <div className="relative grid min-w-0 gap-0 lg:grid-cols-[320px_minmax(0,1fr)]">
+        <div className="absolute left-4 top-4 z-10 aspect-[2/3] w-[96px] overflow-hidden rounded-[16px] border border-white/10 shadow-xl shadow-black/35 min-[390px]:w-[108px] lg:relative lg:left-auto lg:top-auto lg:h-full lg:min-h-[460px] lg:w-full lg:self-stretch lg:rounded-none lg:border-0 lg:shadow-none">
           {poster ? (
             <img src={poster} alt={item.title} className="h-full w-full object-cover" />
           ) : (
@@ -327,15 +327,15 @@ function ResultCard({
               <Film className="h-12 w-12 text-white/28" />
             </div>
           )}
-          <div className="absolute inset-0 bg-gradient-to-t from-[#070a12] via-transparent to-transparent md:bg-gradient-to-r md:from-transparent md:to-[#070a12]/80" />
+          <div className="absolute inset-0 bg-gradient-to-t from-[#070a12] via-transparent to-transparent lg:bg-gradient-to-r lg:from-transparent lg:to-[#070a12]/80" />
           <div className="absolute left-2 top-2 rounded-full border border-white/14 bg-black/50 px-2 py-1 text-[8px] font-black uppercase tracking-[0.16em] text-white/58 backdrop-blur sm:left-4 sm:top-4 sm:px-3 sm:text-[10px]">
             Revelado
           </div>
         </div>
 
-        <div className="flex min-h-0 flex-col justify-between p-4 sm:p-8 md:min-h-[420px]">
-          <div>
-            <div className="min-h-[144px] pl-[112px] min-[390px]:min-h-[162px] min-[390px]:pl-[128px] md:min-h-0 md:pl-0">
+        <div className="flex min-h-0 min-w-0 flex-col justify-between p-4 sm:p-8 lg:min-h-[460px]">
+          <div className="min-w-0">
+            <div className="min-h-[144px] pl-[112px] min-[390px]:min-h-[162px] min-[390px]:pl-[128px] lg:min-h-0 lg:pl-0">
               <div className="mb-3 flex flex-wrap items-center gap-1.5 sm:mb-5 sm:gap-2">
                 <span className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-[0.14em] ${
                   isMovie
@@ -353,7 +353,7 @@ function ResultCard({
                 ))}
               </div>
 
-              <h2 className="max-w-2xl text-[25px] font-black leading-[1.02] tracking-[-0.02em] text-white min-[390px]:text-[28px] sm:text-[52px] sm:leading-[0.95] sm:tracking-[-0.04em]">
+              <h2 className="max-w-2xl text-[25px] font-black leading-[1.04] text-white min-[390px]:text-[28px] sm:text-[46px] sm:leading-none lg:text-[52px]">
                 {mainTitle}
                 {subTitle && (
                   <span className="mt-1 block text-[14px] font-light tracking-normal text-white/40 sm:text-[18px]">

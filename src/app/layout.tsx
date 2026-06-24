@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Sidebar from "@/components/layout/Sidebar";
+import GlobalSearchHeader from "@/components/layout/GlobalSearchHeader";
 import AgendaBackgroundRefresh from "@/components/layout/AgendaBackgroundRefresh";
 import RadarBackgroundPrefetch from "@/components/layout/RadarBackgroundPrefetch";
 import AuthSessionProvider from "@/components/auth/AuthSessionProvider";
@@ -29,6 +30,7 @@ export default function RootLayout({
           {FEATURES.RADAR && <RadarBackgroundPrefetch />}
           <main className="relative min-h-dvh transition-[margin] duration-300 ease-in-out md:ml-20 md:peer-hover/sidebar:ml-64">
             <div className="min-h-dvh px-4 pb-24 pt-4 sm:px-6 md:px-8 md:pb-8 md:pt-6 lg:px-10">
+              <GlobalSearchHeader />
               {children}
             </div>
           </main>
