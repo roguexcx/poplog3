@@ -2,9 +2,8 @@ import HomeMemberSections from "@/features/home/HomeMemberSections";
 import HeroSection from "@/features/home/components/HeroSection";
 import TrendingNowSection from "@/features/home/components/TrendingNowSection";
 
-import { getFeaturedDetails, getTrending } from "@/features/home/home-api";
+import { getTrending } from "@/features/home/home-api";
 import {
-  formatRuntime,
   parseYear,
   translateGenres,
 } from "@/features/home/home-utils";
@@ -12,14 +11,16 @@ import {
 import { getCurrentUser } from "@/server/auth/get-current-user";
 import { buildTmdbUrlLoose } from "@/lib/images";
 import { getMediaType, getTitle } from "@/lib/tmdb-utils";
-import { translateToPtBr } from "@/server/translate/translate-to-pt-br";
 
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   const initialUser = await getCurrentUser();
 
-  const trendingItems = await getTrending(initialUser?.id);
+  const trendingItems = await getTrending(initialUser?.id, {
+    fast: true,
+    includeProviders: false,
+  });
 
   const featuredCandidates = trendingItems.filter(
     (item) =>
@@ -46,10 +47,6 @@ export default async function HomePage() {
 
   const featuredTypeLabel = featuredType === "tv" ? "as séries" : "os filmes";
 
-  const [featuredDetails] = await Promise.all([
-    featuredItem ? getFeaturedDetails(featuredType, featuredItem) : null,
-  ]);
-
   const featuredTitle = featuredItem
     ? getTitle(featuredItem)
     : "Destaque do momento";
@@ -63,29 +60,19 @@ export default async function HomePage() {
     : null;
 
   const year = parseYear(
-    featuredDetails?.release_date,
-    featuredDetails?.first_air_date,
+    featuredItem?.release_date,
+    featuredItem?.first_air_date,
   );
 
-  const genres = featuredDetails?.genres?.length
-    ? translateGenres(featuredDetails.genres)
-    : (featuredItem?.genres?.length
-        ? translateGenres(featuredItem.genres)
-        : null);
-
-  const runtime = formatRuntime(
-    featuredType,
-    featuredDetails?.runtime,
-    featuredDetails?.episode_run_time,
-  );
-
-  const seasons =
-    featuredType === "tv" ? featuredDetails?.number_of_seasons ?? null : null;
-
-  const rawOverview = featuredDetails?.overview ?? featuredItem?.overview ?? null;
-  const overview = rawOverview
-    ? (await translateToPtBr(rawOverview).catch(() => ({ translatedText: rawOverview }))).translatedText
+  const genres = featuredItem?.genres?.length
+    ? translateGenres(featuredItem.genres)
     : null;
+
+  const runtime = null;
+
+  const seasons = featuredType === "tv" ? featuredItem?.number_of_seasons ?? null : null;
+
+  const overview = featuredItem?.overview ?? null;
 
   return (
     <>
@@ -106,11 +93,11 @@ export default async function HomePage() {
 
       <div className="relative z-10 mx-auto max-w-[1560px] pb-16">
         <div className="flex flex-col gap-14">
-          <HomeMemberSections initialUser={initialUser} />
-
           <div id="trending">
             <TrendingNowSection />
           </div>
+
+          <HomeMemberSections initialUser={initialUser} />
         </div>
       </div>
     </>

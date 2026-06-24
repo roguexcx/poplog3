@@ -3,6 +3,7 @@ import Google from "next-auth/providers/google";
 import { PrismaAdapter } from "@auth/prisma-adapter";
 
 import { db } from "@/server/db/client";
+import { ensureUserUsername } from "@/server/auth/username";
 
 function googleProvider() {
   const clientId = process.env.AUTH_GOOGLE_ID;
@@ -52,6 +53,16 @@ export const authOptions = {
     error(error: Error) {
       if (isKnownHarmlessAuthError(error)) return;
       console.error("[auth]", error);
+    },
+  },
+  events: {
+    async createUser({ user }) {
+      if (!user.id) return;
+      await ensureUserUsername({
+        userId: user.id,
+        email: user.email,
+        name: user.name,
+      }).catch((error) => console.error("[auth] username generation failed", error));
     },
   },
   callbacks: {

@@ -7,15 +7,19 @@ import Link from "next/link";
 import Image from "next/image";
 import {
   Bookmark, Heart, PlayCircle, Calendar, CheckCircle2,
-  Pause, X, Filter, ChevronLeft, ChevronRight,
+  Pause, X, Filter, ChevronLeft, ChevronRight, Search,
 } from "lucide-react";
 
 import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
-import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
+import {
+  getCanonicalProviderDisplayName,
+  resolveProviderLogoForRender,
+} from "@/lib/streaming/provider-display";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import SectionHeader from "@/components/ui/SectionHeader";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";
+import type { UserListSummary } from "@/types/lists";
 import {
   resolveLibraryPopularityScore,
   deserializeTraktScoreMap,
@@ -26,6 +30,7 @@ import LibraryEmptyState from "./LibraryEmptyState";
 import LibraryGrid from "./LibraryGrid";
 import LibraryHero from "./LibraryHero";
 import LibraryPosterCard from "./LibraryPosterCard";
+import ListsShelf from "./ListsShelf";
 import { type LibraryTab } from "./LibraryTabs";
 import {
   getComingSoonInfo,
@@ -105,6 +110,35 @@ const STATUS_LABEL: Record<string, string> = {
   fridge:    "Geladeira",
 };
 
+/** Exibição máxima padronizada por aba (página) — divisível por 2/3/4/6 colunas. */
+const LIBRARY_ITEMS_PER_PAGE = 24;
+
+/** Normaliza texto para busca: minúsculo, sem acentos e sem espaços extras. */
+function normalizeSearchText(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .trim();
+}
+
+/** Casa um item da biblioteca com a query já normalizada (título, original e ano). */
+function itemMatchesSearch(item: Poplog3UserLibraryItem, normalizedQuery: string): boolean {
+  const displayTitle = resolveDisplayTitle({
+    title: item.title?.title,
+    originalTitle: item.title?.original_title,
+    tmdbId: item.tmdb_id,
+    imdbId: item.imdb_id,
+    mediaType: item.media_type,
+  });
+  const haystack = normalizeSearchText(
+    [displayTitle, item.title?.title, item.title?.original_title, item.title?.year]
+      .filter(Boolean)
+      .join(" "),
+  );
+  return haystack.includes(normalizedQuery);
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 type LibraryPageProps = {
@@ -112,9 +146,19 @@ type LibraryPageProps = {
   initialTab?:  string;
   /** Mapa serializado de scores Trakt Index (imdbId/tmdbKey → score). Construído no servidor. */
   traktScores?: Record<string, number>;
+  initialLists?: UserListSummary[];
+  listMembership?: Record<string, string[]>;
+  isAuthenticated?: boolean;
 };
 
-export default function LibraryPage({ library, initialTab, traktScores }: LibraryPageProps) {
+export default function LibraryPage({
+  library,
+  initialTab,
+  traktScores,
+  initialLists = [],
+  listMembership = {},
+  isAuthenticated = false,
+}: LibraryPageProps) {
   const defaultTab: LibraryTab = isValidLibraryTab(initialTab) ? initialTab : "all";
 
   // Reconstrói o TraktScoreMap uma vez (ref estável — traktScores não muda após o mount).
@@ -131,9 +175,10 @@ export default function LibraryPage({ library, initialTab, traktScores }: Librar
   const [randomSeed,        setRandomSeed]        = useState<number | null>(null);
   const [page,              setPage]              = useState(1);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [searchQuery,       setSearchQuery]       = useState("");
 
   const gridSectionRef = useRef<HTMLDivElement>(null);
-  const itemsPerPage   = useLibraryItemsPerPage();
+  const itemsPerPage   = LIBRARY_ITEMS_PER_PAGE;
 
   useEffect(() => {
     const seed = typeof crypto !== "undefined" && "getRandomValues" in crypto
@@ -241,10 +286,13 @@ export default function LibraryPage({ library, initialTab, traktScores }: Librar
     if (mediaFilter !== "all")    items = items.filter((i) => i.media_type === mediaFilter);
     if (yearFilter  !== null)     items = items.filter((i) => i.title?.year === yearFilter);
 
+    const normalizedQuery = normalizeSearchText(searchQuery);
+    if (normalizedQuery) items = items.filter((i) => itemMatchesSearch(i, normalizedQuery));
+
     const effectiveSort = activeTab === "random" ? "random" : sortBy;
     items.sort((a, b) => sortLibraryItems(a, b, effectiveSort, randomSeed, traktScoreMap));
     return items;
-  }, [library, activeTab, mediaFilter, yearFilter, sortBy, randomSeed, traktScoreMap]);
+  }, [library, activeTab, mediaFilter, yearFilter, sortBy, searchQuery, randomSeed, traktScoreMap]);
 
   const totalPages     = Math.max(1, Math.ceil(filteredLibrary.length / itemsPerPage));
   const safePage       = Math.min(page, totalPages);
@@ -253,7 +301,7 @@ export default function LibraryPage({ library, initialTab, traktScores }: Librar
     return filteredLibrary.slice(start, start + itemsPerPage);
   }, [filteredLibrary, safePage, itemsPerPage]);
 
-  useEffect(() => { setPage(1); }, [activeTab, mediaFilter, yearFilter, sortBy, itemsPerPage]);
+  useEffect(() => { setPage(1); }, [activeTab, mediaFilter, yearFilter, sortBy, searchQuery, itemsPerPage]);
 
   const hasActiveFilters = activeTab !== "all" || mediaFilter !== "all" || yearFilter !== null;
 
@@ -273,8 +321,11 @@ export default function LibraryPage({ library, initialTab, traktScores }: Librar
     setMediaFilter("all");
     setYearFilter(null);
     setSortBy("popularity-desc");
+    setSearchQuery("");
     setPage(1);
   }
+
+  const hasActiveQuery = searchQuery.trim().length > 0;
 
   return (
     <div className="relative flex flex-col gap-8 pb-20 md:gap-14 md:pb-0">
@@ -292,7 +343,46 @@ export default function LibraryPage({ library, initialTab, traktScores }: Librar
       {/* ── 2. Stats row ── */}
       <LibraryStatsRow stats={extendedStats} onStatClick={scrollToGrid} />
 
-      {/* ── 3. Spotlight + Watchlist ── */}
+      {/* ── 3. Favoritos + Listas (lado a lado) ── */}
+      {(favoritesItems.length > 0 || isAuthenticated) && (
+        <section
+          className={`relative grid gap-6 ${
+            favoritesItems.length > 0 && isAuthenticated ? "lg:grid-cols-2 lg:gap-6" : ""
+          }`}
+        >
+          {/* Favoritos — esquerda */}
+          {favoritesItems.length > 0 && (
+            <div className="relative h-full overflow-hidden rounded-[1.75rem] border border-rose-500/[0.10] bg-gradient-to-br from-rose-950/[0.25] to-transparent p-5 shadow-[inset_0_1px_0_rgba(255,100,100,0.05)] sm:p-6">
+              <div className="pointer-events-none absolute -right-16 -top-12 h-48 w-48 rounded-full bg-rose-500/[0.07] blur-[70px]" />
+              <div className="relative flex h-full flex-col gap-3">
+                <RailHeader
+                  label="Favoritos"
+                  subtitle="Obras marcadas como especiais no seu acervo"
+                  accent="rose"
+                  icon={<Heart className="h-3.5 w-3.5 fill-rose-400 text-rose-400" />}
+                  onViewAll={() => scrollToGrid("favorites", "popularity-desc")}
+                />
+                <ScrollRail>
+                  {favoritesItems.map((item, i) => (
+                    <div key={item.id} className="w-[118px] shrink-0 sm:w-[148px]">
+                      <LibraryPosterCard
+                        item={item}
+                        priority={i < 5}
+                        inCustomList={Boolean(listMembership[`${item.tmdb_id}:${item.media_type}`]?.length)}
+                      />
+                    </div>
+                  ))}
+                </ScrollRail>
+              </div>
+            </div>
+          )}
+
+          {/* Listas — direita */}
+          {isAuthenticated && <ListsShelf initialLists={initialLists} />}
+        </section>
+      )}
+
+      {/* ── 4. Spotlight + Watchlist ── */}
       {(spotlightItem != null || watchlistItems.length > 0) && (
         <section className="relative grid gap-8 lg:grid-cols-[1.15fr_0.85fr] lg:gap-6">
 
@@ -317,7 +407,11 @@ export default function LibraryPage({ library, initialTab, traktScores }: Librar
                 <ScrollRail>
                   {watchlistItems.map((item, i) => (
                     <div key={item.id} className="w-[124px] shrink-0 sm:w-[175px]">
-                      <LibraryPosterCard item={item} priority={i < 5} />
+                      <LibraryPosterCard
+                        item={item}
+                        priority={i < 5}
+                        inCustomList={Boolean(listMembership[`${item.tmdb_id}:${item.media_type}`]?.length)}
+                      />
                     </div>
                   ))}
                 </ScrollRail>
@@ -341,7 +435,11 @@ export default function LibraryPage({ library, initialTab, traktScores }: Librar
               <ScrollRail>
                 {recentItems.map((item, i) => (
                   <div key={item.id} className="w-[118px] shrink-0 sm:w-[140px]">
-                    <LibraryPosterCard item={item} priority={i < 4} />
+                    <LibraryPosterCard
+                      item={item}
+                      priority={i < 4}
+                      inCustomList={Boolean(listMembership[`${item.tmdb_id}:${item.media_type}`]?.length)}
+                    />
                   </div>
                 ))}
               </ScrollRail>
@@ -358,7 +456,11 @@ export default function LibraryPage({ library, initialTab, traktScores }: Librar
               <ScrollRail>
                 {shortestItems.map((item, i) => (
                   <div key={item.id} className="w-[118px] shrink-0 sm:w-[140px]">
-                    <LibraryPosterCard item={item} priority={i < 4} />
+                    <LibraryPosterCard
+                      item={item}
+                      priority={i < 4}
+                      inCustomList={Boolean(listMembership[`${item.tmdb_id}:${item.media_type}`]?.length)}
+                    />
                   </div>
                 ))}
               </ScrollRail>
@@ -367,50 +469,7 @@ export default function LibraryPage({ library, initialTab, traktScores }: Librar
         </section>
       )}
 
-      {/* ── 5. Favorites ── */}
-      {favoritesItems.length > 0 && (
-        <section className="relative">
-          <div className="relative overflow-hidden rounded-[1.75rem] border border-rose-500/[0.10] bg-gradient-to-br from-rose-950/[0.25] to-transparent p-5 shadow-[inset_0_1px_0_rgba(255,100,100,0.05)] sm:p-6">
-            <div className="pointer-events-none absolute -right-16 -top-12 h-48 w-48 rounded-full bg-rose-500/[0.07] blur-[70px]" />
-            <div className="relative flex flex-col gap-3">
-              <RailHeader
-                label="Favoritos"
-                subtitle="Obras marcadas como especiais no seu acervo"
-                accent="rose"
-                icon={<Heart className="h-3.5 w-3.5 fill-rose-400 text-rose-400" />}
-                onViewAll={() => scrollToGrid("favorites", "popularity-desc")}
-              />
-              <ScrollRail>
-                {favoritesItems.map((item, i) => (
-                  <div key={item.id} className="w-[118px] shrink-0 sm:w-[148px]">
-                    <LibraryPosterCard item={item} priority={i < 5} />
-                  </div>
-                ))}
-              </ScrollRail>
-            </div>
-          </div>
-        </section>
-      )}
-
-      {/* ── 6. Coming Soon ── */}
-      {comingSoonItems.length > 0 && (
-        <section className="relative flex flex-col gap-4">
-          <RailHeader
-            label="Em Breve"
-            subtitle="Títulos que ainda vão chegar na sua coleção"
-            accent="amber"
-            icon={<Calendar className="h-3.5 w-3.5 text-amber-400" />}
-            onViewAll={() => scrollToGrid("coming-soon", "release-asc")}
-          />
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
-            {comingSoonItems.map((item, i) => (
-              <ComingSoonCard key={item.id} item={item} priority={i < 3} />
-            ))}
-          </div>
-        </section>
-      )}
-
-      {/* ── 7. Visão Completa da Biblioteca ── */}
+      {/* ── 6. Visão Completa da Biblioteca ── */}
       <section
         ref={gridSectionRef}
         className="relative scroll-mt-6 pb-12"
@@ -430,6 +489,30 @@ export default function LibraryPage({ library, initialTab, traktScores }: Librar
           className="mb-6"
         />
 
+        {/* Busca interna da Biblioteca */}
+        <div className="relative mb-4">
+          <Search className="pointer-events-none absolute left-4 top-1/2 h-4 w-4 -translate-y-1/2 text-white/35" />
+          <input
+            type="search"
+            inputMode="search"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Buscar na sua biblioteca…"
+            aria-label="Buscar na sua biblioteca"
+            className="h-11 w-full rounded-full border border-white/[0.10] bg-white/[0.04] pl-11 pr-11 text-sm text-white placeholder:text-white/35 outline-none transition focus:border-indigo-400/40 focus:bg-white/[0.06] [&::-webkit-search-cancel-button]:appearance-none"
+          />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery("")}
+              aria-label="Limpar busca"
+              className="absolute right-3 top-1/2 grid h-7 w-7 -translate-y-1/2 place-items-center rounded-full text-white/45 transition hover:bg-white/[0.10] hover:text-white"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          )}
+        </div>
+
         {/* Desktop filter bar */}
         <div className="mb-6 hidden md:block">
           <FullFilterBar
@@ -439,7 +522,7 @@ export default function LibraryPage({ library, initialTab, traktScores }: Librar
             sortBy={sortBy}
             availableYears={availableYears}
             total={filteredLibrary.length}
-            hasActiveFilters={hasActiveFilters}
+            hasActiveFilters={hasActiveFilters || hasActiveQuery}
             onTabChange={(t) => { setActiveTab(t); setPage(1); }}
             onMediaChange={(m) => { setMediaFilter(m); setPage(1); }}
             onYearChange={(y) => { setYearFilter(y); setPage(1); }}
@@ -482,10 +565,13 @@ export default function LibraryPage({ library, initialTab, traktScores }: Librar
 
         {/* Grid */}
         {filteredLibrary.length === 0 ? (
-          <LibraryEmptyState activeTab={activeTab} />
+          <LibraryEmptyState
+            activeTab={activeTab}
+            searchQuery={searchQuery.trim() || undefined}
+          />
         ) : (
           <div className="flex flex-col gap-12">
-            <LibraryGrid items={visibleLibrary} />
+            <LibraryGrid items={visibleLibrary} listMembership={listMembership} />
             {totalPages > 1 && (
               <LibraryPagination
                 page={safePage}
@@ -497,6 +583,24 @@ export default function LibraryPage({ library, initialTab, traktScores }: Librar
           </div>
         )}
       </section>
+
+      {/* ── 7. Em Breve (fim da página) ── */}
+      {comingSoonItems.length > 0 && (
+        <section className="relative flex flex-col gap-4 pb-12">
+          <RailHeader
+            label="Em Breve"
+            subtitle="Títulos que ainda vão chegar na sua coleção"
+            accent="amber"
+            icon={<Calendar className="h-3.5 w-3.5 text-amber-400" />}
+            onViewAll={() => scrollToGrid("coming-soon", "release-asc")}
+          />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
+            {comingSoonItems.map((item, i) => (
+              <ComingSoonCard key={item.id} item={item} priority={i < 3} />
+            ))}
+          </div>
+        </section>
+      )}
 
       {/* Mobile filters bottom sheet */}
       {mobileFiltersOpen && (
@@ -914,9 +1018,12 @@ function SpotlightCard({ item }: { item: Poplog3UserLibraryItem }) {
   const isWatching   = isMarathoning(item);
   const badgeClass   = STATUS_BADGE_CLASSES[item.status] ?? STATUS_BADGE_CLASSES.watchlist;
   const badgeLabel   = STATUS_LABEL[item.status] ?? item.status;
-  const spotlightProviderLogo = item.best_provider_logo
-    ? resolveCatalogImage(item.best_provider_logo, "original")
-    : null;
+  const spotlightProviderName =
+    getCanonicalProviderDisplayName({ name: item.best_provider_name }) ?? item.best_provider_name;
+  const spotlightProviderLogo = resolveProviderLogoForRender({
+    name: spotlightProviderName,
+    logoUrl: item.best_provider_logo,
+  });
 
   const metaParts: string[] = [
     title?.year?.toString() ?? "",
@@ -965,12 +1072,12 @@ function SpotlightCard({ item }: { item: Poplog3UserLibraryItem }) {
 
         {/* Provider — top right. Mostra logo quando há; senão chip com o nome
             (espelha a detail page e o LibraryPosterCard). */}
-        {(spotlightProviderLogo || item.best_provider_name) && (
+        {(spotlightProviderLogo || spotlightProviderName) && (
           <div className="absolute right-3 top-3 overflow-hidden rounded-lg border border-white/[0.14] bg-black/55 shadow-[0_4px_14px_rgba(0,0,0,0.45)] backdrop-blur-md sm:right-4 sm:top-4">
             {spotlightProviderLogo ? (
               <Image
                 src={spotlightProviderLogo}
-                alt={item.best_provider_name ?? ""}
+                alt={spotlightProviderName ?? ""}
                 width={28}
                 height={28}
                 unoptimized
@@ -978,7 +1085,7 @@ function SpotlightCard({ item }: { item: Poplog3UserLibraryItem }) {
               />
             ) : (
               <span className="block max-w-[110px] truncate px-2 py-1 text-[9px] font-black uppercase tracking-[0.08em] text-white/85">
-                {item.best_provider_name}
+                {spotlightProviderName}
               </span>
             )}
           </div>
@@ -1415,25 +1522,6 @@ function getPaginationPages(page: number, total: number): Array<number | "gap"> 
   return result;
 }
 
-// ── Hook: responsive items per page ──────────────────────────────────────────
-
-function useLibraryItemsPerPage() {
-  const [itemsPerPage, setItemsPerPage] = useState(28);
-
-  useEffect(() => {
-    function update() {
-      if (window.innerWidth < 640)  { setItemsPerPage(8);  return; }
-      if (window.innerWidth < 1024) { setItemsPerPage(18); return; }
-      setItemsPerPage(28);
-    }
-    update();
-    window.addEventListener("resize", update);
-    return () => window.removeEventListener("resize", update);
-  }, []);
-
-  return itemsPerPage;
-}
-
 // ── Hook: watchlist hydration ─────────────────────────────────────────────────
 
 function useWatchlistHydration(library: Poplog3UserLibraryItem[], activeTab: string) {
@@ -1512,7 +1600,7 @@ function sortLibraryItems(
 ) {
   switch (sortBy) {
     case "random":          return compareRandom(a, b, randomSeed);
-    case "title-asc":      return getTitle(a).localeCompare(getTitle(b), "pt-BR");
+    case "title-asc":      return compareTitleAsc(a, b);
     case "release-desc":   return compareReleaseTime(a, b, "desc");
     case "release-asc":    return compareReleaseTime(a, b, "asc");
     case "popularity-desc": return getPopularity(b, traktScoreMap) - getPopularity(a, traktScoreMap);
@@ -1530,7 +1618,7 @@ function compareRandom(
 ) {
   if (seed === null) return 0;
   const delta = randomScore(a, seed) - randomScore(b, seed);
-  return delta || getTitle(a).localeCompare(getTitle(b), "pt-BR");
+  return delta || compareTitleAsc(a, b);
 }
 
 function randomScore(item: Poplog3UserLibraryItem, seed: number): number {
@@ -1547,6 +1635,28 @@ function getTitle(item: Poplog3UserLibraryItem) {
     tmdbId: item.tmdb_id,
     imdbId: item.imdb_id,
     mediaType: item.media_type,
+  });
+}
+
+// Artigos iniciais ignorados na ordenação (PT-BR como padrão; EN por segurança em
+// títulos sem versão localizada). Evita que "A Origem", "Os Vingadores" e
+// "The Batman" caiam em A/O/T e embaralhem a ordem alfabética entre idiomas.
+const LEADING_ARTICLE_PATTERN = /^(a|as|o|os|um|uma|uns|umas|the|an)\s+/i;
+
+/**
+ * Chave canônica para ordenação alfabética: usa o título de exibição pt-BR
+ * (mesmo string mostrado nos cards), sem acento/caixa e sem artigo inicial.
+ */
+function getSortableTitle(item: Poplog3UserLibraryItem): string {
+  const base = normalizeSearchText(getTitle(item)); // minúsculo, sem acento, trim
+  return base.replace(LEADING_ARTICLE_PATTERN, "").trim() || base;
+}
+
+/** Comparador alfabético único (pt-BR, ignora acento/caixa, ordena números). */
+function compareTitleAsc(a: Poplog3UserLibraryItem, b: Poplog3UserLibraryItem): number {
+  return getSortableTitle(a).localeCompare(getSortableTitle(b), "pt-BR", {
+    numeric: true,
+    sensitivity: "base",
   });
 }
 
@@ -1574,11 +1684,11 @@ function compareReleaseTime(
 ) {
   const aTime = getReleaseTime(a);
   const bTime = getReleaseTime(b);
-  if (aTime === null && bTime === null) return getTitle(a).localeCompare(getTitle(b), "pt-BR");
+  if (aTime === null && bTime === null) return compareTitleAsc(a, b);
   if (aTime === null) return 1;
   if (bTime === null) return -1;
   const delta = direction === "asc" ? aTime - bTime : bTime - aTime;
-  return delta || getTitle(a).localeCompare(getTitle(b), "pt-BR");
+  return delta || compareTitleAsc(a, b);
 }
 
 function compareRuntime(a: Poplog3UserLibraryItem, b: Poplog3UserLibraryItem, direction: "asc" | "desc") {
@@ -1588,7 +1698,7 @@ function compareRuntime(a: Poplog3UserLibraryItem, b: Poplog3UserLibraryItem, di
   if (ar === null) return 1;
   if (br === null) return -1;
   const delta = direction === "asc" ? ar - br : br - ar;
-  return delta || getTitle(a).localeCompare(getTitle(b), "pt-BR");
+  return delta || compareTitleAsc(a, b);
 }
 
 function getTotalRuntime(item: Poplog3UserLibraryItem) {

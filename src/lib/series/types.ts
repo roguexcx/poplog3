@@ -60,6 +60,12 @@ export type EpisodeStub = {
   air_date?: string | null;
 };
 
+/** Forma mínima de uma temporada usada como sinal de "temporada em exibição". */
+export type SeasonAirStub = {
+  season_number?: number | null;
+  air_date?: string | null;
+};
+
 export type SeriesStateInput = {
   firstAirDate?: string | null;
   lastAirDate?: string | null;
@@ -67,6 +73,12 @@ export type SeriesStateInput = {
   tmdbStatus?: string | null;
   nextEpisodeToAir?: EpisodeStub | null;
   lastEpisodeToAir?: EpisodeStub | null;
+  /**
+   * Temporadas conhecidas (premiere por temporada). Quando uma temporada
+   * estreou há pouco e ainda está dentro da janela de exibição, a série é
+   * considerada `in-season` mesmo sem next/last episode no payload.
+   */
+  seasons?: SeasonAirStub[] | null;
   /** Para testar relógio. Default: new Date(). */
   now?: Date;
   /** Janela em dias para considerar um episódio "novo". Default: 14. */

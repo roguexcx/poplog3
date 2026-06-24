@@ -1,7 +1,5 @@
 import { db } from "@/server/db/client";
 import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
-import { listActiveStreamingProviders } from "@/server/local-services/streaming-preferences-local.service";
-import { normalizeProvider } from "@/server/streaming/provider-normalization";
 import { hydrateManyTitleAvailability } from "@/server/availability";
 import {
   catalogGetTrending,
@@ -155,10 +153,6 @@ function dateOnly(value: Date | null | undefined): string | null {
 }
 
 /** Chave de comparação canônica para nomes de provider (alias-aware + lowercase). */
-function providerNameKey(name: string): string {
-  return (normalizeProvider(name)?.name ?? name).trim().toLowerCase();
-}
-
 function passesVibe(item: SorteioItem, vibe: SorteioVibeFilter) {
   if (vibe === "all" || vibe === "surprise") return true;
   const genres = item.genre_ids ?? [];
@@ -420,23 +414,8 @@ async function fetchWatchlistPool(userId: string): Promise<SorteioItem[]> {
  * P4: disponibilidade do Sorteio agora vem do FLUXO CANÔNICO
  * (hydrateManyTitleAvailability, cacheOnly + warmCold) — sem ler catalog_availability direto.
  */
-async function enrichAvailability(items: SorteioItem[], favoriteProviderIds: Set<string>, region: string) {
+async function enrichAvailability(items: SorteioItem[], region: string) {
   if (items.length === 0) return;
-
-  // "Preferred" por NOME canônico (a camada canônica é name-based, não tmdb-provider-id).
-  const favoriteProviderNames = new Set<string>();
-  if (favoriteProviderIds.size > 0) {
-    try {
-      const catalog = await listActiveStreamingProviders(region);
-      for (const p of catalog) {
-        if (p.tmdb_provider_id != null && favoriteProviderIds.has(String(p.tmdb_provider_id))) {
-          favoriteProviderNames.add(providerNameKey(p.provider_name));
-        }
-      }
-    } catch (err) {
-      console.warn("[sorteio] catálogo de providers indisponível p/ preferred:", err);
-    }
-  }
 
   const availabilityMap = await hydrateManyTitleAvailability(
     items.map((item) => ({
@@ -450,7 +429,7 @@ async function enrichAvailability(items: SorteioItem[], favoriteProviderIds: Set
     const best = availabilityMap.get(`${item.media_type}-${item.id}`)?.bestProvider ?? null;
     if (!best) continue; // preserva best_provider já vindo do user_title_state
     const providerType = normalizeProviderType(best.type);
-    const isPreferred = favoriteProviderNames.has(providerNameKey(best.name));
+    const isPreferred = Boolean(best.isPreferred);
 
     item.best_provider_name = best.name;
     item.best_provider_type = providerType;
@@ -552,7 +531,7 @@ export async function buildSorteioPool(userId: string, filters: SorteioFilters):
   }
 
   if (filters.mode === "discovery") {
-    await enrichAvailability(initialItems, favoriteProviderIds, region);
+    await enrichAvailability(initialItems, region);
   }
 
   const strictCandidates = initialItems.filter((item) => {

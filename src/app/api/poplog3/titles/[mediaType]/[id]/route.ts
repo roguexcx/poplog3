@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getTitlePageData } from "@/server/titles/get-title-page-data";
 import type { PoplogTitleSourceHint } from "@/server/titles/poplog-title-identity";
+import { normalizeStreamingRegion } from "@/server/streaming/region";
 
 type MediaType = "movie" | "tv";
 
@@ -20,8 +21,10 @@ export async function GET(
     request.nextUrl.searchParams.get("refresh") === "1" ||
     request.nextUrl.searchParams.get("force") === "1";
 
-  const country =
-    request.nextUrl.searchParams.get("country")?.toUpperCase() ?? "BR";
+  const country = normalizeStreamingRegion(request.nextUrl.searchParams.get("country"), {
+    source: "api:poplog3-title:country",
+    explicit: request.nextUrl.searchParams.has("country"),
+  });
   const sourceHint =
     (request.nextUrl.searchParams.get("sourceHint") ?? "auto") as PoplogTitleSourceHint;
   const debugSource = request.nextUrl.searchParams.get("debugSource") === "1";

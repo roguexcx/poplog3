@@ -1,5 +1,9 @@
 import { getCurrentUser } from "@/server/auth/get-current-user";
-import { getFavoriteTmdbProviderIds } from "@/server/local-services/streaming-preferences-local.service";
+import {
+  getFavoriteTmdbProviderIds,
+  getUserProviderDisplayPreferences as getDisplayPreferences,
+} from "@/server/local-services/streaming-preferences-local.service";
+import type { ProviderDisplayPreference } from "./provider-normalization";
 
 import type { ProviderPreferenceInput } from "./provider-preferences";
 
@@ -8,6 +12,7 @@ const FALLBACK: ProviderPreferenceInput = {
   favoriteProviderIds: [],
   hiddenProviderIds: [],
   onlyFavorites: false,
+  displayPreferences: [],
 };
 
 export async function getUserProviderPreferences(): Promise<ProviderPreferenceInput> {
@@ -17,9 +22,22 @@ export async function getUserProviderPreferences(): Promise<ProviderPreferenceIn
     return FALLBACK;
   }
 
-  const favoriteProviderIds = await getFavoriteTmdbProviderIds({ userId: user.id });
+  const [favoriteProviderIds, displayPreferences] = await Promise.all([
+    getFavoriteTmdbProviderIds({ userId: user.id }),
+    getDisplayPreferences({ userId: user.id, country: "BR" }),
+  ]);
   return {
     ...FALLBACK,
     favoriteProviderIds: favoriteProviderIds.map((id) => String(id)),
+    displayPreferences,
   };
+}
+
+/** Leitura tolerante para o núcleo de availability (também roda fora de request). */
+export async function getUserProviderDisplayPreferences(): Promise<ProviderDisplayPreference[]> {
+  try {
+    return (await getUserProviderPreferences()).displayPreferences ?? [];
+  } catch {
+    return [];
+  }
 }

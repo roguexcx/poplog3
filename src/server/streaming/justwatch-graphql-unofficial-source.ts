@@ -1,10 +1,11 @@
 /**
  * justwatch-graphql-unofficial-source.ts
  *
- * Fonte EXPERIMENTAL de fallback de disponibilidade via GraphQL não oficial da
+ * Fonte EXPERIMENTAL de fallback/enriquecimento via GraphQL não oficial da
  * JustWatch. NÃO é fonte primária — `Balloonerismm` continua sendo a fonte canônica.
- * Esta source só é consultada de dentro de `availability-service.ts`, e apenas quando
- * o Balloonerismm falha/retorna vazio/inconsistente para a região (ver integração lá).
+ * Esta source só é consultada de dentro de `availability-service.ts`: como fallback
+ * quando o Balloonerismm falha/retorna vazio, ou como enriquecimento quando a fonte
+ * primária trouxe um host genérico de canais.
  *
  * Origem técnica: HTML de teste validado manualmente (endpoint apis.justwatch.com/graphql,
  * query `GetSearchTitles`, fragments `PackageDetails`/`TitleOffer`/`TitleDetails`). Aqui
@@ -12,10 +13,11 @@
  * availability do POPLOG (`TitleProvider`).
  *
  * Garantias / isolamento:
- *   - Desativada por padrão; ligada por env `JUSTWATCH_UNOFFICIAL_FALLBACK` (1/true).
+ *   - Fallback desativado por padrão; enriquecimento de canais ativado por padrão e
+ *     desligável por env `JUSTWATCH_CHANNEL_ENRICHMENT=false`.
  *   - Timeout curto (AbortController) — nunca trava o caminho da resposta.
  *   - Cache forte em processo (TTL + teto), com deduplicação por título/ID/região.
- *   - Baixo volume: só roda no fallback ao vivo, nunca em massa em listas/cards.
+ *   - Baixo volume: só roda no caminho ao vivo, nunca em massa em listas/cards.
  *   - Nunca lança — falha vira outcome "error".
  *   - Preserva payload bruto (`raw`) e o node casado (`matched`) para debug.
  *   - Substituível: trocar por fonte licenciada/Partner API mexe só neste arquivo.
@@ -70,10 +72,34 @@ export type JustWatchLookupInput = {
   timeoutMs?: number;
 };
 
-/** Flag/env de ativação — experimental, desligada por padrão. */
-export function isJustWatchUnofficialEnabled(): boolean {
-  const v = (process.env.JUSTWATCH_UNOFFICIAL_FALLBACK ?? "").trim().toLowerCase();
+function envFlag(value: string | undefined): boolean {
+  const v = (value ?? "").trim().toLowerCase();
   return v === "1" || v === "true" || v === "on" || v === "yes";
+}
+
+/** Flag/env de ativação do FALLBACK — experimental, desligada por padrão. */
+export function isJustWatchUnofficialEnabled(): boolean {
+  return envFlag(process.env.JUSTWATCH_UNOFFICIAL_FALLBACK);
+}
+
+/**
+ * Flag/env do ENRIQUECIMENTO de canais (Amazon/Apple TV Channels).
+ *
+ * Diferente do fallback: o enriquecimento roda quando o Balloonerismm RETORNOU
+ * providers, mas de forma genérica (ex.: "Prime Video" sem distinguir que o título
+ * está dentro do canal "Diamond Films"). Aí o JustWatch — que lista cada canal como
+ * pacote próprio — é consultado para quebrar o host genérico em canais reais.
+ * Só roda no caminho ao vivo (nunca em listas/cards cacheOnly). Ativa por padrão,
+ * mas pode ser desligada explicitamente com false/0/off/no.
+ */
+export function isJustWatchChannelEnrichmentEnabled(): boolean {
+  const raw = process.env.JUSTWATCH_CHANNEL_ENRICHMENT;
+  if (raw === undefined) return true;
+  return envFlag(raw);
+}
+
+function isJustWatchLookupEnabled(): boolean {
+  return isJustWatchUnofficialEnabled() || isJustWatchChannelEnrichmentEnabled();
 }
 
 // ─── GraphQL: query + fragments (extraídos do HTML de referência) ──────────────
@@ -412,7 +438,7 @@ export async function getJustWatchUnofficialProviders(
 ): Promise<JustWatchResult> {
   const region = (input.region ?? "BR").toUpperCase();
 
-  if (!isJustWatchUnofficialEnabled()) {
+  if (!isJustWatchLookupEnabled()) {
     return {
       outcome: "disabled", providers: [], region, matched: null,
       offersCount: null, emptyReason: "disabled", raw: null,

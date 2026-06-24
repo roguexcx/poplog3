@@ -42,8 +42,10 @@ export const TRENDING_LOCAL_FALLBACK_LIMIT = 20;
 export const TRAKT_INDEX_TIMEOUT_MS = 14_000;
 
 const TRENDING_SECTION_KEY = "home_trending";
+const TRENDING_LIGHT_SECTION_KEY = "home_trending_light";
 const TRENDING_REGION = "BR";
 const TRENDING_LANGUAGE = "pt-BR";
+const TRENDING_LIGHT_CACHE_TTL_MS = 10 * 60_000;
 
 /** Item de trending já enriquecido (runtime_label + disponibilidade). */
 export type EnrichedTrendingTitle = Awaited<
@@ -73,6 +75,14 @@ export interface TrendingFeedResult {
 export interface GetTrendingFeedOptions {
   /** Callback opcional para marcação de estágios de performance. */
   recordStage?: (stage: string) => void;
+  /** Quando falso, evita availability/providers no payload e no cache desta superfície. */
+  includeProviders?: boolean;
+  /** Caminho de baixa latência para a Home: cache/local DB, sem esperar fonte externa. */
+  fast?: boolean;
+  /** Usado por refresh em background para recalcular mesmo com cache existente. */
+  skipCache?: boolean;
+  /** Se `fast` usar fallback local, agenda refresh externo fora do caminho crítico. */
+  backgroundRefresh?: boolean;
 }
 
 export async function withTimeout<T>(
@@ -179,7 +189,10 @@ async function fetchLocalTrending(): Promise<PoplogTitle[]> {
  * Enriquece PoplogTitle[] com runtime_label e disponibilidade (best_provider_*).
  * Mesmo contrato do card da Watchlist e do bloco "Em alta agora".
  */
-async function enrichWithRuntime(titles: PoplogTitle[]) {
+async function enrichWithRuntime(
+  titles: PoplogTitle[],
+  options: { includeProviders?: boolean } = {},
+) {
   const tvIds = titles
     .filter((t) => t.media_type === "tv")
     .map((t) => t.tmdb_id);
@@ -223,12 +236,20 @@ async function enrichWithRuntime(titles: PoplogTitle[]) {
     };
   });
 
+  if (options.includeProviders === false) {
+    return enriched.map((title) => ({
+      ...title,
+      best_provider_name: null,
+      best_provider_type: null,
+      best_provider_logo: null,
+    }));
+  }
+
   return attachBestProvider(enriched, {
     block: "trending",
     getMediaType: (t) => t.media_type,
     getTmdbId: (t) => t.tmdb_id,
     getImdbId: (t) => t.externalIds?.imdbId,
-    live: true,
   });
 }
 
@@ -251,6 +272,33 @@ type TrendingCachePayload = {
   generatedAt: string;
 };
 
+const TRENDING_REFRESH_IN_FLIGHT = new Map<string, Promise<void>>();
+
+function scheduleTrendingRefresh(options: {
+  includeProviders: boolean;
+  sectionKey: string;
+}) {
+  if (TRENDING_REFRESH_IN_FLIGHT.has(options.sectionKey)) return;
+
+  const promise = getTrendingFeed({
+    includeProviders: options.includeProviders,
+    skipCache: true,
+    fast: false,
+  })
+    .then(() => undefined)
+    .catch((error) => {
+      console.warn(
+        "[trending] background_refresh_failed",
+        error instanceof Error ? error.message : error,
+      );
+    })
+    .finally(() => {
+      TRENDING_REFRESH_IN_FLIGHT.delete(options.sectionKey);
+    });
+
+  TRENDING_REFRESH_IN_FLIGHT.set(options.sectionKey, promise);
+}
+
 /**
  * Resolve a lista canônica de trending seguindo a cadeia de fontes:
  * cache de continuidade → Trakt Index → Trakt adapter → DB local.
@@ -263,34 +311,97 @@ export async function getTrendingFeed(
   options: GetTrendingFeedOptions = {},
 ): Promise<TrendingFeedResult> {
   const recordStage = options.recordStage ?? (() => {});
+  const includeProviders = options.includeProviders ?? true;
+  const sectionKey = includeProviders ? TRENDING_SECTION_KEY : TRENDING_LIGHT_SECTION_KEY;
 
-  // Quando Trakt Index está ativo, o cache genérico é ignorado para não servir
-  // resultados antigos no lugar dos itens do Trakt Index.
-  const useGeneralCache = !isTraktIndexEnabled();
-  const cached = useGeneralCache
-    ? await readContinuitySectionCache<TrendingCachePayload>(TRENDING_SECTION_KEY, {
+  if (!options.skipCache) {
+    const cached = await readContinuitySectionCache<TrendingCachePayload>(sectionKey, {
+      region: TRENDING_REGION,
+      language: TRENDING_LANGUAGE,
+    });
+    recordStage("cache_read");
+
+    if (cached?.payload.results?.length && (cached.status === "hit" || cached.status === "stale")) {
+      return {
+        items: cached.payload.results,
+        source: "cache",
+        cacheStatus: cached.status === "hit" ? "persistent_hit" : "persistent_stale",
+        fromCache: true,
+        cacheReadStatus: cached.status,
+        debugSource: {
+          source: "cache",
+          fallbackUsed: false,
+          usedTmdbApi: false,
+          usedLegacy: false,
+          normalizedFrom: "continuity_section_cache",
+          identityUsed: "cached_payload",
+          legacyCompatibilityUsed: true,
+          cacheStatus: cached.status,
+          includeProviders,
+        },
+      };
+    }
+  } else {
+    recordStage("cache_skip");
+  }
+
+  if (options.fast) {
+    const localTitles = await withTimeout(
+      fetchLocalTrending(),
+      TRENDING_DB_TIMEOUT_MS,
+      [],
+    );
+    const localValid = filterValidTitles(localTitles);
+    recordStage("local_fallback");
+
+    if (localValid.length > 0) {
+      const withRuntime = await enrichWithRuntime(localValid, { includeProviders });
+
+      void writeContinuitySectionCache({
+        sectionKey,
         region: TRENDING_REGION,
         language: TRENDING_LANGUAGE,
-      })
-    : null;
-  recordStage("cache_read");
+        ttlMs: TRENDING_LIGHT_CACHE_TTL_MS,
+        payload: { results: withRuntime, generatedAt: new Date().toISOString() } satisfies TrendingCachePayload,
+      });
 
-  if (cached?.payload.results?.length && (cached.status === "hit" || cached.status === "stale")) {
+      if (options.backgroundRefresh) {
+        scheduleTrendingRefresh({ includeProviders, sectionKey });
+      }
+
+      return {
+        items: withRuntime,
+        source: "local_db",
+        cacheStatus: "local_db_fast",
+        fromCache: false,
+        debugSource: {
+          source: "local_db",
+          fallbackUsed: true,
+          fallbackReason: "fast_home_cache_miss",
+          usedTmdbApi: false,
+          usedLegacy: false,
+          normalizedFrom: "local_cache",
+          identityUsed: "poplog_id",
+          legacyCompatibilityUsed: true,
+          includeProviders,
+        },
+      };
+    }
+
+    if (options.backgroundRefresh) {
+      scheduleTrendingRefresh({ includeProviders, sectionKey });
+    }
+
     return {
-      items: cached.payload.results,
-      source: "cache",
-      cacheStatus: cached.status === "hit" ? "persistent_hit" : "persistent_stale",
-      fromCache: true,
-      cacheReadStatus: cached.status,
+      items: [],
+      source: "unavailable",
+      cacheStatus: "fast_empty",
+      fromCache: false,
       debugSource: {
-        source: "cache",
-        fallbackUsed: false,
-        usedTmdbApi: false,
-        usedLegacy: false,
-        normalizedFrom: "continuity_section_cache",
-        identityUsed: "cached_payload",
-        legacyCompatibilityUsed: true,
-        cacheStatus: cached.status,
+        source: "unavailable",
+        fallbackUsed: true,
+        fallbackReason: "fast_home_no_local_results",
+        includeProviders,
       },
     };
   }
@@ -307,11 +418,11 @@ export async function getTrendingFeed(
 
       if (traktItems.length >= TRENDING_MIN_RESULTS) {
         const titles = traktItems.map(traktIndexToPoplogTitle);
-        const withRuntime = await enrichWithRuntime(titles);
+        const withRuntime = await enrichWithRuntime(titles, { includeProviders });
         recordStage("cache_tables_read");
 
         void writeContinuitySectionCache({
-          sectionKey: TRENDING_SECTION_KEY,
+          sectionKey,
           region: TRENDING_REGION,
           language: TRENDING_LANGUAGE,
           ttlMs: TRENDING_CACHE_TTL_MS,
@@ -323,7 +434,7 @@ export async function getTrendingFeed(
           source: "trakt_index",
           cacheStatus: "trakt_index_primary",
           fromCache: false,
-          debugSource: { source: "trakt_index", period: "daily", fallbackUsed: false },
+          debugSource: { source: "trakt_index", period: "daily", fallbackUsed: false, includeProviders },
         };
       }
 
@@ -388,11 +499,11 @@ export async function getTrendingFeed(
     const validTitles = filterValidTitles(merged);
 
     if (validTitles.length >= TRENDING_MIN_RESULTS) {
-      const withRuntime = await enrichWithRuntime(validTitles);
+      const withRuntime = await enrichWithRuntime(validTitles, { includeProviders });
       recordStage("cache_tables_read");
 
       void writeContinuitySectionCache({
-        sectionKey: TRENDING_SECTION_KEY,
+        sectionKey,
         region: TRENDING_REGION,
         language: TRENDING_LANGUAGE,
         ttlMs: TRENDING_CACHE_TTL_MS,
@@ -429,7 +540,7 @@ export async function getTrendingFeed(
   recordStage("local_fallback");
 
   if (localValid.length > 0) {
-    const withRuntime = await enrichWithRuntime(localValid);
+    const withRuntime = await enrichWithRuntime(localValid, { includeProviders });
     return {
       items: withRuntime,
       source: "local_db",

@@ -43,11 +43,25 @@ import {
   groupProviders,
   pickBestProvider,
 } from "./normalize-providers";
-import { normalizeTitleProvider } from "@/server/streaming/provider-normalization";
+import {
+  normalizeTitleProvider,
+  rankTitleProviders,
+} from "@/server/streaming/provider-normalization";
+import {
+  DEFAULT_STREAMING_REGION,
+  normalizeStreamingRegion,
+} from "@/server/streaming/region";
+import { getUserProviderDisplayPreferences } from "@/server/streaming/user-provider-preferences";
 import {
   getJustWatchUnofficialProviders,
   isJustWatchUnofficialEnabled,
+  isJustWatchChannelEnrichmentEnabled,
 } from "@/server/streaming/justwatch-graphql-unofficial-source";
+import {
+  hasChannelHostGeneric,
+  mergeChannelOffers,
+} from "@/server/streaming/provider-channel-enrichment";
+import { ensureDiscoveredStreamingProviders } from "@/server/streaming/provider-catalog";
 import {
   EMPTY_GROUPED_PROVIDERS,
   UNAVAILABLE_STATUS,
@@ -57,7 +71,7 @@ import {
   type TitleAvailabilitySummary,
 } from "./availability-types";
 
-const DEFAULT_REGION = "BR";
+const DEFAULT_REGION = DEFAULT_STREAMING_REGION;
 
 // Sentinela de estado negativo persistido (sem providers encontrados).
 const NONE_PROVIDER_NAME = "__none__";
@@ -204,20 +218,27 @@ async function writeProvidersToCache(input: {
 
   const rows =
     providers.length > 0
-      ? providers.map((p) => ({
-          imdbId,
-          tmdbId: tmdbIdForRow,
-          mediaType,
-          providerName: p.name,
-          providerRegion: region,
-          providerType: titleTypeToProviderType(p.type),
-          providerUrl: p.deepLink ?? p.deeplink ?? null,
-          providerLogoUrl: p.logoUrl ?? null,
-          source,
-          sourceConfidence,
-          checkedAt: now,
-          expiresAt,
-        }))
+      ? providers.map((p) => {
+          const rowSource: CatalogAvailabilitySource =
+            p.source === "justwatch_graphql_unofficial" ? "justwatch" : source;
+          const rowConfidence: SourceConfidence =
+            rowSource === "justwatch" ? "low" : sourceConfidence;
+          return {
+            imdbId,
+            tmdbId: tmdbIdForRow,
+            mediaType,
+            // Rastreabilidade: o cache persiste o nome da fonte, nunca o rótulo da UI.
+            providerName: p.originalName ?? p.name,
+            providerRegion: region,
+            providerType: titleTypeToProviderType(p.type),
+            providerUrl: p.deepLink ?? p.deeplink ?? null,
+            providerLogoUrl: p.logoUrl ?? null,
+            source: rowSource,
+            sourceConfidence: rowConfidence,
+            checkedAt: now,
+            expiresAt,
+          };
+        })
       : [
           // Sentinela negativa: registra "checado, nada encontrado".
           // Confiança "low" = checagem completa (incl. JustWatch) → confiável até o TTL;
@@ -301,8 +322,10 @@ function buildSummary(input: {
   isInTheaters?: boolean;
   isFutureRelease?: boolean;
   release?: ReleaseStatus;
+  providerPreferences?: AvailabilityIdInput["providerPreferences"];
 }): TitleAvailabilitySummary {
-  const grouped = groupProviders(input.providers);
+  const rankedProviders = rankTitleProviders(input.providers, input.providerPreferences ?? []);
+  const grouped = groupProviders(rankedProviders);
   const status = deriveStatus({
     grouped,
     isInTheaters: input.isInTheaters,
@@ -313,7 +336,7 @@ function buildSummary(input: {
     providers: grouped,
     status,
     state: input.state,
-    bestProvider: pickBestProvider(grouped),
+    bestProvider: pickBestProvider(grouped, Boolean(input.providerPreferences?.length)),
     source: input.source,
     checkedAt: new Date().toISOString(),
     release: {
@@ -489,6 +512,13 @@ type JustWatchDebug = {
   offersCount: number | null;
   providersParsed: number | null;
   emptyReason: string | null;
+  /** Enriquecimento de canais (roda quando o Balloonerismm já trouxe providers). */
+  enrichmentEnabled: boolean;
+  enrichmentAttempted: boolean;
+  /** Identidades genéricas de host substituídas por canais reais. */
+  enrichmentReplaced: string[];
+  /** Identidades de canal adicionadas a partir do JustWatch. */
+  enrichmentAdded: string[];
 };
 
 type ResolvedProviders = {
@@ -523,7 +553,10 @@ type ResolvedProviders = {
  * `live:false`, jamais cacheia negativo). Resolve o IMDb ID de forma padronizada antes.
  */
 async function resolveProviders(input: AvailabilityIdInput): Promise<ResolvedProviders> {
-  const region = (input.region ?? DEFAULT_REGION).toUpperCase();
+  const region = normalizeStreamingRegion(input.region, {
+    source: "availability-core",
+    explicit: input.region != null,
+  });
   const { mediaType } = input;
   const errors: string[] = [];
 
@@ -545,6 +578,10 @@ async function resolveProviders(input: AvailabilityIdInput): Promise<ResolvedPro
     offersCount: null,
     providersParsed: null,
     emptyReason: null,
+    enrichmentEnabled: isJustWatchChannelEnrichmentEnabled(),
+    enrichmentAttempted: false,
+    enrichmentReplaced: [],
+    enrichmentAdded: [],
   };
 
   const base = {
@@ -570,6 +607,61 @@ async function resolveProviders(input: AvailabilityIdInput): Promise<ResolvedPro
     const cached = await readProvidersFromCache(imdbId, mediaType, region);
     if (cached.hit) {
       if (!cached.negative) {
+        if (
+          region === "BR" &&
+          !input.cacheOnly &&
+          isJustWatchChannelEnrichmentEnabled() &&
+          hasChannelHostGeneric(cached.providers)
+        ) {
+          const { title: searchTitle, year } = await resolveTitleForJustWatch(input, mediaType);
+          justwatch.queryTitle = searchTitle;
+          justwatch.queryYear = year;
+          if (searchTitle) {
+            justwatch.enrichmentAttempted = true;
+            const jw = await getJustWatchUnofficialProviders({
+              title: searchTitle,
+              year,
+              imdbId,
+              tmdbId: input.tmdbId ?? null,
+              mediaType,
+              region,
+            }).catch(() => null);
+            if (jw) {
+              justwatch.outcome = jw.outcome;
+              justwatch.offersCount = jw.offersCount;
+              justwatch.providersParsed = jw.providers.length;
+              justwatch.emptyReason = jw.emptyReason;
+              if (jw.matched) {
+                justwatch.matchedTitle = jw.matched.title;
+                justwatch.matchedImdbId = jw.matched.imdbId;
+                justwatch.matchedTmdbId = jw.matched.tmdbId;
+                justwatch.matchReason = jw.matched.matchedVia;
+              }
+              if (jw.outcome === "ok" && jw.providers.length > 0) {
+                const merged = mergeChannelOffers(cached.providers, jw.providers);
+                if (merged.changed) {
+                  justwatch.enrichmentReplaced = merged.replaced;
+                  justwatch.enrichmentAdded = merged.added;
+                  console.log(
+                    `[availability] channelCacheEnrichment imdb=${imdbId} region=${region} replaced=${merged.replaced.length} added=${merged.added.length}`,
+                  );
+                  return {
+                    ...base,
+                    cache: { hit: true, negative: false, expiresAt: cached.expiresAt },
+                    providerPath: "cache+justwatch:channel-enrichment",
+                    providers: merged.providers,
+                    source: "balloonerismm",
+                    live: true,
+                    balloonOutcome: null,
+                  };
+                }
+              }
+            }
+          } else {
+            justwatch.emptyReason = "missing_title_local";
+          }
+        }
+
         return {
           ...base,
           cache: { hit: true, negative: false, expiresAt: cached.expiresAt },
@@ -711,11 +803,66 @@ async function resolveProviders(input: AvailabilityIdInput): Promise<ResolvedPro
       }
     }
 
+    // Enriquecimento de CANAIS: o Balloonerismm trouxe providers, mas pode tê-los
+    // entregue de forma genérica (ex.: "Prime Video" quando o título está, na verdade,
+    // só dentro do canal "Diamond Films"). Quando há um host de canais genérico no
+    // resultado, consultamos o JustWatch (granularidade de canal) e mesclamos. Só roda
+    // no caminho ao vivo (este branch já exige !cacheOnly), region BR, e env-gated. A
+    // própria source JustWatch tem cache forte (6h), então o volume é baixo.
+    let liveProviders = detailed.providers;
+    if (
+      region === "BR" &&
+      detailed.outcome === "ok" &&
+      detailed.providers.length > 0 &&
+      isJustWatchChannelEnrichmentEnabled() &&
+      hasChannelHostGeneric(detailed.providers)
+    ) {
+      const { title: searchTitle, year } = await resolveTitleForJustWatch(input, mediaType);
+      justwatch.queryTitle = searchTitle;
+      justwatch.queryYear = year;
+      if (searchTitle) {
+        justwatch.enrichmentAttempted = true;
+        const jw = await getJustWatchUnofficialProviders({
+          title: searchTitle,
+          year,
+          imdbId,
+          tmdbId: input.tmdbId ?? null,
+          mediaType,
+          region,
+        }).catch(() => null);
+        if (jw) {
+          justwatch.outcome = jw.outcome;
+          justwatch.offersCount = jw.offersCount;
+          justwatch.providersParsed = jw.providers.length;
+          justwatch.emptyReason = jw.emptyReason;
+          if (jw.matched) {
+            justwatch.matchedTitle = jw.matched.title;
+            justwatch.matchedImdbId = jw.matched.imdbId;
+            justwatch.matchedTmdbId = jw.matched.tmdbId;
+            justwatch.matchReason = jw.matched.matchedVia;
+          }
+          if (jw.outcome === "ok" && jw.providers.length > 0) {
+            const merged = mergeChannelOffers(detailed.providers, jw.providers);
+            if (merged.changed) {
+              liveProviders = merged.providers;
+              justwatch.enrichmentReplaced = merged.replaced;
+              justwatch.enrichmentAdded = merged.added;
+              console.log(
+                `[availability] channelEnrichment imdb=${imdbId} region=${region} replaced=${merged.replaced.length} added=${merged.added.length}`,
+              );
+            }
+          }
+        }
+      } else {
+        justwatch.emptyReason = "missing_title_local";
+      }
+    }
+
     return {
       ...base,
       providerPath: detailed.path || `/${mediaType}/${imdbId}/watch/providers`,
-      providers: detailed.providers,
-      source: detailed.providers.length > 0 ? "balloonerismm" : "none",
+      providers: liveProviders,
+      source: liveProviders.length > 0 ? "balloonerismm" : "none",
       // Só é "live" (persistível) quando NÃO foi erro. Erro nunca vira cache negativo.
       live: detailed.outcome !== "error",
       balloonOutcome: detailed.outcome,
@@ -825,6 +972,10 @@ async function resolveAvailabilityCore(
   const grouped = groupProviders(providers);
   const hasProviders = countProviders(grouped) > 0;
 
+  if (hasProviders && live && region === "BR") {
+    void ensureDiscoveredStreamingProviders(providers, region);
+  }
+
   // Status temporal: só vale a pena para filmes ainda sem streaming.
   // Gate por data de lançamento conhecida para não chamar release_dates em catálogo antigo.
   let isInTheaters = false;
@@ -923,6 +1074,7 @@ async function resolveAvailabilityCore(
     isInTheaters,
     isFutureRelease,
     release: releaseStatus,
+    providerPreferences: input.providerPreferences,
   });
 
   const debug: AvailabilityDebug = {
@@ -966,17 +1118,27 @@ async function resolveAvailabilityCore(
   return { summary, debug };
 }
 
+async function withProviderPreferences(
+  input: AvailabilityIdInput,
+): Promise<AvailabilityIdInput> {
+  if (input.providerPreferences !== undefined) return input;
+  return {
+    ...input,
+    providerPreferences: await getUserProviderDisplayPreferences(),
+  };
+}
+
 export async function getTitleAvailability(
   input: AvailabilityIdInput,
 ): Promise<TitleAvailabilitySummary> {
-  return (await resolveAvailabilityCore(input)).summary;
+  return (await resolveAvailabilityCore(await withProviderPreferences(input))).summary;
 }
 
 /** Igual a getTitleAvailability, mas também retorna o trace de diagnóstico (rota ?debug=1). */
 export async function getTitleAvailabilityWithDebug(
   input: AvailabilityIdInput,
 ): Promise<{ summary: TitleAvailabilitySummary; debug: AvailabilityDebug }> {
-  return resolveAvailabilityCore(input);
+  return resolveAvailabilityCore(await withProviderPreferences(input));
 }
 
 /** Açúcar: hidrata um único título (alias semântico de getTitleAvailability). */
@@ -1034,6 +1196,10 @@ export async function hydrateManyTitleAvailability<K>(
   const cacheOnly = options.cacheOnly ?? false;
   const result = new Map<K, TitleAvailabilitySummary>();
   let cursor = 0;
+  const needsSharedPreferences = items.some(({ input }) => input.providerPreferences === undefined);
+  const sharedPreferences = needsSharedPreferences
+    ? await getUserProviderDisplayPreferences()
+    : [];
 
   async function worker() {
     while (cursor < items.length) {
@@ -1041,11 +1207,24 @@ export async function hydrateManyTitleAvailability<K>(
       const { key, input } = items[index];
       // suppressAutoWarm: o warm em lote (warmCold) abaixo já cobre os revalidáveis de
       // forma limitada — evita que cada item agende seu próprio warm (tempestade).
-      const effectiveInput = cacheOnly ? { ...input, cacheOnly: true, suppressAutoWarm: true } : input;
+      const personalizedInput = input.providerPreferences === undefined
+        ? { ...input, providerPreferences: sharedPreferences }
+        : input;
+      const effectiveInput = cacheOnly
+        ? { ...personalizedInput, cacheOnly: true, suppressAutoWarm: true }
+        : personalizedInput;
       try {
         result.set(key, await getTitleAvailability(effectiveInput));
       } catch {
-        result.set(key, emptyAvailabilitySummary(input.region));
+        result.set(
+          key,
+          emptyAvailabilitySummary(
+            normalizeStreamingRegion(input.region, {
+              source: "availability-batch-empty",
+              explicit: input.region != null,
+            }),
+          ),
+        );
       }
     }
   }

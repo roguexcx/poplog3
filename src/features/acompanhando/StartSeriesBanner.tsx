@@ -4,6 +4,10 @@ import { ChevronLeft, ChevronRight, Play, Sparkles } from "lucide-react";
 import Image from "next/image";
 import { useRef } from "react";
 import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
+import {
+  getCanonicalProviderDisplayName,
+  resolveProviderLogoForRender,
+} from "@/lib/streaming/provider-display";
 
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import type { WatchlistPickItem } from "@/features/acompanhando/WatchlistPickCard";
@@ -20,12 +24,18 @@ function tmdbImage(path: string | null, size: "w92" | "w185" | "w342" | "w500" |
 
 function ProviderPill({ item }: { item: WatchlistPickItem }) {
   if (!item.best_provider_name) return null;
+  const providerName =
+    getCanonicalProviderDisplayName({ name: item.best_provider_name }) ?? item.best_provider_name;
+  const providerLogo = resolveProviderLogoForRender({
+    name: providerName,
+    logoUrl: item.best_provider_logo,
+  });
 
   return (
     <span className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-white/[0.12] bg-black/35 px-2.5 py-1 text-[11px] font-bold text-white/80 backdrop-blur-md">
-      {item.best_provider_logo ? (
+      {providerLogo ? (
         <Image
-          src={tmdbImage(item.best_provider_logo, "original") ?? ""}
+          src={providerLogo}
           alt=""
           width={16}
           height={16}
@@ -33,7 +43,7 @@ function ProviderPill({ item }: { item: WatchlistPickItem }) {
           loading="lazy"
         />
       ) : null}
-      <span className="truncate">{item.best_provider_name}</span>
+      <span className="truncate">{providerName}</span>
     </span>
   );
 }

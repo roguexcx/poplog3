@@ -6,13 +6,13 @@ import { applyRadarPersonalFilter, getRadarLibraryIdentity } from "@/server/rada
 import { radarPayloadToLegacyAgenda } from "@/server/radar-trakt/radar-legacy-adapter";
 import type { RadarMode, RadarPayload } from "@/server/radar-trakt/types";
 import { FEATURES } from "@/lib/features";
+import { normalizeStreamingRegion } from "@/server/streaming/region";
 
 export const revalidate = 0;
 
 export type { RadarMode };
 export type RadarResponse = RadarPayload;
 
-const DEFAULT_REGION = "BR";
 const DEFAULT_LANGUAGE = "pt-BR";
 const WINDOW_DAYS = 62;
 
@@ -26,7 +26,10 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const mode: RadarMode = searchParams.get("mode") === "personal" ? "personal" : "general";
-    const region = searchParams.get("region") ?? DEFAULT_REGION;
+    const region = normalizeStreamingRegion(searchParams.get("region"), {
+      source: "api:radar:region",
+      explicit: searchParams.has("region"),
+    });
     const language = searchParams.get("language") ?? DEFAULT_LANGUAGE;
     const debug = searchParams.get("debug") === "1" || searchParams.get("debug") === "true";
 

@@ -15,6 +15,13 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 export const FUTURE_SEASON_WINDOW_DAYS = 120;
 
 /**
+ * Janela (em dias) após a estreia de uma temporada em que ela ainda é
+ * considerada "em exibição". Cobre temporadas semanais longas (≈8–13 episódios
+ * → ~70–90 dias) com folga, sem manter o sinal aceso entre temporadas.
+ */
+export const ACTIVE_SEASON_WINDOW_DAYS = 120;
+
+/**
  * Forma mínima de uma temporada necessária para validação.
  * Compatível com PoplogTitleSeasonStub e com o tmdb_payload raw.
  */
@@ -74,11 +81,36 @@ function isFinishedStatus(status: string): boolean {
 
 function isReturningStatus(status: string): boolean {
   return (
-    status === "returning series" ||
+    status.includes("return") ||
+    status === "continuing" ||
     status === "in production" ||
     status === "post production" ||
     status === "planned"
   );
+}
+
+/**
+ * Indica se alguma temporada está atualmente em exibição: estreia já no passado
+ * e ainda dentro de `ACTIVE_SEASON_WINDOW_DAYS`. Ignora temporada 0 (especiais).
+ * É o sinal direto de "temporada ativa" quando o payload não traz next/last ep.
+ */
+function hasSeasonCurrentlyAiring(
+  seasons: SeasonFilterable[] | null | undefined,
+  now: Date,
+): boolean {
+  if (!seasons?.length) return false;
+  const nowMs = now.getTime();
+  const windowMs = ACTIVE_SEASON_WINDOW_DAYS * DAY_MS;
+
+  for (const season of seasons) {
+    const num = season.season_number;
+    if (typeof num !== "number" || num <= 0) continue;
+    const air = parseDate(season.air_date);
+    if (!air) continue;
+    const started = air.getTime();
+    if (started <= nowMs && nowMs - started <= windowMs) return true;
+  }
+  return false;
 }
 
 /**
@@ -129,6 +161,13 @@ export function computeSeriesState(input: SeriesStateInput): SeriesState {
     return "episode-available";
   }
 
+  // 4.5. Temporada atualmente em exibição (estreia recente, dentro da janela
+  // ativa). Sinal direto de "no ar" quando o payload não traz next/last episode
+  // — corrige séries em exibição que caíam erroneamente em "Aguardando temporada".
+  if (hasSeasonCurrentlyAiring(input.seasons, now)) {
+    return "in-season";
+  }
+
   // 5. Série marcada como ainda em curso mas sem episódio em vista.
   if (isReturningStatus(status)) {
     return "awaiting-next-season";
@@ -167,11 +206,14 @@ export type SeriesStateTitleSource = {
     status?: string | null;
     next_episode_to_air?: EpisodeStub | null;
     last_episode_to_air?: EpisodeStub | null;
+    seasons?: SeasonFilterable[] | null;
   } | null;
   /** Quando vem fora do tmdb_payload (caminho legado). */
   status?: string | null;
   next_episode_to_air?: EpisodeStub | null;
   last_episode_to_air?: EpisodeStub | null;
+  /** Temporadas conhecidas (premiere por temporada) — sinal de "em exibição". */
+  seasons?: SeasonFilterable[] | null;
 };
 
 /**
@@ -193,6 +235,7 @@ export function seriesStateFromTitle(
       payload?.next_episode_to_air ?? title.next_episode_to_air ?? null,
     lastEpisodeToAir:
       payload?.last_episode_to_air ?? title.last_episode_to_air ?? null,
+    seasons: payload?.seasons ?? title.seasons ?? null,
     now: options?.now,
     freshEpisodeWindowDays: options?.freshEpisodeWindowDays,
   });

@@ -6,6 +6,7 @@ import ActionButton from "@/components/ui/ActionButton";
 import EmptyState from "@/components/ui/EmptyState";
 import TitlePageView from "@/features/title/TitlePageView";
 import { getTitlePageData } from "@/server/titles/get-title-page-data";
+import { getPoplogTitleDetails } from "@/server/titles/poplog-title-details";
 import { formatDuration, logger } from "@/server/logging/logger";
 import type { PoplogTitleSourceHint } from "@/server/titles/poplog-title-identity";
 
@@ -26,7 +27,13 @@ export async function generateMetadata({ params }: PageProps): Promise<Metadata>
     return { title: "Título" };
   }
 
-  const title = await getTitlePageData({ mediaType, id, sourceHint: "auto" });
+  const title = await getPoplogTitleDetails({
+    mediaType,
+    id,
+    sourceHint: "auto",
+    region: "BR",
+    locale: "pt-BR",
+  });
 
   return {
     title: title?.title ?? "Título",
@@ -88,15 +95,15 @@ export default async function TitlePage({ params, searchParams }: PageProps) {
   });
 
   // Normalização da URL canônica:
-  // A URL oficial é sempre /title/{mediaType}/{poplogId} onde poplogId é o CUID
-  // local do banco. Qualquer alias (imdbId, slug, tmdbId numérico, sintético) deve
-  // redirecionar permanentemente (308) para a URL canônica.
+  // A URL oficial é sempre /title/{resolvedMediaType}/{poplogId}. Qualquer alias
+  // redireciona uma única vez para o caminho resolvido, incluindo correção movie/tv.
   if (title?.poplogId) {
     const canonicalId = String(title.poplogId);
+    const canonicalPath = `/title/${title.mediaType}/${canonicalId}`;
+    const currentPath = `/title/${mediaType}/${id}`;
 
-    // Só redireciona se o id atual não for já o poplogId canônico
-    if (canonicalId && canonicalId !== id && !refresh) {
-      permanentRedirect(`/title/${mediaType}/${canonicalId}`);
+    if (canonicalId && canonicalPath !== currentPath && !refresh) {
+      permanentRedirect(canonicalPath);
     }
   } else {
     // Fallback legado: se não há poplogId mas há um tmdbId positivo diferente do
@@ -111,7 +118,11 @@ export default async function TitlePage({ params, searchParams }: PageProps) {
       requestedNumeric < 0 &&
       canonicalTmdbId !== requestedNumeric
     ) {
-      redirect(`/title/${mediaType}/${canonicalTmdbId}`);
+      const canonicalPath = `/title/${title.mediaType}/${canonicalTmdbId}`;
+      const currentPath = `/title/${mediaType}/${id}`;
+      if (canonicalPath !== currentPath && !refresh) {
+        redirect(canonicalPath);
+      }
     }
   }
 

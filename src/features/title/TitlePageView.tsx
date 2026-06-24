@@ -19,6 +19,7 @@ import TitleRecommendations from "./TitleRecommendations";
 import TitleSeasonsCard from "./TitleSeasonsCard";
 import TitleSyncBar from "./TitleSyncBar";
 import TitleTrailer from "./TitleTrailer";
+import TitleUniverseSection from "./TitleUniverseSection";
 import UserRatingWidget from "./UserRatingWidget";
 
 import type { TitlePageData } from "./types";
@@ -150,6 +151,8 @@ export default function TitlePageView({ title }: TitlePageViewProps) {
                 (typeof title.id === "number" ? title.id : null)
               }
             />
+
+            <TitleUniverseSection universe={title.universe ?? null} />
 
             <TitleRecommendations recommendations={title.recommendations} />
           </div>

@@ -7,6 +7,7 @@
  */
 import { db } from "@/server/db/client";
 import type { AuthUser } from "@/server/auth/types";
+import { ensureUserUsername } from "@/server/auth/username";
 
 const DEFAULT_LOCAL_USER_ID = "local-user";
 
@@ -24,6 +25,9 @@ export async function getLocalAuthUser(): Promise<AuthUser | null> {
       update: {},
       create: { id, email: `${id}@poplog.dev`, name: "POPLOG Local Dev" },
     });
+    if (!user.username) {
+      await ensureUserUsername({ userId: user.id, email: user.email, name: user.name });
+    }
     return {
       id: user.id,
       email: user.email,

@@ -1,4 +1,9 @@
 import type { TitleProvider, TitleProviderType } from "@/features/title/types";
+import {
+  CANONICAL_PROVIDER_NAMES,
+  CANONICAL_PROVIDER_LOGOS,
+  getCanonicalProviderLogoUrl,
+} from "@/lib/streaming/provider-display";
 
 export type ProviderAccessKind =
   | "included"
@@ -10,6 +15,15 @@ export type ProviderAccessKind =
   | "free"
   | "unknown";
 
+export type ProviderCategory = "principais" | "gratuitos" | "canais" | "aluguel" | "outros";
+
+export type ProviderPresentation = {
+  category: ProviderCategory;
+  brandColor: string;
+  textColor: string;
+  shortLabel: string;
+};
+
 export type NormalizedProvider = {
   /** Nome seguro para UI, preservando a variação de acesso. */
   name: string;
@@ -17,12 +31,16 @@ export type NormalizedProvider = {
   originalName: string;
   rootKey: string;
   rootName: string;
+  /** Família de assinatura. Mantida separada para permitir grupos multi-marca no futuro. */
+  familyKey: string;
+  familyName: string;
   variantKey: string;
   variantName: string | null;
   accessKind: ProviderAccessKind;
   isOfficial: boolean;
   defaultPriority: number;
   logoPath: string | null;
+  presentation: ProviderPresentation;
 };
 
 /** Tipo de oferta normalizado (compartilhado pelo Hero/continuidade). */
@@ -49,38 +67,118 @@ type RootDefinition = {
   aliases: string[];
   defaultPriority: number;
   logoPath?: string | null;
+  presentation: ProviderPresentation;
 };
 
+function presentation(
+  brandColor: string,
+  shortLabel: string,
+  category: ProviderCategory = "principais",
+  textColor = "#ffffff",
+): ProviderPresentation {
+  return { category, brandColor, textColor, shortLabel };
+}
+
+type ProviderFamilyResolution = {
+  familyKey: string;
+  familyName: string;
+};
+
+const CHANNEL_VARIANT_FAMILIES: Record<string, ProviderFamilyResolution> = {
+  "prime-video-channel": { familyKey: "prime-video", familyName: "Prime Video" },
+  "apple-tv-channel": { familyKey: "apple-tv-plus", familyName: "Apple TV+" },
+  "roku-channel": { familyKey: "roku", familyName: "Roku" },
+  "partner-channel": { familyKey: "partner-channels", familyName: "Canais parceiros" },
+};
+
+export function resolveProviderFamily(input: {
+  rootKey: string;
+  rootName: string;
+  variantKey: string;
+  accessKind?: ProviderAccessKind | string | null;
+}): ProviderFamilyResolution {
+  if (input.accessKind === "partner_channel") {
+    return CHANNEL_VARIANT_FAMILIES[input.variantKey] ?? CHANNEL_VARIANT_FAMILIES["partner-channel"];
+  }
+
+  return {
+    familyKey: input.rootKey,
+    familyName: input.rootName,
+  };
+}
+
 const ROOTS: RootDefinition[] = [
-  { key: "netflix", name: "Netflix", aliases: ["netflix"], defaultPriority: 10 },
+  {
+    key: "netflix",
+    name: "Netflix",
+    aliases: ["netflix"],
+    defaultPriority: 10,
+    logoPath: CANONICAL_PROVIDER_LOGOS.netflix,
+    presentation: presentation("#E50914", "N"),
+  },
   {
     key: "prime-video",
     name: "Prime Video",
     aliases: ["prime video", "amazon prime video", "amazon video"],
     defaultPriority: 20,
+    logoPath: CANONICAL_PROVIDER_LOGOS.primeVideo,
+    presentation: presentation("#00A8E1", "P"),
   },
-  { key: "disney-plus", name: "Disney+", aliases: ["disney+", "disney plus"], defaultPriority: 30 },
-  { key: "hbo-max", name: "HBO Max", aliases: ["hbo max", "hbomax", "max", "max.com"], defaultPriority: 40 },
+  { key: "disney-plus", name: "Disney+", aliases: ["disney+", "disney plus"], defaultPriority: 30, logoPath: CANONICAL_PROVIDER_LOGOS.disneyPlus, presentation: presentation("#113CCF", "D+") },
+  {
+    key: "max",
+    name: CANONICAL_PROVIDER_NAMES.max,
+    aliases: ["hbo max", "hbomax", "max", "max.com"],
+    defaultPriority: 40,
+    logoPath: getCanonicalProviderLogoUrl({ rootKey: "max" }),
+    presentation: presentation("#002BE7", "M"),
+  },
   {
     key: "apple-tv-plus",
     name: "Apple TV+",
-    aliases: ["apple tv+", "appletv+", "apple tv plus", "apple tv"],
+    aliases: ["apple tv+", "appletv+", "apple tv plus", "appletv plus"],
     defaultPriority: 50,
-    logoPath: "/68MNrwlkpF7WnmNPXLah69CR5cb.jpg",
+    logoPath: CANONICAL_PROVIDER_LOGOS.appleTvPlus,
+    presentation: presentation("#1C1C1E", "▶"),
   },
-  { key: "globoplay", name: "Globoplay", aliases: ["globoplay"], defaultPriority: 60 },
-  { key: "paramount-plus", name: "Paramount+", aliases: ["paramount+", "paramount plus"], defaultPriority: 70 },
-  { key: "crunchyroll", name: "Crunchyroll", aliases: ["crunchyroll"], defaultPriority: 80 },
-  { key: "mubi", name: "MUBI", aliases: ["mubi"], defaultPriority: 90 },
-  { key: "telecine", name: "Telecine", aliases: ["telecine", "telecine play"], defaultPriority: 100 },
-  { key: "pluto-tv", name: "Pluto TV", aliases: ["pluto tv"], defaultPriority: 110 },
-  { key: "mercado-play", name: "Mercado Play", aliases: ["mercado play"], defaultPriority: 120 },
-  { key: "plex", name: "Plex", aliases: ["plex"], defaultPriority: 130 },
-  { key: "netmovies", name: "NetMovies", aliases: ["netmovies"], defaultPriority: 140 },
-  { key: "claro-video", name: "Claro Video", aliases: ["claro video"], defaultPriority: 150 },
-  { key: "star-plus", name: "Star+", aliases: ["star+", "star plus"], defaultPriority: 160 },
-  { key: "youtube", name: "YouTube", aliases: ["youtube", "youtube premium"], defaultPriority: 170 },
-  { key: "google-play", name: "Google Play", aliases: ["google play movies", "google play"], defaultPriority: 180 },
+  {
+    key: "apple-tv-store",
+    name: "Apple TV",
+    aliases: ["apple tv store", "appletv store", "itunes", "apple itunes"],
+    defaultPriority: 55,
+    logoPath: CANONICAL_PROVIDER_LOGOS.appleTvStore,
+    presentation: presentation("#1C1C1E", "AT", "aluguel"),
+  },
+  { key: "globoplay", name: "Globoplay", aliases: ["globoplay"], defaultPriority: 60, logoPath: CANONICAL_PROVIDER_LOGOS.globoplay, presentation: presentation("#D50032", "G") },
+  { key: "paramount-plus", name: "Paramount+", aliases: ["paramount+", "paramount plus"], defaultPriority: 70, logoPath: CANONICAL_PROVIDER_LOGOS.paramountPlus, presentation: presentation("#0064FF", "P+") },
+  { key: "crunchyroll", name: "Crunchyroll", aliases: ["crunchyroll"], defaultPriority: 80, logoPath: CANONICAL_PROVIDER_LOGOS.crunchyroll, presentation: presentation("#F47521", "CR") },
+  { key: "mubi", name: "MUBI", aliases: ["mubi"], defaultPriority: 90, logoPath: CANONICAL_PROVIDER_LOGOS.mubi, presentation: presentation("#2C2C2C", "MB") },
+  { key: "telecine", name: "Telecine", aliases: ["telecine", "telecine play"], defaultPriority: 100, logoPath: CANONICAL_PROVIDER_LOGOS.telecinePrimeChannel, presentation: presentation("#003087", "TC", "canais") },
+  { key: "pluto-tv", name: "Pluto TV", aliases: ["pluto tv"], defaultPriority: 110, logoPath: CANONICAL_PROVIDER_LOGOS.plutoTv, presentation: presentation("#1F1D36", "PT", "gratuitos") },
+  { key: "mercado-play", name: "Mercado Play", aliases: ["mercado play"], defaultPriority: 120, presentation: presentation("#FFE600", "MP", "gratuitos", "#000000") },
+  { key: "plex", name: "Plex", aliases: ["plex"], defaultPriority: 130, presentation: presentation("#E5A00D", "PX", "gratuitos", "#000000") },
+  { key: "netmovies", name: "NetMovies", aliases: ["netmovies"], defaultPriority: 140, presentation: presentation("#2D2D2D", "NM", "gratuitos") },
+  { key: "claro-video", name: "Claro Video", aliases: ["claro video", "claro tv+"], defaultPriority: 150, logoPath: CANONICAL_PROVIDER_LOGOS.claroVideo, presentation: presentation("#CC0000", "CV", "outros") },
+  { key: "star-plus", name: "Star+", aliases: ["star+", "star plus"], defaultPriority: 160, presentation: presentation("#0A2A6E", "S+") },
+  { key: "youtube", name: "YouTube", aliases: ["youtube", "youtube premium"], defaultPriority: 170, presentation: presentation("#FF0000", "YT", "outros") },
+  { key: "google-play", name: "Google Play", aliases: ["google play movies", "google play"], defaultPriority: 180, presentation: presentation("#34A853", "GP", "aluguel") },
+  { key: "roku", name: "Roku", aliases: ["roku", "roku channel"], defaultPriority: 185, presentation: presentation("#662D91", "R", "outros") },
+  { key: "mgm-plus", name: "MGM+", aliases: ["mgm+", "mgm plus"], defaultPriority: 190, presentation: presentation("#C4A020", "MG", "canais", "#000000") },
+  { key: "universal-plus", name: "Universal+", aliases: ["universal+", "universal plus"], defaultPriority: 200, logoPath: CANONICAL_PROVIDER_LOGOS.universalPrimeChannel, presentation: presentation("#2A2A2A", "U+", "canais") },
+  { key: "wow", name: "WOW", aliases: ["wow", "wow presents plus"], defaultPriority: 210, presentation: presentation("#00C2FF", "W", "outros") },
+  // ── Marcas que existem majoritariamente como CANAIS (Amazon/Apple TV Channels) no BR ──
+  // Sem essas raízes, canais vindos da fonte (ex.: "Diamond Films Amazon Channel") caíam
+  // num root slugificado sem cor/prioridade. Categoria "canais" reforça o agrupamento na UI
+  // mesmo quando o accessKind já a derivaria — e dá marca/identidade estável ao Perfil.
+  { key: "diamond-films", name: "Diamond Films", aliases: ["diamond films", "diamond filmes", "diamond"], defaultPriority: 220, presentation: presentation("#1A6BB5", "DF", "canais") },
+  { key: "reserva-imovision", name: "Reserva Imovision", aliases: ["reserva imovision", "imovision"], defaultPriority: 230, presentation: presentation("#7A1F2B", "RI", "canais") },
+  { key: "looke", name: "Looke", aliases: ["looke"], defaultPriority: 240, presentation: presentation("#E10098", "LK", "canais") },
+  { key: "belas-artes", name: "Belas Artes à La Carte", aliases: ["belas artes a la carte", "belas artes", "belasartes a la carte"], defaultPriority: 250, presentation: presentation("#111111", "BA", "canais") },
+  { key: "filmbox", name: "Filmbox", aliases: ["filmbox", "filmbox+", "filmbox plus"], defaultPriority: 260, presentation: presentation("#E2231A", "FB", "canais") },
+  { key: "lionsgate-plus", name: "Lionsgate+", aliases: ["lionsgate+", "lionsgate plus", "lionsgate"], defaultPriority: 270, presentation: presentation("#1B1B1B", "LG", "canais") },
+  { key: "filmelier-plus", name: "Filmelier+", aliases: ["filmelier+", "filmelier plus", "filmelier"], defaultPriority: 280, presentation: presentation("#FF3B30", "FL", "canais") },
+  { key: "o2play", name: "O2Play", aliases: ["o2play", "o2 play"], defaultPriority: 290, presentation: presentation("#0098D8", "O2", "canais") },
+  { key: "curta-on", name: "Curta!On", aliases: ["curta!on", "curta on", "curtaon"], defaultPriority: 300, presentation: presentation("#F39200", "CO", "canais", "#000000") },
 ];
 
 const ROOT_BY_ALIAS = new Map(
@@ -175,6 +273,9 @@ function resolveVariant(key: string, type?: TitleProviderType | AvailabilityType
   }
 
   const partnerPatterns: Array<{ pattern: RegExp; key: string; label: string }> = [
+    { pattern: /\s+via prime video$/, key: "prime-video-channel", label: "Via Prime Video" },
+    { pattern: /\s+via apple tv$/, key: "apple-tv-channel", label: "Via Apple TV" },
+    { pattern: /\s+via parceiro$/, key: "partner-channel", label: "Via parceiro" },
     { pattern: /\s+(?:amazon|prime video)\s+channel$/, key: "prime-video-channel", label: "Via Prime Video" },
     { pattern: /\s+apple tv\s+channel$/, key: "apple-tv-channel", label: "Via Apple TV" },
     { pattern: /\s+roku(?:\s+premium)?\s+channel$/, key: "roku-channel", label: "Via Roku" },
@@ -190,6 +291,16 @@ function resolveVariant(key: string, type?: TitleProviderType | AvailabilityType
         isOfficial: false,
       };
     }
+  }
+
+  if (/\s+channels?$/.test(key)) {
+    return {
+      baseName: key.replace(/\s+channels?$/, "").trim(),
+      variantKey: "partner-channel",
+      variantName: "Via parceiro",
+      accessKind: "partner_channel",
+      isOfficial: false,
+    };
   }
 
   if (type === "rent") {
@@ -233,6 +344,15 @@ function findRoot(baseName: string): RootDefinition | null {
   return candidates.find(({ alias }) => baseName === alias || baseName.startsWith(`${alias} `))?.root ?? null;
 }
 
+function resolveAmbiguousAppleTvRoot(key: string, variant: VariantResolution): RootDefinition | null {
+  const isPlainAppleTv = key === "apple tv" || key === "appletv" || variant.baseName === "apple tv" || variant.baseName === "appletv";
+  if (!isPlainAppleTv) return null;
+  if (["rent", "buy", "rent_buy"].includes(variant.accessKind)) {
+    return ROOT_BY_ALIAS.get("apple tv store") ?? null;
+  }
+  return ROOT_BY_ALIAS.get("apple tv plus") ?? null;
+}
+
 export function normalizeProvider(
   providerName: string | null | undefined,
   logoPath?: string | null,
@@ -245,23 +365,50 @@ export function normalizeProvider(
   const variant = resolveVariant(key, type);
   // Amazon Video é a loja do Prime Video; após remover a semântica comercial,
   // ainda precisamos apontá-la explicitamente para a raiz Prime Video.
-  const root = findRoot(variant.baseName) ?? findRoot(key);
+  const root = resolveAmbiguousAppleTvRoot(key, variant) ?? findRoot(variant.baseName) ?? findRoot(key);
   const fallbackRootName = titleCase(variant.baseName || key);
   const rootKey = root?.key ?? slugify(fallbackRootName);
   const rootName = root?.name ?? fallbackRootName;
-  const displayName = variant.variantName ? `${rootName} ${variant.variantName.toLowerCase()}` : rootName;
+  const displayVariant = variant.variantName
+    ? `${variant.variantName.charAt(0).toLowerCase()}${variant.variantName.slice(1)}`
+    : null;
+  const displayName = displayVariant ? `${rootName} ${displayVariant}` : rootName;
+  const family = resolveProviderFamily({
+    rootKey,
+    rootName,
+    variantKey: variant.variantKey,
+    accessKind: variant.accessKind,
+  });
+  const fallbackPresentation = presentation("#444444", (rootName || "?").slice(0, 2).toUpperCase(), "outros");
+  const rootPresentation = root?.presentation ?? fallbackPresentation;
+  const category: ProviderCategory =
+    variant.accessKind === "partner_channel"
+      ? "canais"
+      : ["rent", "buy", "rent_buy"].includes(variant.accessKind)
+        ? "aluguel"
+        : variant.accessKind === "free"
+          ? "gratuitos"
+          : rootPresentation.category;
 
   return {
     name: displayName,
     originalName,
     rootKey,
     rootName,
+    familyKey: family.familyKey,
+    familyName: family.familyName,
     variantKey: variant.variantKey,
     variantName: variant.variantName,
     accessKind: variant.accessKind,
     isOfficial: variant.isOfficial,
     defaultPriority: root?.defaultPriority ?? 1_000,
-    logoPath: logoPath ?? root?.logoPath ?? null,
+    logoPath: getCanonicalProviderLogoUrl({
+      rootKey,
+      variantKey: variant.variantKey,
+      name: displayName,
+      logoUrl: logoPath ?? null,
+    }),
+    presentation: { ...rootPresentation, category },
   };
 }
 
@@ -282,12 +429,14 @@ export function normalizeTitleProvider(provider: TitleProvider): TitleProvider {
     originalName: normalized.originalName,
     rootKey: normalized.rootKey,
     rootName: normalized.rootName,
+    familyKey: normalized.familyKey,
+    familyName: normalized.familyName,
     variantKey: normalized.variantKey,
     variantName: normalized.variantName,
     accessKind: normalized.accessKind,
     isOfficial: normalized.isOfficial,
     defaultPriority: normalized.defaultPriority,
-    logoUrl: provider.logoUrl ?? normalized.logoPath,
+    logoUrl: normalized.logoPath ?? provider.logoUrl ?? null,
   };
 }
 

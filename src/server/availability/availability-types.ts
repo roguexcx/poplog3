@@ -9,6 +9,7 @@
  */
 
 import type { TitleProvider } from "@/features/title/types";
+import type { ProviderDisplayPreference } from "@/server/streaming/provider-normalization";
 import type { ReleaseKind } from "./release-status";
 
 export type AvailabilityRegion = string; // "BR" | "US" | …
@@ -120,6 +121,8 @@ export type AvailabilityIdInput = {
    * a busca correta. Só tem efeito quando cacheOnly = false.
    */
   bypassNegativeCache?: boolean;
+  /** Injetada uma vez por request/lote; vazio desativa personalização explicitamente. */
+  providerPreferences?: ProviderDisplayPreference[];
 };
 
 export const EMPTY_GROUPED_PROVIDERS: GroupedProviders = {

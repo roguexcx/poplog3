@@ -29,6 +29,10 @@ import { attachBestProvider } from "@/server/availability/attach-best-provider";
 import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import type { UserTitle } from "@/types/user";
 import {
+  readContinuitySectionCache,
+  writeContinuitySectionCache,
+} from "@/server/continuity/continuity-section-cache";
+import {
   getUserLibraryIdentityIndex,
   hasTitleIdentity,
   type LibraryIdentityIndex,
@@ -41,11 +45,58 @@ const MAX_SEEDS             = 12;
 const DEFAULT_FINAL_COUNT   = 6;   // home desktop exibe 1 featured + 5 small = 6 slots
 const MAX_FINAL_COUNT       = 30;
 const SESSION_EXCLUDE_CAP   = 150;
+const HOME_FAST_COUNT       = 6;
+const FOR_YOU_REGION        = "BR";
+const FOR_YOU_LANGUAGE      = "pt-BR";
 // Balloonerismm is the primary source. All seeds with imdbId are queried.
 // Concurrency cap avoids rate-limit cascades; hydration cap limits Trakt calls.
 const BALLOON_CONCURRENCY   = 4;
 const HYDRATION_CAP         = 40; // top-N candidates to enrich via Trakt single-item lookup
 const HYDRATION_CONCURRENCY = 8;
+const FOR_YOU_POOL_CACHE_VERSION = 2;
+const PERSISTENT_POOL_TTL_MS     = 60 * 60_000;
+const LOCAL_FALLBACK_TTL_MS      = 8 * 60_000;
+
+type ForYouSurface = "home" | "page";
+type ForYouMode = "summary" | "full";
+type ForYouCacheStatus =
+  | "memory_hit"
+  | "persistent_hit"
+  | "persistent_stale"
+  | "miss"
+  | "local_fallback"
+  | "warming"
+  | "error";
+
+type PerfTracker = {
+  startedAt: number;
+  lastAt: number;
+  stages: Record<string, number>;
+};
+
+function createPerfTracker(): PerfTracker {
+  const now = Date.now();
+  return { startedAt: now, lastAt: now, stages: {} };
+}
+
+function markPerf(perf: PerfTracker, stage: string): void {
+  const now = Date.now();
+  perf.stages[stage] = (perf.stages[stage] ?? 0) + (now - perf.lastAt);
+  perf.lastAt = now;
+}
+
+function finishPerf(perf: PerfTracker): Record<string, number> {
+  return { ...perf.stages, total: Date.now() - perf.startedAt };
+}
+
+function hashText(input: string): string {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i++) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
 
 // ─── Genre map (TMDB IDs → pt-BR) ─────────────────────────────────────────────
 
@@ -229,6 +280,30 @@ export type ForYouApiItem = {
   best_provider_name?: string | null;
   best_provider_type?: string | null;
   best_provider_logo?: string | null;
+};
+
+type ForYouApiMeta = {
+  surface: ForYouSurface;
+  mode: ForYouMode;
+  cacheStatus: ForYouCacheStatus;
+  stale: boolean;
+  source: string;
+  returned: number;
+  generatedAt?: string;
+  perf: Record<string, number>;
+};
+
+type ForYouApiResponse = {
+  featured: ForYouApiItem | null;
+  items: ForYouApiItem[];
+  recommendationSource: string;
+  meta: ForYouApiMeta;
+  emptyReason?: string;
+  retryAfterMs?: number;
+  staleCacheUsed?: boolean;
+  validSeeds?: number;
+  failedSeeds?: number;
+  cooldownActive?: boolean;
 };
 
 // ─── Seed building ─────────────────────────────────────────────────────────────
@@ -591,29 +666,76 @@ function buildRouteKey(titles: UserTitle[], limit: number, excludeKeys: Set<stri
 // biblioteca; a amostragem ponderada (weightedSample) e o filtro de `exclude` rodam
 // frescos a cada request, preservando a variedade entre recargas.
 
-const POOL_CACHE     = new Map<string, { eligible: RecCandidate[]; ts: number }>();
-const POOL_CACHE_TTL = 10 * 60_000; // 10 min
+type PoolCachePayload = {
+  version: number;
+  eligible: RecCandidate[];
+  source: string;
+  generatedAt: string;
+  libraryHash: string;
+};
+
+type PoolCacheRead = {
+  eligible: RecCandidate[];
+  source: string;
+  cacheStatus: ForYouCacheStatus;
+  stale: boolean;
+  generatedAt?: string;
+};
+
+const POOL_CACHE     = new Map<string, { eligible: RecCandidate[]; ts: number; source: string; generatedAt: string }>();
+const POOL_CACHE_TTL = 60 * 60_000; // 60 min
 const POOL_CACHE_MAX = 200;
 
-function buildPoolKey(titles: UserTitle[], userId: string | null): string {
-  const sig = titles
-    .map((t) => `${t.media_type}:${t.tmdb_id}:${t.status ?? ""}:${t.favorite ? 1 : 0}`)
+function buildLibrarySignature(titles: UserTitle[]): string {
+  return titles
+    .map((t) => [
+      t.media_type,
+      t.tmdb_id,
+      t.poplogId ?? "",
+      safeStr(t.imdb_id) ?? safeStr(t.externalIds?.imdbId) ?? "",
+      t.externalIds?.traktId ?? "",
+      t.externalIds?.slug ?? "",
+      t.status ?? "",
+      t.favorite ? 1 : 0,
+      t.stream_status ?? "",
+    ].join(":"))
     .sort()
     .join(",");
-  return `pool:${userId ?? "anon"}:${sig}`;
 }
 
-function readPoolCache(key: string): RecCandidate[] | null {
+function buildLibraryHash(titles: UserTitle[]): string {
+  return hashText(buildLibrarySignature(titles));
+}
+
+function buildPoolKey(titles: UserTitle[], userId: string | null): string {
+  return `pool:${userId ?? "anon"}:${buildLibraryHash(titles)}`;
+}
+
+function buildPersistentPoolSectionKey(libraryHash: string): string {
+  return `for_you_pool_v${FOR_YOU_POOL_CACHE_VERSION}:${libraryHash}`;
+}
+
+function cloneCandidates(candidates: RecCandidate[]): RecCandidate[] {
+  return JSON.parse(JSON.stringify(candidates)) as RecCandidate[];
+}
+
+function readPoolCache(key: string): PoolCacheRead | null {
   const hit = POOL_CACHE.get(key);
   if (!hit) return null;
   if (Date.now() - hit.ts > POOL_CACHE_TTL) {
     POOL_CACHE.delete(key);
     return null;
   }
-  return hit.eligible;
+  return {
+    eligible: cloneCandidates(hit.eligible),
+    source: hit.source,
+    cacheStatus: "memory_hit",
+    stale: false,
+    generatedAt: hit.generatedAt,
+  };
 }
 
-function writePoolCache(key: string, eligible: RecCandidate[]): void {
+function writePoolCache(key: string, eligible: RecCandidate[], source: string): void {
   if (POOL_CACHE.size >= POOL_CACHE_MAX) {
     // Evicção simples: remove a entrada mais antiga.
     let oldestKey: string | null = null;
@@ -623,7 +745,67 @@ function writePoolCache(key: string, eligible: RecCandidate[]): void {
     }
     if (oldestKey) POOL_CACHE.delete(oldestKey);
   }
-  POOL_CACHE.set(key, { eligible, ts: Date.now() });
+  POOL_CACHE.set(key, {
+    eligible: cloneCandidates(eligible),
+    ts: Date.now(),
+    source,
+    generatedAt: new Date().toISOString(),
+  });
+}
+
+async function readPersistentPoolCache(input: {
+  userId: string | null;
+  libraryHash: string;
+}): Promise<PoolCacheRead | null> {
+  const cached = await readContinuitySectionCache<PoolCachePayload>(
+    buildPersistentPoolSectionKey(input.libraryHash),
+    {
+      userId: input.userId,
+      region: FOR_YOU_REGION,
+      language: FOR_YOU_LANGUAGE,
+    },
+  );
+
+  if (
+    !cached?.payload ||
+    cached.payload.version !== FOR_YOU_POOL_CACHE_VERSION ||
+    cached.payload.libraryHash !== input.libraryHash ||
+    !Array.isArray(cached.payload.eligible)
+  ) {
+    return null;
+  }
+
+  return {
+    eligible: cloneCandidates(cached.payload.eligible),
+    source: cached.payload.source,
+    cacheStatus: cached.status === "hit" ? "persistent_hit" : "persistent_stale",
+    stale: cached.status === "stale",
+    generatedAt: cached.payload.generatedAt,
+  };
+}
+
+function writePersistentPoolCache(input: {
+  userId: string | null;
+  libraryHash: string;
+  eligible: RecCandidate[];
+  source: string;
+  ttlMs?: number;
+}): void {
+  const generatedAt = new Date().toISOString();
+  void writeContinuitySectionCache({
+    sectionKey: buildPersistentPoolSectionKey(input.libraryHash),
+    userId: input.userId,
+    region: FOR_YOU_REGION,
+    language: FOR_YOU_LANGUAGE,
+    ttlMs: input.ttlMs ?? PERSISTENT_POOL_TTL_MS,
+    payload: {
+      version: FOR_YOU_POOL_CACHE_VERSION,
+      eligible: cloneCandidates(input.eligible),
+      source: input.source,
+      generatedAt,
+      libraryHash: input.libraryHash,
+    } satisfies PoolCachePayload,
+  });
 }
 
 // ─── Gate de qualidade mínima ─────────────────────────────────────────────────
@@ -651,6 +833,116 @@ function passesQualityGate(c: RecCandidate): boolean {
   return true;
 }
 
+async function buildLocalFallbackCandidates(
+  titles: UserTitle[],
+  libraryIdentities: LibraryIdentityIndex,
+  limit: number,
+): Promise<RecCandidate[]> {
+  const allSeeds = buildWeightedSeeds(titles);
+  const picks = pickSeeds(allSeeds);
+  if (!picks.length) return [];
+
+  const seedRows = await db.poplog3Title.findMany({
+    where: {
+      OR: picks.map((seed) => ({
+        tmdbId: seed.title.tmdb_id,
+        mediaType: seed.title.media_type,
+      })),
+    },
+    select: { tmdbId: true, mediaType: true, genres: true },
+  }).catch(() => []);
+
+  const mediaTypes = new Set<"movie" | "tv">(picks.map((seed) => seed.title.media_type));
+  const genreWeights = new Map<number, number>();
+  for (const row of seedRows) {
+    for (const genreId of parseGenreIds(row.genres).slice(0, 4)) {
+      genreWeights.set(genreId, (genreWeights.get(genreId) ?? 0) + 1);
+    }
+  }
+
+  const rows = await db.poplog3Title.findMany({
+    where: {
+      posterPath: { not: null },
+      ...(mediaTypes.size === 1 ? { mediaType: [...mediaTypes][0] } : {}),
+    },
+    orderBy: [{ popularity: "desc" }, { voteAverage: "desc" }],
+    take: Math.max(60, limit * 8),
+    select: {
+      id: true,
+      tmdbId: true,
+      mediaType: true,
+      title: true,
+      originalTitle: true,
+      overview: true,
+      posterPath: true,
+      backdropPath: true,
+      voteAverage: true,
+      voteCount: true,
+      genres: true,
+      year: true,
+      releaseDate: true,
+      firstAirDate: true,
+      imdbId: true,
+      traktId: true,
+      slug: true,
+      popularity: true,
+    },
+  }).catch(() => []);
+
+  const deduper = new Deduper();
+  const out: RecCandidate[] = [];
+
+  for (const row of rows) {
+    const genreIds = parseGenreIds(row.genres);
+    const primaryGenre = genreIds.find((id) => genreWeights.has(id)) ?? genreIds[0] ?? null;
+    const genreLabel = primaryGenre ? GENRE_MAP[primaryGenre] : null;
+    const genreBonus = primaryGenre ? (genreWeights.get(primaryGenre) ?? 0) * 8 : 0;
+    const mediaType = row.mediaType as "movie" | "tv";
+    const title = row.title ?? row.originalTitle ?? "";
+
+    const candidate: RecCandidate = {
+      tmdbId: row.tmdbId,
+      _poplogId: row.id,
+      imdbId: row.imdbId ?? null,
+      traktId: row.traktId != null ? Number(row.traktId) : null,
+      traktSlug: row.slug ?? null,
+      title,
+      originalTitle: row.originalTitle ?? null,
+      overview: row.overview ?? null,
+      posterUrl: row.posterPath ?? null,
+      backdropUrl: row.backdropPath ?? null,
+      voteAverage: row.voteAverage != null ? Number(row.voteAverage) : null,
+      voteCount: row.voteCount ?? null,
+      year:
+        row.year != null
+          ? String(row.year)
+          : mediaType === "movie"
+            ? row.releaseDate?.toISOString().slice(0, 4) ?? null
+            : row.firstAirDate?.toISOString().slice(0, 4) ?? null,
+      genreIds,
+      mediaType,
+      seedEffectiveWeight: 35 + genreBonus,
+      relationStrength: Math.max(10, 100 - out.length * 3),
+      reason: genreLabel
+        ? `${genreLabel} · Combina com sua biblioteca`
+        : "Combina com sua biblioteca",
+      _imageSource: row.posterPath ? "db:poster" : row.backdropPath ? "db:backdrop" : "none",
+      _langSource: looksPortuguese(title) ? "pt-BR:db" : "en:db",
+      _inLocalDb: true,
+      _hydrationSource: "balloon",
+    };
+
+    if (isInIdentitySet(candidate, libraryIdentities)) continue;
+    if (deduper.seen(candidate)) continue;
+    if (!passesQualityGate(candidate)) continue;
+
+    out.push(candidate);
+    if (out.length >= limit) break;
+  }
+
+  return out;
+}
+
 // ─── Seleção final (Fases 8/10/11) ────────────────────────────────────────────
 // Extraída para reuso tanto no caminho normal quanto no cache-hit do pool.
 // Aplica o filtro de sessão (`exclude`), preferência por imagens e amostragem.
@@ -666,7 +958,17 @@ async function buildForYouResponse(
   libraryIdentities: LibraryIdentityIndex,
   FINAL_COUNT: number,
   source: string,
-): Promise<unknown> {
+  options: {
+    surface: ForYouSurface;
+    mode: ForYouMode;
+    cacheStatus: ForYouCacheStatus;
+    stale?: boolean;
+    generatedAt?: string;
+    perf: PerfTracker;
+    includeProviders?: boolean;
+    compact?: boolean;
+  },
+): Promise<ForYouApiResponse> {
   // Filtro de sessão (`exclude`) — por request, nunca cacheado.
   // A biblioteca também é reaplicada aqui para proteger o caminho de cache-hit.
   const responseDeduper = new Deduper();
@@ -683,7 +985,23 @@ async function buildForYouResponse(
   const pool = withImages.length >= CORE_DISPLAY ? withImages : notExcluded;
 
   if (!pool.length) {
-    return { featured: null, items: [], recommendationSource: source };
+    markPerf(options.perf, "response_build");
+    const perf = finishPerf(options.perf);
+    return {
+      featured: null,
+      items: [],
+      recommendationSource: source,
+      meta: {
+        surface: options.surface,
+        mode: options.mode,
+        cacheStatus: options.cacheStatus,
+        stale: Boolean(options.stale),
+        source,
+        returned: 0,
+        generatedAt: options.generatedAt,
+        perf,
+      },
+    };
   }
 
   // Seleção ponderada (roulette-wheel sem reposição).
@@ -710,7 +1028,7 @@ async function buildForYouResponse(
         mediaType: c.mediaType,
       }),
       originalTitle: c.originalTitle !== c.title ? (c.originalTitle ?? null) : null,
-      overview:      c.overview ?? undefined,
+      overview:      options.compact ? undefined : c.overview ?? undefined,
       posterUrl:     c.posterUrl   ?? null,
       backdropUrl:   c.backdropUrl ?? null,
       rating:        c.voteAverage ?? undefined,
@@ -726,17 +1044,14 @@ async function buildForYouResponse(
     } as ForYouApiItem;
   });
 
-  // P7: anexa disponibilidade (best_provider_*) via fluxo canônico — mesmo contrato do
-  // card da Watchlist. Cache-first + warm; não bloqueia nem lê catalog_availability direto.
-  const itemsWithProviders = await attachBestProvider(items, {
-    block: "for-you",
-    getMediaType: (it) => it.mediaType,
-    getTmdbId: (it) => it.id,
-    getImdbId: (it) => it.imdbId ?? null,
-    // Rail pequeno e curado (≤ ~12 itens): busca cache-first dos faltantes para o badge
-    // aparecer já no primeiro load (e persiste, ficando barato nas próximas vezes).
-    live: true,
-  });
+  const itemsWithProviders = options.includeProviders
+    ? await attachBestProvider(items, {
+        block: "for-you",
+        getMediaType: (it) => it.mediaType,
+        getTmdbId: (it) => it.id,
+        getImdbId: (it) => it.imdbId ?? null,
+      })
+    : items;
 
   // Featured = maior rating com backdrop; senão o primeiro item.
   const withBackdrop = itemsWithProviders.filter((it) => it.backdropUrl);
@@ -745,7 +1060,33 @@ async function buildForYouResponse(
     : (itemsWithProviders[0] ?? null);
   const rest = featured ? itemsWithProviders.filter((it) => it !== featured) : itemsWithProviders;
 
-  return { featured, items: rest, recommendationSource: source };
+  if (options.compact) {
+    for (const item of rest) delete item.overview;
+    if (featured && !featured.overview) {
+      const sourceCandidate = selected.find((candidate) => candidate.tmdbId === featured.id);
+      featured.overview = sourceCandidate?.overview ?? undefined;
+    }
+  }
+
+  markPerf(options.perf, "response_build");
+  const perf = finishPerf(options.perf);
+  const returned = (featured ? 1 : 0) + rest.length;
+
+  return {
+    featured,
+    items: rest,
+    recommendationSource: source,
+    meta: {
+      surface: options.surface,
+      mode: options.mode,
+      cacheStatus: options.cacheStatus,
+      stale: Boolean(options.stale),
+      source,
+      returned,
+      generatedAt: options.generatedAt,
+      perf,
+    },
+  };
 }
 
 // ─── Pipeline ─────────────────────────────────────────────────────────────────
@@ -756,14 +1097,22 @@ async function runForYouPipeline(
   titles: UserTitle[],
   FINAL_COUNT: number,
   excludeKeys: Set<string>,
-): Promise<unknown> {
+  options: {
+    surface: ForYouSurface;
+    mode: ForYouMode;
+    includeProviders?: boolean;
+    perf: PerfTracker;
+  },
+): Promise<ForYouApiResponse> {
     // Auth primeiro — necessário para lookup autoritativo da biblioteca no DB.
     const user = await getCurrentUser().catch(() => null);
+    markPerf(options.perf, "auth");
 
     // A chave ainda permite reaproveitar o trabalho externo, mas a biblioteca
     // autoritativa é carregada antes de qualquer cache-hit para nunca servir um
     // título recém-adicionado ou representado por outro alias.
     const poolKey = buildPoolKey(titles, user?.id ?? null);
+    const libraryHash = buildLibraryHash(titles);
 
     // Índice canônico compartilhado por todas as superfícies de descoberta.
     // Une user_titles + user_title_state (qualquer status) e percorre aliases
@@ -780,25 +1129,140 @@ async function runForYouPipeline(
     const libraryIdentities = user
       ? await getUserLibraryIdentityIndex(user.id, suppliedIdentities)
       : new Set(suppliedIdentities.flatMap(titleIdentityKeys));
+    markPerf(options.perf, "library_read");
 
     const cachedEligible = readPoolCache(poolKey);
-    if (cachedEligible) {
-      console.log(`[for-you] pool_cache_hit key candidates=${cachedEligible.length}`);
+    if (cachedEligible && !(options.mode === "full" && cachedEligible.source === "local_fallback")) {
+      markPerf(options.perf, "cache");
+      console.log(`[for-you] pool_cache_hit memory candidates=${cachedEligible.eligible.length}`);
       return await buildForYouResponse(
-        cachedEligible,
+        cachedEligible.eligible,
         excludeKeys,
         libraryIdentities,
         FINAL_COUNT,
-        "balloon_primary",
+        cachedEligible.source,
+        {
+          surface: options.surface,
+          mode: options.mode,
+          cacheStatus: cachedEligible.cacheStatus,
+          stale: cachedEligible.stale,
+          generatedAt: cachedEligible.generatedAt,
+          perf: options.perf,
+          includeProviders: Boolean(options.includeProviders),
+          compact: options.surface === "home",
+        },
       );
+    }
+
+    const persistentEligible = await readPersistentPoolCache({
+      userId: user?.id ?? null,
+      libraryHash,
+    });
+    if (
+      persistentEligible &&
+      !(options.mode === "full" && persistentEligible.source === "local_fallback")
+    ) {
+      writePoolCache(poolKey, persistentEligible.eligible, persistentEligible.source);
+      markPerf(options.perf, "cache");
+      console.log(
+        `[for-you] pool_cache_hit persistent status=${persistentEligible.cacheStatus} ` +
+        `candidates=${persistentEligible.eligible.length}`,
+      );
+      return await buildForYouResponse(
+        persistentEligible.eligible,
+        excludeKeys,
+        libraryIdentities,
+        FINAL_COUNT,
+        persistentEligible.source,
+        {
+          surface: options.surface,
+          mode: options.mode,
+          cacheStatus: persistentEligible.cacheStatus,
+          stale: persistentEligible.stale,
+          generatedAt: persistentEligible.generatedAt,
+          perf: options.perf,
+          includeProviders: Boolean(options.includeProviders),
+          compact: options.surface === "home",
+        },
+      );
+    }
+
+    markPerf(options.perf, "cache");
+
+    if (options.surface === "home" && options.mode === "summary") {
+      const localEligible = await buildLocalFallbackCandidates(
+        titles,
+        libraryIdentities,
+        Math.max(HOME_FAST_COUNT, FINAL_COUNT),
+      );
+      markPerf(options.perf, "local_fallback");
+
+      if (localEligible.length > 0) {
+        writePoolCache(poolKey, localEligible, "local_fallback");
+        writePersistentPoolCache({
+          userId: user?.id ?? null,
+          libraryHash,
+          eligible: localEligible,
+          source: "local_fallback",
+          ttlMs: LOCAL_FALLBACK_TTL_MS,
+        });
+
+        return await buildForYouResponse(
+          localEligible,
+          excludeKeys,
+          libraryIdentities,
+          FINAL_COUNT,
+          "local_fallback",
+          {
+            surface: options.surface,
+            mode: options.mode,
+            cacheStatus: "local_fallback",
+            stale: false,
+            perf: options.perf,
+            includeProviders: false,
+            compact: true,
+          },
+        );
+      }
+
+      markPerf(options.perf, "response_build");
+      return {
+        featured: null,
+        items: [],
+        recommendationSource: "warming",
+        meta: {
+          surface: options.surface,
+          mode: options.mode,
+          cacheStatus: "warming",
+          stale: false,
+          source: "warming",
+          returned: 0,
+          perf: finishPerf(options.perf),
+        },
+      };
     }
 
     // ── FASE 1 — SEMENTES ────────────────────────────────────────────────────
     const allSeeds = buildWeightedSeeds(titles);
     const picks    = pickSeeds(allSeeds);
+    markPerf(options.perf, "seed_generation");
 
     if (!picks.length) {
-      return { featured: null, items: [], recommendationSource: "empty" };
+      markPerf(options.perf, "response_build");
+      return {
+        featured: null,
+        items: [],
+        recommendationSource: "empty",
+        meta: {
+          surface: options.surface,
+          mode: options.mode,
+          cacheStatus: "miss",
+          stale: false,
+          source: "empty",
+          returned: 0,
+          perf: finishPerf(options.perf),
+        },
+      };
     }
 
     // ── FASE 2 — LABELS pt-BR das sementes (via local DB) ─────────────────────
@@ -815,6 +1279,7 @@ async function runForYouPipeline(
         } catch { /* keep defensively-extracted label */ }
       }),
     );
+    markPerf(options.perf, "seed_labels");
 
     // ── FASE 3 — IDs externos para chamadas Trakt ──────────────────────────────
     const extIds = new Map<string, ExtIds>();
@@ -824,6 +1289,7 @@ async function runForYouPipeline(
         extIds.set(key, await resolveExternalIds(seed));
       }),
     );
+    markPerf(options.perf, "seed_external_ids");
 
     // ── FASE 4 — Balloonerismm para todas as sementes com imdbId ─────────────────
     // Balloonerismm é a fonte primária de relevância. Trakt é usado apenas como
@@ -895,25 +1361,62 @@ async function runForYouPipeline(
       `[for-you:phase4] balloon_seeds=${balloonSeedResults.length}/${seedsWithImdb.length} ` +
       `balloon_items=${balloonTotal} picks=${picks.length}`,
     );
+    markPerf(options.perf, "candidate_fetch");
 
     // ── FASE 4c — Merge Balloon cross-seeds + hidratação Trakt ───────────────
     // Balloon determina relevância. Trakt fornece tmdbId, slug, pt-BR, imagens.
-    const mergedBalloon = mergeBalloonCandidates(balloonSeedResults);
+    const mergedBalloonRaw = mergeBalloonCandidates(balloonSeedResults);
+
+    let preHydrationLibRemoved = 0;
+    let preHydrationDeduped = 0;
+    const preHydrationIdentities = new Set<string>();
+    const mergedBalloon = mergedBalloonRaw.filter((candidate) => {
+      const identity = {
+        mediaType: candidate.mediaType,
+        imdbId: candidate.imdbId,
+        tmdbId: syntheticTmdbFromImdbId(candidate.imdbId),
+      };
+      if (hasTitleIdentity(libraryIdentities, identity)) {
+        preHydrationLibRemoved++;
+        return false;
+      }
+
+      const keys = titleIdentityKeys(identity);
+      if (keys.some((key) => preHydrationIdentities.has(key))) {
+        preHydrationDeduped++;
+        return false;
+      }
+      for (const key of keys) preHydrationIdentities.add(key);
+      return true;
+    });
 
     console.log(
-      `[for-you:merge] merged_candidates=${mergedBalloon.length} ` +
+      `[for-you:merge] merged_candidates=${mergedBalloon.length}/${mergedBalloonRaw.length} ` +
+      `pre_hydration_lib_removed=${preHydrationLibRemoved} ` +
+      `pre_hydration_deduped=${preHydrationDeduped} ` +
       `recs_only=${mergedBalloon.filter(c => c.balloonSource === "recommendations").length} ` +
       `sim_only=${mergedBalloon.filter(c => c.balloonSource === "similar").length} ` +
       `both=${mergedBalloon.filter(c => c.balloonSource === "both").length}`,
     );
+    markPerf(options.perf, "dedup_pre_enrichment");
 
     // Empty state: all seeds failed Balloon fetch
     if (!mergedBalloon.length) {
       const cooldownActive = balloonSeedResults.length === 0 && seedsWithImdb.length > 0;
+      markPerf(options.perf, "response_build");
       return {
         featured:             null,
         items:                [],
         recommendationSource: "empty_balloon",
+        meta: {
+          surface: options.surface,
+          mode: options.mode,
+          cacheStatus: "miss",
+          stale: false,
+          source: "empty_balloon",
+          returned: 0,
+          perf: finishPerf(options.perf),
+        },
         emptyReason:          cooldownActive ? "balloon_cooldown" : "no_balloon_results",
         retryAfterMs:         cooldownActive ? 60_000 : 0,
         staleCacheUsed:       false,
@@ -937,6 +1440,7 @@ async function runForYouPipeline(
       `missing_ptbr=${hydrationStats.missingPtBrTranslation} ` +
       `missing_poster=${hydrationStats.missingPoster}`,
     );
+    markPerf(options.perf, "hydration");
 
     // ── FASE 4d — Converter TraktHydratedCandidate → RecCandidate ─────────────
     const totalMerged = allHydrated.length;
@@ -1018,6 +1522,7 @@ async function runForYouPipeline(
       if (deduper.seen(rec))  { deduped++;   rec._discardReason = "dedup"; continue; }
       candidates.push(rec);
     }
+    markPerf(options.perf, "dedup");
 
     const hadBalloonCandidates = candidates.length > 0;
 
@@ -1026,6 +1531,7 @@ async function runForYouPipeline(
     // NOTA: row.title da DB é o título original (inglês). Não é pt-BR.
     // Fase 6b busca pt-BR via endpoint dedicado do Trakt.
     await enrichFromDb(candidates);
+    markPerf(options.perf, "db_enrichment");
 
     // O enriquecimento revela poplogId e outros aliases locais que não estavam
     // necessariamente presentes na resposta externa. Revalida e deduplica após
@@ -1049,6 +1555,7 @@ async function runForYouPipeline(
     // Para candidatos ainda sem pt-BR (inline Trakt não retornou ou DB não tinha),
     // busca /translations/pt separadamente. Resposta em cache TTL=86400.
     await enrichWithTraktTranslations(candidates);
+    markPerf(options.perf, "translation_enrichment");
 
     // ── FASE 7 — Filtro not_interested ────────────────────────────────────────
     const notIntSet = new Set<string>();
@@ -1070,6 +1577,7 @@ async function runForYouPipeline(
     const eligible = candidates.filter(
       (c) => !notIntSet.has(`${c.mediaType}:${c.tmdbId}`) && passesQualityGate(c),
     );
+    markPerf(options.perf, "feedback_quality");
 
     // ── LOG SUMMARY ───────────────────────────────────────────────────────────
     const source = hadBalloonCandidates ? "balloon_primary" : "empty";
@@ -1084,7 +1592,16 @@ async function runForYouPipeline(
     );
 
     // Cacheia o pool elegível (independente de sessão/seleção) para recargas baratas.
-    if (eligible.length > 0) writePoolCache(poolKey, eligible);
+    if (eligible.length > 0) {
+      writePoolCache(poolKey, eligible, source);
+      writePersistentPoolCache({
+        userId: user?.id ?? null,
+        libraryHash,
+        eligible,
+        source,
+      });
+    }
+    markPerf(options.perf, "cache_write");
 
     // ── FASES 8/10/11 — Filtro de sessão + amostragem + payload ───────────────
     return await buildForYouResponse(
@@ -1093,6 +1610,15 @@ async function runForYouPipeline(
       libraryIdentities,
       FINAL_COUNT,
       source,
+      {
+        surface: options.surface,
+        mode: options.mode,
+        cacheStatus: "miss",
+        stale: false,
+        perf: options.perf,
+        includeProviders: Boolean(options.includeProviders),
+        compact: options.surface === "home",
+      },
     );
 }
 
@@ -1101,6 +1627,9 @@ async function runForYouPipeline(
 export async function POST(req: NextRequest) {
   const body     = await req.json().catch(() => null);
   const titles: UserTitle[] = Array.isArray(body?.titles) ? body.titles : [];
+  const surface: ForYouSurface = body?.surface === "page" ? "page" : "home";
+  const mode: ForYouMode = body?.mode === "full" || surface === "page" ? "full" : "summary";
+  const includeProviders = body?.includeProviders === true;
   const excludeKeys = new Set<string>(
     Array.isArray(body?.exclude)
       ? (body.exclude as string[]).slice(-SESSION_EXCLUDE_CAP)
@@ -1108,15 +1637,30 @@ export async function POST(req: NextRequest) {
   );
   const FINAL_COUNT = Math.min(
     typeof body?.limit === "number" && body.limit > 0 ? body.limit : DEFAULT_FINAL_COUNT,
-    MAX_FINAL_COUNT,
+    surface === "home" ? HOME_FAST_COUNT : MAX_FINAL_COUNT,
   );
+  const perf = createPerfTracker();
 
   if (!titles.length) {
-    return NextResponse.json({ featured: null, items: [], recommendationSource: "empty" });
+    markPerf(perf, "response_build");
+    return NextResponse.json({
+      featured: null,
+      items: [],
+      recommendationSource: "empty",
+      meta: {
+        surface,
+        mode,
+        cacheStatus: "miss",
+        stale: false,
+        source: "empty",
+        returned: 0,
+        perf: finishPerf(perf),
+      },
+    } satisfies ForYouApiResponse);
   }
 
   // ── Route-level dedup (burst protection) ─────────────────────────────────
-  const routeKey = buildRouteKey(titles, FINAL_COUNT, excludeKeys);
+  const routeKey = `${surface}:${mode}:${includeProviders ? "providers" : "compact"}:${buildRouteKey(titles, FINAL_COUNT, excludeKeys)}`;
   const inflight = ROUTE_IN_FLIGHT.get(routeKey);
   if (inflight) {
     console.log(`[for-you] dedup_inflight key="${routeKey}"`);
@@ -1126,14 +1670,41 @@ export async function POST(req: NextRequest) {
 
   // Run pipeline with origin context
   const pipelinePromise: Promise<unknown> = withOrigin("for-you", () =>
-    runForYouPipeline(titles, FINAL_COUNT, excludeKeys)
+    runForYouPipeline(titles, FINAL_COUNT, excludeKeys, {
+      surface,
+      mode,
+      includeProviders,
+      perf,
+    })
   ).catch((err: unknown) => {
     console.error("[for-you]", err);
-    return { featured: null, items: [], recommendationSource: "error" };
+    markPerf(perf, "response_build");
+    return {
+      featured: null,
+      items: [],
+      recommendationSource: "error",
+      meta: {
+        surface,
+        mode,
+        cacheStatus: "error",
+        stale: false,
+        source: "error",
+        returned: 0,
+        perf: finishPerf(perf),
+      },
+    } satisfies ForYouApiResponse;
   });
 
   ROUTE_IN_FLIGHT.set(routeKey, pipelinePromise);
-  const data = await pipelinePromise;
+  const data = (await pipelinePromise) as ForYouApiResponse;
   ROUTE_IN_FLIGHT.delete(routeKey);
+  console.log("[for-you/perf]", {
+    surface: data.meta.surface,
+    mode: data.meta.mode,
+    cacheStatus: data.meta.cacheStatus,
+    stale: data.meta.stale,
+    returned: data.meta.returned,
+    ...data.meta.perf,
+  });
   return NextResponse.json(data);
 }

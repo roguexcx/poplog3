@@ -43,6 +43,27 @@ type BalloonRawItem = BalloonRelatedItem & {
   _rank: number; // 0-indexed position in the originating list
 };
 
+/**
+ * Infere o tipo de midia REAL do item recomendado.
+ *
+ * /recommendations e /similar de uma semente de FILME podem conter SERIES (e vice-versa).
+ * Herdar cegamente o tipo da semente produz candidatos com mediaType errado, o que
+ * quebra tanto a pagina do titulo quanto, criticamente, a exclusao da biblioteca pela
+ * chave `${mediaType}:tmdb:...`. O payload do Balloon traz release_date (filmes) e
+ * first_air_date (series); usamos esse sinal e so caimos no tipo da semente quando
+ * ambos estao ausentes.
+ */
+function inferItemMediaType(
+  item: BalloonRelatedItem,
+  seedMediaType: "movie" | "tv",
+): "movie" | "tv" {
+  const hasAirDate = Boolean(item.first_air_date);
+  const hasReleaseDate = Boolean(item.release_date);
+  if (hasAirDate && !hasReleaseDate) return "tv";
+  if (hasReleaseDate && !hasAirDate) return "movie";
+  return seedMediaType;
+}
+
 // ─── Per-seed result bundle ────────────────────────────────────────────────────
 
 export type BalloonSeedResult = {
@@ -324,7 +345,7 @@ export function mergeBalloonCandidates(
 
         map.set(item.id, {
           item,
-          mediaType:       seedMediaType,
+          mediaType:       inferItemMediaType(item, seedMediaType),
           seedWeightSum:   seedWeight,
           seedBestWeight:  seedWeight,
           bestRank:        item._rank,

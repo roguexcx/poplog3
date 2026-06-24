@@ -57,6 +57,11 @@ function bigintValues(values: string[]): bigint[] {
  * watching, completed, fridge, abandoned, favorites and progress-only states all
  * block discovery. Local catalog tables are then followed as an alias graph so a
  * title saved under one source ID also matches recommendations from another source.
+ *
+ * Formato das chaves (ver titleIdentityKeys): IMDb/Trakt/slug/Poplog sao GLOBAIS
+ * ("g:imdb:...") por serem identificadores unicos entre filme e serie; apenas o TMDB
+ * mantem escopo de tipo. valuesFor continua extraindo cada tipo pelo marcador
+ * ":kind:", que permanece presente no prefixo "g:".
  */
 export async function getUserLibraryIdentityIndex(
   userId: string,

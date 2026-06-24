@@ -2,12 +2,23 @@ import type { LibraryTab } from "./LibraryTabs";
 
 type LibraryEmptyStateProps = {
   activeTab: LibraryTab;
+  /** Quando há uma busca interna ativa sem resultados, sobrepõe a mensagem da aba. */
+  searchQuery?: string;
 };
 
 export default function LibraryEmptyState({
   activeTab,
+  searchQuery,
 }: LibraryEmptyStateProps) {
-  const content = getEmptyContent(activeTab);
+  const content = searchQuery
+    ? {
+        icon: "🔍",
+        kicker: "Sem resultados",
+        title: `Nada encontrado para “${searchQuery}”.`,
+        description:
+          "Nenhum título salvo corresponde à sua busca. Tente outro termo ou ajuste os filtros e o estado selecionado.",
+      }
+    : getEmptyContent(activeTab);
 
   return (
     <div className="relative overflow-hidden rounded-[2.25rem] border border-white/[0.08] bg-white/[0.028] px-6 py-16 text-center shadow-[0_26px_100px_rgba(0,0,0,0.38)] backdrop-blur-xl sm:px-8 md:py-24">

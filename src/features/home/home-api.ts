@@ -100,8 +100,15 @@ function trendingTitleToTMDBItem(t: EnrichedTrendingTitle): TMDBItem {
  * lista independente, deduplicação própria nem critérios de validade distintos.
  * As regras de exibição do Hero (rotação a cada F5) permanecem na Home.
  */
-export async function getTrending(userId?: string | null): Promise<TMDBItem[]> {
-  const feed = await getTrendingFeed();
+export async function getTrending(
+  userId?: string | null,
+  options: { fast?: boolean; includeProviders?: boolean } = {},
+): Promise<TMDBItem[]> {
+  const feed = await getTrendingFeed({
+    fast: options.fast,
+    includeProviders: options.includeProviders,
+    backgroundRefresh: options.fast,
+  });
 
   const feedbackMap = userId
     ? await getUserFeedbackMap(userId).catch(() => undefined)

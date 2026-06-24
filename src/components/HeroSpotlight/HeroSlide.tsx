@@ -6,6 +6,10 @@ import type { ScoredItem } from "./types";
 import HeroCTA from "./HeroCTA";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
 import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
+import {
+  getCanonicalProviderDisplayName,
+  resolveProviderLogoForRender,
+} from "@/lib/streaming/provider-display";
 
 interface HeroSlideProps {
   item: ScoredItem;
@@ -140,10 +144,14 @@ export default function HeroSlide({
   const glowRgb = hexToRgb(dominantColor);
 
   const genres = Array.isArray(item.genres) ? item.genres.join(" · ") : "";
-  const platform = item.streaming_platform ?? "";
-  const platformLogo = item.best_provider_logo
-    ? resolveCatalogImage(item.best_provider_logo, "original")
-    : null;
+  const platform =
+    getCanonicalProviderDisplayName({ name: item.streaming_platform ?? item.best_provider_name }) ??
+    item.streaming_platform ??
+    "";
+  const platformLogo = resolveProviderLogoForRender({
+    name: item.best_provider_name,
+    logoUrl: item.best_provider_logo,
+  });
   const yearStr = item.year?.toString() ?? "";
   const runtimeLabel = item.runtime_label;
 

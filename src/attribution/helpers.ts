@@ -14,6 +14,8 @@ const SOURCE_ALIASES: Record<string, ApiSourceId> = {
   banco_de_series: "bancodeseries",
   "banco-de-series": "bancodeseries",
   balloonerismm: "balloonerismm",
+  justwatch: "balloonerismm",
+  justwatch_graphql_unofficial: "balloonerismm",
 };
 
 const CONTEXT_LABELS: Record<AttributionContext, string> = {

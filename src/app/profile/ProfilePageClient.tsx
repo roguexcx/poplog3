@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Image from "next/image";
 import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 import { Reorder, useDragControls } from "framer-motion";
 import { signOut as signOutAuthJs } from "next-auth/react";
@@ -35,11 +36,25 @@ type GenreStat = { name: string; count: number; pct: number };
 type StreamingProvider = {
   id:               string;
   provider_name:    string;
-  provider_slug:    string;
+  provider_slug:    string | null;
   logo_url:         string | null;
   tmdb_provider_id: number | null;
   country:          string;
   is_active:        boolean;
+  original_name:    string;
+  normalized_name:  string;
+  root_key:         string;
+  root_name:        string;
+  family_key:       string;
+  family_name:      string;
+  variant_key:      string;
+  variant_name:     string | null;
+  access_kind:      "included" | "ads" | "partner_channel" | "rent" | "buy" | "rent_buy" | "free" | "unknown";
+  default_priority: number;
+  category:         ProviderCategory;
+  brand_color:      string;
+  text_color:       string;
+  short_label:      string;
 };
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
@@ -116,11 +131,12 @@ function fetchNotInterestedTitles() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// PROVIDER BRAND MAP
+// PROVIDER PRESENTATION (derivada pelo catálogo global no servidor)
 // ─────────────────────────────────────────────────────────────────────────────
 
 type ProviderCategory = "principais" | "gratuitos" | "canais" | "aluguel" | "outros";
 type ProviderType     = "subscription" | "ads" | "channel" | "free" | "rental";
+type ProviderFilter   = ProviderCategory;
 
 type ProviderMeta = {
   brand:         string;
@@ -132,109 +148,100 @@ type ProviderMeta = {
   short:         string;
 };
 
-const PROVIDER_BRAND_MAP: Record<string, ProviderMeta> = {
-  "netflix":                         { brand: "Netflix",         type: "subscription", category: "principais", bg: "#E50914", short: "N" },
-  "netflix standard with ads":       { brand: "Netflix",         variantLabel: "Com anúncios",       type: "ads",     category: "principais", bg: "#E50914", short: "N"  },
-  "netflix basic with ads":          { brand: "Netflix",         variantLabel: "Com anúncios",       type: "ads",     category: "principais", bg: "#E50914", short: "N"  },
-  "max":                             { brand: "Max",             type: "subscription", category: "principais", bg: "#002BE7", short: "M"  },
-  "hbo max":                         { brand: "Max",             type: "subscription", category: "principais", bg: "#002BE7", short: "M"  },
-  "max amazon channel":              { brand: "Max",             variantLabel: "Canal Prime Video",  type: "channel", category: "canais",    bg: "#002BE7", short: "M"  },
-  "max apple tv channel":            { brand: "Max",             variantLabel: "Canal Apple TV",     type: "channel", category: "canais",    bg: "#002BE7", short: "M"  },
-  "amazon prime video":              { brand: "Prime Video",     type: "subscription", category: "principais", bg: "#00A8E1", short: "P"  },
-  "prime video":                     { brand: "Prime Video",     type: "subscription", category: "principais", bg: "#00A8E1", short: "P"  },
-  "amazon prime video with ads":     { brand: "Prime Video",     variantLabel: "Com anúncios",       type: "ads",     category: "principais", bg: "#00A8E1", short: "P"  },
-  "amazon video":                    { brand: "Prime Video",     variantLabel: "Aluguel/compra",     type: "rental",  category: "aluguel",   bg: "#00A8E1", short: "P"  },
-  "disney plus":                     { brand: "Disney+",         type: "subscription", category: "principais", bg: "#113CCF", short: "D+" },
-  "disney+":                         { brand: "Disney+",         type: "subscription", category: "principais", bg: "#113CCF", short: "D+" },
-  "star plus":                       { brand: "Star+",           type: "subscription", category: "principais", bg: "#0A2A6E", short: "S+" },
-  "apple tv plus":                   { brand: "Apple TV+",       type: "subscription", category: "principais", bg: "#1C1C1E", short: "▶" },
-  "apple tv+":                       { brand: "Apple TV+",       type: "subscription", category: "principais", bg: "#1C1C1E", short: "▶" },
-  "apple tv":                        { brand: "Apple TV+",       type: "subscription", category: "principais", bg: "#1C1C1E", short: "▶" },
-  "apple tv store":                  { brand: "Apple TV+",       variantLabel: "Aluguel/compra",     type: "rental",  category: "aluguel",   bg: "#1C1C1E", short: "▶" },
-  "apple tv channels":               { brand: "Apple TV+",       variantLabel: "Canais",             type: "channel", category: "canais",    bg: "#1C1C1E", short: "▶" },
-  "globoplay":                       { brand: "Globoplay",       type: "subscription", category: "principais", bg: "#D50032", short: "G"  },
-  "globoplay amazon channel":        { brand: "Globoplay",       variantLabel: "Canal Prime Video",  type: "channel", category: "canais",    bg: "#D50032", short: "G"  },
-  "paramount plus":                  { brand: "Paramount+",      type: "subscription", category: "principais", bg: "#0064FF", short: "P+" },
-  "paramount+":                      { brand: "Paramount+",      type: "subscription", category: "principais", bg: "#0064FF", short: "P+" },
-  "paramount plus apple tv channel": { brand: "Paramount+",      variantLabel: "Canal Apple TV",     type: "channel", category: "canais",    bg: "#0064FF", short: "P+" },
-  "paramount+ amazon channel":       { brand: "Paramount+",      variantLabel: "Canal Prime Video",  type: "channel", category: "canais",    bg: "#0064FF", short: "P+" },
-  "mubi":                            { brand: "MUBI",            type: "subscription", category: "principais", bg: "#2C2C2C", short: "MB" },
-  "mubi amazon channel":             { brand: "MUBI",            variantLabel: "Canal Prime Video",  type: "channel", category: "canais",    bg: "#2C2C2C", short: "MB" },
-  "pluto tv":                        { brand: "Pluto TV",        type: "free",         category: "gratuitos",  bg: "#1F1D36", short: "PT" },
-  "mercado play":                    { brand: "Mercado Play",    type: "free",         category: "gratuitos",  bg: "#FFE600", textColor: "#000", short: "MP" },
-  "plex":                            { brand: "Plex",            type: "free",         category: "gratuitos",  bg: "#E5A00D", textColor: "#000", short: "PX" },
-  "netmovies":                       { brand: "NetMovies",       type: "free",         category: "gratuitos",  bg: "#2D2D2D", short: "NM" },
-  "claro video":                     { brand: "Claro Video",     type: "subscription", category: "outros",     bg: "#CC0000", short: "CV" },
-  "telecine play":                   { brand: "Telecine",        type: "channel",      category: "canais",     bg: "#003087", short: "TC" },
-  "mgm plus":                        { brand: "MGM+",            type: "channel",      category: "canais",     bg: "#C4A020", textColor: "#000", short: "MG" },
-  "universal plus":                  { brand: "Universal+",      type: "channel",      category: "canais",     bg: "#2A2A2A", short: "U+" },
-  "google play movies":              { brand: "Google Play",     variantLabel: "Aluguel/compra",     type: "rental",  category: "aluguel",   bg: "#34A853", short: "GP" },
-  "youtube premium":                 { brand: "YouTube Premium", type: "subscription", category: "outros",     bg: "#FF0000", short: "YT" },
-  "crunchyroll":                      { brand: "Crunchyroll",     type: "subscription", category: "principais", bg: "#F47521", short: "CR" },
-  "wow":                              { brand: "WOW",             type: "subscription", category: "principais", bg: "#00C2FF", short: "W"  },
-  "wow presents plus":               { brand: "WOW",             variantLabel: "Presents Plus",          type: "subscription", category: "principais", bg: "#00C2FF", short: "W"  },
-};
-
-function getProviderMeta(name: string | null | undefined): ProviderMeta {
-  const key = (name ?? "").trim().toLowerCase();
-  if (PROVIDER_BRAND_MAP[key]) return PROVIDER_BRAND_MAP[key];
-
-  // Auto-detect Amazon Channel variants not explicitly mapped
-  if (key.includes(" amazon channel")) {
-    const rawBrand = key.replace(" amazon channel", "").trim();
-    const base = PROVIDER_BRAND_MAP[rawBrand];
-    return {
-      brand:        base?.brand ?? toTitleCase(rawBrand),
-      variantLabel: "Canal Prime Video",
-      type:         "channel",
-      category:     "canais",
-      bg:           base?.bg ?? "#2A2A2A",
-      textColor:    base?.textColor,
-      short:        base?.short ?? rawBrand.slice(0, 2).toUpperCase(),
-    };
-  }
-
-  // Auto-detect Apple TV Channel variants
-  if (key.includes(" apple tv channel")) {
-    const rawBrand = key.replace(" apple tv channel", "").trim();
-    const base = PROVIDER_BRAND_MAP[rawBrand];
-    return {
-      brand:        base?.brand ?? toTitleCase(rawBrand),
-      variantLabel: "Canal Apple TV",
-      type:         "channel",
-      category:     "canais",
-      bg:           base?.bg ?? "#1C1C1E",
-      textColor:    base?.textColor,
-      short:        base?.short ?? rawBrand.slice(0, 2).toUpperCase(),
-    };
-  }
-
-  // Generic "channel" keyword
-  if (key.includes(" channel")) {
-    return {
-      brand:    toTitleCase(key.replace(/ channel.*/, "").trim()) ?? name ?? "Canal",
-      type:     "channel",
-      category: "canais",
-      bg:       "#2A2A2A",
-      short:    (name ?? "?").slice(0, 2).toUpperCase(),
-    };
-  }
-
+function getProviderMeta(provider: StreamingProvider): ProviderMeta {
+  const accessType: ProviderType =
+    provider.access_kind === "ads" ? "ads" :
+    provider.access_kind === "partner_channel" ? "channel" :
+    provider.access_kind === "free" ? "free" :
+    ["rent", "buy", "rent_buy"].includes(provider.access_kind) ? "rental" :
+    "subscription";
   return {
-    brand:    name ?? "Desconhecido",
-    type:     "subscription",
-    category: "outros",
-    bg:       "#444444",
-    short:    (name ?? "?").slice(0, 2).toUpperCase(),
+    brand: provider.root_name,
+    variantLabel: provider.variant_name ?? undefined,
+    type: accessType,
+    category: provider.category,
+    bg: provider.brand_color,
+    textColor: provider.text_color,
+    short: provider.short_label,
   };
-}
-
-function toTitleCase(str: string): string {
-  return str.replace(/\b\w/g, c => c.toUpperCase());
 }
 
 function getLogoUrl(logoUrl: string | null | undefined): string | null {
   return resolveCatalogImage(logoUrl, "w200");
+}
+
+function ProviderLogo({
+  src,
+  alt,
+  width,
+  height,
+  className,
+  fallbackClassName,
+  bg,
+  textColor,
+  short,
+}: {
+  src: string | null;
+  alt: string;
+  width: number;
+  height: number;
+  className: string;
+  fallbackClassName: string;
+  bg: string;
+  textColor: string;
+  short: string;
+}) {
+  const [failed, setFailed] = useState(false);
+  if (!src || failed) {
+    return (
+      <div
+        className={fallbackClassName}
+        style={{ background: bg, color: textColor }}
+      >
+        {short}
+      </div>
+    );
+  }
+  return (
+    <Image
+      src={src}
+      alt={alt}
+      width={width}
+      height={height}
+      unoptimized
+      className={className}
+      style={{ background: bg }}
+      onError={() => setFailed(true)}
+    />
+  );
+}
+
+function getProviderAccessBadge(provider: StreamingProvider): { label: string; cls: string } {
+  if (provider.access_kind === "free") {
+    return { label: "Grátis", cls: "border-teal-500/25 bg-teal-950/30 text-teal-400/70" };
+  }
+  if (["rent", "buy", "rent_buy"].includes(provider.access_kind)) {
+    return { label: "Loja", cls: "border-amber-500/25 bg-amber-950/30 text-amber-400/70" };
+  }
+  if (provider.access_kind === "ads") {
+    return { label: "Anúncios", cls: "border-orange-500/25 bg-orange-950/30 text-orange-400/70" };
+  }
+  if (provider.access_kind === "partner_channel") {
+    return { label: "Canal", cls: "border-violet-500/25 bg-violet-950/30 text-violet-400/70" };
+  }
+  return { label: "Streaming", cls: "border-white/[0.07] bg-white/[0.04] text-white/30" };
+}
+
+function providerOptionLabel(provider: StreamingProvider): string {
+  return provider.normalized_name || provider.root_name || provider.provider_name;
+}
+
+function providerOptionHint(provider: StreamingProvider): string | null {
+  if (provider.access_kind === "partner_channel") return provider.variant_name ?? "Canal parceiro";
+  if (["rent", "buy", "rent_buy"].includes(provider.access_kind)) return provider.variant_name ?? "Aluguel/compra";
+  if (provider.access_kind === "ads") return "Plano com anúncios";
+  if (provider.access_kind === "free") return "Grátis";
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -352,7 +359,7 @@ function ProfileHeader({
             className={`w-[72px] h-[72px] sm:w-20 sm:h-20 rounded-[20px] bg-gradient-to-br ${gradBg} flex items-center justify-center border-2 border-white/[0.12] shadow-xl flex-shrink-0`}
           >
             {typeof user.user_metadata?.avatar_url === "string" ? (
-              <img src={user.user_metadata.avatar_url} alt={name} className="w-full h-full rounded-[18px] object-cover" />
+              <Image src={user.user_metadata.avatar_url} alt={name} width={80} height={80} unoptimized className="w-full h-full rounded-[18px] object-cover" />
             ) : (
               <span className="text-xl sm:text-2xl font-black text-white/90 tracking-tight">{initials}</span>
             )}
@@ -588,16 +595,9 @@ function ActiveStreamingItem({
   isSaving: boolean;
 }) {
   const controls = useDragControls();
-  const meta     = getProviderMeta(provider.provider_name);
+  const meta     = getProviderMeta(provider);
   const logo     = getLogoUrl(provider.logo_url);
-
-  const typeBadge = (() => {
-    if (meta.type === "free")    return { label: "Grátis",     cls: "border-teal-500/25 bg-teal-950/30 text-teal-400/70"     };
-    if (meta.type === "rental")  return { label: "Aluguel",    cls: "border-amber-500/25 bg-amber-950/30 text-amber-400/70"   };
-    if (meta.type === "ads")     return { label: "Anúncios",   cls: "border-orange-500/25 bg-orange-950/30 text-orange-400/70" };
-    if (meta.type === "channel") return { label: "Canal",      cls: "border-violet-500/25 bg-violet-950/30 text-violet-400/70" };
-    return                              { label: "Assinatura", cls: "border-white/[0.07] bg-white/[0.04] text-white/25"       };
-  })();
+  const typeBadge = getProviderAccessBadge(provider);
 
   return (
     <Reorder.Item
@@ -622,17 +622,17 @@ function ActiveStreamingItem({
         {priority}
       </span>
 
-      {/* Logo */}
-      {logo ? (
-        <img src={logo} alt={meta.brand} className="w-8 h-8 rounded-lg object-cover flex-shrink-0" />
-      ) : (
-        <div
-          className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-black"
-          style={{ background: meta.bg, color: meta.textColor ?? "#fff" }}
-        >
-          {meta.short}
-        </div>
-      )}
+      <ProviderLogo
+        src={logo}
+        alt={meta.brand}
+        width={32}
+        height={32}
+        className="w-8 h-8 rounded-lg object-cover flex-shrink-0"
+        fallbackClassName="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-black"
+        bg={meta.bg}
+        textColor={meta.textColor ?? "#fff"}
+        short={meta.short}
+      />
 
       {/* Name + variant */}
       <div className="flex-1 min-w-0">
@@ -671,33 +671,76 @@ function ActiveStreamingItem({
 // ─────────────────────────────────────────────────────────────────────────────
 
 type BrandGroup = {
+  rootKey:   string;
   brand:     string;
   bg:        string;
   textColor: string;
   short:     string;
   logoUrl:   string | null;
   category:  ProviderCategory;
+  summary:   string | null;
   providers: StreamingProvider[];
 };
+
+function providerGroupPriority(provider: StreamingProvider): number {
+  if (provider.variant_key === "direct" && provider.access_kind === "included") return 0;
+  if (provider.access_kind === "included") return 1;
+  if (provider.access_kind === "ads") return 2;
+  if (provider.access_kind === "free") return 3;
+  if (provider.access_kind === "partner_channel") return 4;
+  if (["rent", "buy", "rent_buy"].includes(provider.access_kind)) return 5;
+  return 6;
+}
+
+function sortProvidersForGroup(providers: StreamingProvider[]): StreamingProvider[] {
+  return [...providers].sort((a, b) => {
+    const priority = providerGroupPriority(a) - providerGroupPriority(b);
+    if (priority !== 0) return priority;
+    return a.normalized_name.localeCompare(b.normalized_name, "pt-BR");
+  });
+}
 
 function buildBrandGroups(providers: StreamingProvider[]): BrandGroup[] {
   const map = new Map<string, BrandGroup>();
   for (const p of providers) {
-    const meta = getProviderMeta(p.provider_name);
-    if (!map.has(meta.brand)) {
-      map.set(meta.brand, {
+    const meta = getProviderMeta(p);
+    if (!map.has(p.root_key)) {
+      map.set(p.root_key, {
+        rootKey:   p.root_key,
         brand:     meta.brand,
         bg:        meta.bg,
         textColor: meta.textColor ?? "#fff",
         short:     meta.short,
-        logoUrl:   getLogoUrl(p.logo_url),
+        logoUrl:   null,
         category:  meta.category,
+        summary:   null,
         providers: [],
       });
     }
-    map.get(meta.brand)!.providers.push(p);
+    map.get(p.root_key)!.providers.push(p);
   }
-  return Array.from(map.values());
+  return Array.from(map.values()).map(group => {
+    const sortedProviders = sortProvidersForGroup(group.providers);
+    const primary = sortedProviders[0];
+    const primaryMeta = getProviderMeta(primary);
+    const shouldUseFullOptionName = sortedProviders.length === 1 && primary.category !== "principais";
+    return {
+      ...group,
+      brand: shouldUseFullOptionName ? providerOptionLabel(primary) : primaryMeta.brand,
+      bg: primaryMeta.bg,
+      textColor: primaryMeta.textColor ?? "#fff",
+      short: primaryMeta.short,
+      logoUrl: getLogoUrl(primary.logo_url),
+      category: primaryMeta.category,
+      summary:
+        sortedProviders.length === 1 && !shouldUseFullOptionName
+          ? providerOptionHint(primary)
+          : sortedProviders.length > 1
+            ? `${sortedProviders.length} opções`
+            : null,
+      providers: sortedProviders,
+    };
+  });
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -705,10 +748,10 @@ function buildBrandGroups(providers: StreamingProvider[]): BrandGroup[] {
 // ─────────────────────────────────────────────────────────────────────────────
 
 const CATEGORY_LABELS: Record<ProviderCategory, string> = {
-  principais: "Principais",
+  principais: "Streaming",
   gratuitos:  "Gratuitos",
   canais:     "Canais",
-  aluguel:    "Aluguel",
+  aluguel:    "Lojas",
   outros:     "Outros",
 };
 
@@ -724,50 +767,72 @@ function AddStreamingBlock({
   desktopMode?:  boolean;
 }) {
   const [search,       setSearch]       = useState("");
-  const [activeFilter, setActiveFilter] = useState<ProviderCategory | "todos">("todos");
+  const [activeFilter, setActiveFilter] = useState<ProviderFilter>("principais");
   const [expandedBrand, setExpandedBrand] = useState<string | null>(null);
 
-  // Hide the entire brand once any variant of it is already active
-  const activeBrands = new Set(
+  // Mantém streaming, canais e lojas como escolhas independentes da mesma marca.
+  const activeRootCategories = new Set(
     activeIds
       .map(id => allProviders.find(p => p.id === id))
       .filter((p): p is StreamingProvider => !!p)
-      .map(p => getProviderMeta(p.provider_name).brand)
+      .map(p => `${p.root_key}:${p.category}`)
   );
   const available = allProviders.filter(p => {
     if (activeIds.includes(p.id)) return false;
-    return !activeBrands.has(getProviderMeta(p.provider_name).brand);
-  });
-  const groups = buildBrandGroups(available);
-
-  const filtered = groups.filter(g => {
-    if (activeFilter !== "todos" && g.category !== activeFilter) return false;
-    if (search && !g.brand.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
+    return !activeRootCategories.has(`${p.root_key}:${p.category}`);
   });
 
-  const categories: Array<ProviderCategory | "todos"> = ["todos", "principais", "gratuitos", "canais", "aluguel", "outros"];
+  const filteredProviders = available.filter(p => {
+    if (p.category !== activeFilter) return false;
+    if (!search) return true;
+    const normalizedSearch = search.toLowerCase();
+    return [
+      p.provider_name,
+      p.normalized_name,
+      p.root_name,
+      p.variant_name ?? "",
+      p.family_name,
+    ].some(value => value.toLowerCase().includes(normalizedSearch));
+  });
+  const filtered = buildBrandGroups(filteredProviders);
+
+  const categories: ProviderFilter[] = ["principais", "canais", "gratuitos", "aluguel", "outros"];
+
+  const emptyMessage = (() => {
+    if (search) return "Nenhum resultado para esta busca.";
+    if (activeFilter === "aluguel") return "Todas as lojas desta categoria já foram adicionadas.";
+    if (activeFilter === "canais") return "Todos os canais desta categoria já foram adicionados.";
+    if (activeFilter === "gratuitos") return "Todos os serviços gratuitos desta categoria já foram adicionados.";
+    return "Todos os serviços desta categoria já foram adicionados.";
+  })();
+
+  const helperText = (() => {
+    if (activeFilter === "aluguel") return "Lojas de aluguel e compra ficam separadas dos streamings.";
+    if (activeFilter === "canais") return "Canais adicionais aparecem separados do plano principal.";
+    if (activeFilter === "gratuitos") return "Serviços gratuitos e com acesso aberto.";
+    return "Selecione os streamings, canais ou lojas que você assina ou acessa.";
+  })();
 
   function handleBrandClick(group: BrandGroup) {
     if (group.providers.length === 1) {
       onAdd(group.providers[0].id);
       setExpandedBrand(null);
     } else {
-      setExpandedBrand(prev => prev === group.brand ? null : group.brand);
+      setExpandedBrand(prev => prev === group.rootKey ? null : group.rootKey);
     }
   }
 
   return (
     <div className={desktopMode ? "flex flex-col h-full" : "mt-6 pt-6 border-t border-white/[0.06]"}>
-      {!desktopMode && <Eyebrow color="muted">Adicionar streaming</Eyebrow>}
-      <p className="text-[12px] text-white/30 mb-4 flex-shrink-0">Selecione os serviços que você assina.</p>
+      {!desktopMode && <Eyebrow color="muted">Adicionar serviço</Eyebrow>}
+      <p className="text-[12px] text-white/30 mb-4 flex-shrink-0">{helperText}</p>
 
       {/* Search */}
       <div className="relative mb-3 flex-shrink-0">
         <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25 pointer-events-none" />
         <input
           type="text"
-          placeholder="Buscar streaming..."
+          placeholder="Buscar serviço..."
           value={search}
           onChange={e => setSearch(e.target.value)}
           className="w-full bg-white/[0.04] border border-white/[0.07] rounded-xl pl-8 pr-3 py-2.5 text-[12px] text-white/70 placeholder:text-white/20 outline-none focus:border-indigo-500/40 focus:bg-white/[0.06] transition-all"
@@ -788,7 +853,7 @@ function AddStreamingBlock({
                 : "bg-white/[0.04] border border-white/[0.06] text-white/30 hover:bg-white/[0.07] hover:text-white/50",
             ].join(" ")}
           >
-            {cat === "todos" ? "Todos" : CATEGORY_LABELS[cat]}
+            {CATEGORY_LABELS[cat]}
           </button>
         ))}
       </div>
@@ -798,39 +863,35 @@ function AddStreamingBlock({
         <div className={desktopMode ? "absolute inset-0 overflow-y-auto thin-scrollbar pr-1" : "overflow-y-auto no-scrollbar max-h-[420px] pr-0.5"}>
         {filtered.length === 0 ? (
           <p className="text-[12px] text-white/25 text-center py-6">
-            {search ? "Nenhum resultado para esta busca." : "Todos os streamings desta categoria ja foram adicionados."}
+            {emptyMessage}
           </p>
         ) : (
           <div className="grid grid-cols-1 gap-1.5">
             {filtered.map(group => {
-              const isExpanded = expandedBrand === group.brand;
+              const isExpanded = expandedBrand === group.rootKey;
               const brandLogo  = group.logoUrl;
               return (
-                <div key={group.brand}>
+                <div key={group.rootKey}>
                   <button
                     type="button"
                     onClick={() => handleBrandClick(group)}
                     className="w-full flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.025] hover:bg-white/[0.05] hover:border-indigo-500/25 transition-all px-3 py-2.5 text-left"
                   >
-                    {brandLogo ? (
-                      <img
-                        src={brandLogo}
-                        alt={group.brand}
-                        className="w-9 h-9 rounded-xl object-cover flex-shrink-0"
-                        style={{ background: group.bg }}
-                      />
-                    ) : (
-                      <div
-                        className="w-9 h-9 rounded-xl flex items-center justify-center text-[11px] font-black flex-shrink-0"
-                        style={{ background: group.bg, color: group.textColor }}
-                      >
-                        {group.short}
-                      </div>
-                    )}
+                    <ProviderLogo
+                      src={brandLogo}
+                      alt={group.brand}
+                      width={36}
+                      height={36}
+                      className="w-9 h-9 rounded-xl object-cover flex-shrink-0"
+                      fallbackClassName="w-9 h-9 rounded-xl flex items-center justify-center text-[11px] font-black flex-shrink-0"
+                      bg={group.bg}
+                      textColor={group.textColor}
+                      short={group.short}
+                    />
                     <div className="flex-1 min-w-0">
                       <p className="text-[13px] font-bold text-white/80 truncate">{group.brand}</p>
-                      {group.providers.length > 1 && (
-                        <p className="text-[10px] text-white/30">{group.providers.length} opcoes</p>
+                      {group.summary && (
+                        <p className="text-[10px] text-white/30 truncate">{group.summary}</p>
                       )}
                     </div>
                     {group.providers.length > 1 && (
@@ -844,8 +905,10 @@ function AddStreamingBlock({
                   {isExpanded && (
                     <div className="mt-1 ml-3 space-y-1">
                       {group.providers.map(p => {
-                        const pMeta   = getProviderMeta(p.provider_name);
+                        const pMeta   = getProviderMeta(p);
                         const pLogo   = getLogoUrl(p.logo_url);
+                        const pBadge  = getProviderAccessBadge(p);
+                        const pHint   = providerOptionHint(p);
                         return (
                           <button
                             key={p.id}
@@ -853,26 +916,33 @@ function AddStreamingBlock({
                             onClick={() => { onAdd(p.id); setExpandedBrand(null); }}
                             className="w-full flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.06] hover:border-indigo-500/25 transition-all px-3 py-2 text-left"
                           >
-                            {pLogo ? (
-                              <img
-                                src={pLogo}
-                                alt={pMeta.brand}
-                                className="w-6 h-6 rounded-lg object-cover flex-shrink-0"
-                                style={{ background: pMeta.bg }}
-                              />
-                            ) : (
-                              <div
-                                className="w-6 h-6 rounded-lg flex items-center justify-center text-[9px] font-black flex-shrink-0"
-                                style={{ background: pMeta.bg, color: pMeta.textColor ?? "#fff" }}
-                              >
-                                {pMeta.short}
-                              </div>
-                            )}
+                            <ProviderLogo
+                              src={pLogo}
+                              alt={providerOptionLabel(p)}
+                              width={24}
+                              height={24}
+                              className="w-6 h-6 rounded-lg object-cover flex-shrink-0"
+                              fallbackClassName="w-6 h-6 rounded-lg flex items-center justify-center text-[9px] font-black flex-shrink-0"
+                              bg={pMeta.bg}
+                              textColor={pMeta.textColor ?? "#fff"}
+                              short={pMeta.short}
+                            />
                             <div className="flex-1 min-w-0">
                               <p className="text-[11px] font-semibold text-white/70 truncate">
-                                {pMeta.variantLabel ?? pMeta.brand}
+                                {providerOptionLabel(p)}
                               </p>
+                              {pHint && (
+                                <p className="mt-0.5 text-[9px] text-white/30 truncate">{pHint}</p>
+                              )}
                             </div>
+                            <span
+                              className={[
+                                "text-[8px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full border flex-shrink-0",
+                                pBadge.cls,
+                              ].join(" ")}
+                            >
+                              {pBadge.label}
+                            </span>
                           </button>
                         );
                       })}
@@ -931,6 +1001,11 @@ function TabPreferences({
 
   const isSaving = saveStatus === "saving";
 
+  useEffect(() => () => {
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    if (savedTimer.current) clearTimeout(savedTimer.current);
+  }, []);
+
   const doSave = useCallback(async (ids: string[]) => {
     setSaveStatus("saving");
     try {
@@ -988,7 +1063,7 @@ function TabPreferences({
             <Eyebrow color="indigo">Streaming</Eyebrow>
             <SaveStatusBadge status={saveStatus} />
           </div>
-          <BlockTitle>Seus streamings</BlockTitle>
+          <BlockTitle>Seus serviços</BlockTitle>
 
           {activeProviders.length === 0 ? (
             <div className="text-center py-8">
@@ -1028,7 +1103,7 @@ function TabPreferences({
         <div className="hidden lg:flex lg:flex-col lg:sticky lg:top-6" style={{ height: "calc(100vh - 6rem)" }}>
           <Block className="flex flex-col flex-1 min-h-0 overflow-hidden">
             <div className="flex-shrink-0">
-              <Eyebrow color="muted">Adicionar streaming</Eyebrow>
+              <Eyebrow color="muted">Adicionar serviço</Eyebrow>
               <BlockTitle>Serviços disponíveis</BlockTitle>
             </div>
             <div className="flex-1 min-h-0">

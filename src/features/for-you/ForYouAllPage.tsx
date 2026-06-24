@@ -319,6 +319,9 @@ export default function ForYouAllPage() {
             titles: titlesSnapshot,
             exclude: shownHistoryRef.current.slice(-SESSION_HISTORY_CAP),
             limit: PAGE_SIZE,
+            surface: "page",
+            mode: "full",
+            includeProviders: false,
           }),
         });
 

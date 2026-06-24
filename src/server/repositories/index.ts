@@ -7,6 +7,7 @@ export * from "./external-ids-cache.repository";
 export * from "./ics-agenda-cache.repository";
 export * from "./episode-progress.repository";
 export * from "./library.repository";
+export * from "./user-list.repository";
 export * from "./premium-api-usage.repository";
 export * from "./ratings-cache.repository";
 export * from "./season-cache.repository";

@@ -1,5 +1,6 @@
 import { db } from "@/server/db/client";
 import { hydrateManyTitleAvailability } from "@/server/availability";
+import { getUserProviderDisplayPreferences } from "@/server/local-services/streaming-preferences-local.service";
 import type { ProviderRegion } from "./provider-preferences";
 
 /** Mapeia o tipo de oferta da camada global para o enum persistido em user_title_state. */
@@ -33,6 +34,10 @@ export async function refreshAllUserTitleAvailability(
   if (!statesResult.length) return;
 
   const region = country === "US" ? "US" : "BR";
+  const providerPreferences = await getUserProviderDisplayPreferences({
+    userId,
+    country: region,
+  });
 
   const summaries = await hydrateManyTitleAvailability(
     statesResult.map((row) => ({
@@ -41,9 +46,10 @@ export async function refreshAllUserTitleAvailability(
         tmdbId: row.tmdbId,
         mediaType: row.mediaType as "movie" | "tv",
         region,
+        providerPreferences,
       },
     })),
-    { concurrency: 6 },
+    { concurrency: 8, cacheOnly: true },
   );
 
   for (const state of statesResult) {

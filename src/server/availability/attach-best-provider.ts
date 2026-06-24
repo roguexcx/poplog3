@@ -12,6 +12,7 @@
 
 import { hydrateManyTitleAvailability } from "./availability-service";
 import type { TitleAvailabilitySummary } from "./availability-types";
+import { normalizeStreamingRegion } from "@/server/streaming/region";
 
 export type BestProviderBadgeFields = {
   best_provider_name: string | null;
@@ -49,7 +50,10 @@ export async function attachBestProvider<T extends object>(
 ): Promise<Array<T & BestProviderBadgeFields>> {
   if (items.length === 0) return items as Array<T & BestProviderBadgeFields>;
 
-  const region = opts.region ?? "BR";
+  const region = normalizeStreamingRegion(opts.region, {
+    source: `availability:attach:${opts.block}`,
+    explicit: opts.region != null,
+  });
   const inputs = items.map((item, index) => ({
     key: index,
     input: {

@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
+import {
+  getCanonicalProviderDisplayName,
+  resolveProviderLogoForRender,
+} from "@/lib/streaming/provider-display";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
 import {
   ArrowRight,
@@ -95,10 +99,12 @@ function libraryLabel(item: AgendaItem) {
 
 function contextMessage(item: AgendaItem): string {
   const genres = item.genre_ids ?? [];
+  const providerName =
+    getCanonicalProviderDisplayName({ name: item.best_provider_name }) ?? item.best_provider_name;
   if (item.is_preferred_provider && item.best_provider_name) {
-    return `Está no seu streaming favorito: ${item.best_provider_name}`;
+    return `Está no seu streaming favorito: ${providerName}`;
   }
-  if (item.best_provider_name) return `Disponível em ${item.best_provider_name}`;
+  if (providerName) return `Disponível em ${providerName}`;
   if (genres.includes(27)) return "Uma escolha para apagar as luzes";
   if (genres.includes(35)) return "Leve, esperto e bom para descompressão";
   if (genres.includes(80) || genres.includes(53)) return "Tensão com pulso de maratona";
@@ -246,7 +252,12 @@ function ProviderBadge({ item }: { item: AgendaItem }) {
     );
   }
 
-  const logo = IMG(item.best_provider_logo, "original");
+  const providerName =
+    getCanonicalProviderDisplayName({ name: item.best_provider_name }) ?? item.best_provider_name;
+  const logo = resolveProviderLogoForRender({
+    name: providerName,
+    logoUrl: item.best_provider_logo,
+  });
 
   return (
     <div
@@ -257,12 +268,12 @@ function ProviderBadge({ item }: { item: AgendaItem }) {
       }`}
     >
       {logo ? (
-        <img src={logo} alt={item.best_provider_name} className="h-8 w-8 rounded-lg object-contain" />
+        <img src={logo} alt={providerName} className="h-8 w-8 rounded-lg object-contain" />
       ) : (
         <div className="h-8 w-8 rounded-lg bg-white/10" />
       )}
       <div className="min-w-0">
-        <p className="truncate text-[13px] font-black text-white/90">{item.best_provider_name}</p>
+        <p className="truncate text-[13px] font-black text-white/90">{providerName}</p>
         <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-cyan-100/62">
           {item.is_preferred_provider ? "Seu streaming" : providerTypeLabel(item.best_provider_type)}
         </p>

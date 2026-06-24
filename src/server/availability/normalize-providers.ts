@@ -54,7 +54,29 @@ export function groupProviders(providers: TitleProvider[]): GroupedProviders {
  * Melhor provider para exibição compacta (1 logo no card).
  * Prioridade: flatrate > free > ads > rent > buy.
  */
-export function pickBestProvider(grouped: GroupedProviders): TitleProvider | null {
+export function pickBestProvider(
+  grouped: GroupedProviders,
+  hasPreferences = false,
+): TitleProvider | null {
+  if (hasPreferences) {
+    const ranked = [
+      ...grouped.flatrate,
+      ...grouped.free,
+      ...grouped.ads,
+      ...grouped.rent,
+      ...grouped.buy,
+    ].sort((left, right) => {
+      if (Boolean(left.isExactPreference) !== Boolean(right.isExactPreference)) {
+        return left.isExactPreference ? -1 : 1;
+      }
+      if (Boolean(left.isPreferred) !== Boolean(right.isPreferred)) {
+        return left.isPreferred ? -1 : 1;
+      }
+      return (left.preferenceOrder ?? 1_000) - (right.preferenceOrder ?? 1_000);
+    });
+    const personalized = ranked.find((provider) => provider.isPreferred);
+    if (personalized) return personalized;
+  }
   return (
     grouped.flatrate[0] ??
     grouped.free[0] ??

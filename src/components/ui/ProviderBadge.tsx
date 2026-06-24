@@ -1,4 +1,8 @@
 import Image from "next/image";
+import {
+  getCanonicalProviderDisplayName,
+  resolveProviderLogoForRender,
+} from "@/lib/streaming/provider-display";
 
 type ProviderBadgeProps = {
   name: string;
@@ -51,15 +55,17 @@ export default function ProviderBadge({
   className = "",
 }: ProviderBadgeProps) {
   const logoSize = SIZE_LOGO[size];
+  const displayName = getCanonicalProviderDisplayName({ name }) ?? name;
+  const displayLogoUrl = resolveProviderLogoForRender({ name, logoUrl });
 
   return (
     <div
       className={`inline-flex items-center rounded-2xl border border-white/[0.08] bg-white/[0.04] backdrop-blur-md transition duration-200 hover:border-white/[0.16] hover:bg-white/[0.07] ${SIZE_GAP[size]} ${className}`}
     >
-      {logoUrl ? (
+      {displayLogoUrl ? (
         <Image
-          src={logoUrl}
-          alt={name}
+          src={displayLogoUrl}
+          alt={displayName}
           width={logoSize}
           height={logoSize}
           unoptimized
@@ -77,7 +83,7 @@ export default function ProviderBadge({
         <p
           className={`truncate font-semibold tracking-[-0.01em] text-white/92 ${SIZE_TEXT[size]}`}
         >
-          {name}
+          {displayName}
         </p>
         <p
           className={`text-[10px] font-bold uppercase tracking-[0.14em] ${TYPE_ACCENT[type]}`}

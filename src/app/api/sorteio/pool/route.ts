@@ -5,6 +5,7 @@ import {
   readContinuitySectionCache,
   writeContinuitySectionCache,
 } from "@/server/continuity/continuity-section-cache";
+import { normalizeStreamingRegion } from "@/server/streaming/region";
 import { parseSorteioFilters, requireSorteioUser } from "../_shared";
 
 type SorteioPoolResponse = {
@@ -18,7 +19,6 @@ type SorteioPoolCachePayload = {
 };
 
 const SORTEIO_POOL_CACHE_TTL_MS = 30 * 60_000;
-const DEFAULT_REGION = "BR";
 const DEFAULT_LANGUAGE = "pt-BR";
 const refreshes = new Map<string, Promise<void>>();
 
@@ -78,7 +78,10 @@ export async function GET(request: NextRequest) {
 
   try {
     const filters = parseSorteioFilters(request.nextUrl.searchParams);
-    const region = request.nextUrl.searchParams.get("region") ?? DEFAULT_REGION;
+    const region = normalizeStreamingRegion(request.nextUrl.searchParams.get("region"), {
+      source: "api:sorteio-pool:region",
+      explicit: request.nextUrl.searchParams.has("region"),
+    });
     const language = request.nextUrl.searchParams.get("language") ?? DEFAULT_LANGUAGE;
     const key = sectionKey(filters);
     markStage(perf, stageRef, "request_parse");

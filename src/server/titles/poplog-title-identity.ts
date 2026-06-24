@@ -354,6 +354,27 @@ export async function resolvePoplogTitleIdentity({
       }));
     }
 
+    // IMDb IDs are globally stable across media types. If a title was already
+    // resolved and persisted under the opposite type, keep that mediaType instead
+    // of probing movie/show on every request to the old alias route.
+    if (imdbId) {
+      const otherMediaType: MediaType = mediaType === "movie" ? "tv" : "movie";
+      const crossCanonicalMatch = await findByCanonicalExternalId(otherMediaType, { imdbId });
+      if (crossCanonicalMatch) {
+        return enrichIdentity(identityFromRow(crossCanonicalMatch as TitleRow, "imdb_id", 0.97, {
+          imdbId,
+        }));
+      }
+
+      const crossMatch = await findByExternalId(otherMediaType, { imdbId });
+      if (crossMatch) {
+        return enrichIdentity(identityFromRow(crossMatch.row as TitleRow, "imdb_id", 0.95, {
+          ...crossMatch.externalIds,
+          imdbId,
+        }));
+      }
+    }
+
     return enrichIdentity({
       mediaType,
       externalIds: {

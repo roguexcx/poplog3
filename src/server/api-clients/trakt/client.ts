@@ -485,6 +485,7 @@ async function performTraktRequest<T>(
     if (stale != null) return stale;
     throw new TraktControlledError(reason, isAbort ? "Timeout no Trakt." : "Falha de rede no Trakt.", {
       cacheStatus: "miss",
+      logged: true,
     });
   } finally {
     clearTimeout(timeout);

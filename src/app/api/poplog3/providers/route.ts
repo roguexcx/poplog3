@@ -14,6 +14,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { AVAILABILITY_UNAVAILABLE } from "@/server/source-engine/normalizers/normalize-availability";
 import { resolvePoplogTitleIdentity } from "@/server/titles/poplog-title-identity";
 import { getTitleAvailabilityWithDebug } from "@/server/availability";
+import { normalizeStreamingRegion } from "@/server/streaming/region";
 
 type MediaType = "movie" | "tv";
 
@@ -24,7 +25,10 @@ function normalizeMediaType(value: string | null): MediaType | null {
 export async function GET(request: NextRequest) {
   const { searchParams } = request.nextUrl;
   const id = searchParams.get("id");
-  const region = (searchParams.get("region") ?? "BR").toUpperCase();
+  const region = normalizeStreamingRegion(searchParams.get("region"), {
+    source: "api:providers:region",
+    explicit: searchParams.has("region"),
+  });
   const mediaType = normalizeMediaType(searchParams.get("media_type"));
   const debugSource = searchParams.get("debugSource") === "1";
   const debug = searchParams.get("debug") === "1";

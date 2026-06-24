@@ -28,6 +28,8 @@ async function resolveUserFeedback() {
 
 export async function GET(request: NextRequest) {
   const debugSource = request.nextUrl.searchParams.get("debugSource") === "1";
+  const includeProviders = request.nextUrl.searchParams.get("includeProviders") !== "0";
+  const fast = request.nextUrl.searchParams.get("fast") === "1";
   const totalStartedAt = Date.now();
   const perf: Record<string, number> = { request_parse: 0 };
   const stageRef = { value: totalStartedAt };
@@ -38,6 +40,9 @@ export async function GET(request: NextRequest) {
 
     // Fonte única: pipeline canônico compartilhado com o Hero rotativo da Home.
     const feed = await getTrendingFeed({
+      fast,
+      includeProviders,
+      backgroundRefresh: fast,
       recordStage: (stage) => markStage(perf, stageRef, stage),
     });
 

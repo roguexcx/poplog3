@@ -11,18 +11,17 @@ import {
   getUserLibrary,
   type Poplog3UserLibraryItem,
 } from "@/server/library/library-service";
+import {
+  getUserListMembership,
+  getUserListSummaries,
+} from "@/server/lists/list-service";
+import type { UserListSummary } from "@/types/lists";
 import { isTraktIndexEnabled } from "@/lib/trakt-index/engine";
 import { getPoplogDailyTrendingIndex } from "@/lib/trakt-index/canonical";
 import {
   buildTraktScoreMapFromIndex,
   serializeTraktScoreMap,
 } from "@/lib/score/library-popularity";
-
-async function getLibrary(): Promise<Poplog3UserLibraryItem[]> {
-  const user = await getCurrentUser();
-  if (!user) return [];
-  return getUserLibrary(user.id);
-}
 
 type LibraryPageProps = {
   searchParams?: Promise<{
@@ -46,10 +45,24 @@ async function getTraktScores(): Promise<Record<string, number>> {
 export default async function LibraryPage({
   searchParams,
 }: LibraryPageProps) {
-  const [library, traktScores] = await Promise.all([
-    getLibrary(),
+  const user = await getCurrentUser();
+  const [library, traktScores, lists] = await Promise.all([
+    user ? getUserLibrary(user.id) : Promise.resolve([] as Poplog3UserLibraryItem[]),
     getTraktScores(),
+    user ? getUserListSummaries(user.id) : Promise.resolve([] as UserListSummary[]),
   ]);
+
+  const membership: Record<string, string[]> = {};
+  if (user) {
+    for (let offset = 0; offset < library.length; offset += 100) {
+      const titles = library.slice(offset, offset + 100).map((item) => ({
+        tmdbId: item.tmdb_id,
+        mediaType: item.media_type,
+      }));
+      const chunk = await getUserListMembership({ userId: user.id, titles });
+      for (const [key, listIds] of chunk) membership[key] = listIds;
+    }
+  }
 
   const resolvedSearchParams = await searchParams;
 
@@ -65,6 +78,9 @@ export default async function LibraryPage({
         library={library}
         initialTab={initialTab}
         traktScores={traktScores}
+        initialLists={lists}
+        listMembership={membership}
+        isAuthenticated={Boolean(user)}
       />
     </PageShell>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 
 import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
@@ -23,10 +23,13 @@ function useCollectionPartActions(part: TitleCollectionPart) {
   const userData = useOptionalUserData();
   const isLoggedIn = Boolean(userData && !userData.loading);
   const releaseYear = part.year != null ? Number(String(part.year).slice(0, 4)) || undefined : undefined;
+  const mediaType = part.mediaType ?? "movie";
+  const tmdbId = part.tmdbId ?? part.id;
 
   const { executeAction, effectiveKey } = useUserAction({
-    tmdbId: part.id,
-    mediaType: "movie",
+    tmdbId,
+    mediaType,
+    imdbId: part.imdbId ?? null,
     title: part.title,
     releaseYear,
   });
@@ -43,7 +46,12 @@ function useCollectionPartActions(part: TitleCollectionPart) {
     setSaving(false);
   }
 
-  const feedback = useUserFeedbackToggle({ tmdbId: part.id, mediaType: "movie", source: "collection" });
+  const feedback = useUserFeedbackToggle({
+    tmdbId,
+    imdbId: part.imdbId ?? null,
+    mediaType,
+    source: "collection",
+  });
 
   return { isLoggedIn, inWatchlist, isWatched, saving, handleAction, feedback };
 }
@@ -61,7 +69,7 @@ function HorizontalCard({
 }) {
   const { isLoggedIn, inWatchlist, isWatched, saving, handleAction, feedback } = useCollectionPartActions(part);
 
-  const href = isCurrent ? undefined : `/title/movie/${part.id}`;
+  const href = isCurrent ? undefined : `/title/${part.mediaType ?? "movie"}/${part.id}`;
 
   const inner = (
     <article className={[
@@ -185,7 +193,7 @@ function PosterCard({
   isCurrent: boolean;
 }) {
   const { isLoggedIn, inWatchlist, isWatched, saving, handleAction, feedback } = useCollectionPartActions(part);
-  const href = isCurrent ? undefined : `/title/movie/${part.id}`;
+  const href = isCurrent ? undefined : `/title/${part.mediaType ?? "movie"}/${part.id}`;
 
   const card = (
     <article className={`group relative ${isCurrent ? "ring-2 ring-indigo-400/50 ring-offset-[3px] ring-offset-[#020617] rounded-[1.2rem]" : ""}`}>
@@ -280,10 +288,33 @@ export default function TitleCollectionSection({
   collection,
   currentTitleId,
 }: TitleCollectionSectionProps) {
-  if (!collection?.parts?.length) return null;
+  const [orderMode, setOrderMode] = useState<"release" | "chronological">("release");
+  const rawParts = useMemo(() => collection?.parts ?? [], [collection?.parts]);
+  const hasChronologicalOrder =
+    Boolean(collection?.chronologicalOrder?.length) &&
+    collection?.chronologicalOrder?.length === rawParts.length;
 
-  const count = collection.parts.length;
+  const parts = useMemo(() => {
+    const order =
+      orderMode === "chronological" && hasChronologicalOrder
+        ? collection?.chronologicalOrder
+        : collection?.releaseOrder;
+    if (!order?.length) return rawParts;
+
+    const orderIndex = new Map(order.map((id, index) => [id, index]));
+    return [...rawParts].sort((a, b) => {
+      const aIndex = orderIndex.get(a.id) ?? Number.POSITIVE_INFINITY;
+      const bIndex = orderIndex.get(b.id) ?? Number.POSITIVE_INFINITY;
+      if (aIndex !== bIndex) return aIndex - bIndex;
+      return a.title.localeCompare(b.title, "pt-BR");
+    });
+  }, [collection?.chronologicalOrder, collection?.releaseOrder, hasChronologicalOrder, orderMode, rawParts]);
+
+  if (!collection || parts.length === 0) return null;
+
+  const count = parts.length;
   const useHorizontal = count <= 3;
+  const allMovies = parts.every((part) => (part.mediaType ?? "movie") === "movie");
 
   const gridCols = useHorizontal
     ? count === 1 ? "grid-cols-1" : count === 2 ? "sm:grid-cols-2" : "sm:grid-cols-2 md:grid-cols-3"
@@ -311,14 +342,39 @@ export default function TitleCollectionSection({
           </h2>
         </div>
 
-        <span className="ml-auto shrink-0 rounded-full border border-indigo-400/20 bg-indigo-500/[0.10] px-2.5 py-1 text-[10px] font-black text-indigo-200/70">
-          {count} {count === 1 ? "filme" : "filmes"}
-        </span>
+        <div className="ml-auto flex shrink-0 items-center gap-2">
+          {hasChronologicalOrder && (
+            <div className="hidden rounded-full border border-indigo-400/20 bg-black/30 p-0.5 sm:flex">
+              {[
+                ["release", "Lançamento"],
+                ["chronological", "Cronológica"],
+              ].map(([mode, label]) => (
+                <button
+                  key={mode}
+                  type="button"
+                  onClick={() => setOrderMode(mode as "release" | "chronological")}
+                  className={[
+                    "rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-[0.14em] transition",
+                    orderMode === mode
+                      ? "bg-indigo-400/85 text-white"
+                      : "text-indigo-100/55 hover:text-indigo-100",
+                  ].join(" ")}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          )}
+
+          <span className="rounded-full border border-indigo-400/20 bg-indigo-500/[0.10] px-2.5 py-1 text-[10px] font-black text-indigo-200/70">
+            {count} {count === 1 ? (allMovies ? "filme" : "título") : (allMovies ? "filmes" : "títulos")}
+          </span>
+        </div>
       </div>
 
       {/* cards */}
       <div className={`relative grid gap-3 ${gridCols}`}>
-        {collection.parts.map((part, index) =>
+        {parts.map((part, index) =>
           useHorizontal ? (
             <HorizontalCard
               key={part.id}

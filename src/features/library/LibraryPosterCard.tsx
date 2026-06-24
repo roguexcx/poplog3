@@ -1,8 +1,12 @@
 import Image from "next/image";
 import Link from "next/link";
+import { Layers3 } from "lucide-react";
 
 import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
-import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
+import {
+  getCanonicalProviderDisplayName,
+  resolveProviderLogoForRender,
+} from "@/lib/streaming/provider-display";
 import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";
 import { getComingSoonInfo, getTheatricalStatus } from "./library-coming-soon";
@@ -18,11 +22,13 @@ const STATUS_BADGE: Record<string, string> = {
 type LibraryPosterCardProps = {
   item: Poplog3UserLibraryItem;
   priority?: boolean;
+  inCustomList?: boolean;
 };
 
 export default function LibraryPosterCard({
   item,
   priority,
+  inCustomList = false,
 }: LibraryPosterCardProps) {
   const title = item.title;
   const isFavorite = item.favorite === true;
@@ -35,12 +41,13 @@ export default function LibraryPosterCard({
 
   // Badge de streaming: espelha a detail page (TitleProviders) — mostra o provider
   // sempre que houver dado (logo OU apenas nome). Antes o badge era gated por logo,
-  // então providers sem logo (ex.: HBO Max → "Max") sumiam no card mas apareciam no
+  // então providers sem logo (ex.: HBO MAX) sumiam no card mas apareciam no
   // detalhe. Agora: logo quando disponível, senão um chip com o nome do provider.
-  const providerLogoSrc = item.best_provider_logo
-    ? resolveCatalogImage(item.best_provider_logo, "original")
-    : null;
-  const providerName = item.best_provider_name ?? null;
+  const providerName = getCanonicalProviderDisplayName({ name: item.best_provider_name }) ?? item.best_provider_name ?? null;
+  const providerLogoSrc = resolveProviderLogoForRender({
+    name: providerName,
+    logoUrl: item.best_provider_logo,
+  });
   const hasProvider = !!(providerLogoSrc || providerName);
 
   const displayTitle = resolveDisplayTitle({
@@ -119,6 +126,16 @@ export default function LibraryPosterCard({
                 </div>
               ) : null}
             </div>
+
+            {inCustomList && (
+              <span
+                className="absolute bottom-2 left-2 grid h-7 w-7 place-items-center rounded-full border border-indigo-200/25 bg-indigo-950/72 text-indigo-100 shadow-[0_8px_22px_rgba(0,0,0,0.42)] backdrop-blur-md sm:bottom-3 sm:left-3"
+                title="Em uma ou mais listas personalizadas"
+                aria-label="Em uma ou mais listas personalizadas"
+              >
+                <Layers3 className="h-3.5 w-3.5" aria-hidden />
+              </span>
+            )}
 
             {hasProvider && (
               <div className="absolute bottom-2 right-2 overflow-hidden rounded-md border border-white/[0.14] bg-black/55 shadow-[0_4px_14px_rgba(0,0,0,0.45)] backdrop-blur-md sm:bottom-3 sm:right-3 sm:rounded-lg">

@@ -128,7 +128,7 @@ function toTrendingItem(raw: RawItem): TrendingItem {
 }
 
 async function fetchTrending(): Promise<TrendingItem[]> {
-  const res = await fetch("/api/trending");
+  const res = await fetch("/api/trending?includeProviders=0&fast=1");
   if (!res.ok) return [];
   const json = await res.json();
   return (json.results ?? [])
@@ -207,7 +207,7 @@ function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
   const [imgErr, setImgErr] = useState(false);
   const posterPath = item.poster_path;
   const isMovie = item.media_type === "movie";
-  const slug = `/title/${item.media_type}/${item.linkIdUsed ?? item.poplogId ?? item.externalIds?.imdbId ?? item.id}`;
+  const slug = `/title/${item.media_type}/${item.poplogId ?? item.linkIdUsed ?? item.externalIds?.imdbId ?? item.id}`;
 
   const userData = useOptionalUserData();
   const isLoggedIn = Boolean(userData && !userData.loading);

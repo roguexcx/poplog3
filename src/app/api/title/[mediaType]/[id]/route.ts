@@ -47,6 +47,8 @@ export async function GET(
       mediaType,
       id,
       sourceHint,
+      region: "BR",
+      locale: "pt-BR",
     });
 
     if (poplogDetails && poplogDetails.sourceMeta.primarySource !== "legacy") {

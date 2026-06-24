@@ -12,6 +12,7 @@ import {
   readContinuitySectionCache,
   writeContinuitySectionCache,
 } from "@/server/continuity/continuity-section-cache";
+import { normalizeStreamingRegion } from "@/server/streaming/region";
 
 const HERO_VISIBLE_LIMIT = 5;
 const HERO_POOL_LIMIT = 14;
@@ -356,8 +357,10 @@ export async function GET(request: Request) {
 
     const url = new URL(request.url);
     const forceRefresh = url.searchParams.get("refresh") === "1" || url.searchParams.get("force") === "1";
-    const regionParam = url.searchParams.get("region")?.toUpperCase();
-    const region: "BR" | "US" = regionParam === "US" ? "US" : "BR";
+    const region = normalizeStreamingRegion(url.searchParams.get("region"), {
+      source: "api:continuity-hero:region",
+      explicit: url.searchParams.has("region"),
+    });
     const sectionKey = `hero_${region.toLowerCase()}`;
 
     const language = "pt-BR";

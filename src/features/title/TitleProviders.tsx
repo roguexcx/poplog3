@@ -29,6 +29,7 @@ type ProviderGroup = {
 type MergedProvider = TitleProvider & {
   accessLabel?: string;
   isPreferred?: boolean;
+  isExactPreference?: boolean;
 };
 
 const TYPE_LABEL: Record<ProviderGroupType, string> = {
@@ -67,6 +68,7 @@ function dedupeProviders(providers: MergedProvider[]) {
       quality: current.quality ?? provider.quality,
       accessLabel: current.accessLabel ?? provider.accessLabel,
       isPreferred: current.isPreferred || provider.isPreferred,
+      isExactPreference: current.isExactPreference || provider.isExactPreference,
     });
   }
 
@@ -147,6 +149,13 @@ function groupByType(
     const baseIsPreferred =
       "isPreferred" in base ? Boolean(base.isPreferred) : false;
 
+    const rentIsExact =
+      rent && "isExactPreference" in rent ? Boolean(rent.isExactPreference) : false;
+    const buyIsExact =
+      buy && "isExactPreference" in buy ? Boolean(buy.isExactPreference) : false;
+    const baseIsExact =
+      "isExactPreference" in base ? Boolean(base.isExactPreference) : false;
+
     return {
       ...base,
       type: base.type,
@@ -154,6 +163,7 @@ function groupByType(
       logoUrl: base.logoUrl ?? null,
       quality: rent?.quality ?? buy?.quality ?? null,
       isPreferred: baseIsPreferred || rentIsPreferred || buyIsPreferred,
+      isExactPreference: baseIsExact || rentIsExact || buyIsExact,
       accessLabel: rent && buy ? "aluguel/compra" : rent ? "aluguel" : "compra",
     };
   }
@@ -243,11 +253,15 @@ export default function TitleProviders({ providers }: TitleProvidersProps) {
 }
 
 function ProviderPill({ provider }: { provider: MergedProvider }) {
+  // "Seu streaming" só vale para a VARIANTE exata que o usuário assina (raiz + variante).
+  // Usar apenas a raiz marcava todas as variantes (ex.: "Netflix" e "Netflix com anúncios",
+  // "HBO Max" e "HBO Max via Prime Video") como assinadas, mesmo sem o usuário ter o plano.
+  const isUserSubscription = Boolean(provider.isExactPreference);
   const inner = (
     <span
       className={[
         "inline-flex w-full max-w-full items-center gap-2 rounded-2xl border py-2 pl-2 pr-3 text-[12px] font-semibold backdrop-blur-md transition duration-200",
-        provider.isPreferred
+        isUserSubscription
           ? "border-cyan-300/30 bg-cyan-300/[0.08] text-white shadow-[0_0_24px_rgba(34,211,238,0.10)] hover:border-cyan-200/45 hover:bg-cyan-300/[0.12]"
           : "border-white/[0.08] bg-white/[0.04] text-white/90 hover:border-white/[0.18] hover:bg-white/[0.08]",
       ].join(" ")}
@@ -272,7 +286,7 @@ function ProviderPill({ provider }: { provider: MergedProvider }) {
         {provider.name}
       </span>
 
-      {provider.isPreferred && (
+      {isUserSubscription && (
         <span className="shrink-0 rounded-full border border-cyan-200/20 bg-cyan-300/10 px-1.5 py-0.5 text-[8px] font-black uppercase tracking-[0.12em] text-cyan-100">
           Seu streaming
         </span>

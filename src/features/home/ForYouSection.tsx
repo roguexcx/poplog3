@@ -46,6 +46,25 @@ type ForYouItem = {
   userFeedback?: { notInterested?: boolean };
 };
 
+type ForYouResponse = {
+  featured?: ForYouItem | null;
+  items?: ForYouItem[];
+  recommendationSource?: string;
+  meta?: {
+    cacheStatus?: string;
+    mode?: "summary" | "full";
+  };
+};
+
+type UserTitlesSnapshot = ReturnType<typeof useUserData>["titles"];
+
+type FetchForYouFn = (
+  titlesSnapshot: UserTitlesSnapshot,
+  exclude: string[],
+  mode?: "summary" | "full",
+  silent?: boolean,
+) => void;
+
 function formatRating(value?: number): string | null {
   return value ? value.toFixed(1) : null;
 }
@@ -329,7 +348,7 @@ function ForYouSkeleton() {
 
 // Quantos slots mostrar no grid (1 featured + 5 small) e quantos buscar (buffer 2×)
 const DISPLAY_COUNT = 6;
-const FETCH_LIMIT   = 12;
+const FETCH_LIMIT   = 6;
 
 export default function ForYouSection() {
   const { titles, loading: titlesLoading } = useUserData();
@@ -385,20 +404,33 @@ export default function ForYouSection() {
   // Session history: tracks shown item keys ("mediaType:id") across Sorteio rounds
   const shownHistoryRef = useRef<string[]>([]);
   const SHOWN_HISTORY_CAP = 40;
+  const fetchForYouRef = useRef<FetchForYouFn | null>(null);
 
-  const fetchForYou = useCallback((titlesSnapshot: typeof titles, exclude: string[]) => {
+  const fetchForYou = useCallback((
+    titlesSnapshot: typeof titles,
+    exclude: string[],
+    mode: "summary" | "full" = "summary",
+    silent = false,
+  ) => {
     if (titlesSnapshot.length === 0) {
       setLoading(false);
       return;
     }
-    setLoading(true);
+    if (!silent) setLoading(true);
     fetch("/api/user/for-you", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ titles: titlesSnapshot, exclude, limit: FETCH_LIMIT }),
+      body: JSON.stringify({
+        titles: titlesSnapshot,
+        exclude,
+        limit: FETCH_LIMIT,
+        surface: "home",
+        mode,
+        includeProviders: false,
+      }),
     })
       .then((res) => (res.ok ? res.json() : null))
-      .then((json) => {
+      .then((json: ForYouResponse | null) => {
         if (json) {
           setFeatured(json.featured ?? null);
           setItems(json.items ?? []);
@@ -412,6 +444,19 @@ export default function ForYouSection() {
             ...shownHistoryRef.current,
             ...newKeys,
           ].slice(-SHOWN_HISTORY_CAP);
+
+          if (
+            mode === "summary" &&
+            (
+              json.meta?.cacheStatus === "local_fallback" ||
+              json.meta?.cacheStatus === "warming" ||
+              json.recommendationSource === "local_fallback"
+            )
+          ) {
+            window.setTimeout(() => {
+              fetchForYouRef.current?.(titlesSnapshot, shownHistoryRef.current, "full", true);
+            }, 1200);
+          }
         }
       })
       .catch(() => {
@@ -421,13 +466,15 @@ export default function ForYouSection() {
       .finally(() => setLoading(false));
   }, []);
 
+  fetchForYouRef.current = fetchForYou;
+
   useEffect(() => {
     if (titlesLoading) return;
     if (didInitRef.current && refreshCount === 0) return;
     didInitRef.current = true;
     // First load: no exclusions; subsequent Sorteio rounds: pass history
     const exclude = refreshCount > 0 ? shownHistoryRef.current : [];
-    fetchForYou(titles, exclude);
+    fetchForYou(titles, exclude, refreshCount > 0 ? "full" : "summary");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [titlesLoading, refreshCount]);
 

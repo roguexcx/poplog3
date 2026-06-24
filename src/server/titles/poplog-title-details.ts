@@ -1,6 +1,7 @@
 import { buildTmdbRawUrl } from "@/lib/images/url";
 import { translateGenreName } from "@/lib/domain-labels";
 import { resolveDisplayTitle } from "@/lib/titles/display-title";
+import { cache } from "react";
 import {
   catalogGetMovie,
   catalogGetPeople,
@@ -120,6 +121,8 @@ type LoaderInput = {
   mediaType: MediaType;
   id: string;
   sourceHint?: PoplogTitleSourceHint;
+  region?: string;
+  locale?: string;
 };
 
 type LocalTitleRow = {
@@ -504,7 +507,7 @@ function logMediaCorrection(input: {
   );
 }
 
-export async function getPoplogTitleDetails({
+async function loadPoplogTitleDetails({
   mediaType,
   id,
   sourceHint = "auto",
@@ -516,55 +519,63 @@ export async function getPoplogTitleDetails({
   if (lookupId) {
     let remoteTitle: CatalogTitle | null = null;
     let remoteSource: Exclude<PoplogTitleDetailsSource, "local" | "legacy"> = "trakt";
-    let effectiveMediaType: MediaType = mediaType;
+    let effectiveMediaType: MediaType = identity.mediaType;
+    const hasPersistedMediaType = Boolean(local?.id || identity.poplogId);
 
     if (lookupId.startsWith("tt")) {
-      // Resolução bidirecional: consulta os endpoints de filme E série em paralelo
-      // e corrige a mídia conforme a evidência. Antes só filmes faziam isso, então
-      // uma série cujo IMDb o Trakt só conhece como filme (ou vice-versa) caía em
-      // "legacy" e a PÁGINA NÃO CARREGAVA. Agência simétrica para ambos os tipos.
-      const [movieCandidate, showCandidate] = await Promise.all([
-        resolveMovieTitleCandidate({ imdbId: lookupId }),
-        resolveShowTitleCandidate({ imdbId: lookupId, tvdbId: identity.externalIds.tvdbId }),
-      ]);
-      const movieTitle = movieCandidate?.title ?? null;
-      const showTitle = showCandidate?.title ?? null;
+      if (hasPersistedMediaType) {
+        const candidate = effectiveMediaType === "movie"
+          ? await resolveMovieTitleCandidate({ imdbId: lookupId })
+          : await resolveShowTitleCandidate({ imdbId: lookupId, tvdbId: identity.externalIds.tvdbId });
+        remoteTitle = candidate?.title ?? null;
+        remoteSource = candidate?.source ?? "trakt";
+      } else {
+        // Resolução bidirecional só quando ainda não temos mediaType persistido.
+        // Depois que o IMDb fica associado a movie/tv no catálogo local, o caminho
+        // acima evita novas tentativas no endpoint oposto em cada request.
+        const [movieCandidate, showCandidate] = await Promise.all([
+          resolveMovieTitleCandidate({ imdbId: lookupId }),
+          resolveShowTitleCandidate({ imdbId: lookupId, tvdbId: identity.externalIds.tvdbId }),
+        ]);
+        const movieTitle = movieCandidate?.title ?? null;
+        const showTitle = showCandidate?.title ?? null;
 
-      if (mediaType === "tv") {
-        // Solicitado série: prefere o show; cai para o filme só se não houver show.
-        if (showTitle) {
+        if (mediaType === "tv") {
+          // Solicitado série: prefere o show; cai para o filme só se não houver show.
+          if (showTitle) {
+            remoteTitle = showTitle;
+            remoteSource = showCandidate?.source ?? "trakt";
+            effectiveMediaType = "tv";
+          } else if (movieTitle) {
+            remoteTitle = movieTitle;
+            remoteSource = movieCandidate?.source ?? "trakt";
+            effectiveMediaType = "movie";
+            logMediaCorrection({
+              requested: mediaType,
+              resolved: effectiveMediaType,
+              id: lookupId,
+              reason: "show_endpoint_empty_movie_endpoint_valid",
+              showTitle: movieTitle,
+            });
+          }
+        } else if (hasSeriesEvidence(showTitle) && (!movieTitle || showTitle?.ids.imdbId === movieTitle.ids.imdbId || showTitle?.title === movieTitle.title)) {
           remoteTitle = showTitle;
           remoteSource = showCandidate?.source ?? "trakt";
           effectiveMediaType = "tv";
-        } else if (movieTitle) {
-          remoteTitle = movieTitle;
-          remoteSource = movieCandidate?.source ?? "trakt";
-          effectiveMediaType = "movie";
           logMediaCorrection({
             requested: mediaType,
             resolved: effectiveMediaType,
             id: lookupId,
-            reason: "show_endpoint_empty_movie_endpoint_valid",
-            showTitle: movieTitle,
+            reason: movieTitle ? "show_endpoint_valid" : "movie_endpoint_empty_show_endpoint_valid",
+            showTitle,
           });
+        } else {
+          remoteTitle = movieTitle;
+          remoteSource = movieCandidate?.source ?? "trakt";
         }
-      } else if (hasSeriesEvidence(showTitle) && (!movieTitle || showTitle?.ids.imdbId === movieTitle.ids.imdbId || showTitle?.title === movieTitle.title)) {
-        remoteTitle = showTitle;
-        remoteSource = showCandidate?.source ?? "trakt";
-        effectiveMediaType = "tv";
-        logMediaCorrection({
-          requested: mediaType,
-          resolved: effectiveMediaType,
-          id: lookupId,
-          reason: movieTitle ? "show_endpoint_valid" : "movie_endpoint_empty_show_endpoint_valid",
-          showTitle,
-        });
-      } else {
-        remoteTitle = movieTitle;
-        remoteSource = movieCandidate?.source ?? "trakt";
       }
     } else {
-      const candidate = mediaType === "movie"
+      const candidate = effectiveMediaType === "movie"
         ? await resolveMovieTitleCandidate({ imdbId: lookupId })
         : await resolveShowTitleCandidate({ imdbId: lookupId, tvdbId: identity.externalIds.tvdbId });
       remoteTitle = candidate?.title ?? null;
@@ -666,7 +677,7 @@ export async function getPoplogTitleDetails({
 
     // Se DB local tem numberOfSeasons null para série TV, tenta Trakt e agenda refresh.
     let numberOfSeasons = localDetails.numberOfSeasons;
-    if (numberOfSeasons == null && mediaType === "tv") {
+    if (numberOfSeasons == null && localDetails.mediaType === "tv") {
       numberOfSeasons = await resolveNumberOfSeasons(
         localDetails.externalIds.imdbId,
         localDetails.externalIds.tvdbId,
@@ -695,7 +706,7 @@ export async function getPoplogTitleDetails({
   }
 
   return {
-    mediaType,
+    mediaType: identity.mediaType,
     title: identity.title ?? `Titulo ${id}`,
     year: identity.year ?? null,
     externalIds: identity.externalIds,
@@ -709,4 +720,43 @@ export async function getPoplogTitleDetails({
       aliasResolution: identity.aliasResolution,
     },
   };
+}
+
+function normalizeMemoPart(value: string | null | undefined, fallback: string) {
+  const normalized = value?.trim();
+  return normalized ? normalized.toLowerCase() : fallback;
+}
+
+const getPoplogTitleDetailsRequestCached = cache(
+  async (
+    mediaType: MediaType,
+    id: string,
+    sourceHint: PoplogTitleSourceHint,
+    region: string,
+    locale: string,
+  ) => {
+    return loadPoplogTitleDetails({
+      mediaType,
+      id,
+      sourceHint,
+      region,
+      locale,
+    });
+  },
+);
+
+export async function getPoplogTitleDetails({
+  mediaType,
+  id,
+  sourceHint = "auto",
+  region,
+  locale,
+}: LoaderInput): Promise<PoplogTitleDetailsResult | null> {
+  return getPoplogTitleDetailsRequestCached(
+    mediaType,
+    normalizeMemoPart(id, ""),
+    sourceHint,
+    normalizeMemoPart(region, "br"),
+    normalizeMemoPart(locale, "pt-br"),
+  );
 }

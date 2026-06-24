@@ -5,7 +5,6 @@ import { db } from "@/server/db/client";
 import { applyLegacyBrazilianBonus } from "@/server/agenda/editorial-regional-bonus";
 import { normalizeTmdbPopularity } from "@/lib/score/tmdb-popularity";
 import { getUserProviderPreferences } from "@/server/streaming/user-provider-preferences";
-import { listActiveStreamingProviders } from "@/server/local-services/streaming-preferences-local.service";
 import { normalizeProvider } from "@/server/streaming/provider-normalization";
 import { hydrateManyTitleAvailability } from "@/server/availability";
 import { resolveDisplayTitle } from "@/lib/titles/display-title";
@@ -317,11 +316,6 @@ function normalizeProviderType(type?: string | null) {
   return type;
 }
 
-/** Chave de comparação canônica para nomes de provider (alias-aware + lowercase). */
-function providerNameKey(name: string): string {
-  return (normalizeProvider(name)?.name ?? name).trim().toLowerCase();
-}
-
 /**
  * P4: disponibilidade da Agenda agora vem do FLUXO CANÔNICO
  * (hydrateManyTitleAvailability, cacheOnly + warmCold) — sem ler poplog3_title_availability.
@@ -337,24 +331,10 @@ async function enrichAgendaItems(input: {
   const movieIds = Array.from(new Set(items.filter((i) => i.media_type === "movie").map((i) => i.id)));
   const tvIds = Array.from(new Set(items.filter((i) => i.media_type === "tv").map((i) => i.id)));
   const preferences = await getUserProviderPreferences();
-  const favoriteProviderIds = new Set(preferences.favoriteProviderIds ?? []);
   const region = preferences.region ?? "BR";
-
-  // "Preferred" por NOME canônico: mapeia os tmdb provider ids favoritos → nome via
-  // catálogo local de providers (a camada canônica é name-based, não tmdb-provider-id).
-  const favoriteProviderNames = new Set<string>();
-  if (favoriteProviderIds.size > 0) {
-    try {
-      const catalog = await listActiveStreamingProviders(region);
-      for (const p of catalog) {
-        if (p.tmdb_provider_id != null && favoriteProviderIds.has(String(p.tmdb_provider_id))) {
-          favoriteProviderNames.add(providerNameKey(p.provider_name));
-        }
-      }
-    } catch (err) {
-      console.warn("[agenda] catálogo de providers indisponível p/ preferred:", err);
-    }
-  }
+  const preferredRoots = new Set(
+    (preferences.displayPreferences ?? []).map((preference) => preference.rootKey),
+  );
 
   // Disponibilidade canônica (cache-first; aquece em background os frios/negativos legados).
   const availabilityMap = await hydrateManyTitleAvailability(
@@ -386,7 +366,8 @@ async function enrichAgendaItems(input: {
     const providerType = normalizeProviderType(best?.type ?? state?.best_provider_type ?? null);
     const providerLogo = best?.logoUrl ?? state?.best_provider_logo ?? null;
 
-    const isPreferred = providerName ? favoriteProviderNames.has(providerNameKey(providerName)) : false;
+    const fallbackRootKey = providerName ? normalizeProvider(providerName)?.rootKey : null;
+    const isPreferred = best?.isPreferred ?? Boolean(fallbackRootKey && preferredRoots.has(fallbackRootKey));
     const isStreaming = STREAMING_TYPES.has(providerType ?? "");
 
     item.user_status = state?.status ?? null;

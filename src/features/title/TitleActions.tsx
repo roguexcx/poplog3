@@ -6,6 +6,7 @@ import ActionButton from "@/components/ui/ActionButton";
 import { IconBookmark, IconCheck } from "@/components/ui/icons";
 
 import ProgressUpdateModal from "./ProgressUpdateModal";
+import AddToListPopover from "./AddToListPopover";
 import {
   clearSeriesProgress,
   dispatchSeriesProgressRefresh,
@@ -65,6 +66,15 @@ function userStateToStatus(
   if (state.watched) return "watched";
   if (state.watching) return "watching";
   if (state.inWatchlist) return "watchlist";
+  if (
+    state.status === "watchlist" ||
+    state.status === "watching" ||
+    state.status === "watched" ||
+    state.status === "abandoned" ||
+    state.status === "fridge"
+  ) {
+    return state.status;
+  }
 
   return null;
 }
@@ -552,12 +562,10 @@ export default function TitleActions({
             {labels.watched}
           </ActionButton>
         )}
-      </div>
 
-      <div className="flex flex-wrap gap-2 sm:gap-2.5">
         <ActionButton
           variant="social"
-          size="sm"
+          size="md"
           active={favorite}
           loading={pendingAction === "favorite"}
           onClick={toggleFavorite}
@@ -570,7 +578,19 @@ export default function TitleActions({
           {labels.favorite}
         </ActionButton>
 
-        {isTv && (
+        <AddToListPopover
+          tmdbId={id}
+          poplogId={poplogId}
+          imdbId={imdbId}
+          slug={slug}
+          mediaType={mediaType}
+          currentLibraryStatus={status}
+          onWatchlistAdded={() => setStatus((current) => current ?? "watchlist")}
+        />
+      </div>
+
+      {isTv && (
+        <div className="flex flex-wrap gap-2 sm:gap-2.5">
           <ActionButton
             variant="utility"
             size="sm"
@@ -585,8 +605,8 @@ export default function TitleActions({
           >
             {labels.fridge}
           </ActionButton>
-        )}
-      </div>
+        </div>
+      )}
 
       {status === "fridge" && isTv && (
         <div className="inline-flex w-fit max-w-full items-center gap-2 rounded-full border border-cyan-200/[0.14] bg-cyan-950/[0.16] px-3.5 py-2 text-xs font-medium text-cyan-50/78 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-xl">

@@ -12,8 +12,19 @@ export type TitleProviderType =
 
 export type TitleProviderSource = "tmdb" | "watchmode" | "motn" | "balloonerismm";
 
+export type TitleProviderAccessKind =
+  | "included"
+  | "ads"
+  | "partner_channel"
+  | "rent"
+  | "buy"
+  | "rent_buy"
+  | "free"
+  | "unknown";
+
 export type TitleProvider = {
   name: string;
+  originalName?: string;
   logoUrl: string | null;
   type: TitleProviderType;
   providerId?: number | string | null;
@@ -26,9 +37,20 @@ export type TitleProvider = {
   country?: string;
   source?: TitleProviderSource | string;
   normalizedType?: "subscription" | "rent" | "buy" | "free" | "ads";
+  rootKey?: string;
+  rootName?: string;
+  familyKey?: string;
+  familyName?: string;
+  variantKey?: string;
+  variantName?: string | null;
+  accessKind?: TitleProviderAccessKind;
+  isOfficial?: boolean;
+  defaultPriority?: number;
   confidence?: string;
   priorityScore?: number;
   isPreferred?: boolean;
+  isExactPreference?: boolean;
+  preferenceOrder?: number;
 };
 
 export type TitleAvailabilityWindowStatus =
@@ -200,17 +222,38 @@ export type TitleLanguage = {
 
 export type TitleCollectionPart = {
   id: number;
+  mediaType?: TitleMediaType;
+  tmdbId?: number | null;
+  imdbId?: string | null;
+  wikidataQid?: string | null;
   title: string;
   releaseDate?: string | null;
   year?: number | null;
   posterPath?: string | null;
+  releaseOrder?: number | null;
+  chronologicalOrder?: number | null;
 };
 
 export type TitleCollection = {
   id: number;
   name: string;
+  source?: "tmdb" | "wikidata" | string;
+  engine?: "direct-franchise" | string;
+  franchiseQid?: string | null;
   posterPath?: string | null;
   backdropPath?: string | null;
+  parts?: TitleCollectionPart[];
+  releaseOrder?: number[];
+  chronologicalOrder?: number[];
+  orderType?: "release" | "chronological";
+};
+
+export type TitleUniverse = {
+  id: number;
+  name: string;
+  source?: "wikidata" | string;
+  engine?: "same-universe" | string;
+  universeQid?: string | null;
   parts?: TitleCollectionPart[];
 };
 
@@ -322,6 +365,7 @@ export type TitlePageData = {
   crew?: TitleCrewMember[];
   recommendations?: TitleRecommendation[];
   metadata?: TitleMetadataBlock | null;
+  universe?: TitleUniverse | null;
   lastSyncedAt?: string | null;
   cacheInfo?: TitleCacheInfo | null;
 };
