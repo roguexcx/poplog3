@@ -6,6 +6,8 @@ import GlobalSearchHeader from "@/components/layout/GlobalSearchHeader";
 import AgendaBackgroundRefresh from "@/components/layout/AgendaBackgroundRefresh";
 import RadarBackgroundPrefetch from "@/components/layout/RadarBackgroundPrefetch";
 import LocaleFooterSwitch from "@/components/layout/LocaleFooterSwitch";
+import SiteFooter from "@/components/layout/SiteFooter";
+import ConsentBanner from "@/components/legal/ConsentBanner";
 import AuthSessionProvider from "@/components/auth/AuthSessionProvider";
 import AdSenseBootstrap from "@/components/ads/AdSenseBootstrap";
 import { FEATURES } from "@/lib/features";
@@ -34,9 +36,11 @@ export default async function RootLayout({ children, }: {
             <div className="min-h-dvh px-4 pb-24 pt-4 sm:px-6 md:px-8 md:pb-8 md:pt-6 lg:px-10">
               <GlobalSearchHeader />
               {children}
+              <SiteFooter />
             </div>
           </main>
           <LocaleFooterSwitch />
+          <ConsentBanner />
         </AuthSessionProvider>
       </body>
     </html>);

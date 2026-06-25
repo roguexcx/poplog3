@@ -7,7 +7,10 @@ import { ArrowRight, Building2, ImageIcon, Search, UserRound } from "lucide-reac
 import TmdbImage from "@/components/images/TmdbImage";
 import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import { getOriginalTitle, getRating, getReleaseYear, getTitle } from "@/lib/tmdb-utils";
-import { useSearch, type QuickSearchCompany, type QuickSearchPerson, type QuickSearchTitle, } from "./useSearch";
+import { useDebouncedGlobalSearch } from "@/hooks/useDebouncedGlobalSearch";
+import { type QuickSearchCompany, type QuickSearchPerson, type QuickSearchTitle, } from "./useSearch";
+// Static so the hook's effect deps stay stable across renders.
+const SEARCH_EXTRA_PARAMS = { type: "all", page: "1" } as const;
 const MAX_VISIBLE_TITLES = 5;
 const MAX_VISIBLE_PEOPLE = 3;
 const MAX_VISIBLE_COMPANIES = 2;
@@ -59,7 +62,23 @@ export default function SearchBar({ variant = "hero", className = "", placeholde
     const [query, setQuery] = useState("");
     const [activeIndex, setActiveIndex] = useState(0);
     const [isOpen, setIsOpen] = useState(false);
-    const { results, people, companies, loading } = useSearch(query);
+    const search = useDebouncedGlobalSearch({
+        language: "pt-BR",
+        region: "BR",
+        endpoint: "/api/poplog3/search",
+        includeExtras: true,
+        extraParams: SEARCH_EXTRA_PARAMS,
+        minQueryLength: 1,
+        debounceMs: 300,
+    });
+    const setSearchQuery = search.setQuery;
+    useEffect(() => {
+        setSearchQuery(query);
+    }, [query, setSearchQuery]);
+    const results = search.results as unknown as QuickSearchTitle[];
+    const people = (search.people as unknown as QuickSearchPerson[]).filter((person) => Boolean(person.href));
+    const companies = search.companies as unknown as QuickSearchCompany[];
+    const loading = search.isLoading;
     const trimmedQuery = query.trim();
     const visibleResults = results.slice(0, MAX_VISIBLE_TITLES);
     const visiblePeople = people.slice(0, MAX_VISIBLE_PEOPLE);

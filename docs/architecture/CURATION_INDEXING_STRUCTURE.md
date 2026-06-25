@@ -135,6 +135,32 @@ src/hooks/useDebouncedGlobalSearch.ts
 src/components/skeletons/MediaGridSkeleton.tsx
 ```
 
+## Status de integracao no site (2026-06-25)
+
+A base tecnica anterior foi integrada na experiencia visivel do produto:
+
+| Item | Status | Onde |
+| --- | --- | --- |
+| Pagina publica de Termos/Disclaimer | Integrado | `src/app/legal/page.tsx` + `src/lib/legal/legal-content.ts` |
+| Link de Termos no footer | Integrado | `src/components/layout/SiteFooter.tsx` (montado em `src/app/layout.tsx`) |
+| Banner/modal real de consentimento LGPD/cookies | Integrado | `src/components/legal/ConsentBanner.tsx` (montado em `src/app/layout.tsx`) |
+| Ligacao do consentimento com banco/usuario logado | Integrado (degrada com seguranca) | `src/app/api/legal/consent/route.ts` + modelo `UserLegalConsent` |
+| SearchBar usando `useDebouncedGlobalSearch` | Integrado | `src/features/search/SearchBar.tsx` consome o hook (com people/companies + cache + abort) |
+| `MediaGridSkeleton` nas telas de busca | Integrado | `src/features/search/SearchPageView.tsx` (busca, atalhos e descoberta) |
+| Refatoracao fisica completa da arvore | Deferido por seguranca | ver "Ordem de refatoracao segura" |
+
+Notas operacionais:
+
+- O hook `useDebouncedGlobalSearch` ganhou `includeExtras` e `extraParams` para expor `people`/`companies`
+  do endpoint rico `/api/poplog3/search` sem regredir a busca rapida (titulos + pessoas + empresas).
+- A tabela `user_legal_consents` ainda nao existe no banco em execucao. Rode `npm run db:push`
+  (ou aplique `prisma/migrations/manual/2026-06-25-user-legal-consent.sql`) para ativar a persistencia.
+  Ate la, `POST /api/legal/consent` responde `{ ok: true, persisted: false }` e o `localStorage`
+  permanece como fonte da verdade — nenhuma falha visivel ao usuario.
+- A refatoracao fisica da arvore de diretorios foi mantida como plano (abaixo) e nao executada em
+  bloco: os modulos `radar-trakt/`, `availability/` e `source-engine/` carregam regras de dominio
+  sensiveis e devem ser estabilizados antes de uma mudanca fisica maior.
+
 ## Onde deve residir i18n
 
 Estado atual correto:

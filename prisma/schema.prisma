@@ -236,6 +236,7 @@ model User {
   continuitySectionCaches    ContinuitySectionCache[]
   availabilityFallbackStates Poplog3AvailabilityFallbackState[]
   premiumApiUsages           Poplog3PremiumApiUsage[]
+  legalConsents              UserLegalConsent[]
 
   @@index([role])
   @@index([accessStatus])
@@ -510,6 +511,31 @@ model UserCuradoriaPreference {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@map("user_curadoria_preferences")
+}
+
+model UserLegalConsent {
+  id                     String   @id @default(cuid()) @db.VarChar(191)
+  anonymousId            String   @unique @map("anonymous_id") @db.VarChar(128)
+  userId                 String?  @map("user_id") @db.VarChar(191)
+  schemaVersion          Int      @default(1) @map("schema_version")
+  termsAccepted          Boolean  @default(false) @map("terms_accepted")
+  termsVersion           String   @map("terms_version") @db.VarChar(32)
+  privacyAccepted        Boolean  @default(false) @map("privacy_accepted")
+  privacyVersion         String   @map("privacy_version") @db.VarChar(32)
+  analyticsEnabled       Boolean  @default(false) @map("analytics_enabled")
+  adsEnabled             Boolean  @default(false) @map("ads_enabled")
+  personalizationEnabled Boolean  @default(false) @map("personalization_enabled")
+  interfaceLanguage      String   @default("pt-BR") @map("interface_language") @db.VarChar(16)
+  region                 String   @default("BR") @map("region") @db.VarChar(16)
+  source                 String?  @db.VarChar(32)
+  record                 Json
+  createdAt              DateTime @default(now()) @map("created_at")
+  updatedAt              DateTime @updatedAt @map("updated_at")
+
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@map("user_legal_consents")
 }
 
 model HeroSpotlightSession {

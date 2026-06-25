@@ -10,6 +10,7 @@ import InteractivePosterCard from "@/components/ui/InteractivePosterCard";
 import EmptyState from "@/components/ui/EmptyState";
 import SectionHeader from "@/components/ui/SectionHeader";
 import ExploreShortcuts from "./ExploreShortcuts";
+import { MediaGridSkeleton } from "@/components/skeletons/MediaGridSkeleton";
 import { findShortcut } from "@/lib/discovery/shortcuts-config";
 import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -452,9 +453,7 @@ export default function SearchPageView({ initialQuery, initialType, initialPage,
         {!trimmedQuery ? (<ExploreShortcuts activeSlug={selectedShortcut} onSelect={handleShortcutSelect}/>) : null}
 
         {/* ── Skeleton ── */}
-        {(loading || shortcutLoading || discoveryLoading) && !hasSearched ? (<div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-6">
-            {Array.from({ length: 12 }).map((_, i) => (<div key={i} className="aspect-[2/3] animate-pulse rounded-[1.35rem] border border-white/[0.06] bg-white/[0.04]"/>))}
-          </div>) : null}
+        {(loading || shortcutLoading || discoveryLoading) && !hasSearched ? (<MediaGridSkeleton items={12} ariaLabel={uiMessage("ui.e145da845aa8")}/>) : null}
 
         {loading && hasSearched ? (<div className="rounded-2xl border border-white/[0.06] bg-white/[0.025] px-4 py-3 text-sm font-medium text-white/55">{uiMessage("ui.e145da845aa8")}</div>) : null}
 
@@ -528,9 +527,7 @@ export default function SearchPageView({ initialQuery, initialType, initialPage,
             : null}
 
         {/* ── Shortcut skeleton ── */}
-        {!trimmedQuery && selectedShortcut && shortcutLoading ? (<div className="grid grid-cols-2 gap-4 md:grid-cols-4 lg:grid-cols-6">
-            {Array.from({ length: 12 }).map((_, i) => (<div key={i} className="aspect-[2/3] animate-pulse rounded-[1.35rem] border border-white/[0.06] bg-white/[0.04]"/>))}
-          </div>) : null}
+        {!trimmedQuery && selectedShortcut && shortcutLoading ? (<MediaGridSkeleton items={12}/>) : null}
 
         {/* ── Discovery (no query, no shortcut) ── */}
         {!trimmedQuery && !selectedShortcut && !hasSearched ? (<div className="flex flex-col gap-10">

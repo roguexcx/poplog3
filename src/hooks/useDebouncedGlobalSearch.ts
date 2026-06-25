@@ -29,6 +29,23 @@ export type GlobalSearchResult = {
   } | null;
 };
 
+export type GlobalSearchPerson = {
+  id: string;
+  name: string;
+  profile_path?: string | null;
+  known_for_department?: string | null;
+  known_for?: Array<{ title: string; media_type?: string; year?: number | null; poster_path?: string | null }>;
+  href: string;
+};
+
+export type GlobalSearchCompany = {
+  id?: string | null;
+  name: string;
+  logo_path?: string | null;
+  origin_country?: string | null;
+  description?: string | null;
+};
+
 export type GlobalSearchResponse = {
   ok: boolean;
   query: string;
@@ -37,6 +54,9 @@ export type GlobalSearchResponse = {
   region: string;
   count: number;
   results: GlobalSearchResult[];
+  titles?: GlobalSearchResult[];
+  people?: GlobalSearchPerson[];
+  companies?: GlobalSearchCompany[];
   error?: string;
 };
 
@@ -44,6 +64,8 @@ export type DebouncedGlobalSearchState = {
   query: string;
   debouncedQuery: string;
   results: GlobalSearchResult[];
+  people: GlobalSearchPerson[];
+  companies: GlobalSearchCompany[];
   status: "idle" | "typing" | "loading" | "success" | "empty" | "error";
   error: string | null;
   isLoading: boolean;
@@ -56,6 +78,10 @@ export type UseDebouncedGlobalSearchOptions = {
   minQueryLength?: number;
   endpoint?: string;
   cacheTtlMs?: number;
+  /** When true, also surfaces `people` and `companies` returned by richer endpoints. */
+  includeExtras?: boolean;
+  /** Extra static query params sent on every request (e.g. `{ type: "all", page: "1" }`). */
+  extraParams?: Record<string, string>;
 };
 
 type CacheEntry = {
@@ -91,11 +117,16 @@ export function useDebouncedGlobalSearch(options: UseDebouncedGlobalSearchOption
     minQueryLength = 2,
     endpoint = "/api/search",
     cacheTtlMs = 30_000,
+    includeExtras = false,
+    extraParams,
   } = options;
+  const extraParamsKey = extraParams ? new URLSearchParams(extraParams).toString() : "";
   const [state, setState] = useState<DebouncedGlobalSearchState>({
     query: "",
     debouncedQuery: "",
     results: [],
+    people: [],
+    companies: [],
     status: "idle",
     error: null,
     isLoading: false,
@@ -118,6 +149,8 @@ export function useDebouncedGlobalSearch(options: UseDebouncedGlobalSearchOption
       query: "",
       debouncedQuery: "",
       results: [],
+      people: [],
+      companies: [],
       status: "idle",
       error: null,
       isLoading: false,
@@ -139,6 +172,8 @@ export function useDebouncedGlobalSearch(options: UseDebouncedGlobalSearchOption
       setState((current) => ({
         ...current,
         results: [],
+        people: [],
+        companies: [],
         status: query ? "typing" : "idle",
         error: null,
         isLoading: false,
@@ -146,13 +181,21 @@ export function useDebouncedGlobalSearch(options: UseDebouncedGlobalSearchOption
       return;
     }
 
-    const key = cacheKey(query, language, region);
+    const resultsOf = (payload: GlobalSearchResponse) => payload.titles ?? payload.results ?? [];
+    const peopleOf = (payload: GlobalSearchResponse) => (includeExtras ? payload.people ?? [] : []);
+    const companiesOf = (payload: GlobalSearchResponse) =>
+      includeExtras ? payload.companies ?? [] : [];
+
+    const key = `${cacheKey(query, language, region)}::${extraParamsKey}`;
     const cached = readCache(key);
     if (cached) {
+      const cachedResults = resultsOf(cached);
       setState((current) => ({
         ...current,
-        results: cached.results,
-        status: cached.results.length ? "success" : "empty",
+        results: cachedResults,
+        people: peopleOf(cached),
+        companies: companiesOf(cached),
+        status: cachedResults.length ? "success" : "empty",
         error: null,
         isLoading: false,
       }));
@@ -167,7 +210,7 @@ export function useDebouncedGlobalSearch(options: UseDebouncedGlobalSearchOption
 
     setState((current) => ({ ...current, status: "loading", error: null, isLoading: true }));
 
-    const params = new URLSearchParams({ q: query, language, region });
+    const params = new URLSearchParams({ q: query, language, region, ...extraParams });
 
     fetch(`${endpoint}?${params.toString()}`, {
       method: "GET",
@@ -182,10 +225,13 @@ export function useDebouncedGlobalSearch(options: UseDebouncedGlobalSearchOption
       .then((payload) => {
         if (requestIdRef.current !== requestId) return;
         memoryCache.set(key, { response: payload, expiresAt: Date.now() + cacheTtlMs });
+        const nextResults = resultsOf(payload);
         setState((current) => ({
           ...current,
-          results: payload.results,
-          status: payload.results.length ? "success" : "empty",
+          results: nextResults,
+          people: peopleOf(payload),
+          companies: companiesOf(payload),
+          status: nextResults.length ? "success" : "empty",
           error: null,
           isLoading: false,
         }));
@@ -195,6 +241,8 @@ export function useDebouncedGlobalSearch(options: UseDebouncedGlobalSearchOption
         setState((current) => ({
           ...current,
           results: [],
+          people: [],
+          companies: [],
           status: "error",
           error: error instanceof Error ? error.message : String(error),
           isLoading: false,
@@ -202,7 +250,17 @@ export function useDebouncedGlobalSearch(options: UseDebouncedGlobalSearchOption
       });
 
     return () => controller.abort();
-  }, [cacheTtlMs, endpoint, language, minQueryLength, region, state.debouncedQuery]);
+  }, [
+    cacheTtlMs,
+    endpoint,
+    extraParams,
+    extraParamsKey,
+    includeExtras,
+    language,
+    minQueryLength,
+    region,
+    state.debouncedQuery,
+  ]);
 
   return useMemo(() => ({ ...state, setQuery, clear }), [clear, setQuery, state]);
 }
