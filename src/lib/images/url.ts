@@ -16,7 +16,7 @@ export function buildTmdbUrlLoose(
   path: string | null | undefined,
 ): string | null {
   if (!path) return null;
-  // URL completa (Trakt, TheTVDB, etc.) — passar sem modificar
+  // URL completa (Trakt, Balloonerismm, CDN próprio etc.) — passar sem modificar
   const absoluteUrl = normalizeAbsoluteImageUrl(path);
   if (absoluteUrl) return absoluteUrl;
   const sizes = IMAGE_SIZES[kind] as Record<string, string>;

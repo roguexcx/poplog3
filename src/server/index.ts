@@ -1,7 +1,5 @@
 export * from "./normalizers/tmdb-title";
 
-export * from "./normalizers/omdb-ratings";
-
 export * from "./cache/cache-config";
 
 export * from "./strategies/api-priority";

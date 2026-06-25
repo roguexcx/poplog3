@@ -1,5 +1,5 @@
 "use client";
-
+import { uiMessage } from "@/lib/i18n/ui-message";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Image from "next/image";
@@ -8,369 +8,320 @@ import { Reorder, useDragControls } from "framer-motion";
 import { signOut as signOutAuthJs } from "next-auth/react";
 import type { AuthUser } from "@/server/auth/types";
 import { useAuth } from "@/hooks/useAuth";
-import {
-  GripVertical, X, Search, ChevronRight,
-  LogOut, Mail, Lock, Check, Trash2,
-  Film, Tv, BarChart2, ChevronDown, RotateCcw, AlertTriangle,
-} from "lucide-react";
-
+import { GripVertical, X, Search, ChevronRight, LogOut, Mail, Lock, Check, Trash2, Film, Tv, BarChart2, ChevronDown, RotateCcw, AlertTriangle, } from "lucide-react";
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────────────────────────────────────────
-
 type Tab = "visao-geral" | "preferencias" | "nao-interesse" | "conta";
-
 type LibraryStats = {
-  watched:   number;
-  watching:  number;
-  watchlist: number;
-  abandoned: number;
-  favorites: number;
-  movies:    number;
-  series:    number;
-  total:     number;
+    watched: number;
+    watching: number;
+    watchlist: number;
+    abandoned: number;
+    favorites: number;
+    movies: number;
+    series: number;
+    total: number;
 };
-
-type GenreStat = { name: string; count: number; pct: number };
-
+type GenreStat = {
+    name: string;
+    count: number;
+    pct: number;
+};
 type StreamingProvider = {
-  id:               string;
-  provider_name:    string;
-  provider_slug:    string | null;
-  logo_url:         string | null;
-  tmdb_provider_id: number | null;
-  country:          string;
-  is_active:        boolean;
-  original_name:    string;
-  normalized_name:  string;
-  root_key:         string;
-  root_name:        string;
-  family_key:       string;
-  family_name:      string;
-  variant_key:      string;
-  variant_name:     string | null;
-  access_kind:      "included" | "ads" | "partner_channel" | "rent" | "buy" | "rent_buy" | "free" | "unknown";
-  default_priority: number;
-  category:         ProviderCategory;
-  brand_color:      string;
-  text_color:       string;
-  short_label:      string;
+    id: string;
+    provider_name: string;
+    provider_slug: string | null;
+    logo_url: string | null;
+    tmdb_provider_id: number | null;
+    country: string;
+    is_active: boolean;
+    original_name: string;
+    normalized_name: string;
+    root_key: string;
+    root_name: string;
+    family_key: string;
+    family_name: string;
+    variant_key: string;
+    variant_name: string | null;
+    access_kind: "included" | "ads" | "partner_channel" | "rent" | "buy" | "rent_buy" | "free" | "unknown";
+    default_priority: number;
+    category: ProviderCategory;
+    brand_color: string;
+    text_color: string;
+    short_label: string;
 };
-
 type SaveStatus = "idle" | "saving" | "saved" | "error";
-
 type NotInterestedTitle = {
-  tmdbId: number;
-  mediaType: "movie" | "tv";
-  title: string;
-  originalTitle: string | null;
-  year: string | null;
-  source: string | null;
-  updatedAt: string;
+    tmdbId: number;
+    mediaType: "movie" | "tv";
+    title: string;
+    originalTitle: string | null;
+    year: string | null;
+    source: string | null;
+    updatedAt: string;
 };
-
-type GenreStatsResponse = { ok: boolean; genres: GenreStat[] };
+type GenreStatsResponse = {
+    ok: boolean;
+    genres: GenreStat[];
+};
 type StreamingPreferencesResponse = {
-  ok:          boolean;
-  providers:   StreamingProvider[];
-  preferences: Array<{ provider_id: string; is_enabled: boolean; priority_order: number }>;
+    ok: boolean;
+    providers: StreamingProvider[];
+    preferences: Array<{
+        provider_id: string;
+        is_enabled: boolean;
+        priority_order: number;
+    }>;
 };
 type NotInterestedResponse = {
-  ok: boolean;
-  items: NotInterestedTitle[];
+    ok: boolean;
+    items: NotInterestedTitle[];
 };
 type LibraryItemForStats = {
-  status: string | null;
-  media_type: "movie" | "tv";
-  favorite?: boolean | null;
+    status: string | null;
+    media_type: "movie" | "tv";
+    favorite?: boolean | null;
 };
 type LibraryResponseForStats = {
-  success: boolean;
-  data: LibraryItemForStats[];
+    success: boolean;
+    data: LibraryItemForStats[];
 };
-
-const PROFILE_CLIENT_CACHE_TTL_MS = 5 * 60_000;
-let genreStatsCache:
-  | { promise: Promise<GenreStatsResponse>; expiresAt: number }
-  | null = null;
-let streamingPreferencesCache:
-  | { promise: Promise<StreamingPreferencesResponse>; expiresAt: number }
-  | null = null;
-
+const PROFILE_CLIENT_CACHE_TTL_MS = 5 * 60000;
+let genreStatsCache: {
+    promise: Promise<GenreStatsResponse>;
+    expiresAt: number;
+} | null = null;
+let streamingPreferencesCache: {
+    promise: Promise<StreamingPreferencesResponse>;
+    expiresAt: number;
+} | null = null;
 function fetchGenreStatsOnce() {
-  if (genreStatsCache && genreStatsCache.expiresAt > Date.now()) {
-    return genreStatsCache.promise;
-  }
-
-  const promise = fetch("/api/user/genre-stats").then((res) => {
-    if (!res.ok) throw new Error("genre stats failed");
-    return res.json() as Promise<GenreStatsResponse>;
-  });
-  genreStatsCache = { promise, expiresAt: Date.now() + PROFILE_CLIENT_CACHE_TTL_MS };
-  return promise;
+    if (genreStatsCache && genreStatsCache.expiresAt > Date.now()) {
+        return genreStatsCache.promise;
+    }
+    const promise = fetch("/api/user/genre-stats").then((res) => {
+        if (!res.ok)
+            throw new Error("genre stats failed");
+        return res.json() as Promise<GenreStatsResponse>;
+    });
+    genreStatsCache = { promise, expiresAt: Date.now() + PROFILE_CLIENT_CACHE_TTL_MS };
+    return promise;
 }
-
 function fetchStreamingPreferencesOnce() {
-  if (streamingPreferencesCache && streamingPreferencesCache.expiresAt > Date.now()) {
-    return streamingPreferencesCache.promise;
-  }
-
-  const promise = fetch("/api/user/streaming-preferences").then((res) => {
-    if (!res.ok) throw new Error("streaming preferences failed");
-    return res.json() as Promise<StreamingPreferencesResponse>;
-  });
-  streamingPreferencesCache = { promise, expiresAt: Date.now() + PROFILE_CLIENT_CACHE_TTL_MS };
-  return promise;
+    if (streamingPreferencesCache && streamingPreferencesCache.expiresAt > Date.now()) {
+        return streamingPreferencesCache.promise;
+    }
+    const promise = fetch("/api/user/streaming-preferences").then((res) => {
+        if (!res.ok)
+            throw new Error("streaming preferences failed");
+        return res.json() as Promise<StreamingPreferencesResponse>;
+    });
+    streamingPreferencesCache = { promise, expiresAt: Date.now() + PROFILE_CLIENT_CACHE_TTL_MS };
+    return promise;
 }
-
 function fetchNotInterestedTitles() {
-  return fetch("/api/user/not-interested").then((res) => {
-    if (!res.ok) throw new Error("not interested failed");
-    return res.json() as Promise<NotInterestedResponse>;
-  });
+    return fetch("/api/user/not-interested").then((res) => {
+        if (!res.ok)
+            throw new Error("not interested failed");
+        return res.json() as Promise<NotInterestedResponse>;
+    });
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // PROVIDER PRESENTATION (derivada pelo catálogo global no servidor)
 // ─────────────────────────────────────────────────────────────────────────────
-
 type ProviderCategory = "principais" | "gratuitos" | "canais" | "aluguel" | "outros";
-type ProviderType     = "subscription" | "ads" | "channel" | "free" | "rental";
-type ProviderFilter   = ProviderCategory;
-
+type ProviderType = "subscription" | "ads" | "channel" | "free" | "rental";
+type ProviderFilter = ProviderCategory;
 type ProviderMeta = {
-  brand:         string;
-  variantLabel?: string;
-  type:          ProviderType;
-  category:      ProviderCategory;
-  bg:            string;
-  textColor?:    string;
-  short:         string;
+    brand: string;
+    variantLabel?: string;
+    type: ProviderType;
+    category: ProviderCategory;
+    bg: string;
+    textColor?: string;
+    short: string;
 };
-
 function getProviderMeta(provider: StreamingProvider): ProviderMeta {
-  const accessType: ProviderType =
-    provider.access_kind === "ads" ? "ads" :
-    provider.access_kind === "partner_channel" ? "channel" :
-    provider.access_kind === "free" ? "free" :
-    ["rent", "buy", "rent_buy"].includes(provider.access_kind) ? "rental" :
-    "subscription";
-  return {
-    brand: provider.root_name,
-    variantLabel: provider.variant_name ?? undefined,
-    type: accessType,
-    category: provider.category,
-    bg: provider.brand_color,
-    textColor: provider.text_color,
-    short: provider.short_label,
-  };
+    const accessType: ProviderType = provider.access_kind === "ads" ? "ads" :
+        provider.access_kind === "partner_channel" ? "channel" :
+            provider.access_kind === "free" ? "free" :
+                ["rent", "buy", "rent_buy"].includes(provider.access_kind) ? "rental" :
+                    "subscription";
+    return {
+        brand: provider.root_name,
+        variantLabel: provider.variant_name ?? undefined,
+        type: accessType,
+        category: provider.category,
+        bg: provider.brand_color,
+        textColor: provider.text_color,
+        short: provider.short_label,
+    };
 }
-
 function getLogoUrl(logoUrl: string | null | undefined): string | null {
-  return resolveCatalogImage(logoUrl, "w200");
+    return resolveCatalogImage(logoUrl, "w200");
 }
-
-function ProviderLogo({
-  src,
-  alt,
-  width,
-  height,
-  className,
-  fallbackClassName,
-  bg,
-  textColor,
-  short,
-}: {
-  src: string | null;
-  alt: string;
-  width: number;
-  height: number;
-  className: string;
-  fallbackClassName: string;
-  bg: string;
-  textColor: string;
-  short: string;
+function ProviderLogo({ src, alt, width, height, className, fallbackClassName, bg, textColor, short, }: {
+    src: string | null;
+    alt: string;
+    width: number;
+    height: number;
+    className: string;
+    fallbackClassName: string;
+    bg: string;
+    textColor: string;
+    short: string;
 }) {
-  const [failed, setFailed] = useState(false);
-  if (!src || failed) {
-    return (
-      <div
-        className={fallbackClassName}
-        style={{ background: bg, color: textColor }}
-      >
+    const [failed, setFailed] = useState(false);
+    if (!src || failed) {
+        return (<div className={fallbackClassName} style={{ background: bg, color: textColor }}>
         {short}
-      </div>
-    );
-  }
-  return (
-    <Image
-      src={src}
-      alt={alt}
-      width={width}
-      height={height}
-      unoptimized
-      className={className}
-      style={{ background: bg }}
-      onError={() => setFailed(true)}
-    />
-  );
+      </div>);
+    }
+    return (<Image src={src} alt={alt} width={width} height={height} unoptimized className={className} style={{ background: bg }} onError={() => setFailed(true)}/>);
 }
-
-function getProviderAccessBadge(provider: StreamingProvider): { label: string; cls: string } {
-  if (provider.access_kind === "free") {
-    return { label: "Grátis", cls: "border-teal-500/25 bg-teal-950/30 text-teal-400/70" };
-  }
-  if (["rent", "buy", "rent_buy"].includes(provider.access_kind)) {
-    return { label: "Loja", cls: "border-amber-500/25 bg-amber-950/30 text-amber-400/70" };
-  }
-  if (provider.access_kind === "ads") {
-    return { label: "Anúncios", cls: "border-orange-500/25 bg-orange-950/30 text-orange-400/70" };
-  }
-  if (provider.access_kind === "partner_channel") {
-    return { label: "Canal", cls: "border-violet-500/25 bg-violet-950/30 text-violet-400/70" };
-  }
-  return { label: "Streaming", cls: "border-white/[0.07] bg-white/[0.04] text-white/30" };
+function getProviderAccessBadge(provider: StreamingProvider): {
+    label: string;
+    cls: string;
+} {
+    if (provider.access_kind === "free") {
+        return { label: uiMessage("ui.26f630caadb7"), cls: "border-teal-500/25 bg-teal-950/30 text-teal-400/70" };
+    }
+    if (["rent", "buy", "rent_buy"].includes(provider.access_kind)) {
+        return { label: "Loja", cls: "border-amber-500/25 bg-amber-950/30 text-amber-400/70" };
+    }
+    if (provider.access_kind === "ads") {
+        return { label: uiMessage("ui.a450ad6293b0"), cls: "border-orange-500/25 bg-orange-950/30 text-orange-400/70" };
+    }
+    if (provider.access_kind === "partner_channel") {
+        return { label: "Canal", cls: "border-violet-500/25 bg-violet-950/30 text-violet-400/70" };
+    }
+    return { label: "Streaming", cls: "border-white/[0.07] bg-white/[0.04] text-white/30" };
 }
-
 function providerOptionLabel(provider: StreamingProvider): string {
-  return provider.normalized_name || provider.root_name || provider.provider_name;
+    return provider.normalized_name || provider.root_name || provider.provider_name;
 }
-
 function providerOptionHint(provider: StreamingProvider): string | null {
-  if (provider.access_kind === "partner_channel") return provider.variant_name ?? "Canal parceiro";
-  if (["rent", "buy", "rent_buy"].includes(provider.access_kind)) return provider.variant_name ?? "Aluguel/compra";
-  if (provider.access_kind === "ads") return "Plano com anúncios";
-  if (provider.access_kind === "free") return "Grátis";
-  return null;
+    if (provider.access_kind === "partner_channel")
+        return provider.variant_name ?? "Canal parceiro";
+    if (["rent", "buy", "rent_buy"].includes(provider.access_kind))
+        return provider.variant_name ?? "Aluguel/compra";
+    if (provider.access_kind === "ads")
+        return uiMessage("ui.8e93cd453e04");
+    if (provider.access_kind === "free")
+        return uiMessage("ui.26f630caadb7");
+    return null;
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // UTILITIES
 // ─────────────────────────────────────────────────────────────────────────────
-
 function getInitials(user: AuthUser): string {
-  const name = user.user_metadata?.full_name ?? user.user_metadata?.name;
-  if (typeof name === "string") return name.split(" ").slice(0, 2).map((w: string) => w[0]).join("").toUpperCase();
-  return (user.email?.[0] ?? "U").toUpperCase();
+    const name = user.user_metadata?.full_name ?? user.user_metadata?.name;
+    if (typeof name === "string")
+        return name.split(" ").slice(0, 2).map((w: string) => w[0]).join("").toUpperCase();
+    return (user.email?.[0] ?? "U").toUpperCase();
 }
-
 function getDisplayName(user: AuthUser): string {
-  return (
-    (typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null) ??
-    (typeof user.user_metadata?.name === "string" ? user.user_metadata.name : null) ??
-    user.name ??
-    user.email?.split("@")[0] ??
-    "Usuário"
-  );
+    return ((typeof user.user_metadata?.full_name === "string" ? user.user_metadata.full_name : null) ??
+        (typeof user.user_metadata?.name === "string" ? user.user_metadata.name : null) ??
+        user.name ??
+        user.email?.split("@")[0] ?? uiMessage("ui.f32c134523d4"));
 }
-
 function formatJoinDate(dateStr: string): string {
-  return new Date(dateStr).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+    return new Date(dateStr).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
 }
-
 function estimateHours(stats: LibraryStats): number {
-  return Math.round((stats.movies * 105 + stats.series * 45 * 8) / 60);
+    return Math.round((stats.movies * 105 + stats.series * 45 * 8) / 60);
 }
-
 function avatarGradient(email: string): string {
-  const opts = [
-    "from-violet-600 to-indigo-600",
-    "from-rose-600 to-pink-600",
-    "from-cyan-600 to-teal-600",
-    "from-amber-600 to-orange-600",
-    "from-emerald-600 to-teal-600",
-  ];
-  return opts[email.charCodeAt(0) % opts.length];
+    const opts = [
+        "from-violet-600 to-indigo-600",
+        "from-rose-600 to-pink-600",
+        "from-cyan-600 to-teal-600",
+        "from-amber-600 to-orange-600",
+        "from-emerald-600 to-teal-600",
+    ];
+    return opts[email.charCodeAt(0) % opts.length];
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // PRIMITIVES
 // ─────────────────────────────────────────────────────────────────────────────
-
 type EyebrowColor = "indigo" | "violet" | "teal" | "amber" | "muted" | "rose";
-
-function Eyebrow({ children, color = "indigo" }: { children: React.ReactNode; color?: EyebrowColor }) {
-  const map: Record<EyebrowColor, [string, string]> = {
-    indigo: ["bg-indigo-400/60",  "text-indigo-400/80"],
-    violet: ["bg-violet-400/60",  "text-violet-400/80"],
-    teal:   ["bg-teal-400/60",    "text-teal-400/80"],
-    amber:  ["bg-amber-400/60",   "text-amber-400/80"],
-    muted:  ["bg-white/20",       "text-white/30"],
-    rose:   ["bg-rose-400/60",    "text-rose-400/80"],
-  };
-  const [line, text] = map[color];
-  return (
-    <div className="flex items-center gap-2 mb-1.5">
-      <span className={`block h-px w-5 rounded-full ${line}`} />
+function Eyebrow({ children, color = "indigo" }: {
+    children: React.ReactNode;
+    color?: EyebrowColor;
+}) {
+    const map: Record<EyebrowColor, [
+        string,
+        string
+    ]> = {
+        indigo: ["bg-indigo-400/60", "text-indigo-400/80"],
+        violet: ["bg-violet-400/60", "text-violet-400/80"],
+        teal: ["bg-teal-400/60", "text-teal-400/80"],
+        amber: ["bg-amber-400/60", "text-amber-400/80"],
+        muted: ["bg-white/20", "text-white/30"],
+        rose: ["bg-rose-400/60", "text-rose-400/80"],
+    };
+    const [line, text] = map[color];
+    return (<div className="flex items-center gap-2 mb-1.5">
+      <span className={`block h-px w-5 rounded-full ${line}`}/>
       <p className={`text-[9.5px] font-bold uppercase tracking-[0.22em] ${text}`}>{children}</p>
-    </div>
-  );
+    </div>);
 }
-
-function BlockTitle({ children }: { children: React.ReactNode }) {
-  return <h2 className="text-[18px] font-black tracking-[-0.03em] text-white/90 leading-tight mb-5">{children}</h2>;
+function BlockTitle({ children }: {
+    children: React.ReactNode;
+}) {
+    return <h2 className="text-[18px] font-black tracking-[-0.03em] text-white/90 leading-tight mb-5">{children}</h2>;
 }
-
-function Block({ children, className = "" }: { children: React.ReactNode; className?: string }) {
-  return (
-    <div className={`rounded-[22px] border border-white/[0.06] bg-white/[0.025] p-5 sm:p-6 ${className}`}>
+function Block({ children, className = "" }: {
+    children: React.ReactNode;
+    className?: string;
+}) {
+    return (<div className={`rounded-[22px] border border-white/[0.06] bg-white/[0.025] p-5 sm:p-6 ${className}`}>
       {children}
-    </div>
-  );
+    </div>);
 }
-
-function StatPill({ value, label, accent = false }: { value: string | number; label: string; accent?: boolean }) {
-  return (
-    <div className={`rounded-2xl border px-4 py-3.5 ${accent ? "bg-violet-950/35 border-violet-500/20" : "bg-white/[0.025] border-white/[0.06]"}`}>
+function StatPill({ value, label, accent = false }: {
+    value: string | number;
+    label: string;
+    accent?: boolean;
+}) {
+    return (<div className={`rounded-2xl border px-4 py-3.5 ${accent ? "bg-violet-950/35 border-violet-500/20" : "bg-white/[0.025] border-white/[0.06]"}`}>
       <p className={`text-[22px] font-black tracking-tight leading-none mb-1 ${accent ? "text-violet-200" : "text-white/80"}`}>{value}</p>
       <p className="text-[11px] text-white/35 leading-snug">{label}</p>
-    </div>
-  );
+    </div>);
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // PROFILE HEADER
 // ─────────────────────────────────────────────────────────────────────────────
-
-function ProfileHeader({
-  user, stats, onSignOut,
-}: {
-  user: AuthUser; stats: LibraryStats; onSignOut: () => void;
+function ProfileHeader({ user, stats, onSignOut, }: {
+    user: AuthUser;
+    stats: LibraryStats;
+    onSignOut: () => void;
 }) {
-  const initials = getInitials(user);
-  const name     = getDisplayName(user);
-  const gradBg   = avatarGradient(user.email ?? "u");
-  const joinDate = formatJoinDate(user.created_at ?? new Date().toISOString());
-  const hours    = estimateHours(stats);
-
-  return (
-    <div className="relative isolate rounded-[24px] overflow-hidden border border-white/[0.07] mb-6">
-      <div className="absolute inset-0 -z-10 bg-gradient-to-br from-indigo-950/60 via-zinc-950 to-black" />
-      <div
-        className="absolute inset-0 -z-10"
-        style={{ background: "radial-gradient(ellipse at 20% 0%,rgba(139,92,246,.15) 0%,transparent 55%),radial-gradient(ellipse at 80% 100%,rgba(6,182,212,.09) 0%,transparent 45%)" }}
-      />
+    const initials = getInitials(user);
+    const name = getDisplayName(user);
+    const gradBg = avatarGradient(user.email ?? "u");
+    const joinDate = formatJoinDate(user.created_at ?? new Date().toISOString());
+    const hours = estimateHours(stats);
+    return (<div className="relative isolate rounded-[24px] overflow-hidden border border-white/[0.07] mb-6">
+      <div className="absolute inset-0 -z-10 bg-gradient-to-br from-indigo-950/60 via-zinc-950 to-black"/>
+      <div className="absolute inset-0 -z-10" style={{ background: "radial-gradient(ellipse at 20% 0%,rgba(139,92,246,.15) 0%,transparent 55%),radial-gradient(ellipse at 80% 100%,rgba(6,182,212,.09) 0%,transparent 45%)" }}/>
 
       <div className="px-5 sm:px-7 pt-6 pb-5">
         <div className="flex flex-col sm:flex-row items-start sm:items-center gap-5">
 
           {/* Avatar */}
-          <div
-            className={`w-[72px] h-[72px] sm:w-20 sm:h-20 rounded-[20px] bg-gradient-to-br ${gradBg} flex items-center justify-center border-2 border-white/[0.12] shadow-xl flex-shrink-0`}
-          >
-            {typeof user.user_metadata?.avatar_url === "string" ? (
-              <Image src={user.user_metadata.avatar_url} alt={name} width={80} height={80} unoptimized className="w-full h-full rounded-[18px] object-cover" />
-            ) : (
-              <span className="text-xl sm:text-2xl font-black text-white/90 tracking-tight">{initials}</span>
-            )}
+          <div className={`w-[72px] h-[72px] sm:w-20 sm:h-20 rounded-[20px] bg-gradient-to-br ${gradBg} flex items-center justify-center border-2 border-white/[0.12] shadow-xl flex-shrink-0`}>
+            {typeof user.user_metadata?.avatar_url === "string" ? (<Image src={user.user_metadata.avatar_url} alt={name} width={80} height={80} unoptimized className="w-full h-full rounded-[18px] object-cover"/>) : (<span className="text-xl sm:text-2xl font-black text-white/90 tracking-tight">{initials}</span>)}
           </div>
 
           {/* Info */}
           <div className="flex-1 min-w-0">
             <h1 className="text-[22px] sm:text-[26px] font-black tracking-[-0.04em] text-white/93 leading-tight">{name}</h1>
-            <p className="text-[11px] text-white/30 mt-0.5">Membro desde {joinDate}</p>
+            <p className="text-[11px] text-white/30 mt-0.5">{uiMessage("ui.df35c87bd2c6")}{joinDate}</p>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-2.5 text-[12px] text-white/45">
-              <span><span className="font-bold text-white/70">{stats.total}</span> títulos</span>
+              <span><span className="font-bold text-white/70">{stats.total}</span>{uiMessage("ui.d3e75bbc154a")}</span>
               <span className="text-white/15">·</span>
               <span><span className="font-bold text-white/70">{hours > 0 ? `${hours.toLocaleString("pt-BR")}h` : "—"}</span> estimadas</span>
               <span className="text-white/15">·</span>
@@ -395,142 +346,130 @@ function ProfileHeader({
           </div>
 
           {/* Sign out — low visual weight */}
-          <button
-            type="button"
-            onClick={onSignOut}
-            className="flex items-center gap-1.5 text-[11px] text-white/22 hover:text-white/45 transition-colors px-2 py-1.5 flex-shrink-0 self-start sm:self-center"
-          >
-            <LogOut size={13} />
+          <button type="button" onClick={onSignOut} className="flex items-center gap-1.5 text-[11px] text-white/22 hover:text-white/45 transition-colors px-2 py-1.5 flex-shrink-0 self-start sm:self-center">
+            <LogOut size={13}/>
             Sair
           </button>
         </div>
       </div>
-    </div>
-  );
+    </div>);
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB BAR
 // ─────────────────────────────────────────────────────────────────────────────
-
-const TABS: { id: Tab; label: string }[] = [
-  { id: "visao-geral",  label: "Visão geral" },
-  { id: "preferencias", label: "Preferências" },
-  { id: "nao-interesse", label: "Não tenho interesse" },
-  { id: "conta",        label: "Conta" },
+const TABS: {
+    id: Tab;
+    label: string;
+}[] = [
+    { id: "visao-geral", label: uiMessage("ui.d30838893a55") },
+    { id: "preferencias", label: uiMessage("ui.703602a24dc4") },
+    { id: "nao-interesse", label: uiMessage("ui.7aea725c0eb9") },
+    { id: "conta", label: "Conta" },
 ];
-
-function TabBar({ active, onChange }: { active: Tab; onChange: (t: Tab) => void }) {
-  return (
-    <div className="flex border-b border-white/[0.07] mb-7 overflow-x-auto no-scrollbar">
-      {TABS.map(tab => (
-        <button
-          key={tab.id}
-          type="button"
-          onClick={() => onChange(tab.id)}
-          className={[
-            "relative flex-shrink-0 px-5 py-3.5 text-[12px] font-bold uppercase tracking-[0.12em] transition-colors duration-200 border-b-2 -mb-px",
-            active === tab.id
-              ? "border-indigo-500 text-white"
-              : "border-transparent text-white/35 hover:text-white/60",
-          ].join(" ")}
-        >
+function TabBar({ active, onChange }: {
+    active: Tab;
+    onChange: (t: Tab) => void;
+}) {
+    return (<div className="flex border-b border-white/[0.07] mb-7 overflow-x-auto no-scrollbar">
+      {TABS.map(tab => (<button key={tab.id} type="button" onClick={() => onChange(tab.id)} className={[
+                "relative flex-shrink-0 px-5 py-3.5 text-[12px] font-bold uppercase tracking-[0.12em] transition-colors duration-200 border-b-2 -mb-px",
+                active === tab.id
+                    ? "border-indigo-500 text-white"
+                    : "border-transparent text-white/35 hover:text-white/60",
+            ].join(" ")}>
           {tab.label}
-        </button>
-      ))}
-    </div>
-  );
+        </button>))}
+    </div>);
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB: VISÃO GERAL
 // ─────────────────────────────────────────────────────────────────────────────
-
-function ProgressBar({ pct, colorClass }: { pct: number; colorClass: string }) {
-  return (
-    <div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
-      <div className={`h-full rounded-full ${colorClass}`} style={{ width: `${pct}%`, transition: "width 1.1s ease" }} />
-    </div>
-  );
+function ProgressBar({ pct, colorClass }: {
+    pct: number;
+    colorClass: string;
+}) {
+    return (<div className="h-2 rounded-full bg-white/[0.06] overflow-hidden">
+      <div className={`h-full rounded-full ${colorClass}`} style={{ width: `${pct}%`, transition: "width 1.1s ease" }}/>
+    </div>);
 }
-
-function TabOverview({ stats, genres }: { stats: LibraryStats; genres: GenreStat[] }) {
-  const hours      = estimateHours(stats);
-  const watchedPct = stats.total > 0 ? Math.round((stats.watched / stats.total) * 100) : 0;
-  const moviesPct  = stats.total > 0 ? Math.round((stats.movies  / stats.total) * 100) : 50;
-  const seriesPct  = 100 - moviesPct;
-
-  return (
-    <div className="space-y-4">
+function TabOverview({ stats, genres }: {
+    stats: LibraryStats;
+    genres: GenreStat[];
+}) {
+    const hours = estimateHours(stats);
+    const watchedPct = stats.total > 0 ? Math.round((stats.watched / stats.total) * 100) : 0;
+    const moviesPct = stats.total > 0 ? Math.round((stats.movies / stats.total) * 100) : 50;
+    const seriesPct = 100 - moviesPct;
+    return (<div className="space-y-4">
 
       {/* Topo: resumo + biblioteca lado a lado no desktop */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
 
         {/* Resumo geral */}
         <Block>
-          <Eyebrow color="violet">Sua jornada · POPLOG</Eyebrow>
-          <BlockTitle>Resumo geral</BlockTitle>
+          <Eyebrow color="violet">{uiMessage("ui.364b6ce885c6")}</Eyebrow>
+          <BlockTitle>{uiMessage("ui.ff0b10ed9323")}</BlockTitle>
 
           <div className="grid grid-cols-3 gap-3 mb-5">
             <div className="text-center">
               <p className="text-3xl font-black text-white/85 tracking-tight leading-none">{stats.total}</p>
-              <p className="text-[11px] text-white/30 mt-1">títulos</p>
+              <p className="text-[11px] text-white/30 mt-1">{uiMessage("ui.d3e75bbc154a")}</p>
             </div>
             <div className="text-center">
               <p className="text-3xl font-black text-white/85 tracking-tight leading-none">
                 {hours > 0 ? hours.toLocaleString("pt-BR") : "—"}
               </p>
-              <p className="text-[11px] text-white/30 mt-1">horas est.</p>
+              <p className="text-[11px] text-white/30 mt-1">{uiMessage("ui.890733e4087e")}</p>
             </div>
             <div className="text-center">
               <p className="text-3xl font-black text-cyan-300/80 tracking-tight leading-none">{watchedPct}%</p>
-              <p className="text-[11px] text-white/30 mt-1">concluídos</p>
+              <p className="text-[11px] text-white/30 mt-1">{uiMessage("ui.5e5e95109c55")}</p>
             </div>
           </div>
 
-          <div className="h-px bg-white/[0.05] mb-5" />
+          <div className="h-px bg-white/[0.05] mb-5"/>
           <div className="mb-1.5 flex justify-between">
-            <span className="text-[11px] text-white/40">Progresso geral</span>
+            <span className="text-[11px] text-white/40">{uiMessage("ui.95b275130868")}</span>
             <span className="text-[11px] text-white/25">{stats.watched}/{stats.total}</span>
           </div>
-          <ProgressBar pct={watchedPct} colorClass="bg-gradient-to-r from-indigo-500 to-cyan-400" />
+          <ProgressBar pct={watchedPct} colorClass="bg-gradient-to-r from-indigo-500 to-cyan-400"/>
         </Block>
 
         {/* Biblioteca + Consumo empilhados na coluna direita */}
         <div className="space-y-4">
           {/* Biblioteca em números */}
           <div className="grid grid-cols-2 gap-2.5">
-            <StatPill value={stats.watched}   label="Assistidos"  accent />
-            <StatPill value={stats.watching}  label="Assistindo"  />
-            <StatPill value={stats.watchlist} label="Watchlist"   />
-            <StatPill value={stats.favorites} label="Favoritos"   />
+            <StatPill value={stats.watched} label="Assistidos" accent/>
+            <StatPill value={stats.watching} label="Assistindo"/>
+            <StatPill value={stats.watchlist} label="Watchlist"/>
+            <StatPill value={stats.favorites} label={uiMessage("ui.33b332595fe4")}/>
           </div>
 
           {/* Perfil de consumo */}
           <Block>
-            <Eyebrow color="teal">Perfil de consumo</Eyebrow>
-            <BlockTitle>Filmes vs Séries</BlockTitle>
+            <Eyebrow color="teal">{uiMessage("ui.6bdabd19fee5")}</Eyebrow>
+            <BlockTitle>{uiMessage("ui.ddea4d7d5434")}</BlockTitle>
 
             <div className="space-y-3.5">
               <div>
                 <div className="flex justify-between items-center mb-1.5">
                   <div className="flex items-center gap-1.5">
-                    <Film size={13} className="text-cyan-400/70" />
+                    <Film size={13} className="text-cyan-400/70"/>
                     <span className="text-[11px] text-cyan-400/80 font-bold">Filmes</span>
                   </div>
                   <span className="text-[11px] text-white/30">{stats.movies} · {moviesPct}%</span>
                 </div>
-                <ProgressBar pct={moviesPct} colorClass="bg-gradient-to-r from-cyan-500 to-cyan-400" />
+                <ProgressBar pct={moviesPct} colorClass="bg-gradient-to-r from-cyan-500 to-cyan-400"/>
               </div>
               <div>
                 <div className="flex justify-between items-center mb-1.5">
                   <div className="flex items-center gap-1.5">
-                    <Tv size={13} className="text-indigo-400/70" />
-                    <span className="text-[11px] text-indigo-400/80 font-bold">Séries</span>
+                    <Tv size={13} className="text-indigo-400/70"/>
+                    <span className="text-[11px] text-indigo-400/80 font-bold">{uiMessage("ui.de212174bc0c")}</span>
                   </div>
                   <span className="text-[11px] text-white/30">{stats.series} · {seriesPct}%</span>
                 </div>
-                <ProgressBar pct={seriesPct} colorClass="bg-gradient-to-r from-indigo-500 to-violet-400" />
+                <ProgressBar pct={seriesPct} colorClass="bg-gradient-to-r from-indigo-500 to-violet-400"/>
               </div>
             </div>
           </Block>
@@ -539,82 +478,54 @@ function TabOverview({ stats, genres }: { stats: LibraryStats; genres: GenreStat
 
       {/* Gêneros favoritos — largura total */}
       <Block>
-        <Eyebrow color="indigo">Gêneros favoritos</Eyebrow>
-        <BlockTitle>O que você mais assiste</BlockTitle>
+        <Eyebrow color="indigo">{uiMessage("ui.8d4d416a772d")}</Eyebrow>
+        <BlockTitle>{uiMessage("ui.602b6331b5d1")}</BlockTitle>
 
-        {genres.length > 0 ? (
-          <div className="space-y-3">
+        {genres.length > 0 ? (<div className="space-y-3">
             {genres.slice(0, 6).map((g, i) => {
-              const colorClasses = [
-                "bg-indigo-500 opacity-75",
-                "bg-violet-500 opacity-75",
-                "bg-cyan-500 opacity-75",
-                "bg-rose-500 opacity-75",
-                "bg-amber-500 opacity-75",
-                "bg-teal-500 opacity-75",
-              ];
-              return (
-                <div key={g.name}>
+                const colorClasses = [
+                    "bg-indigo-500 opacity-75",
+                    "bg-violet-500 opacity-75",
+                    "bg-cyan-500 opacity-75",
+                    "bg-rose-500 opacity-75",
+                    "bg-amber-500 opacity-75",
+                    "bg-teal-500 opacity-75",
+                ];
+                return (<div key={g.name}>
                   <div className="flex justify-between items-center mb-1.5">
                     <span className="text-[12px] font-bold text-white/60">{g.name}</span>
                     <span className="text-[11px] text-white/25">{g.pct}%</span>
                   </div>
-                  <ProgressBar pct={g.pct} colorClass={colorClasses[i % colorClasses.length]} />
-                </div>
-              );
+                  <ProgressBar pct={g.pct} colorClass={colorClasses[i % colorClasses.length]}/>
+                </div>);
             })}
-            <p className="text-[10px] text-white/20 mt-3 italic">
-              * Calculado a partir dos títulos da sua biblioteca.
-            </p>
-          </div>
-        ) : (
-          <div className="text-center py-6">
-            <BarChart2 size={28} className="text-white/15 mx-auto mb-3" />
-            <p className="text-[12px] text-white/30">Nenhum dado de gênero disponível ainda.</p>
-            <p className="text-[11px] text-white/20 mt-1">
-              Adicione títulos à sua biblioteca para ver seus gêneros favoritos.
-            </p>
-          </div>
-        )}
+            <p className="text-[10px] text-white/20 mt-3 italic">{uiMessage("ui.cabde91ae714")}</p>
+          </div>) : (<div className="text-center py-6">
+            <BarChart2 size={28} className="text-white/15 mx-auto mb-3"/>
+            <p className="text-[12px] text-white/30">{uiMessage("ui.1a9b34a02b91")}</p>
+            <p className="text-[11px] text-white/20 mt-1">{uiMessage("ui.7044e5ebcd19")}</p>
+          </div>)}
       </Block>
 
-    </div>
-  );
+    </div>);
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // ACTIVE STREAMING ITEM (draggable)
 // ─────────────────────────────────────────────────────────────────────────────
-
-function ActiveStreamingItem({
-  provider, priority, onRemove, isSaving,
-}: {
-  provider: StreamingProvider;
-  priority: number;
-  onRemove: () => void;
-  isSaving: boolean;
+function ActiveStreamingItem({ provider, priority, onRemove, isSaving, }: {
+    provider: StreamingProvider;
+    priority: number;
+    onRemove: () => void;
+    isSaving: boolean;
 }) {
-  const controls = useDragControls();
-  const meta     = getProviderMeta(provider);
-  const logo     = getLogoUrl(provider.logo_url);
-  const typeBadge = getProviderAccessBadge(provider);
-
-  return (
-    <Reorder.Item
-      value={provider.id}
-      dragListener={false}
-      dragControls={controls}
-      className="flex items-center gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.03] px-3.5 py-3 touch-none select-none"
-      whileDrag={{ scale: 1.02, boxShadow: "0 12px 40px rgba(0,0,0,0.45)", zIndex: 50 }}
-    >
+    const controls = useDragControls();
+    const meta = getProviderMeta(provider);
+    const logo = getLogoUrl(provider.logo_url);
+    const typeBadge = getProviderAccessBadge(provider);
+    return (<Reorder.Item value={provider.id} dragListener={false} dragControls={controls} className="flex items-center gap-3 rounded-2xl border border-white/[0.07] bg-white/[0.03] px-3.5 py-3 touch-none select-none" whileDrag={{ scale: 1.02, boxShadow: "0 12px 40px rgba(0,0,0,0.45)", zIndex: 50 }}>
       {/* Drag handle */}
-      <button
-        type="button"
-        className="cursor-grab active:cursor-grabbing text-white/20 hover:text-white/50 transition-colors flex-shrink-0"
-        onPointerDown={e => controls.start(e)}
-        aria-label="Arrastar para reordenar"
-      >
-        <GripVertical size={16} />
+      <button type="button" className="cursor-grab active:cursor-grabbing text-white/20 hover:text-white/50 transition-colors flex-shrink-0" onPointerDown={e => controls.start(e)} aria-label={uiMessage("ui.c865f5889582")}>
+        <GripVertical size={16}/>
       </button>
 
       {/* Priority */}
@@ -622,437 +533,339 @@ function ActiveStreamingItem({
         {priority}
       </span>
 
-      <ProviderLogo
-        src={logo}
-        alt={meta.brand}
-        width={32}
-        height={32}
-        className="w-8 h-8 rounded-lg object-cover flex-shrink-0"
-        fallbackClassName="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-black"
-        bg={meta.bg}
-        textColor={meta.textColor ?? "#fff"}
-        short={meta.short}
-      />
+      <ProviderLogo src={logo} alt={meta.brand} width={32} height={32} className="w-8 h-8 rounded-lg object-cover flex-shrink-0" fallbackClassName="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 text-[10px] font-black" bg={meta.bg} textColor={meta.textColor ?? "#fff"} short={meta.short}/>
 
       {/* Name + variant */}
       <div className="flex-1 min-w-0">
         <p className="text-[13px] font-bold text-white/80 leading-tight truncate">{meta.brand}</p>
-        {meta.variantLabel && (
-          <p className="text-[10px] text-white/30 mt-0.5">{meta.variantLabel}</p>
-        )}
+        {meta.variantLabel && (<p className="text-[10px] text-white/30 mt-0.5">{meta.variantLabel}</p>)}
       </div>
 
       {/* Type badge */}
-      <span
-        className={[
-          "text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full border flex-shrink-0",
-          typeBadge.cls,
-        ].join(" ")}
-      >
+      <span className={[
+            "text-[9px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full border flex-shrink-0",
+            typeBadge.cls,
+        ].join(" ")}>
         {typeBadge.label}
       </span>
 
       {/* Remove */}
-      <button
-        type="button"
-        onClick={onRemove}
-        disabled={isSaving}
-        className="w-7 h-7 rounded-full border border-white/[0.07] bg-white/[0.03] hover:bg-rose-500/15 hover:border-rose-500/25 flex items-center justify-center text-white/25 hover:text-rose-400 transition-all flex-shrink-0"
-        aria-label={`Remover ${meta.brand}`}
-      >
-        <X size={12} />
+      <button type="button" onClick={onRemove} disabled={isSaving} className="w-7 h-7 rounded-full border border-white/[0.07] bg-white/[0.03] hover:bg-rose-500/15 hover:border-rose-500/25 flex items-center justify-center text-white/25 hover:text-rose-400 transition-all flex-shrink-0" aria-label={uiMessage("ui.d6f07188174d", { v1: meta.brand })}>
+        <X size={12}/>
       </button>
-    </Reorder.Item>
-  );
+    </Reorder.Item>);
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // BRAND GROUPS FOR ADD STREAMING
 // ─────────────────────────────────────────────────────────────────────────────
-
 type BrandGroup = {
-  rootKey:   string;
-  brand:     string;
-  bg:        string;
-  textColor: string;
-  short:     string;
-  logoUrl:   string | null;
-  category:  ProviderCategory;
-  summary:   string | null;
-  providers: StreamingProvider[];
+    rootKey: string;
+    brand: string;
+    bg: string;
+    textColor: string;
+    short: string;
+    logoUrl: string | null;
+    category: ProviderCategory;
+    summary: string | null;
+    providers: StreamingProvider[];
 };
-
 function providerGroupPriority(provider: StreamingProvider): number {
-  if (provider.variant_key === "direct" && provider.access_kind === "included") return 0;
-  if (provider.access_kind === "included") return 1;
-  if (provider.access_kind === "ads") return 2;
-  if (provider.access_kind === "free") return 3;
-  if (provider.access_kind === "partner_channel") return 4;
-  if (["rent", "buy", "rent_buy"].includes(provider.access_kind)) return 5;
-  return 6;
+    if (provider.variant_key === "direct" && provider.access_kind === "included")
+        return 0;
+    if (provider.access_kind === "included")
+        return 1;
+    if (provider.access_kind === "ads")
+        return 2;
+    if (provider.access_kind === "free")
+        return 3;
+    if (provider.access_kind === "partner_channel")
+        return 4;
+    if (["rent", "buy", "rent_buy"].includes(provider.access_kind))
+        return 5;
+    return 6;
 }
-
 function sortProvidersForGroup(providers: StreamingProvider[]): StreamingProvider[] {
-  return [...providers].sort((a, b) => {
-    const priority = providerGroupPriority(a) - providerGroupPriority(b);
-    if (priority !== 0) return priority;
-    return a.normalized_name.localeCompare(b.normalized_name, "pt-BR");
-  });
+    return [...providers].sort((a, b) => {
+        const priority = providerGroupPriority(a) - providerGroupPriority(b);
+        if (priority !== 0)
+            return priority;
+        return a.normalized_name.localeCompare(b.normalized_name, "pt-BR");
+    });
 }
-
 function buildBrandGroups(providers: StreamingProvider[]): BrandGroup[] {
-  const map = new Map<string, BrandGroup>();
-  for (const p of providers) {
-    const meta = getProviderMeta(p);
-    if (!map.has(p.root_key)) {
-      map.set(p.root_key, {
-        rootKey:   p.root_key,
-        brand:     meta.brand,
-        bg:        meta.bg,
-        textColor: meta.textColor ?? "#fff",
-        short:     meta.short,
-        logoUrl:   null,
-        category:  meta.category,
-        summary:   null,
-        providers: [],
-      });
+    const map = new Map<string, BrandGroup>();
+    for (const p of providers) {
+        const meta = getProviderMeta(p);
+        if (!map.has(p.root_key)) {
+            map.set(p.root_key, {
+                rootKey: p.root_key,
+                brand: meta.brand,
+                bg: meta.bg,
+                textColor: meta.textColor ?? "#fff",
+                short: meta.short,
+                logoUrl: null,
+                category: meta.category,
+                summary: null,
+                providers: [],
+            });
+        }
+        map.get(p.root_key)!.providers.push(p);
     }
-    map.get(p.root_key)!.providers.push(p);
-  }
-  return Array.from(map.values()).map(group => {
-    const sortedProviders = sortProvidersForGroup(group.providers);
-    const primary = sortedProviders[0];
-    const primaryMeta = getProviderMeta(primary);
-    const shouldUseFullOptionName = sortedProviders.length === 1 && primary.category !== "principais";
-    return {
-      ...group,
-      brand: shouldUseFullOptionName ? providerOptionLabel(primary) : primaryMeta.brand,
-      bg: primaryMeta.bg,
-      textColor: primaryMeta.textColor ?? "#fff",
-      short: primaryMeta.short,
-      logoUrl: getLogoUrl(primary.logo_url),
-      category: primaryMeta.category,
-      summary:
-        sortedProviders.length === 1 && !shouldUseFullOptionName
-          ? providerOptionHint(primary)
-          : sortedProviders.length > 1
-            ? `${sortedProviders.length} opções`
-            : null,
-      providers: sortedProviders,
-    };
-  });
+    return Array.from(map.values()).map(group => {
+        const sortedProviders = sortProvidersForGroup(group.providers);
+        const primary = sortedProviders[0];
+        const primaryMeta = getProviderMeta(primary);
+        const shouldUseFullOptionName = sortedProviders.length === 1 && primary.category !== "principais";
+        return {
+            ...group,
+            brand: shouldUseFullOptionName ? providerOptionLabel(primary) : primaryMeta.brand,
+            bg: primaryMeta.bg,
+            textColor: primaryMeta.textColor ?? "#fff",
+            short: primaryMeta.short,
+            logoUrl: getLogoUrl(primary.logo_url),
+            category: primaryMeta.category,
+            summary: sortedProviders.length === 1 && !shouldUseFullOptionName
+                ? providerOptionHint(primary)
+                : sortedProviders.length > 1
+                    ? uiMessage("ui.95ca2703390d", { v1: sortedProviders.length }) : null,
+            providers: sortedProviders,
+        };
+    });
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // ADD STREAMING BLOCK
 // ─────────────────────────────────────────────────────────────────────────────
-
 const CATEGORY_LABELS: Record<ProviderCategory, string> = {
-  principais: "Streaming",
-  gratuitos:  "Gratuitos",
-  canais:     "Canais",
-  aluguel:    "Lojas",
-  outros:     "Outros",
+    principais: "Streaming",
+    gratuitos: "Gratuitos",
+    canais: "Canais",
+    aluguel: "Lojas",
+    outros: "Outros",
 };
-
-function AddStreamingBlock({
-  allProviders,
-  activeIds,
-  onAdd,
-  desktopMode = false,
-}: {
-  allProviders:  StreamingProvider[];
-  activeIds:     string[];
-  onAdd:         (id: string) => void;
-  desktopMode?:  boolean;
+function AddStreamingBlock({ allProviders, activeIds, onAdd, desktopMode = false, }: {
+    allProviders: StreamingProvider[];
+    activeIds: string[];
+    onAdd: (id: string) => void;
+    desktopMode?: boolean;
 }) {
-  const [search,       setSearch]       = useState("");
-  const [activeFilter, setActiveFilter] = useState<ProviderFilter>("principais");
-  const [expandedBrand, setExpandedBrand] = useState<string | null>(null);
-
-  // Mantém streaming, canais e lojas como escolhas independentes da mesma marca.
-  const activeRootCategories = new Set(
-    activeIds
-      .map(id => allProviders.find(p => p.id === id))
-      .filter((p): p is StreamingProvider => !!p)
-      .map(p => `${p.root_key}:${p.category}`)
-  );
-  const available = allProviders.filter(p => {
-    if (activeIds.includes(p.id)) return false;
-    return !activeRootCategories.has(`${p.root_key}:${p.category}`);
-  });
-
-  const filteredProviders = available.filter(p => {
-    if (p.category !== activeFilter) return false;
-    if (!search) return true;
-    const normalizedSearch = search.toLowerCase();
-    return [
-      p.provider_name,
-      p.normalized_name,
-      p.root_name,
-      p.variant_name ?? "",
-      p.family_name,
-    ].some(value => value.toLowerCase().includes(normalizedSearch));
-  });
-  const filtered = buildBrandGroups(filteredProviders);
-
-  const categories: ProviderFilter[] = ["principais", "canais", "gratuitos", "aluguel", "outros"];
-
-  const emptyMessage = (() => {
-    if (search) return "Nenhum resultado para esta busca.";
-    if (activeFilter === "aluguel") return "Todas as lojas desta categoria já foram adicionadas.";
-    if (activeFilter === "canais") return "Todos os canais desta categoria já foram adicionados.";
-    if (activeFilter === "gratuitos") return "Todos os serviços gratuitos desta categoria já foram adicionados.";
-    return "Todos os serviços desta categoria já foram adicionados.";
-  })();
-
-  const helperText = (() => {
-    if (activeFilter === "aluguel") return "Lojas de aluguel e compra ficam separadas dos streamings.";
-    if (activeFilter === "canais") return "Canais adicionais aparecem separados do plano principal.";
-    if (activeFilter === "gratuitos") return "Serviços gratuitos e com acesso aberto.";
-    return "Selecione os streamings, canais ou lojas que você assina ou acessa.";
-  })();
-
-  function handleBrandClick(group: BrandGroup) {
-    if (group.providers.length === 1) {
-      onAdd(group.providers[0].id);
-      setExpandedBrand(null);
-    } else {
-      setExpandedBrand(prev => prev === group.rootKey ? null : group.rootKey);
+    const [search, setSearch] = useState("");
+    const [activeFilter, setActiveFilter] = useState<ProviderFilter>("principais");
+    const [expandedBrand, setExpandedBrand] = useState<string | null>(null);
+    // Mantém streaming, canais e lojas como escolhas independentes da mesma marca.
+    const activeRootCategories = new Set(activeIds
+        .map(id => allProviders.find(p => p.id === id))
+        .filter((p): p is StreamingProvider => !!p)
+        .map(p => `${p.root_key}:${p.category}`));
+    const available = allProviders.filter(p => {
+        if (activeIds.includes(p.id))
+            return false;
+        return !activeRootCategories.has(`${p.root_key}:${p.category}`);
+    });
+    const filteredProviders = available.filter(p => {
+        if (p.category !== activeFilter)
+            return false;
+        if (!search)
+            return true;
+        const normalizedSearch = search.toLowerCase();
+        return [
+            p.provider_name,
+            p.normalized_name,
+            p.root_name,
+            p.variant_name ?? "",
+            p.family_name,
+        ].some(value => value.toLowerCase().includes(normalizedSearch));
+    });
+    const filtered = buildBrandGroups(filteredProviders);
+    const categories: ProviderFilter[] = ["principais", "canais", "gratuitos", "aluguel", "outros"];
+    const emptyMessage = (() => {
+        if (search)
+            return "Nenhum resultado para esta busca.";
+        if (activeFilter === "aluguel")
+            return uiMessage("ui.49741a38c35a");
+        if (activeFilter === "canais")
+            return uiMessage("ui.97cd773c5e6a");
+        if (activeFilter === "gratuitos")
+            return uiMessage("ui.68c9f0fc6026");
+        return uiMessage("ui.e46ac1203940");
+    })();
+    const helperText = (() => {
+        if (activeFilter === "aluguel")
+            return "Lojas de aluguel e compra ficam separadas dos streamings.";
+        if (activeFilter === "canais")
+            return "Canais adicionais aparecem separados do plano principal.";
+        if (activeFilter === "gratuitos")
+            return uiMessage("ui.65b9ea4e95b4");
+        return uiMessage("ui.980a8de676ed");
+    })();
+    function handleBrandClick(group: BrandGroup) {
+        if (group.providers.length === 1) {
+            onAdd(group.providers[0].id);
+            setExpandedBrand(null);
+        }
+        else {
+            setExpandedBrand(prev => prev === group.rootKey ? null : group.rootKey);
+        }
     }
-  }
-
-  return (
-    <div className={desktopMode ? "flex flex-col h-full" : "mt-6 pt-6 border-t border-white/[0.06]"}>
-      {!desktopMode && <Eyebrow color="muted">Adicionar serviço</Eyebrow>}
+    return (<div className={desktopMode ? "flex flex-col h-full" : "mt-6 pt-6 border-t border-white/[0.06]"}>
+      {!desktopMode && <Eyebrow color="muted">{uiMessage("ui.0296207072a1")}</Eyebrow>}
       <p className="text-[12px] text-white/30 mb-4 flex-shrink-0">{helperText}</p>
 
       {/* Search */}
       <div className="relative mb-3 flex-shrink-0">
-        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25 pointer-events-none" />
-        <input
-          type="text"
-          placeholder="Buscar serviço..."
-          value={search}
-          onChange={e => setSearch(e.target.value)}
-          className="w-full bg-white/[0.04] border border-white/[0.07] rounded-xl pl-8 pr-3 py-2.5 text-[12px] text-white/70 placeholder:text-white/20 outline-none focus:border-indigo-500/40 focus:bg-white/[0.06] transition-all"
-        />
+        <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25 pointer-events-none"/>
+        <input type="text" placeholder={uiMessage("ui.123816f7a517")} value={search} onChange={e => setSearch(e.target.value)} className="w-full bg-white/[0.04] border border-white/[0.07] rounded-xl pl-8 pr-3 py-2.5 text-[12px] text-white/70 placeholder:text-white/20 outline-none focus:border-indigo-500/40 focus:bg-white/[0.06] transition-all"/>
       </div>
 
       {/* Category chips */}
       <div className="flex gap-1.5 overflow-x-auto no-scrollbar pb-1 mb-3 flex-shrink-0">
-        {categories.map(cat => (
-          <button
-            key={cat}
-            type="button"
-            onClick={() => setActiveFilter(cat)}
-            className={[
-              "flex-shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wide transition-all",
-              activeFilter === cat
-                ? "bg-indigo-600/30 border border-indigo-500/40 text-indigo-300"
-                : "bg-white/[0.04] border border-white/[0.06] text-white/30 hover:bg-white/[0.07] hover:text-white/50",
-            ].join(" ")}
-          >
+        {categories.map(cat => (<button key={cat} type="button" onClick={() => setActiveFilter(cat)} className={[
+                "flex-shrink-0 px-3 py-1.5 rounded-full text-[10px] font-bold uppercase tracking-wide transition-all",
+                activeFilter === cat
+                    ? "bg-indigo-600/30 border border-indigo-500/40 text-indigo-300"
+                    : "bg-white/[0.04] border border-white/[0.06] text-white/30 hover:bg-white/[0.07] hover:text-white/50",
+            ].join(" ")}>
             {CATEGORY_LABELS[cat]}
-          </button>
-        ))}
+          </button>))}
       </div>
 
       {/* Brand grid — scrollable area */}
       <div className={desktopMode ? "relative flex-1 min-h-0" : ""}>
         <div className={desktopMode ? "absolute inset-0 overflow-y-auto thin-scrollbar pr-1" : "overflow-y-auto no-scrollbar max-h-[420px] pr-0.5"}>
-        {filtered.length === 0 ? (
-          <p className="text-[12px] text-white/25 text-center py-6">
+        {filtered.length === 0 ? (<p className="text-[12px] text-white/25 text-center py-6">
             {emptyMessage}
-          </p>
-        ) : (
-          <div className="grid grid-cols-1 gap-1.5">
+          </p>) : (<div className="grid grid-cols-1 gap-1.5">
             {filtered.map(group => {
-              const isExpanded = expandedBrand === group.rootKey;
-              const brandLogo  = group.logoUrl;
-              return (
-                <div key={group.rootKey}>
-                  <button
-                    type="button"
-                    onClick={() => handleBrandClick(group)}
-                    className="w-full flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.025] hover:bg-white/[0.05] hover:border-indigo-500/25 transition-all px-3 py-2.5 text-left"
-                  >
-                    <ProviderLogo
-                      src={brandLogo}
-                      alt={group.brand}
-                      width={36}
-                      height={36}
-                      className="w-9 h-9 rounded-xl object-cover flex-shrink-0"
-                      fallbackClassName="w-9 h-9 rounded-xl flex items-center justify-center text-[11px] font-black flex-shrink-0"
-                      bg={group.bg}
-                      textColor={group.textColor}
-                      short={group.short}
-                    />
+                const isExpanded = expandedBrand === group.rootKey;
+                const brandLogo = group.logoUrl;
+                return (<div key={group.rootKey}>
+                  <button type="button" onClick={() => handleBrandClick(group)} className="w-full flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.025] hover:bg-white/[0.05] hover:border-indigo-500/25 transition-all px-3 py-2.5 text-left">
+                    <ProviderLogo src={brandLogo} alt={group.brand} width={36} height={36} className="w-9 h-9 rounded-xl object-cover flex-shrink-0" fallbackClassName="w-9 h-9 rounded-xl flex items-center justify-center text-[11px] font-black flex-shrink-0" bg={group.bg} textColor={group.textColor} short={group.short}/>
                     <div className="flex-1 min-w-0">
                       <p className="text-[13px] font-bold text-white/80 truncate">{group.brand}</p>
-                      {group.summary && (
-                        <p className="text-[10px] text-white/30 truncate">{group.summary}</p>
-                      )}
+                      {group.summary && (<p className="text-[10px] text-white/30 truncate">{group.summary}</p>)}
                     </div>
-                    {group.providers.length > 1 && (
-                      isExpanded
-                        ? <ChevronDown size={14} className="text-white/30 flex-shrink-0" />
-                        : <ChevronRight size={14} className="text-white/30 flex-shrink-0" />
-                    )}
+                    {group.providers.length > 1 && (isExpanded
+                        ? <ChevronDown size={14} className="text-white/30 flex-shrink-0"/>
+                        : <ChevronRight size={14} className="text-white/30 flex-shrink-0"/>)}
                   </button>
 
                   {/* Variant picker */}
-                  {isExpanded && (
-                    <div className="mt-1 ml-3 space-y-1">
+                  {isExpanded && (<div className="mt-1 ml-3 space-y-1">
                       {group.providers.map(p => {
-                        const pMeta   = getProviderMeta(p);
-                        const pLogo   = getLogoUrl(p.logo_url);
-                        const pBadge  = getProviderAccessBadge(p);
-                        const pHint   = providerOptionHint(p);
-                        return (
-                          <button
-                            key={p.id}
-                            type="button"
-                            onClick={() => { onAdd(p.id); setExpandedBrand(null); }}
-                            className="w-full flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.06] hover:border-indigo-500/25 transition-all px-3 py-2 text-left"
-                          >
-                            <ProviderLogo
-                              src={pLogo}
-                              alt={providerOptionLabel(p)}
-                              width={24}
-                              height={24}
-                              className="w-6 h-6 rounded-lg object-cover flex-shrink-0"
-                              fallbackClassName="w-6 h-6 rounded-lg flex items-center justify-center text-[9px] font-black flex-shrink-0"
-                              bg={pMeta.bg}
-                              textColor={pMeta.textColor ?? "#fff"}
-                              short={pMeta.short}
-                            />
+                            const pMeta = getProviderMeta(p);
+                            const pLogo = getLogoUrl(p.logo_url);
+                            const pBadge = getProviderAccessBadge(p);
+                            const pHint = providerOptionHint(p);
+                            return (<button key={p.id} type="button" onClick={() => { onAdd(p.id); setExpandedBrand(null); }} className="w-full flex items-center gap-2 rounded-xl border border-white/[0.06] bg-white/[0.02] hover:bg-white/[0.06] hover:border-indigo-500/25 transition-all px-3 py-2 text-left">
+                            <ProviderLogo src={pLogo} alt={providerOptionLabel(p)} width={24} height={24} className="w-6 h-6 rounded-lg object-cover flex-shrink-0" fallbackClassName="w-6 h-6 rounded-lg flex items-center justify-center text-[9px] font-black flex-shrink-0" bg={pMeta.bg} textColor={pMeta.textColor ?? "#fff"} short={pMeta.short}/>
                             <div className="flex-1 min-w-0">
                               <p className="text-[11px] font-semibold text-white/70 truncate">
                                 {providerOptionLabel(p)}
                               </p>
-                              {pHint && (
-                                <p className="mt-0.5 text-[9px] text-white/30 truncate">{pHint}</p>
-                              )}
+                              {pHint && (<p className="mt-0.5 text-[9px] text-white/30 truncate">{pHint}</p>)}
                             </div>
-                            <span
-                              className={[
-                                "text-[8px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full border flex-shrink-0",
-                                pBadge.cls,
-                              ].join(" ")}
-                            >
+                            <span className={[
+                                    "text-[8px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded-full border flex-shrink-0",
+                                    pBadge.cls,
+                                ].join(" ")}>
                               {pBadge.label}
                             </span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              );
+                          </button>);
+                        })}
+                    </div>)}
+                </div>);
             })}
-          </div>
-        )}
+          </div>)}
       </div>
       </div>
-    </div>
-  );
+    </div>);
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // SAVE STATUS BADGE
 // ─────────────────────────────────────────────────────────────────────────────
-
-function SaveStatusBadge({ status }: { status: SaveStatus }) {
-  if (status === "idle") return null;
-  const map: Record<Exclude<SaveStatus, "idle">, { label: string; cls: string }> = {
-    saving: { label: "Salvando...",    cls: "bg-white/[0.05] border-white/[0.08] text-white/30"       },
-    saved:  { label: "✓ Salvo",        cls: "bg-teal-950/40 border-teal-500/25 text-teal-400/80"      },
-    error:  { label: "Erro ao salvar", cls: "bg-rose-950/40 border-rose-500/25 text-rose-400/80"      },
-  };
-  const { label, cls } = map[status as Exclude<SaveStatus, "idle">];
-  return (
-    <span
-      className={[
-        "text-[9px] font-bold uppercase tracking-wide px-2 py-1 rounded-full border",
-        cls,
-      ].join(" ")}
-    >
+function SaveStatusBadge({ status }: {
+    status: SaveStatus;
+}) {
+    if (status === "idle")
+        return null;
+    const map: Record<Exclude<SaveStatus, "idle">, {
+        label: string;
+        cls: string;
+    }> = {
+        saving: { label: "Salvando...", cls: "bg-white/[0.05] border-white/[0.08] text-white/30" },
+        saved: { label: uiMessage("ui.bed2b1e66550"), cls: "bg-teal-950/40 border-teal-500/25 text-teal-400/80" },
+        error: { label: uiMessage("ui.c3be11961873"), cls: "bg-rose-950/40 border-rose-500/25 text-rose-400/80" },
+    };
+    const { label, cls } = map[status as Exclude<SaveStatus, "idle">];
+    return (<span className={[
+            "text-[9px] font-bold uppercase tracking-wide px-2 py-1 rounded-full border",
+            cls,
+        ].join(" ")}>
       {label}
-    </span>
-  );
+    </span>);
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB: PREFERÊNCIAS
 // ─────────────────────────────────────────────────────────────────────────────
-
-function TabPreferences({
-  allProviders,
-  initialActiveIds,
-}: {
-  allProviders:     StreamingProvider[];
-  initialActiveIds: string[];
+function TabPreferences({ allProviders, initialActiveIds, }: {
+    allProviders: StreamingProvider[];
+    initialActiveIds: string[];
 }) {
-  const [activeIds,  setActiveIds]  = useState<string[]>(initialActiveIds);
-  const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
-  const saveTimer  = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  const isSaving = saveStatus === "saving";
-
-  useEffect(() => () => {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    if (savedTimer.current) clearTimeout(savedTimer.current);
-  }, []);
-
-  const doSave = useCallback(async (ids: string[]) => {
-    setSaveStatus("saving");
-    try {
-      const res = await fetch("/api/user/streaming-preferences", {
-        method:  "PUT",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ providerIds: ids, country: "BR" }),
-      });
-      if (!res.ok) throw new Error("save failed");
-      streamingPreferencesCache = null;
-      if (savedTimer.current) clearTimeout(savedTimer.current);
-      setSaveStatus("saved");
-      savedTimer.current = setTimeout(() => setSaveStatus("idle"), 2500);
-    } catch {
-      setSaveStatus("error");
+    const [activeIds, setActiveIds] = useState<string[]>(initialActiveIds);
+    const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
+    const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const savedTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const isSaving = saveStatus === "saving";
+    useEffect(() => () => {
+        if (saveTimer.current)
+            clearTimeout(saveTimer.current);
+        if (savedTimer.current)
+            clearTimeout(savedTimer.current);
+    }, []);
+    const doSave = useCallback(async (ids: string[]) => {
+        setSaveStatus("saving");
+        try {
+            const res = await fetch("/api/user/streaming-preferences", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ providerIds: ids, country: "BR" }),
+            });
+            if (!res.ok)
+                throw new Error("save failed");
+            streamingPreferencesCache = null;
+            if (savedTimer.current)
+                clearTimeout(savedTimer.current);
+            setSaveStatus("saved");
+            savedTimer.current = setTimeout(() => setSaveStatus("idle"), 2500);
+        }
+        catch {
+            setSaveStatus("error");
+        }
+    }, []);
+    function scheduleProviderSave(ids: string[]) {
+        if (saveTimer.current)
+            clearTimeout(saveTimer.current);
+        setSaveStatus("saving");
+        saveTimer.current = setTimeout(() => { void doSave(ids); }, 700);
     }
-  }, []);
-
-  function scheduleProviderSave(ids: string[]) {
-    if (saveTimer.current) clearTimeout(saveTimer.current);
-    setSaveStatus("saving");
-    saveTimer.current = setTimeout(() => { void doSave(ids); }, 700);
-  }
-
-  function handleReorder(newOrder: string[]) {
-    setActiveIds(newOrder);
-    scheduleProviderSave(newOrder);
-  }
-
-  function handleAdd(id: string) {
-    const next = [...activeIds, id];
-    setActiveIds(next);
-    scheduleProviderSave(next);
-  }
-
-  function handleRemove(id: string) {
-    const next = activeIds.filter(x => x !== id);
-    setActiveIds(next);
-    scheduleProviderSave(next);
-  }
-
-  const activeProviders = activeIds
-    .map(id => allProviders.find(p => p.id === id))
-    .filter((p): p is StreamingProvider => !!p);
-
-  return (
-    <div className="space-y-4">
+    function handleReorder(newOrder: string[]) {
+        setActiveIds(newOrder);
+        scheduleProviderSave(newOrder);
+    }
+    function handleAdd(id: string) {
+        const next = [...activeIds, id];
+        setActiveIds(next);
+        scheduleProviderSave(next);
+    }
+    function handleRemove(id: string) {
+        const next = activeIds.filter(x => x !== id);
+        setActiveIds(next);
+        scheduleProviderSave(next);
+    }
+    const activeProviders = activeIds
+        .map(id => allProviders.find(p => p.id === id))
+        .filter((p): p is StreamingProvider => !!p);
+    return (<div className="space-y-4">
 
       {/* Streaming: 2 cols desktop — direita fixa/sticky, esquerda com scroll */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 lg:items-start">
@@ -1061,41 +874,20 @@ function TabPreferences({
         <Block className="flex flex-col">
           <div className="flex items-center justify-between mb-1.5">
             <Eyebrow color="indigo">Streaming</Eyebrow>
-            <SaveStatusBadge status={saveStatus} />
+            <SaveStatusBadge status={saveStatus}/>
           </div>
-          <BlockTitle>Seus serviços</BlockTitle>
+          <BlockTitle>{uiMessage("ui.54d3900b005d")}</BlockTitle>
 
-          {activeProviders.length === 0 ? (
-            <div className="text-center py-8">
-              <p className="text-[13px] text-white/30">Nenhum streaming adicionado ainda.</p>
-              <p className="text-[11px] text-white/20 mt-1">Adicione ao lado para personalizar sua experiência.</p>
-            </div>
-          ) : (
-            <Reorder.Group
-              axis="y"
-              values={activeIds}
-              onReorder={handleReorder}
-              className="space-y-2"
-            >
-              {activeProviders.map((p, idx) => (
-                <ActiveStreamingItem
-                  key={p.id}
-                  provider={p}
-                  priority={idx + 1}
-                  isSaving={isSaving}
-                  onRemove={() => handleRemove(p.id)}
-                />
-              ))}
-            </Reorder.Group>
-          )}
+          {activeProviders.length === 0 ? (<div className="text-center py-8">
+              <p className="text-[13px] text-white/30">{uiMessage("ui.81df2f31ad08")}</p>
+              <p className="text-[11px] text-white/20 mt-1">{uiMessage("ui.82a4b8939fb4")}</p>
+            </div>) : (<Reorder.Group axis="y" values={activeIds} onReorder={handleReorder} className="space-y-2">
+              {activeProviders.map((p, idx) => (<ActiveStreamingItem key={p.id} provider={p} priority={idx + 1} isSaving={isSaving} onRemove={() => handleRemove(p.id)}/>))}
+            </Reorder.Group>)}
 
           {/* Mobile: adicionar inline */}
           <div className="lg:hidden">
-            <AddStreamingBlock
-              allProviders={allProviders}
-              activeIds={activeIds}
-              onAdd={handleAdd}
-            />
+            <AddStreamingBlock allProviders={allProviders} activeIds={activeIds} onAdd={handleAdd}/>
           </div>
         </Block>
 
@@ -1103,89 +895,65 @@ function TabPreferences({
         <div className="hidden lg:flex lg:flex-col lg:sticky lg:top-6" style={{ height: "calc(100vh - 6rem)" }}>
           <Block className="flex flex-col flex-1 min-h-0 overflow-hidden">
             <div className="flex-shrink-0">
-              <Eyebrow color="muted">Adicionar serviço</Eyebrow>
-              <BlockTitle>Serviços disponíveis</BlockTitle>
+              <Eyebrow color="muted">{uiMessage("ui.0296207072a1")}</Eyebrow>
+              <BlockTitle>{uiMessage("ui.7b4d1bfe485b")}</BlockTitle>
             </div>
             <div className="flex-1 min-h-0">
-              <AddStreamingBlock
-                allProviders={allProviders}
-                activeIds={activeIds}
-                onAdd={handleAdd}
-                desktopMode
-              />
+              <AddStreamingBlock allProviders={allProviders} activeIds={activeIds} onAdd={handleAdd} desktopMode/>
             </div>
           </Block>
         </div>
       </div>
 
-    </div>
-  );
+    </div>);
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB: NÃO TENHO INTERESSE
 // ─────────────────────────────────────────────────────────────────────────────
-
 function mediaLabel(mediaType: NotInterestedTitle["mediaType"]) {
-  return mediaType === "tv" ? "Série" : "Filme";
+    return mediaType === "tv" ? uiMessage("ui.74f19285073a") : "Filme";
 }
-
 function formatShortDate(value: string | null | undefined) {
-  if (!value) return null;
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return null;
-  return new Intl.DateTimeFormat("pt-BR", {
-    day: "2-digit",
-    month: "short",
-    year: "numeric",
-  }).format(date);
+    if (!value)
+        return null;
+    const date = new Date(value);
+    if (Number.isNaN(date.getTime()))
+        return null;
+    return new Intl.DateTimeFormat("pt-BR", {
+        day: "2-digit",
+        month: "short",
+        year: "numeric",
+    }).format(date);
 }
-
-function TabNotInterested({
-  titles,
-  onUndo,
-}: {
-  titles: NotInterestedTitle[];
-  onUndo: (title: NotInterestedTitle) => void;
+function TabNotInterested({ titles, onUndo, }: {
+    titles: NotInterestedTitle[];
+    onUndo: (title: NotInterestedTitle) => void;
 }) {
-  return (
-    <div className="space-y-4">
+    return (<div className="space-y-4">
       <Block>
-        <Eyebrow color="rose">Preferências negativas</Eyebrow>
-        <BlockTitle>Não tenho interesse</BlockTitle>
+        <Eyebrow color="rose">{uiMessage("ui.528917b5f629")}</Eyebrow>
+        <BlockTitle>{uiMessage("ui.7aea725c0eb9")}</BlockTitle>
 
         <div className="mb-5 grid grid-cols-1 gap-2.5 sm:grid-cols-3">
-          <StatPill value={titles.length} label="títulos bloqueados" accent />
-          <StatPill value={titles.filter((item) => item.mediaType === "movie").length} label="filmes" />
-          <StatPill value={titles.filter((item) => item.mediaType === "tv").length} label="séries" />
+          <StatPill value={titles.length} label={uiMessage("ui.e2a02b58dcfc")} accent/>
+          <StatPill value={titles.filter((item) => item.mediaType === "movie").length} label="filmes"/>
+          <StatPill value={titles.filter((item) => item.mediaType === "tv").length} label={uiMessage("ui.4c07aff1feae")}/>
         </div>
 
-        {titles.length === 0 ? (
-          <div className="rounded-2xl border border-white/[0.06] bg-white/[0.025] px-4 py-8 text-center">
-            <p className="text-[13px] font-semibold text-white/55">Nenhum título marcado.</p>
-            <p className="mt-1 text-[11px] text-white/28">
-              Quando você usar &quot;Não tenho interesse&quot;, ele aparece aqui e perde força nas recomendações.
-            </p>
-          </div>
-        ) : (
-          <div className="divide-y divide-white/[0.06]">
+        {titles.length === 0 ? (<div className="rounded-2xl border border-white/[0.06] bg-white/[0.025] px-4 py-8 text-center">
+            <p className="text-[13px] font-semibold text-white/55">{uiMessage("ui.94f5aec5c813")}</p>
+            <p className="mt-1 text-[11px] text-white/28">{uiMessage("ui.000cee287827")}</p>
+          </div>) : (<div className="divide-y divide-white/[0.06]">
             {titles.map((item) => {
-              const changedAt = formatShortDate(item.updatedAt);
-              return (
-                <div
-                  key={`${item.mediaType}:${item.tmdbId}`}
-                  className="flex flex-col gap-3 py-3.5 sm:flex-row sm:items-center sm:justify-between"
-                >
-                  <a
-                    href={`/title/${item.mediaType}/${item.tmdbId}`}
-                    className="min-w-0 flex-1 rounded-xl px-1 py-1 transition-colors hover:bg-white/[0.03]"
-                  >
+                const changedAt = formatShortDate(item.updatedAt);
+                return (<div key={`${item.mediaType}:${item.tmdbId}`} className="flex flex-col gap-3 py-3.5 sm:flex-row sm:items-center sm:justify-between">
+                  <a href={`/title/${item.mediaType}/${item.tmdbId}`} className="min-w-0 flex-1 rounded-xl px-1 py-1 transition-colors hover:bg-white/[0.03]">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="rounded-full border border-rose-400/20 bg-rose-950/25 px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.16em] text-rose-300/75">
                         {mediaLabel(item.mediaType)}
                       </span>
                       {item.year && <span className="text-[11px] text-white/28">{item.year}</span>}
-                      {changedAt && <span className="text-[11px] text-white/22">marcado em {changedAt}</span>}
+                      {changedAt && <span className="text-[11px] text-white/22">{uiMessage("ui.f407d3932105")}{changedAt}</span>}
                     </div>
                     <p className="mt-1 truncate text-[14px] font-bold text-white/82">{item.title}</p>
                     <p className="mt-0.5 truncate text-[11px] text-white/35">
@@ -1193,66 +961,53 @@ function TabNotInterested({
                     </p>
                   </a>
 
-                  <button
-                    type="button"
-                    onClick={() => onUndo(item)}
-                    className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-2 text-[11px] font-bold text-white/55 transition-colors hover:border-teal-400/25 hover:bg-teal-950/20 hover:text-teal-200"
-                  >
-                    <RotateCcw size={13} />
+                  <button type="button" onClick={() => onUndo(item)} className="inline-flex shrink-0 items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.035] px-3 py-2 text-[11px] font-bold text-white/55 transition-colors hover:border-teal-400/25 hover:bg-teal-950/20 hover:text-teal-200">
+                    <RotateCcw size={13}/>
                     Desfazer
                   </button>
-                </div>
-              );
+                </div>);
             })}
-          </div>
-        )}
+          </div>)}
       </Block>
-    </div>
-  );
+    </div>);
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB: CONTA
 // ─────────────────────────────────────────────────────────────────────────────
-
-function TabAccount({
-  user, onSignOut, onResetLibrary,
-}: {
-  user: AuthUser;
-  onSignOut: () => void;
-  onResetLibrary: () => Promise<void>;
+function TabAccount({ user, onSignOut, onResetLibrary, }: {
+    user: AuthUser;
+    onSignOut: () => void;
+    onResetLibrary: () => Promise<void>;
 }) {
-  const hasProvider = (user.app_metadata?.providers as string[] | undefined)?.includes("email");
-  const [confirmReset, setConfirmReset] = useState(false);
-  const [resetting, setResetting]       = useState(false);
-  const [resetDone, setResetDone]       = useState(false);
-
-  async function handleConfirmReset() {
-    setResetting(true);
-    try {
-      await onResetLibrary();
-      setResetDone(true);
-      setConfirmReset(false);
-    } finally {
-      setResetting(false);
+    const hasProvider = (user.app_metadata?.providers as string[] | undefined)?.includes("email");
+    const [confirmReset, setConfirmReset] = useState(false);
+    const [resetting, setResetting] = useState(false);
+    const [resetDone, setResetDone] = useState(false);
+    async function handleConfirmReset() {
+        setResetting(true);
+        try {
+            await onResetLibrary();
+            setResetDone(true);
+            setConfirmReset(false);
+        }
+        finally {
+            setResetting(false);
+        }
     }
-  }
-
-  return (
-    <div className="space-y-4">
+    return (<div className="space-y-4">
 
       {/* Login + Sessão lado a lado no desktop */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
 
       {/* Login info */}
       <Block>
-        <Eyebrow color="indigo">Informações da conta</Eyebrow>
-        <BlockTitle>Login &amp; segurança</BlockTitle>
+        <Eyebrow color="indigo">{uiMessage("ui.691413bd9d17")}</Eyebrow>
+        <BlockTitle>{uiMessage("ui.8e522e2be8fd")}</BlockTitle>
 
         <div className="space-y-3">
           <div className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.025] px-4 py-3.5">
             <div className="w-9 h-9 rounded-xl bg-indigo-600/20 border border-indigo-500/25 flex items-center justify-center flex-shrink-0">
-              <Mail size={15} className="text-indigo-400" />
+              <Mail size={15} className="text-indigo-400"/>
             </div>
             <div className="flex-1 min-w-0">
               <p className="text-[10px] font-bold text-white/30 uppercase tracking-wide mb-0.5">E-mail</p>
@@ -1260,295 +1015,229 @@ function TabAccount({
             </div>
           </div>
 
-          {hasProvider && (
-            <div className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.025] px-4 py-3.5">
+          {hasProvider && (<div className="flex items-center gap-3 rounded-2xl border border-white/[0.06] bg-white/[0.025] px-4 py-3.5">
               <div className="w-9 h-9 rounded-xl bg-violet-600/20 border border-violet-500/25 flex items-center justify-center flex-shrink-0">
-                <Lock size={15} className="text-violet-400" />
+                <Lock size={15} className="text-violet-400"/>
               </div>
               <div className="flex-1 min-w-0">
                 <p className="text-[10px] font-bold text-white/30 uppercase tracking-wide mb-0.5">Senha</p>
                 <p className="text-[13px] font-semibold text-white/75">••••••••</p>
               </div>
-            </div>
-          )}
+            </div>)}
         </div>
       </Block>
 
       {/* Sign out */}
       <Block>
-        <Eyebrow color="muted">Sessão</Eyebrow>
-        <BlockTitle>Sair da conta</BlockTitle>
+        <Eyebrow color="muted">{uiMessage("ui.de10fc0cb78c")}</Eyebrow>
+        <BlockTitle>{uiMessage("ui.79c7443231cc")}</BlockTitle>
 
-        <p className="text-[12px] text-white/35 mb-5 leading-relaxed">
-          Encerre a sessão neste dispositivo. Seus dados permanecem salvos.
-        </p>
+        <p className="text-[12px] text-white/35 mb-5 leading-relaxed">{uiMessage("ui.078c11390ec0")}</p>
 
-        <button
-          type="button"
-          onClick={onSignOut}
-          className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.04] hover:bg-white/[0.07] text-[13px] font-semibold text-white/60 hover:text-white/80 transition-all"
-        >
-          <LogOut size={15} />
-          Sair da conta
-        </button>
+        <button type="button" onClick={onSignOut} className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-white/[0.08] bg-white/[0.04] hover:bg-white/[0.07] text-[13px] font-semibold text-white/60 hover:text-white/80 transition-all">
+          <LogOut size={15}/>{uiMessage("ui.79c7443231cc")}</button>
       </Block>
 
       </div>{/* end desktop 2-col grid */}
 
       {/* Reset library */}
       <Block>
-        <Eyebrow color="muted">Zona de perigo</Eyebrow>
-        <BlockTitle>Resetar biblioteca</BlockTitle>
+        <Eyebrow color="muted">{uiMessage("ui.69ab4a2e78ad")}</Eyebrow>
+        <BlockTitle>{uiMessage("ui.a85d7caa4bc9")}</BlockTitle>
 
-        {resetDone ? (
-          <div className="flex items-center gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-3.5">
-            <Check size={15} className="text-emerald-400 flex-shrink-0" />
-            <p className="text-[13px] text-emerald-300/80">
-              Biblioteca apagada. Sua conta está zerada.
-            </p>
-          </div>
-        ) : confirmReset ? (
-          <div className="rounded-2xl border border-rose-500/25 bg-rose-500/[0.05] p-4 space-y-4">
+        {resetDone ? (<div className="flex items-center gap-3 rounded-2xl border border-emerald-500/20 bg-emerald-500/[0.06] px-4 py-3.5">
+            <Check size={15} className="text-emerald-400 flex-shrink-0"/>
+            <p className="text-[13px] text-emerald-300/80">{uiMessage("ui.5f347dd92391")}</p>
+          </div>) : confirmReset ? (<div className="rounded-2xl border border-rose-500/25 bg-rose-500/[0.05] p-4 space-y-4">
             <div className="flex items-start gap-3">
-              <AlertTriangle size={16} className="text-rose-400 flex-shrink-0 mt-0.5" />
+              <AlertTriangle size={16} className="text-rose-400 flex-shrink-0 mt-0.5"/>
               <div className="space-y-1">
-                <p className="text-[13px] font-semibold text-rose-300">Tem certeza absoluta?</p>
-                <p className="text-[12px] text-white/40 leading-relaxed">
-                  Isso vai apagar <strong className="text-white/60">permanentemente</strong> toda a sua
-                  biblioteca, histórico, avaliações, episódios assistidos e sinais de recomendação.
-                  Essa ação não pode ser desfeita.
-                </p>
+                <p className="text-[13px] font-semibold text-rose-300">{uiMessage("ui.1debc1d0c0b8")}</p>
+                <p className="text-[12px] text-white/40 leading-relaxed">{uiMessage("ui.148871039ca4")}<strong className="text-white/60">permanentemente</strong>{uiMessage("ui.888ed0b0b9e0")}</p>
               </div>
             </div>
             <div className="flex items-center gap-3">
-              <button
-                type="button"
-                onClick={handleConfirmReset}
-                disabled={resetting}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-rose-500/40 bg-rose-600/20 hover:bg-rose-600/30 text-[13px] font-semibold text-rose-300 hover:text-rose-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {resetting ? (
-                  <div className="w-3.5 h-3.5 rounded-full border-2 border-rose-400/30 border-t-rose-400 animate-spin" />
-                ) : (
-                  <Trash2 size={14} />
-                )}
+              <button type="button" onClick={handleConfirmReset} disabled={resetting} className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-rose-500/40 bg-rose-600/20 hover:bg-rose-600/30 text-[13px] font-semibold text-rose-300 hover:text-rose-200 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                {resetting ? (<div className="w-3.5 h-3.5 rounded-full border-2 border-rose-400/30 border-t-rose-400 animate-spin"/>) : (<Trash2 size={14}/>)}
                 {resetting ? "Apagando..." : "Sim, apagar tudo"}
               </button>
-              <button
-                type="button"
-                onClick={() => setConfirmReset(false)}
-                disabled={resetting}
-                className="px-4 py-2.5 rounded-xl text-[13px] text-white/40 hover:text-white/60 transition-colors disabled:opacity-50"
-              >
+              <button type="button" onClick={() => setConfirmReset(false)} disabled={resetting} className="px-4 py-2.5 rounded-xl text-[13px] text-white/40 hover:text-white/60 transition-colors disabled:opacity-50">
                 Cancelar
               </button>
             </div>
-          </div>
-        ) : (
-          <>
-            <p className="text-[12px] text-white/35 mb-5 leading-relaxed">
-              Apaga toda a sua biblioteca, histórico de episódios, avaliações e dados de comportamento.
-              Suas preferências de streaming são mantidas. Essa ação é irreversível.
-            </p>
-            <button
-              type="button"
-              onClick={() => setConfirmReset(true)}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-rose-500/20 bg-rose-500/[0.06] hover:bg-rose-500/[0.12] text-[13px] font-semibold text-rose-400/80 hover:text-rose-300 transition-all"
-            >
-              <Trash2 size={14} />
-              Resetar biblioteca
-            </button>
-          </>
-        )}
+          </div>) : (<>
+            <p className="text-[12px] text-white/35 mb-5 leading-relaxed">{uiMessage("ui.789e3a38d00d")}</p>
+            <button type="button" onClick={() => setConfirmReset(true)} className="flex items-center gap-2 px-5 py-2.5 rounded-xl border border-rose-500/20 bg-rose-500/[0.06] hover:bg-rose-500/[0.12] text-[13px] font-semibold text-rose-400/80 hover:text-rose-300 transition-all">
+              <Trash2 size={14}/>{uiMessage("ui.a85d7caa4bc9")}</button>
+          </>)}
       </Block>
 
-    </div>
-  );
+    </div>);
 }
-
 // ─────────────────────────────────────────────────────────────────────────────
 // MAIN PAGE
 // ─────────────────────────────────────────────────────────────────────────────
-
 export default function ProfilePageClient() {
-  const router       = useRouter();
-  const searchParams = useSearchParams();
-  const { user, loading: authLoading, refresh: refreshAuth } = useAuth();
-
-
-  const [stats,        setStats]        = useState<LibraryStats>({ watched: 0, watching: 0, watchlist: 0, abandoned: 0, favorites: 0, movies: 0, series: 0, total: 0 });
-  const [genres,       setGenres]       = useState<GenreStat[]>([]);
-  const [allProviders, setAllProviders] = useState<StreamingProvider[]>([]);
-  const [activeIds,    setActiveIds]    = useState<string[]>([]);
-  const [notInterestedTitles, setNotInterestedTitles] = useState<NotInterestedTitle[]>([]);
-  const [dataLoading,  setDataLoading]  = useState(true);
-
-  const rawTab    = searchParams.get("tab") as Tab | null;
-  const validTabs: Tab[] = ["visao-geral", "preferencias", "nao-interesse", "conta"];
-  const [tab, setTab] = useState<Tab>(validTabs.includes(rawTab as Tab) ? (rawTab as Tab) : "visao-geral");
-
-  function changeTab(t: Tab) {
-    setTab(t);
-    router.replace(`/profile?tab=${t}`, { scroll: false });
-  }
-
-  const loadData = useCallback(async (_u: AuthUser) => {
-    setDataLoading(true);
-
-    // Stats
-    try {
-      const response = await fetch("/api/library", { cache: "no-store" });
-      if (response.ok) {
-        const json = (await response.json()) as LibraryResponseForStats;
-        const titles = json.data ?? [];
-        const s: LibraryStats = { watched: 0, watching: 0, watchlist: 0, abandoned: 0, favorites: 0, movies: 0, series: 0, total: titles.length };
-        for (const t of titles) {
-          if (t.status === "watched")   s.watched++;
-          if (t.status === "watching")  s.watching++;
-          if (t.status === "watchlist") s.watchlist++;
-          if (t.status === "abandoned") s.abandoned++;
-          if (t.media_type === "movie") s.movies++;
-          if (t.media_type === "tv")    s.series++;
-          if (t.favorite)               s.favorites++;
+    const router = useRouter();
+    const searchParams = useSearchParams();
+    const { user, loading: authLoading, refresh: refreshAuth } = useAuth();
+    const [stats, setStats] = useState<LibraryStats>({ watched: 0, watching: 0, watchlist: 0, abandoned: 0, favorites: 0, movies: 0, series: 0, total: 0 });
+    const [genres, setGenres] = useState<GenreStat[]>([]);
+    const [allProviders, setAllProviders] = useState<StreamingProvider[]>([]);
+    const [activeIds, setActiveIds] = useState<string[]>([]);
+    const [notInterestedTitles, setNotInterestedTitles] = useState<NotInterestedTitle[]>([]);
+    const [dataLoading, setDataLoading] = useState(true);
+    const rawTab = searchParams.get("tab") as Tab | null;
+    const validTabs: Tab[] = ["visao-geral", "preferencias", "nao-interesse", "conta"];
+    const [tab, setTab] = useState<Tab>(validTabs.includes(rawTab as Tab) ? (rawTab as Tab) : "visao-geral");
+    function changeTab(t: Tab) {
+        setTab(t);
+        router.replace(`/profile?tab=${t}`, { scroll: false });
+    }
+    const loadData = useCallback(async (_u: AuthUser) => {
+        setDataLoading(true);
+        // Stats
+        try {
+            const response = await fetch("/api/library", { cache: "no-store" });
+            if (response.ok) {
+                const json = (await response.json()) as LibraryResponseForStats;
+                const titles = json.data ?? [];
+                const s: LibraryStats = { watched: 0, watching: 0, watchlist: 0, abandoned: 0, favorites: 0, movies: 0, series: 0, total: titles.length };
+                for (const t of titles) {
+                    if (t.status === "watched")
+                        s.watched++;
+                    if (t.status === "watching")
+                        s.watching++;
+                    if (t.status === "watchlist")
+                        s.watchlist++;
+                    if (t.status === "abandoned")
+                        s.abandoned++;
+                    if (t.media_type === "movie")
+                        s.movies++;
+                    if (t.media_type === "tv")
+                        s.series++;
+                    if (t.favorite)
+                        s.favorites++;
+                }
+                setStats(s);
+            }
         }
-        setStats(s);
-      }
-    } catch { /* silent */ }
-
-    // Genres — via API route (server-side, service role bypasses RLS)
-    try {
-      const json = await fetchGenreStatsOnce();
-      if (json.ok && Array.isArray(json.genres)) {
-        setGenres(json.genres);
-      }
-    } catch { /* silent */ }
-
-    // Providers + active preferences via API
-    try {
-      const json = await fetchStreamingPreferencesOnce();
-      if (json.ok) {
-        setAllProviders(json.providers ?? []);
-        const active = (json.preferences ?? [])
-          .filter(p => p.is_enabled)
-          .sort((a, b) => a.priority_order - b.priority_order)
-          .map(p => p.provider_id);
-        setActiveIds(active);
-      }
-    } catch { /* silent */ }
-
-    // Lista de titulos marcados como "Nao tenho interesse"
-    try {
-      const json = await fetchNotInterestedTitles();
-      if (json.ok && Array.isArray(json.items)) {
-        setNotInterestedTitles(json.items);
-      }
-    } catch { /* silent */ }
-
-    setDataLoading(false);
-  }, []);
-
-  useEffect(() => {
-    if (!user) { setDataLoading(false); return; }
-    void loadData(user);
-  }, [user, loadData]);
-
-  async function handleSignOut() {
-    if (user?.authProvider === "authjs") {
-      try {
-        await signOutAuthJs({ redirect: false });
-      } catch {
-        // Auth.js signout failed — estado local ainda será limpo
-      }
+        catch { /* silent */ }
+        // Genres — via API route (server-side, service role bypasses RLS)
+        try {
+            const json = await fetchGenreStatsOnce();
+            if (json.ok && Array.isArray(json.genres)) {
+                setGenres(json.genres);
+            }
+        }
+        catch { /* silent */ }
+        // Providers + active preferences via API
+        try {
+            const json = await fetchStreamingPreferencesOnce();
+            if (json.ok) {
+                setAllProviders(json.providers ?? []);
+                const active = (json.preferences ?? [])
+                    .filter(p => p.is_enabled)
+                    .sort((a, b) => a.priority_order - b.priority_order)
+                    .map(p => p.provider_id);
+                setActiveIds(active);
+            }
+        }
+        catch { /* silent */ }
+        // Lista de titulos marcados como "Nao tenho interesse"
+        try {
+            const json = await fetchNotInterestedTitles();
+            if (json.ok && Array.isArray(json.items)) {
+                setNotInterestedTitles(json.items);
+            }
+        }
+        catch { /* silent */ }
+        setDataLoading(false);
+    }, []);
+    useEffect(() => {
+        if (!user) {
+            setDataLoading(false);
+            return;
+        }
+        void loadData(user);
+    }, [user, loadData]);
+    async function handleSignOut() {
+        if (user?.authProvider === "authjs") {
+            try {
+                await signOutAuthJs({ redirect: false });
+            }
+            catch {
+                // Auth.js signout failed — estado local ainda será limpo
+            }
+        }
+        await refreshAuth();
+        router.push("/");
+        router.refresh();
     }
-    await refreshAuth();
-    router.push("/");
-    router.refresh();
-  }
-
-  async function handleResetLibrary() {
-    const res = await fetch("/api/user/reset-library", { method: "DELETE" });
-    if (!res.ok) throw new Error("Falha ao resetar a biblioteca");
-    setStats({ watched: 0, watching: 0, watchlist: 0, abandoned: 0, favorites: 0, movies: 0, series: 0, total: 0 });
-    setGenres([]);
-    router.refresh();
-  }
-
-  async function handleUndoNotInterested(title: NotInterestedTitle) {
-    const previous = notInterestedTitles;
-    setNotInterestedTitles((current) =>
-      current.filter((item) => item.tmdbId !== title.tmdbId || item.mediaType !== title.mediaType),
-    );
-
-    try {
-      const response = await fetch("/api/user/feedback", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tmdb_id: title.tmdbId,
-          media_type: title.mediaType,
-          feedback_type: "not_interested",
-          source: "profile_not_interested",
-        }),
-      });
-
-      if (!response.ok) throw new Error("undo failed");
-      router.refresh();
-    } catch {
-      setNotInterestedTitles(previous);
+    async function handleResetLibrary() {
+        const res = await fetch("/api/user/reset-library", { method: "DELETE" });
+        if (!res.ok)
+            throw new Error("Falha ao resetar a biblioteca");
+        setStats({ watched: 0, watching: 0, watchlist: 0, abandoned: 0, favorites: 0, movies: 0, series: 0, total: 0 });
+        setGenres([]);
+        router.refresh();
     }
-  }
-
-  if (authLoading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="w-8 h-8 rounded-full border-2 border-indigo-500/30 border-t-indigo-400 animate-spin" />
-      </div>
-    );
-  }
-
-  if (!user) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center">
+    async function handleUndoNotInterested(title: NotInterestedTitle) {
+        const previous = notInterestedTitles;
+        setNotInterestedTitles((current) => current.filter((item) => item.tmdbId !== title.tmdbId || item.mediaType !== title.mediaType));
+        try {
+            const response = await fetch("/api/user/feedback", {
+                method: "DELETE",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    tmdb_id: title.tmdbId,
+                    media_type: title.mediaType,
+                    feedback_type: "not_interested",
+                    source: "profile_not_interested",
+                }),
+            });
+            if (!response.ok)
+                throw new Error("undo failed");
+            router.refresh();
+        }
+        catch {
+            setNotInterestedTitles(previous);
+        }
+    }
+    if (authLoading) {
+        return (<div className="min-h-screen flex items-center justify-center">
+        <div className="w-8 h-8 rounded-full border-2 border-indigo-500/30 border-t-indigo-400 animate-spin"/>
+      </div>);
+    }
+    if (!user) {
+        return (<div className="min-h-screen flex flex-col items-center justify-center gap-4 px-6 text-center">
         <div className="w-14 h-14 rounded-[18px] bg-gradient-to-br from-indigo-600 to-purple-700 flex items-center justify-center mb-2">
           <span className="text-2xl font-black text-white">P</span>
         </div>
-        <h1 className="text-xl font-black text-white/90 tracking-tight">Central do Perfil</h1>
-        <p className="text-[13px] text-white/40 max-w-xs leading-relaxed">
-          Entre na sua conta para ver sua biblioteca, preferencias e historico na Poplog.
-        </p>
-      </div>
-    );
-  }
+        <h1 className="text-xl font-black text-white/90 tracking-tight">{uiMessage("ui.1bd55b39ec55")}</h1>
+        <p className="text-[13px] text-white/40 max-w-xs leading-relaxed">{uiMessage("ui.a63b48edd000")}</p>
+      </div>);
+    }
+    return (<div className="max-w-5xl mx-auto">
 
-  return (
-    <div className="max-w-5xl mx-auto">
+      <ProfileHeader user={user} stats={stats} onSignOut={handleSignOut}/>
 
-      <ProfileHeader user={user} stats={stats} onSignOut={handleSignOut} />
+      <TabBar active={tab} onChange={changeTab}/>
 
-      <TabBar active={tab} onChange={changeTab} />
+      {tab === "visao-geral" && (dataLoading
+            ? <div className="flex items-center justify-center py-16"><div className="w-6 h-6 rounded-full border-2 border-indigo-500/30 border-t-indigo-400 animate-spin"/></div>
+            : <TabOverview stats={stats} genres={genres}/>)}
 
-      {tab === "visao-geral" && (
-        dataLoading
-          ? <div className="flex items-center justify-center py-16"><div className="w-6 h-6 rounded-full border-2 border-indigo-500/30 border-t-indigo-400 animate-spin" /></div>
-          : <TabOverview stats={stats} genres={genres} />
-      )}
+      {tab === "preferencias" && (dataLoading
+            ? <div className="flex items-center justify-center py-16"><div className="w-6 h-6 rounded-full border-2 border-indigo-500/30 border-t-indigo-400 animate-spin"/></div>
+            : <TabPreferences allProviders={allProviders} initialActiveIds={activeIds}/>)}
 
-      {tab === "preferencias" && (
-        dataLoading
-          ? <div className="flex items-center justify-center py-16"><div className="w-6 h-6 rounded-full border-2 border-indigo-500/30 border-t-indigo-400 animate-spin" /></div>
-          : <TabPreferences allProviders={allProviders} initialActiveIds={activeIds} />
-      )}
+      {tab === "nao-interesse" && (dataLoading
+            ? <div className="flex items-center justify-center py-16"><div className="w-6 h-6 rounded-full border-2 border-rose-500/30 border-t-rose-400 animate-spin"/></div>
+            : <TabNotInterested titles={notInterestedTitles} onUndo={handleUndoNotInterested}/>)}
 
-      {tab === "nao-interesse" && (
-        dataLoading
-          ? <div className="flex items-center justify-center py-16"><div className="w-6 h-6 rounded-full border-2 border-rose-500/30 border-t-rose-400 animate-spin" /></div>
-          : <TabNotInterested titles={notInterestedTitles} onUndo={handleUndoNotInterested} />
-      )}
+      {tab === "conta" && (<TabAccount user={user} onSignOut={handleSignOut} onResetLibrary={handleResetLibrary}/>)}
 
-      {tab === "conta" && (
-        <TabAccount user={user} onSignOut={handleSignOut} onResetLibrary={handleResetLibrary} />
-      )}
-
-    </div>
-  );
+    </div>);
 }
+

@@ -1,0 +1,119 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://poplog.local/schemas/legal-consent.schema.json",
+  "title": "POPLOG Legal Consent Record",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "subjectId",
+    "anonymousId",
+    "terms",
+    "cookies",
+    "privacy",
+    "locale",
+    "createdAt",
+    "updatedAt"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "integer",
+      "const": 1
+    },
+    "subjectId": {
+      "description": "Authenticated user id when available; null for anonymous visitors.",
+      "type": ["string", "null"],
+      "minLength": 1
+    },
+    "anonymousId": {
+      "description": "Opaque local id stored client-side before login.",
+      "type": "string",
+      "minLength": 12,
+      "maxLength": 128
+    },
+    "terms": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted", "version", "acceptedAt"],
+      "properties": {
+        "accepted": { "type": "boolean" },
+        "version": { "type": "string", "minLength": 1 },
+        "acceptedAt": { "type": ["string", "null"], "format": "date-time" },
+        "source": {
+          "type": "string",
+          "enum": ["banner", "modal", "profile", "admin_import", "migration"]
+        }
+      }
+    },
+    "privacy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted", "version", "acceptedAt"],
+      "properties": {
+        "accepted": { "type": "boolean" },
+        "version": { "type": "string", "minLength": 1 },
+        "acceptedAt": { "type": ["string", "null"], "format": "date-time" },
+        "source": {
+          "type": "string",
+          "enum": ["banner", "modal", "profile", "admin_import", "migration"]
+        }
+      }
+    },
+    "cookies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["essential", "analytics", "ads", "personalization"],
+      "properties": {
+        "essential": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["enabled", "legalBasis"],
+          "properties": {
+            "enabled": { "type": "boolean", "const": true },
+            "legalBasis": { "type": "string", "enum": ["contract", "legitimate_interest"] }
+          }
+        },
+        "analytics": { "$ref": "#/$defs/optionalCookieCategory" },
+        "ads": { "$ref": "#/$defs/optionalCookieCategory" },
+        "personalization": { "$ref": "#/$defs/optionalCookieCategory" }
+      }
+    },
+    "locale": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["interfaceLanguage", "catalogLanguage", "region"],
+      "properties": {
+        "interfaceLanguage": { "type": "string", "pattern": "^[a-z]{2}(-[A-Z]{2})?$" },
+        "catalogLanguage": { "type": "string", "pattern": "^[a-z]{2}(-[A-Z]{2})?$" },
+        "region": { "type": "string", "pattern": "^[A-Z]{2}$" }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "ipHash": { "type": ["string", "null"] },
+        "userAgentHash": { "type": ["string", "null"] },
+        "lastSyncedAt": { "type": ["string", "null"], "format": "date-time" },
+        "storage": { "type": "string", "enum": ["localStorage", "database", "cookie", "import"] }
+      }
+    },
+    "createdAt": { "type": "string", "format": "date-time" },
+    "updatedAt": { "type": "string", "format": "date-time" }
+  },
+  "$defs": {
+    "optionalCookieCategory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["enabled", "legalBasis", "updatedAt"],
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "legalBasis": {
+          "type": "string",
+          "enum": ["consent", "legitimate_interest", "not_applicable"]
+        },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      }
+    }
+  }
+}

@@ -89,6 +89,7 @@ export type AvailabilityIdInput = {
   tmdbId?: number | null;
   traktId?: number | string | null;
   region?: AvailabilityRegion;
+  language?: string | null;
   /** Datas para janela de TTL/cinema, quando já conhecidas pelo caller. */
   releaseDate?: string | null;
   firstAirDate?: string | null;
@@ -121,6 +122,8 @@ export type AvailabilityIdInput = {
    * a busca correta. Só tem efeito quando cacheOnly = false.
    */
   bypassNegativeCache?: boolean;
+  /** Ignora availability persistida para renovação controlada em background. */
+  bypassProviderCache?: boolean;
   /** Injetada uma vez por request/lote; vazio desativa personalização explicitamente. */
   providerPreferences?: ProviderDisplayPreference[];
 };

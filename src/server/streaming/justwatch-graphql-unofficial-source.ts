@@ -1,11 +1,9 @@
 /**
  * justwatch-graphql-unofficial-source.ts
  *
- * Fonte EXPERIMENTAL de fallback/enriquecimento via GraphQL não oficial da
- * JustWatch. NÃO é fonte primária — `Balloonerismm` continua sendo a fonte canônica.
- * Esta source só é consultada de dentro de `availability-service.ts`: como fallback
- * quando o Balloonerismm falha/retorna vazio, ou como enriquecimento quando a fonte
- * primária trouxe um host genérico de canais.
+ * Fonte JustWatch via GraphQL não oficial. No POPLOG V2 ela é a fonte protagonista
+ * de disponibilidade (assinatura, canais, aluguel e compra), isolada neste arquivo
+ * para ser trocada por Partner API/licenciada sem alterar o modelo interno.
  *
  * Origem técnica: HTML de teste validado manualmente (endpoint apis.justwatch.com/graphql,
  * query `GetSearchTitles`, fragments `PackageDetails`/`TitleOffer`/`TitleDetails`). Aqui
@@ -13,8 +11,8 @@
  * availability do POPLOG (`TitleProvider`).
  *
  * Garantias / isolamento:
- *   - Fallback desativado por padrão; enriquecimento de canais ativado por padrão e
- *     desligável por env `JUSTWATCH_CHANNEL_ENRICHMENT=false`.
+ *   - Lookup primário ativado por padrão em local/dev e desligável com
+ *     `JUSTWATCH_PRIMARY=false`.
  *   - Timeout curto (AbortController) — nunca trava o caminho da resposta.
  *   - Cache forte em processo (TTL + teto), com deduplicação por título/ID/região.
  *   - Baixo volume: só roda no caminho ao vivo, nunca em massa em listas/cards.
@@ -77,7 +75,14 @@ function envFlag(value: string | undefined): boolean {
   return v === "1" || v === "true" || v === "on" || v === "yes";
 }
 
-/** Flag/env de ativação do FALLBACK — experimental, desligada por padrão. */
+/** Flag/env de ativação do lookup primário de providers via JustWatch. */
+export function isJustWatchPrimaryEnabled(): boolean {
+  const raw = process.env.JUSTWATCH_PRIMARY;
+  if (raw === undefined) return true;
+  return envFlag(raw);
+}
+
+/** Flag/env de ativação do fallback legado — mantida para compatibilidade. */
 export function isJustWatchUnofficialEnabled(): boolean {
   return envFlag(process.env.JUSTWATCH_UNOFFICIAL_FALLBACK);
 }
@@ -99,7 +104,7 @@ export function isJustWatchChannelEnrichmentEnabled(): boolean {
 }
 
 function isJustWatchLookupEnabled(): boolean {
-  return isJustWatchUnofficialEnabled() || isJustWatchChannelEnrichmentEnabled();
+  return isJustWatchPrimaryEnabled() || isJustWatchUnofficialEnabled() || isJustWatchChannelEnrichmentEnabled();
 }
 
 // ─── GraphQL: query + fragments (extraídos do HTML de referência) ──────────────
@@ -214,6 +219,10 @@ function mapMonetization(type: string | null | undefined): TitleProviderType | n
     default:
       return null;
   }
+}
+
+export function mapJustWatchMonetizationForProvider(type: string | null | undefined): TitleProviderType | null {
+  return mapMonetization(type);
 }
 
 // ─── Cache em processo (forte, com TTL e teto) ─────────────────────────────────
@@ -409,9 +418,13 @@ async function graphQL(
 
 function buildVariables(input: JustWatchLookupInput, region: string) {
   const language = input.language ?? "pt";
+  const searchQuery =
+    (input.title ?? "").trim() ||
+    input.imdbId?.trim() ||
+    (input.tmdbId != null ? String(input.tmdbId) : "");
   return {
     searchTitlesFilter: {
-      searchQuery: (input.title ?? "").trim(),
+      searchQuery,
       includeTitlesWithoutUrl: true,
       objectTypes: [objectTypeFor(input.mediaType)],
     },
@@ -430,8 +443,9 @@ function buildVariables(input: JustWatchLookupInput, region: string) {
 
 /**
  * Consulta a JustWatch (não oficial) e retorna providers normalizados ao contrato
- * interno. Requer um `title` para a busca (a query é search-based) — quando ausente,
- * retorna outcome "empty". Nunca lança.
+ * interno. Prefere título textual, mas também tenta IMDb/TMDB como query quando
+ * o título local ainda não existe; o match final continua validado por external IDs.
+ * Nunca lança.
  */
 export async function getJustWatchUnofficialProviders(
   input: JustWatchLookupInput,
@@ -446,8 +460,9 @@ export async function getJustWatchUnofficialProviders(
   }
 
   const title = (input.title ?? "").trim();
-  if (!title) {
-    console.warn("[justwatch-unofficial] sem título para busca — pulando", {
+  const query = title || input.imdbId?.trim() || (input.tmdbId != null ? String(input.tmdbId) : "");
+  if (!query) {
+    console.warn("[justwatch-unofficial] sem título/id para busca — pulando", {
       imdbId: input.imdbId ?? null,
       tmdbId: input.tmdbId ?? null,
       region,
@@ -461,7 +476,7 @@ export async function getJustWatchUnofficialProviders(
   const key = cacheKey(input, region);
   const cached = getCached(key);
   if (cached) {
-    console.log(`[justwatch-unofficial] cache-hit "${title}" region=${region} outcome=${cached.outcome}`);
+    console.log(`[justwatch-unofficial] cache-hit "${query}" region=${region} outcome=${cached.outcome}`);
     return cached;
   }
 
@@ -486,7 +501,7 @@ export async function getJustWatchUnofficialProviders(
         raw: { edgeCount: edges.length },
       };
       console.log(
-        `[justwatch-unofficial] no-match "${title}" region=${region} edges=${edges.length} imdb=${input.imdbId ?? "-"} tmdb=${input.tmdbId ?? "-"}`,
+        `[justwatch-unofficial] no-match "${query}" region=${region} edges=${edges.length} imdb=${input.imdbId ?? "-"} tmdb=${input.tmdbId ?? "-"}`,
       );
       setCached(key, result);
       return result;
@@ -520,13 +535,13 @@ export async function getJustWatchUnofficialProviders(
     };
 
     console.log(
-      `[justwatch-unofficial] ${result.outcome} "${title}" region=${region} via=${via} providers=${providers.length}`,
+      `[justwatch-unofficial] ${result.outcome} "${query}" region=${region} via=${via} providers=${providers.length}`,
     );
     setCached(key, result);
     return result;
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
-    console.warn(`[justwatch-unofficial] error "${title}" region=${region}: ${message}`);
+    console.warn(`[justwatch-unofficial] error "${query}" region=${region}: ${message}`);
     return {
       outcome: "error", providers: [], region, matched: null,
       offersCount: null, emptyReason: `error:${message}`, raw: { error: message },

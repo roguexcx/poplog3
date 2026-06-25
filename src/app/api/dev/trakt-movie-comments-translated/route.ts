@@ -74,7 +74,7 @@ async function normalizeComment(comment: TraktComment) {
 }
 
 export async function GET(request: Request) {
-  if (!isAdminRequest(request)) return adminUnauthorizedResponse();
+  if (!(await isAdminRequest(request))) return adminUnauthorizedResponse();
 
   try {
     const { searchParams } = new URL(request.url);

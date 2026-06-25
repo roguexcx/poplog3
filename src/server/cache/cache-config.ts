@@ -79,10 +79,6 @@ export const CACHE_TTL = {
     details:         60 * 60 * 24 * 30,
   },
 
-  omdb: {
-    ratings: 60 * 60 * 24 * 30,
-  },
-
   watchmode: {
     availability: 60 * 60 * 24 * 7,
   },

@@ -37,3 +37,7 @@ export function parseSorteioFilters(input: URLSearchParams | Record<string, unkn
     vibe: VIBES.has(vibe as SorteioVibeFilter) ? vibe as SorteioVibeFilter : "all",
   };
 }
+
+export function sorteioSectionKey(filters: SorteioFilters) {
+  return `sorteio_pool_${filters.mode}_${filters.type}_${filters.vibe}`;
+}

@@ -13,6 +13,7 @@ export type CatalogAvailabilityInput = {
   mediaType: MediaType;
   providerName: string;
   providerRegion: string;
+  providerLanguage?: string | null;
   providerType: ProviderType;
   providerUrl?: string | null;
   providerLogoUrl?: string | null;
@@ -20,6 +21,7 @@ export type CatalogAvailabilityInput = {
   sourceConfidence: SourceConfidence;
   checkedAt?: Date | string;
   expiresAt: Date | string;
+  staleUntil?: Date | string | null;
   evidencePayloadHash?: string | null;
   rawPayloadJson?: unknown;
 };
@@ -43,6 +45,7 @@ export async function listCatalogAvailability(input: {
   tmdbId?: bigint | number | null;
   mediaType?: MediaType;
   providerRegion?: string;
+  providerLanguage?: string;
   includeExpired?: boolean;
 }) {
   try {
@@ -53,6 +56,7 @@ export async function listCatalogAvailability(input: {
         tmdbId: input.tmdbId === undefined ? undefined : toBigIntValue(input.tmdbId),
         mediaType: input.mediaType,
         providerRegion: input.providerRegion,
+        providerLanguage: input.providerLanguage,
         expiresAt: input.includeExpired ? undefined : { gt: new Date() },
       },
       orderBy: [{ providerType: "asc" }, { providerName: "asc" }],
@@ -70,6 +74,7 @@ export async function replaceCatalogAvailability(input: {
   mediaType?: MediaType;
   source?: CatalogAvailabilitySource;
   providerRegion: string;
+  providerLanguage?: string;
   rows: CatalogAvailabilityInput[];
 }): Promise<boolean> {
   try {
@@ -79,12 +84,14 @@ export async function replaceCatalogAvailability(input: {
       const tmdbIdBig = toBigIntValue(input.tmdbId)!;
       const mediaTypeStr = input.mediaType ?? "";
       const sourceStr = String(input.source);
+      const providerLanguage = input.providerLanguage ?? "pt-BR";
       await db.$executeRaw`
         DELETE FROM catalog_availability
         WHERE tmdb_id = ${tmdbIdBig}
           AND media_type = ${mediaTypeStr}
           AND source = ${sourceStr}
           AND provider_region = ${input.providerRegion}
+          AND provider_language = ${providerLanguage}
       `;
     } else {
       await db.catalogAvailability.deleteMany({
@@ -92,6 +99,7 @@ export async function replaceCatalogAvailability(input: {
           imdbId: input.imdbId ?? undefined,
           traktId: input.traktId === undefined ? undefined : toBigIntValue(input.traktId),
           providerRegion: input.providerRegion,
+          providerLanguage: input.providerLanguage,
         },
       });
     }
@@ -106,6 +114,7 @@ export async function replaceCatalogAvailability(input: {
         mediaType: row.mediaType,
         providerName: row.providerName,
         providerRegion: row.providerRegion,
+        providerLanguage: row.providerLanguage ?? "pt-BR",
         providerType: row.providerType,
         providerUrl: row.providerUrl ?? null,
         providerLogoUrl: row.providerLogoUrl ?? null,
@@ -113,6 +122,7 @@ export async function replaceCatalogAvailability(input: {
         sourceConfidence: row.sourceConfidence,
         checkedAt: row.checkedAt ? toDate(row.checkedAt) : new Date(),
         expiresAt: toDate(row.expiresAt),
+        staleUntil: row.staleUntil ? toDate(row.staleUntil) : null,
         evidencePayloadHash: row.evidencePayloadHash ?? null,
         rawPayloadJson: row.rawPayloadJson as object ?? undefined,
       })),

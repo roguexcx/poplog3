@@ -12,6 +12,7 @@
 
 # testing
 /coverage
+/artifacts/
 
 # next.js
 /.next/
@@ -34,6 +35,7 @@ yarn-error.log*
 .env*
 !.env.example
 !.env.local.example
+!.env.production.example
 
 # vercel
 .vercel
@@ -45,3 +47,8 @@ next-env.d.ts
 # db exports e backups locais (dados sensíveis, não versionar)
 /exports/
 /backups/
+
+# assets locais gerados pelo worker (o banco guarda assetKey, não path absoluto)
+/storage/
+.codex-dev-server.*.log
+/.codex-logs/

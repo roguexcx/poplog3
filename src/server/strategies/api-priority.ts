@@ -4,7 +4,6 @@ export const API_PRIORITY = {
   ],
 
   ratings: [
-    "omdb",
     "tmdb",
   ],
 

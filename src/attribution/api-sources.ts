@@ -21,13 +21,6 @@ export const API_SOURCES: Record<ApiSourceId, ApiSourceDefinition> = {
     officialUrl: "https://www.watchmode.com/",
     contexts: ["availability"],
   },
-  omdb: {
-    id: "omdb",
-    name: "OMDb",
-    role: "Ratings externos, prêmios e informações complementares.",
-    officialUrl: "https://www.omdbapi.com/",
-    contexts: ["ratings"],
-  },
   trakt: {
     id: "trakt",
     name: "Trakt",

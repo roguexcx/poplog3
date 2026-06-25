@@ -1,8 +1,8 @@
 /**
  * /api/poplog3/providers — disponibilidade regional (onde assistir).
  *
- * Fonte primária: Balloonerismm /watch/providers (ao vivo, BR por padrão).
- * Fallback: cache local (TMDB/Watchmode/MOTN já sincronizados).
+ * Fonte protagonista: JustWatch normalizado em catalog_availability.
+ * Fallback residual: Balloonerismm/cache local quando JustWatch falha ou vem vazio.
  *
  * Parâmetros:
  *   ?id=<imdb_id|trakt_id>  — identificador do título
@@ -15,6 +15,7 @@ import { AVAILABILITY_UNAVAILABLE } from "@/server/source-engine/normalizers/nor
 import { resolvePoplogTitleIdentity } from "@/server/titles/poplog-title-identity";
 import { getTitleAvailabilityWithDebug } from "@/server/availability";
 import { normalizeStreamingRegion } from "@/server/streaming/region";
+import { normalizeCatalogLanguage } from "@/server/source-engine/locale";
 
 type MediaType = "movie" | "tv";
 
@@ -29,11 +30,16 @@ export async function GET(request: NextRequest) {
     source: "api:providers:region",
     explicit: searchParams.has("region"),
   });
+  const language = normalizeCatalogLanguage(
+    searchParams.get("language") ??
+    searchParams.get("locale") ??
+    request.cookies.get("poplog_catalog_language")?.value,
+  );
   const mediaType = normalizeMediaType(searchParams.get("media_type"));
   const debugSource = searchParams.get("debugSource") === "1";
   const debug = searchParams.get("debug") === "1";
-  // Opção SÓ-dev: ignora a sentinela negativa do cache e força Balloonerismm + fallback
-  // JustWatch. Em produção é ignorada (segurança). Útil para depurar disponibilidade live.
+  // Opção SÓ-dev: ignora a sentinela negativa do cache e força resolução live
+  // JustWatch-first + fallback residual. Em produção é ignorada (segurança).
   const forceLive =
     process.env.NODE_ENV !== "production" &&
     (searchParams.get("force_live") === "1" || searchParams.get("bypass_negative_cache") === "1");
@@ -66,11 +72,13 @@ export async function GET(request: NextRequest) {
     tmdbId: tmdbId ?? null,
     traktId: identity.externalIds.traktId ?? null,
     region,
+    language,
     // Título/ano para o fallback experimental JustWatch (busca por título).
     title: identity.title ?? null,
     year: identity.year ?? null,
     // force_live/bypass_negative_cache (só-dev): ignora sentinela __none__ fresca.
     bypassNegativeCache: forceLive,
+    bypassProviderCache: forceLive,
   });
 
   const grouped = availability.providers;
@@ -81,7 +89,7 @@ export async function GET(request: NextRequest) {
   if (debug) {
     return NextResponse.json({
       ok: true,
-      input: { id, mediaType, region },
+      input: { id, mediaType, region, language },
       resolved: {
         ...availabilityDebug.resolved,
         identityImdbId: imdbId ?? null,
@@ -109,8 +117,9 @@ export async function GET(request: NextRequest) {
     externalIds: identity.externalIds,
     id,
     region,
+    language,
     media_type: mediaType,
-    dataSource: hasData ? "balloonerismm" : "source_engine_unavailable",
+    dataSource: hasData ? providerSource : "source_engine_unavailable",
     ...(hasData ? { available: true } : AVAILABILITY_UNAVAILABLE),
     providers: grouped,
     status: availability.status,
@@ -120,7 +129,7 @@ export async function GET(request: NextRequest) {
     sourceIdUsed,
     sourceIdType,
     message: hasData
-      ? "Provider data loaded from Balloonerismm."
+      ? `Provider data loaded from ${providerSource}.`
       : "Provider data not yet available for this title.",
     ...(debugSource
       ? {

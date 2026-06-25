@@ -32,18 +32,3 @@ export function shouldUseMovieOfTheNight(
   return input.isRadarSync || input.isImportantTitle;
 }
 
-type OmdbEnrichmentInput = {
-  hasImdbId: boolean;
-  isTitlePage: boolean;
-  isSavedTitle: boolean;
-  isBulkList: boolean;
-};
-
-export function shouldUseOmdbEnrichment(
-  input: OmdbEnrichmentInput
-) {
-  if (!input.hasImdbId) return false;
-  if (input.isBulkList) return false;
-
-  return input.isTitlePage || input.isSavedTitle;
-}

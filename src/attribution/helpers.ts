@@ -4,7 +4,6 @@ import type { ApiSourceDefinition, ApiSourceId, AttributionContext } from "./typ
 const SOURCE_ALIASES: Record<string, ApiSourceId> = {
   tmdb: "tmdb",
   watchmode: "watchmode",
-  omdb: "omdb",
   trakt: "trakt",
   motn: "movieofthenight",
   movieofthenight: "movieofthenight",
@@ -93,15 +92,6 @@ export function getRatingSourceIds(input: {
   tmdbRating?: number | null;
 }) {
   const sources: ApiSourceId[] = [];
-
-  if (
-    typeof input.imdbRating === "number" ||
-    typeof input.imdbVotes === "number" ||
-    typeof input.rottenTomatoesScore === "number" ||
-    typeof input.metacriticScore === "number"
-  ) {
-    sources.push("omdb");
-  }
 
   if (typeof input.tmdbRating === "number") {
     sources.push("tmdb");

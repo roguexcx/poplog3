@@ -1,8 +1,7 @@
 "use client";
-
+import { uiMessage } from "@/lib/i18n/ui-message";
 import { useEffect, useState } from "react";
 import Link from "next/link";
-
 import TmdbImage from "@/components/images/TmdbImage";
 import { ScrollRowArrows } from "@/components/ScrollRowArrows";
 import { CardActionButton } from "@/components/ui/CardActionButton";
@@ -16,283 +15,241 @@ import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import SectionHeader from "@/components/ui/SectionHeader";
 import LibraryStateBadge from "@/components/ui/LibraryStateBadge";
 import CardProviderBadge from "@/components/ui/CardProviderBadge";
-
 // ─── Types ────────────────────────────────────────────────────────────────────
-
 type MediaFilter = "all" | "movie" | "tv";
-
 interface TrendingItem {
-  id: number;
-  poplogId?: string | number | null;
-  externalIds?: {
-    tmdbId?: number;
-    imdbId?: string;
-    tvdbId?: number;
-    traktId?: number | string;
-    balloonerismmId?: string;
-    slug?: string;
-  };
-  identityUsed?: string;
-  linkIdUsed?: string | number;
-  hasPoplogId?: boolean;
-  media_type: "movie" | "tv";
-  title_label: string;
-  original_title_label: string | null;
-  poster_path: string | null;
-  year: string | null;
-  media_label: string;
-  season_label: string | null;
-  runtime_label: string | null;
-  is_new: boolean;
-  new_label: string | null;
-  best_provider_name: string | null;
-  best_provider_type: string | null;
-  best_provider_logo: string | null;
-  userFeedback?: { notInterested?: boolean };
+    id: number;
+    poplogId?: string | number | null;
+    externalIds?: {
+        tmdbId?: number;
+        imdbId?: string;
+        tvdbId?: number;
+        traktId?: number | string;
+        balloonerismmId?: string;
+        slug?: string;
+    };
+    identityUsed?: string;
+    linkIdUsed?: string | number;
+    hasPoplogId?: boolean;
+    media_type: "movie" | "tv";
+    title_label: string;
+    original_title_label: string | null;
+    poster_path: string | null;
+    year: string | null;
+    media_label: string;
+    season_label: string | null;
+    runtime_label: string | null;
+    is_new: boolean;
+    new_label: string | null;
+    best_provider_name: string | null;
+    best_provider_type: string | null;
+    best_provider_logo: string | null;
+    userFeedback?: {
+        notInterested?: boolean;
+    };
 }
-
 // ─── API ─────────────────────────────────────────────────────────────────────
-
 interface RawItem {
-  tmdb_id: number;
-  poplogId?: string | number | null;
-  externalIds?: TrendingItem["externalIds"];
-  identityUsed?: string;
-  linkIdUsed?: string | number;
-  hasPoplogId?: boolean;
-  title: string;
-  original_title?: string | null;
-  media_type: "movie" | "tv";
-  poster_path?: string | null;
-  release_date?: string | null;
-  first_air_date?: string | null;
-  last_air_date?: string | null;
-  runtime_label?: string | null;
-  best_provider_name?: string | null;
-  best_provider_type?: string | null;
-  best_provider_logo?: string | null;
-  userFeedback?: { notInterested?: boolean };
+    tmdb_id: number;
+    poplogId?: string | number | null;
+    externalIds?: TrendingItem["externalIds"];
+    identityUsed?: string;
+    linkIdUsed?: string | number;
+    hasPoplogId?: boolean;
+    title: string;
+    original_title?: string | null;
+    media_type: "movie" | "tv";
+    poster_path?: string | null;
+    release_date?: string | null;
+    first_air_date?: string | null;
+    last_air_date?: string | null;
+    runtime_label?: string | null;
+    best_provider_name?: string | null;
+    best_provider_type?: string | null;
+    best_provider_logo?: string | null;
+    userFeedback?: {
+        notInterested?: boolean;
+    };
 }
-
 const DAYS_NEW = 90;
-
 function daysSince(dateStr?: string | null): number | null {
-  if (!dateStr) return null;
-  const d = new Date(dateStr);
-  if (isNaN(d.getTime())) return null;
-  return Math.floor((Date.now() - d.getTime()) / 86_400_000);
+    if (!dateStr)
+        return null;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime()))
+        return null;
+    return Math.floor((Date.now() - d.getTime()) / 86400000);
 }
-
 function toTrendingItem(raw: RawItem): TrendingItem {
-  const isMovie = raw.media_type === "movie";
-  const year = isMovie
-    ? (raw.release_date ?? "").slice(0, 4) || null
-    : (raw.last_air_date ?? raw.first_air_date ?? "").slice(0, 4) || null;
-
-  const season_label = !isMovie ? "Série" : null;
-
-  let is_new = false;
-  let new_label: string | null = null;
-
-  if (isMovie) {
-    const age = daysSince(raw.release_date);
-    if (age !== null && age <= DAYS_NEW) { is_new = true; new_label = "Estreia"; }
-  } else {
-    const refDate = raw.last_air_date ?? raw.first_air_date;
-    const age = daysSince(refDate);
-    if (age !== null && age <= DAYS_NEW) { is_new = true; new_label = "Nova Série"; }
-  }
-
-  return {
-    id: raw.tmdb_id,
-    poplogId: raw.poplogId,
-    externalIds: raw.externalIds,
-    identityUsed: raw.identityUsed,
-    linkIdUsed: raw.linkIdUsed,
-    hasPoplogId: raw.hasPoplogId,
-    media_type: raw.media_type,
-    title_label: raw.title,
-    original_title_label: raw.original_title ?? null,
-    poster_path: raw.poster_path ?? null,
-    year,
-    media_label: isMovie ? "Filme" : "Série",
-    season_label,
-    runtime_label: raw.runtime_label ?? null,
-    is_new,
-    new_label,
-    best_provider_name: raw.best_provider_name ?? null,
-    best_provider_type: raw.best_provider_type ?? null,
-    best_provider_logo: raw.best_provider_logo ?? null,
-    userFeedback: raw.userFeedback,
-  };
+    const isMovie = raw.media_type === "movie";
+    const year = isMovie
+        ? (raw.release_date ?? "").slice(0, 4) || null
+        : (raw.last_air_date ?? raw.first_air_date ?? "").slice(0, 4) || null;
+    const season_label = !isMovie ? uiMessage("ui.74f19285073a") : null;
+    let is_new = false;
+    let new_label: string | null = null;
+    if (isMovie) {
+        const age = daysSince(raw.release_date);
+        if (age !== null && age <= DAYS_NEW) {
+            is_new = true;
+            new_label = "Estreia";
+        }
+    }
+    else {
+        const refDate = raw.last_air_date ?? raw.first_air_date;
+        const age = daysSince(refDate);
+        if (age !== null && age <= DAYS_NEW) {
+            is_new = true;
+            new_label = uiMessage("ui.eb554f998961");
+        }
+    }
+    return {
+        id: raw.tmdb_id,
+        poplogId: raw.poplogId,
+        externalIds: raw.externalIds,
+        identityUsed: raw.identityUsed,
+        linkIdUsed: raw.linkIdUsed,
+        hasPoplogId: raw.hasPoplogId,
+        media_type: raw.media_type,
+        title_label: raw.title,
+        original_title_label: raw.original_title ?? null,
+        poster_path: raw.poster_path ?? null,
+        year,
+        media_label: isMovie ? "Filme" : uiMessage("ui.74f19285073a"),
+        season_label,
+        runtime_label: raw.runtime_label ?? null,
+        is_new,
+        new_label,
+        best_provider_name: raw.best_provider_name ?? null,
+        best_provider_type: raw.best_provider_type ?? null,
+        best_provider_logo: raw.best_provider_logo ?? null,
+        userFeedback: raw.userFeedback,
+    };
 }
-
 async function fetchTrending(): Promise<TrendingItem[]> {
-  const res = await fetch("/api/trending?includeProviders=0&fast=1");
-  if (!res.ok) return [];
-  const json = await res.json();
-  return (json.results ?? [])
-    .filter((r: RawItem) => r.tmdb_id && (r.media_type === "movie" || r.media_type === "tv"))
-    .map(toTrendingItem);
+    const res = await fetch("/api/trending?includeProviders=0&fast=1");
+    if (!res.ok)
+        return [];
+    const json = await res.json();
+    return (json.results ?? [])
+        .filter((r: RawItem) => r.tmdb_id && (r.media_type === "movie" || r.media_type === "tv"))
+        .map(toTrendingItem);
 }
-
 // ─── Filter pills ─────────────────────────────────────────────────────────────
-
-const FILTERS: { value: MediaFilter; label: string }[] = [
-  { value: "all",   label: "Todos"  },
-  { value: "movie", label: "Filmes" },
-  { value: "tv",    label: "Séries" },
+const FILTERS: {
+    value: MediaFilter;
+    label: string;
+}[] = [
+    { value: "all", label: "Todos" },
+    { value: "movie", label: "Filmes" },
+    { value: "tv", label: uiMessage("ui.de212174bc0c") },
 ];
-
-function FilterPills({ active, onChange }: { active: MediaFilter; onChange: (v: MediaFilter) => void }) {
-  return (
-    <div className="flex items-center gap-2">
-      {FILTERS.map((f) => (
-        <button
-          key={f.value}
-          type="button"
-          onClick={() => onChange(f.value)}
-          className={[
-            "rounded-full px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] backdrop-blur-[8px]",
-            "transition-[transform,background,border-color,box-shadow] duration-200 hover:scale-105",
-            active === f.value
-              ? "border border-violet-500/55 bg-violet-500/[0.18] text-violet-300 shadow-[0_0_12px_rgba(139,92,246,0.3)]"
-              : "border border-white/[0.18] bg-black/[0.72] text-white/60 hover:border-violet-500/40 hover:text-white/85",
-          ].join(" ")}
-        >
+function FilterPills({ active, onChange }: {
+    active: MediaFilter;
+    onChange: (v: MediaFilter) => void;
+}) {
+    return (<div className="flex items-center gap-2">
+      {FILTERS.map((f) => (<button key={f.value} type="button" onClick={() => onChange(f.value)} className={[
+                "rounded-full px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.08em] backdrop-blur-[8px]",
+                "transition-[transform,background,border-color,box-shadow] duration-200 hover:scale-105",
+                active === f.value
+                    ? "border border-violet-500/55 bg-violet-500/[0.18] text-violet-300 shadow-[0_0_12px_rgba(139,92,246,0.3)]"
+                    : "border border-white/[0.18] bg-black/[0.72] text-white/60 hover:border-violet-500/40 hover:text-white/85",
+            ].join(" ")}>
           {f.label}
-        </button>
-      ))}
-    </div>
-  );
+        </button>))}
+    </div>);
 }
-
 // ─── Skeleton ─────────────────────────────────────────────────────────────────
-
 function SkeletonCard() {
-  return (
-    <div className="shrink-0 w-[160px] md:w-[180px] animate-pulse">
-      <div className="aspect-[2/3] w-full rounded-[14px] bg-white/[0.06] ring-1 ring-white/[0.08]" />
-      <div className="mt-2.5 h-3 w-3/4 rounded bg-white/[0.06]" />
-      <div className="mt-1.5 h-2.5 w-1/2 rounded bg-white/[0.04]" />
-    </div>
-  );
+    return (<div className="shrink-0 w-[160px] md:w-[180px] animate-pulse">
+      <div className="aspect-[2/3] w-full rounded-[14px] bg-white/[0.06] ring-1 ring-white/[0.08]"/>
+      <div className="mt-2.5 h-3 w-3/4 rounded bg-white/[0.06]"/>
+      <div className="mt-1.5 h-2.5 w-1/2 rounded bg-white/[0.04]"/>
+    </div>);
 }
-
 // ─── Card ─────────────────────────────────────────────────────────────────────
-
 const THIS_YEAR = String(new Date().getFullYear());
-
-function MetaLine({ item }: { item: TrendingItem }) {
-  const showYear = item.year && item.year !== THIS_YEAR;
-  const label = item.season_label ?? item.media_label;
-  const runtime = item.runtime_label ?? null;
-
-  return (
-    <p className="mt-1 flex items-center gap-[5px] text-[11px] text-[#52526a] truncate">
+function MetaLine({ item }: {
+    item: TrendingItem;
+}) {
+    const showYear = item.year && item.year !== THIS_YEAR;
+    const label = item.season_label ?? item.media_label;
+    const runtime = item.runtime_label ?? null;
+    return (<p className="mt-1 flex items-center gap-[5px] text-[11px] text-[#52526a] truncate">
       {showYear && <span>{item.year}</span>}
-      {showYear && <span className="inline-block h-[2px] w-[2px] shrink-0 rounded-full bg-[#3a3a50]" />}
+      {showYear && <span className="inline-block h-[2px] w-[2px] shrink-0 rounded-full bg-[#3a3a50]"/>}
       <span className="truncate">{label}</span>
-      {runtime && (
-        <>
-          <span className="inline-block h-[2px] w-[2px] shrink-0 rounded-full bg-[#3a3a50]" />
+      {runtime && (<>
+          <span className="inline-block h-[2px] w-[2px] shrink-0 rounded-full bg-[#3a3a50]"/>
           <span className="truncate">{runtime}</span>
-        </>
-      )}
-    </p>
-  );
+        </>)}
+    </p>);
 }
-
-function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
-  const [imgErr, setImgErr] = useState(false);
-  const posterPath = item.poster_path;
-  const isMovie = item.media_type === "movie";
-  const slug = `/title/${item.media_type}/${item.poplogId ?? item.linkIdUsed ?? item.externalIds?.imdbId ?? item.id}`;
-
-  const userData = useOptionalUserData();
-  const isLoggedIn = Boolean(userData && !userData.loading);
-
-  const { executeAction, effectiveKey } = useUserAction({
-    tmdbId: item.id,
-    poplogId: item.poplogId != null ? String(item.poplogId) : undefined,
-    imdbId: item.externalIds?.imdbId ?? undefined,
-    slug: item.externalIds?.slug ?? undefined,
-    mediaType: item.media_type as "movie" | "tv",
-    title: item.title_label,
-    releaseYear: item.year ? Number(item.year) : undefined,
-  });
-
-  const zustandState = usePoplogUserState(effectiveKey);
-  const inWatchlist = zustandState?.isInWatchlist ?? false;
-  const isWatched   = zustandState?.isWatched   ?? false;
-
-  const [saving, setSaving] = useState(false);
-
-  async function handleTrendingAction(action: "addToWatchlist" | "removeFromWatchlist" | "markAsWatched" | "markAsUnwatched") {
-    setSaving(true);
-    await executeAction(action);
-    setSaving(false);
-  }
-
-  const feedback = useUserFeedbackToggle({
-    tmdbId: item.id,
-    poplogId: item.poplogId ?? null,
-    imdbId: item.externalIds?.imdbId ?? null,
-    slug: item.externalIds?.slug ?? null,
-    mediaType: item.media_type,
-    source: "trending",
-    initialNotInterested: Boolean(item.userFeedback?.notInterested),
-  });
-
-  return (
-    <article className="group relative shrink-0 w-[160px] md:w-[180px]">
+function TrendingCard({ item, rank }: {
+    item: TrendingItem;
+    rank: number;
+}) {
+    const [imgErr, setImgErr] = useState(false);
+    const posterPath = item.poster_path;
+    const isMovie = item.media_type === "movie";
+    const slug = `/title/${item.media_type}/${item.poplogId ?? item.linkIdUsed ?? item.externalIds?.imdbId ?? item.id}`;
+    const userData = useOptionalUserData();
+    const isLoggedIn = Boolean(userData && !userData.loading);
+    const { executeAction, effectiveKey } = useUserAction({
+        tmdbId: item.id,
+        poplogId: item.poplogId != null ? String(item.poplogId) : undefined,
+        imdbId: item.externalIds?.imdbId ?? undefined,
+        slug: item.externalIds?.slug ?? undefined,
+        mediaType: item.media_type as "movie" | "tv",
+        title: item.title_label,
+        releaseYear: item.year ? Number(item.year) : undefined,
+    });
+    const zustandState = usePoplogUserState(effectiveKey);
+    const inWatchlist = zustandState?.isInWatchlist ?? false;
+    const isWatched = zustandState?.isWatched ?? false;
+    const [saving, setSaving] = useState(false);
+    async function handleTrendingAction(action: "addToWatchlist" | "removeFromWatchlist" | "markAsWatched" | "markAsUnwatched") {
+        setSaving(true);
+        await executeAction(action);
+        setSaving(false);
+    }
+    const feedback = useUserFeedbackToggle({
+        tmdbId: item.id,
+        poplogId: item.poplogId ?? null,
+        imdbId: item.externalIds?.imdbId ?? null,
+        slug: item.externalIds?.slug ?? null,
+        mediaType: item.media_type,
+        source: "trending",
+        initialNotInterested: Boolean(item.userFeedback?.notInterested),
+    });
+    return (<article className="group relative shrink-0 w-[160px] md:w-[180px]">
       <div className="relative">
         <Link href={slug} className="block">
-          <div
-            className={[
-              "relative aspect-[2/3] w-full overflow-hidden rounded-[14px] bg-[#0e0e1a]",
-              "transition-transform duration-[400ms] ease-[cubic-bezier(0.25,0.46,0.45,0.94)]",
-              "group-hover:-translate-y-1 ring-1 ring-white/[0.08]",
-              "before:absolute before:inset-0 before:rounded-[14px] before:p-px",
-              "before:bg-gradient-to-br before:from-white/10 before:via-white/[0.04] before:to-white/[0.01]",
-              "before:[mask-composite:exclude] before:[webkit-mask-composite:destination-out]",
-              "before:[mask:linear-gradient(#fff_0_0)_content-box,linear-gradient(#fff_0_0)]",
-              "after:absolute after:inset-0 after:rounded-[14px] after:p-px after:opacity-0",
-              "after:bg-gradient-to-br after:from-violet-500/55 after:via-sky-400/35 after:to-violet-500/15",
-              "after:[mask-composite:exclude] after:[webkit-mask-composite:destination-out]",
-              "after:[mask:linear-gradient(#fff_0_0)_content-box,linear-gradient(#fff_0_0)]",
-              "after:transition-opacity after:duration-350 group-hover:after:opacity-100",
-            ].join(" ")}
-          >
-            {posterPath && !imgErr ? (
-              <TmdbImage
-                path={posterPath}
-                kind="poster"
-                size="card"
-                alt={item.title_label}
-                fill
-                sizes="(max-width: 768px) 160px, 180px"
-                className="object-cover brightness-[0.92] saturate-[1.05] transition-[transform,filter] duration-[600ms] ease-[cubic-bezier(0.25,0.46,0.45,0.94)] group-hover:scale-[1.04] group-hover:brightness-100 group-hover:saturate-110"
-                onError={() => setImgErr(true)}
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center bg-[#0e0e1a] text-[11px] text-[#3a3a55]">
-                Sem imagem
-              </div>
-            )}
+          <div className={[
+            "relative aspect-[2/3] w-full overflow-hidden rounded-[14px] bg-[#0e0e1a]",
+            "transition-transform duration-[400ms] ease-[cubic-bezier(0.25,0.46,0.45,0.94)]",
+            "group-hover:-translate-y-1 ring-1 ring-white/[0.08]",
+            "before:absolute before:inset-0 before:rounded-[14px] before:p-px",
+            "before:bg-gradient-to-br before:from-white/10 before:via-white/[0.04] before:to-white/[0.01]",
+            "before:[mask-composite:exclude] before:[webkit-mask-composite:destination-out]",
+            "before:[mask:linear-gradient(#fff_0_0)_content-box,linear-gradient(#fff_0_0)]",
+            "after:absolute after:inset-0 after:rounded-[14px] after:p-px after:opacity-0",
+            "after:bg-gradient-to-br after:from-violet-500/55 after:via-sky-400/35 after:to-violet-500/15",
+            "after:[mask-composite:exclude] after:[webkit-mask-composite:destination-out]",
+            "after:[mask:linear-gradient(#fff_0_0)_content-box,linear-gradient(#fff_0_0)]",
+            "after:transition-opacity after:duration-350 group-hover:after:opacity-100",
+        ].join(" ")}>
+            {posterPath && !imgErr ? (<TmdbImage path={posterPath} kind="poster" size="card" alt={item.title_label} fill sizes="(max-width: 768px) 160px, 180px" className="object-cover brightness-[0.92] saturate-[1.05] transition-[transform,filter] duration-[600ms] ease-[cubic-bezier(0.25,0.46,0.45,0.94)] group-hover:scale-[1.04] group-hover:brightness-100 group-hover:saturate-110" onError={() => setImgErr(true)}/>) : (<div className="flex h-full items-center justify-center bg-[#0e0e1a] text-[11px] text-[#3a3a55]">{uiMessage("ui.01c119dc9e1b")}</div>)}
 
-            <div className="pointer-events-none absolute inset-0 z-[2] bg-gradient-to-t from-black/70 via-transparent to-black/25" />
-            <div className="pointer-events-none absolute inset-0 z-[3] bg-[radial-gradient(ellipse_at_50%_110%,rgba(99,102,241,0.22),transparent_65%)] opacity-0 transition-opacity duration-500 group-hover:opacity-100" />
+            <div className="pointer-events-none absolute inset-0 z-[2] bg-gradient-to-t from-black/70 via-transparent to-black/25"/>
+            <div className="pointer-events-none absolute inset-0 z-[3] bg-[radial-gradient(ellipse_at_50%_110%,rgba(99,102,241,0.22),transparent_65%)] opacity-0 transition-opacity duration-500 group-hover:opacity-100"/>
 
-            {item.is_new && item.new_label ? (
-              <div className="absolute bottom-2.5 left-2.5 z-20 rounded-[5px] border border-sky-400/40 bg-sky-500/[0.18] px-[7px] py-[2px] text-[9px] font-bold uppercase tracking-[0.08em] text-sky-300 backdrop-blur-[8px]">
+            {item.is_new && item.new_label ? (<div className="absolute bottom-2.5 left-2.5 z-20 rounded-[5px] border border-sky-400/40 bg-sky-500/[0.18] px-[7px] py-[2px] text-[9px] font-bold uppercase tracking-[0.08em] text-sky-300 backdrop-blur-[8px]">
                 {item.new_label}
-              </div>
-            ) : (
-              <div className="absolute bottom-2.5 left-2.5 z-20 rounded-[5px] border border-violet-500/40 bg-violet-500/[0.18] px-[7px] py-[2px] text-[9px] font-semibold uppercase tracking-[0.08em] text-violet-300 backdrop-blur-[8px]">
-                {isMovie ? "Filme" : "Série"}
-              </div>
-            )}
+              </div>) : (<div className="absolute bottom-2.5 left-2.5 z-20 rounded-[5px] border border-violet-500/40 bg-violet-500/[0.18] px-[7px] py-[2px] text-[9px] font-semibold uppercase tracking-[0.08em] text-violet-300 backdrop-blur-[8px]">
+                {isMovie ? "Filme" : uiMessage("ui.74f19285073a")}
+              </div>)}
 
             <div className="absolute top-2.5 right-2.5 z-20 flex items-center gap-1 rounded-full border border-white/[0.18] bg-black/[0.82] px-2 py-[3px] backdrop-blur-[10px]">
               <span className="text-[8px] font-black text-violet-400/80 leading-none">#</span>
@@ -300,138 +257,73 @@ function TrendingCard({ item, rank }: { item: TrendingItem; rank: number }) {
             </div>
 
             {/* Badge de disponibilidade (Onde assistir) — mesmo contrato da Watchlist */}
-            {item.best_provider_name && (
-              <div className="absolute bottom-2.5 right-2.5 z-20">
-                <CardProviderBadge
-                  name={item.best_provider_name}
-                  logoPath={item.best_provider_logo}
-                  type={item.best_provider_type}
-                />
-              </div>
-            )}
+            {item.best_provider_name && (<div className="absolute bottom-2.5 right-2.5 z-20">
+                <CardProviderBadge name={item.best_provider_name} logoPath={item.best_provider_logo} type={item.best_provider_type}/>
+              </div>)}
 
             {/* Badge de estado da biblioteca — visível quando não está em hover (z-10 < z-30 dos botões) */}
-            <LibraryStateBadge
-              tmdbId={item.id}
-              poplogId={item.poplogId}
-              imdbId={item.externalIds?.imdbId}
-              mediaType={item.media_type}
-              className="top-2.5 left-2.5 z-10 group-hover:opacity-0 transition-opacity duration-200"
-            />
+            <LibraryStateBadge tmdbId={item.id} poplogId={item.poplogId} imdbId={item.externalIds?.imdbId} mediaType={item.media_type} className="top-2.5 left-2.5 z-10 group-hover:opacity-0 transition-opacity duration-200"/>
           </div>
         </Link>
 
         <div className="absolute left-2.5 top-2.5 z-30 flex flex-col gap-1.5 opacity-0 transition-opacity duration-200 group-hover:opacity-100">
-          <CardActionButton
-            onClick={() => handleTrendingAction(inWatchlist ? "removeFromWatchlist" : "addToWatchlist")}
-            disabled={!isLoggedIn || saving}
-            title={inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"}
-            active={inWatchlist} saving={saving}
-            activeClass="border-sky-400/55 bg-sky-400/[0.18] text-sky-300 shadow-[0_0_10px_rgba(56,189,248,0.25)]"
-          >
-            <IconBookmark filled={inWatchlist} />
+          <CardActionButton onClick={() => handleTrendingAction(inWatchlist ? "removeFromWatchlist" : "addToWatchlist")} disabled={!isLoggedIn || saving} title={inWatchlist ? "Remover da watchlist" : "Adicionar à watchlist"} active={inWatchlist} saving={saving} activeClass="border-sky-400/55 bg-sky-400/[0.18] text-sky-300 shadow-[0_0_10px_rgba(56,189,248,0.25)]">
+            <IconBookmark filled={inWatchlist}/>
           </CardActionButton>
-          <CardActionButton
-            onClick={() => handleTrendingAction(isWatched ? "markAsUnwatched" : "markAsWatched")}
-            disabled={!isLoggedIn || saving}
-            title={isWatched ? "Desmarcar como assistido" : "Já vi"}
-            active={isWatched} saving={saving}
-            activeClass="border-emerald-400/55 bg-emerald-400/[0.18] text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.25)]"
-          >
+          <CardActionButton onClick={() => handleTrendingAction(isWatched ? "markAsUnwatched" : "markAsWatched")} disabled={!isLoggedIn || saving} title={isWatched ? "Desmarcar como assistido" : uiMessage("ui.56c6eef6ab5b")} active={isWatched} saving={saving} activeClass="border-emerald-400/55 bg-emerald-400/[0.18] text-emerald-300 shadow-[0_0_10px_rgba(52,211,153,0.25)]">
             <IconCheck />
           </CardActionButton>
-          <CardActionButton
-            onClick={feedback.toggleNotInterested}
-            disabled={!isLoggedIn || feedback.saving}
-            title={feedback.notInterested ? "Remover sem interesse" : "Não tenho interesse"}
-            active={feedback.notInterested} saving={feedback.saving}
-            activeClass="border-rose-400/55 bg-rose-400/[0.18] text-rose-300 shadow-[0_0_10px_rgba(251,113,133,0.22)]"
-          >
+          <CardActionButton onClick={feedback.toggleNotInterested} disabled={!isLoggedIn || feedback.saving} title={feedback.notInterested ? "Remover sem interesse" : uiMessage("ui.7aea725c0eb9")} active={feedback.notInterested} saving={feedback.saving} activeClass="border-rose-400/55 bg-rose-400/[0.18] text-rose-300 shadow-[0_0_10px_rgba(251,113,133,0.22)]">
             <IconX />
           </CardActionButton>
         </div>
       </div>
 
       <Link href={slug} className="mt-2.5 block px-0.5">
-        <LocalizedTitle
-          as="h3"
-          title={item.title_label}
-          originalTitle={item.original_title_label}
-          variant="poster"
-          className="line-clamp-2 text-[13px] font-[500] leading-[1.35] tracking-[-0.01em] text-[#e8e8f0] transition-colors duration-200 group-hover:text-[#f4f4fa]"
-        />
-        <MetaLine item={item} />
+        <LocalizedTitle as="h3" title={item.title_label} originalTitle={item.original_title_label} variant="poster" className="line-clamp-2 text-[13px] font-[500] leading-[1.35] tracking-[-0.01em] text-[#e8e8f0] transition-colors duration-200 group-hover:text-[#f4f4fa]"/>
+        <MetaLine item={item}/>
       </Link>
-    </article>
-  );
+    </article>);
 }
-
 // ─── Main ─────────────────────────────────────────────────────────────────────
-
 export default function TrendingNowSection() {
-  const [items, setItems]     = useState<TrendingItem[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [filter, setFilter]   = useState<MediaFilter>("all");
-
-  const { ref: rowRef, canScrollLeft, canScrollRight, scrollLeft: doScrollLeft, scrollRight: doScrollRight } =
-    useScrollRow({ step: 640 });
-
-  useEffect(() => {
-    let active = true;
-    fetchTrending()
-      .then((data) => {
-        if (active) setItems(data);
-      })
-      .catch(() => {
-        if (active) setItems([]);
-      })
-      .finally(() => {
-        if (active) setLoading(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, []);
-
-  const visible = filter === "all" ? items : items.filter((i) => i.media_type === filter);
-
-  return (
-    <section>
-      <SectionHeader
-        title="Em alta agora"
-        subtitle="O que todo mundo está assistindo."
-        className="mb-6"
-        action={
-          <div className="flex flex-wrap items-center gap-2 sm:gap-3">
-            <FilterPills active={filter} onChange={setFilter} />
+    const [items, setItems] = useState<TrendingItem[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [filter, setFilter] = useState<MediaFilter>("all");
+    const { ref: rowRef, canScrollLeft, canScrollRight, scrollLeft: doScrollLeft, scrollRight: doScrollRight } = useScrollRow({ step: 640 });
+    useEffect(() => {
+        let active = true;
+        fetchTrending()
+            .then((data) => {
+            if (active)
+                setItems(data);
+        })
+            .catch(() => {
+            if (active)
+                setItems([]);
+        })
+            .finally(() => {
+            if (active)
+                setLoading(false);
+        });
+        return () => {
+            active = false;
+        };
+    }, []);
+    const visible = filter === "all" ? items : items.filter((i) => i.media_type === filter);
+    return (<section>
+      <SectionHeader title={uiMessage("ui.c1a5f3c8e157")} subtitle={uiMessage("ui.a5462dcc478d")} className="mb-6" action={<div className="flex flex-wrap items-center gap-2 sm:gap-3">
+            <FilterPills active={filter} onChange={setFilter}/>
             <div className="flex">
-              <ScrollRowArrows
-                canScrollLeft={canScrollLeft}
-                canScrollRight={canScrollRight}
-                onLeft={doScrollLeft}
-                onRight={doScrollRight}
-              />
+              <ScrollRowArrows canScrollLeft={canScrollLeft} canScrollRight={canScrollRight} onLeft={doScrollLeft} onRight={doScrollRight}/>
             </div>
-          </div>
-        }
-      />
+          </div>}/>
 
-      {loading ? (
-        <div className="no-scrollbar flex gap-4 overflow-x-auto pb-4 pt-3">
-          {Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i} />)}
-        </div>
-      ) : visible.length === 0 ? (
-        <p className="py-10 text-center text-sm text-[#52526a]">Nenhum resultado encontrado.</p>
-      ) : (
-        <div
-          ref={rowRef}
-          className="no-scrollbar flex gap-4 overflow-x-auto pb-4 pt-3"
-        >
-          {visible.map((item, idx) => (
-            <TrendingCard key={`${item.media_type}-${item.id}`} item={item} rank={idx + 1} />
-          ))}
-        </div>
-      )}
-    </section>
-  );
+      {loading ? (<div className="no-scrollbar flex gap-4 overflow-x-auto pb-4 pt-3">
+          {Array.from({ length: 8 }).map((_, i) => <SkeletonCard key={i}/>)}
+        </div>) : visible.length === 0 ? (<p className="py-10 text-center text-sm text-[#52526a]">{uiMessage("ui.2facd3dd693d")}</p>) : (<div ref={rowRef} className="no-scrollbar flex gap-4 overflow-x-auto pb-4 pt-3">
+          {visible.map((item, idx) => (<TrendingCard key={`${item.media_type}-${item.id}`} item={item} rank={idx + 1}/>))}
+        </div>)}
+    </section>);
 }
+

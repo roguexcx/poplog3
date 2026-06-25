@@ -1,5 +1,4 @@
 "use client";
-
 import { useEffect } from "react";
 
 // Dispara um prefetch do Radar em background quando o usuário entra no site.

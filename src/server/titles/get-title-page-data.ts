@@ -54,6 +54,7 @@ import {
 } from "@/server/source-engine/series-season-list-resolver";
 import { persistSeriesCanonicalMeta } from "@/server/source-engine/persist-series-canonical";
 import { hydrateSeriesEpisodesFromSources } from "@/server/source-engine/series-episode-hydrator";
+import { enqueueSeriesEpisodeHydrationJob } from "@/server/workers/series-prehydration";
 import { getMovieFinancials } from "@/server/titles/title-financials";
 import { resolveDirectFranchiseForTitle } from "@/server/franchises/direct-franchise-service";
 import { resolveTitleUniverseForTitle } from "@/server/franchises/title-universe-service";
@@ -62,6 +63,8 @@ type MediaType = "movie" | "tv";
 
 const TITLE_PAGE_LOCALE = "pt-BR";
 const TITLE_RELATED_CACHE_TTL_MS = 6 * 60 * 60_000;
+const TITLE_COLD_SEASON_LIST_SYNC = process.env.POPLOG_TITLE_COLD_SEASON_LIST_SYNC === "true";
+const TITLE_COLD_SERIES_SYNC = process.env.POPLOG_TITLE_COLD_SERIES_SYNC === "true";
 
 type RelatedMediaType = "movie" | "show";
 type TitleRelatedCachePayload = {
@@ -1037,8 +1040,19 @@ export async function getTitlePageData(
 
           seasons = mergeSeasonSummariesWithCount(seasons, effectiveSeasonCount);
 
-          // Se o DB está vazio E não temos contagem, buscar lista live de TVDB/Trakt
-          if (seasons.length === 0 && (tvdbId || imdbId)) {
+          if (seasons.length === 0 && effectiveSeasonCount && effectiveSeasonCount > 0) {
+            seasons = buildSeasonStubsFromCount(effectiveSeasonCount).map((s) => ({
+              seasonNumber: s.seasonNumber,
+              name: null,
+              airDate: null,
+              episodeCount: null,
+              posterUrl: null,
+            }));
+          }
+
+          // Hidratação síncrona da lista externa fica atrás de flag. No fluxo
+          // padrão local, a primeira visita fria agenda worker e retorna rápido.
+          if (seasons.length === 0 && TITLE_COLD_SEASON_LIST_SYNC && (tvdbId || imdbId)) {
             const liveSeasonsResult = await resolveSeriesSeasonList({
               tvdbId: tvdbId ?? null,
               imdbId: imdbId ?? null,
@@ -1052,38 +1066,40 @@ export async function getTitlePageData(
                 episodeCount: s.episodeCount ?? null,
                 posterUrl: s.posterUrl ?? null,
               }));
-            } else if (effectiveSeasonCount && effectiveSeasonCount > 0) {
-              // Fallback final: stubs a partir da contagem
-              seasons = buildSeasonStubsFromCount(effectiveSeasonCount).map((s) => ({
-                seasonNumber: s.seasonNumber,
-                name: null,
-                airDate: null,
-                episodeCount: null,
-                posterUrl: null,
-              }));
             }
           }
 
           // Se a página conseguiu resolver IDs mas o cache local ainda está vazio,
-          // hidrata e persiste temporadas/episódios agora. Assim progresso, agenda e
-          // "próximo episódio" não dependem do usuário abrir uma temporada manualmente.
+          // agenda hidratação por worker. Isso reduz a primeira visita fria; o
+          // comportamento síncrono antigo só roda com POPLOG_TITLE_COLD_SERIES_SYNC.
           if (!hadSeasonCache && ratingKeyId && (imdbId || tvdbId || base.title)) {
-            const hydrated = await hydrateSeriesEpisodesFromSources({
-              seriesTmdbId: ratingKeyId,
-              imdbId: imdbId ?? null,
-              tvdbId: tvdbId ?? null,
-              traktId: traktId ?? null,
-              title: base.title,
-              year: typeof base.year === "number" ? base.year : null,
-              numberOfSeasons: effectiveSeasonCount ?? null,
-            }).catch((err) => {
-              console.warn("[getTitlePageData] hydrateSeriesEpisodesFromSources erro:", (err as Error)?.message);
-              return null;
-            });
+            if (TITLE_COLD_SERIES_SYNC) {
+              const hydrated = await hydrateSeriesEpisodesFromSources({
+                seriesTmdbId: ratingKeyId,
+                imdbId: imdbId ?? null,
+                tvdbId: tvdbId ?? null,
+                traktId: traktId ?? null,
+                title: base.title,
+                year: typeof base.year === "number" ? base.year : null,
+                numberOfSeasons: effectiveSeasonCount ?? null,
+              }).catch((err) => {
+                console.warn("[getTitlePageData] hydrateSeriesEpisodesFromSources erro:", (err as Error)?.message);
+                return null;
+              });
 
-            if (hydrated?.seasonsSaved) {
-              const persistedSeasons = await getSeasonSummariesFromDb(ratingKeyId);
-              seasons = mergeSeasonSummariesWithCount(persistedSeasons, effectiveSeasonCount);
+              if (hydrated?.seasonsSaved) {
+                const persistedSeasons = await getSeasonSummariesFromDb(ratingKeyId);
+                seasons = mergeSeasonSummariesWithCount(persistedSeasons, effectiveSeasonCount);
+              }
+            } else {
+              await enqueueSeriesEpisodeHydrationJob({
+                seriesTmdbId: ratingKeyId,
+                imdbId: imdbId ?? null,
+                traktId: traktId ?? null,
+                priority: 35,
+              }).catch((err) => {
+                console.warn("[getTitlePageData] enqueueSeriesEpisodeHydrationJob erro:", (err as Error)?.message);
+              });
             }
           }
         }

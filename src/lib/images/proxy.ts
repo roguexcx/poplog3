@@ -13,6 +13,8 @@
 
 import { resolveCatalogImage, type CatalogImageSize } from "./resolve";
 
+const LOCAL_ASSET_PREFIXES = ["posters/", "backdrops/", "logos/", "profiles/"] as const;
+
 /** Domínios externos autorizados para proxy de imagens. */
 export const EXTERNAL_IMAGE_DOMAINS = [
   "image.tmdb.org",
@@ -48,6 +50,20 @@ export function toProxyUrl(externalUrl: string): string {
   return `/api/images/proxy?url=${encodeURIComponent(externalUrl)}`;
 }
 
+function assetBaseUrl(): string {
+  return (process.env.NEXT_PUBLIC_POPLOG_ASSET_PUBLIC_BASE_URL ?? "/storage").replace(/\/+$/, "");
+}
+
+export function isLocalAssetKey(src: string | null | undefined): boolean {
+  const normalized = src?.trim().replace(/^\/+/, "");
+  if (!normalized) return false;
+  return LOCAL_ASSET_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
+export function resolveLocalAssetKeyForRender(assetKey: string): string {
+  return `${assetBaseUrl()}/${assetKey.trim().replace(/^\/+/, "")}`;
+}
+
 /**
  * Resolve qualquer campo de imagem para uma URL segura para renderização no <img>.
  *
@@ -64,6 +80,8 @@ export function resolveForRender(
   src: string | null | undefined,
   size: CatalogImageSize | string = "w500",
 ): string | null {
+  if (isLocalAssetKey(src)) return resolveLocalAssetKeyForRender(src!);
+
   const resolved = resolveCatalogImage(src, size);
   if (!resolved) return null;
 

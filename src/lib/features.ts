@@ -2,7 +2,7 @@
 // This file is imported by both server and client components.
 export const FEATURES = {
   // ── RADAR ─────────────────────────────────────────────────────────────────
-  // false → página oculta, links removidos da sidebar, prefetch desligado, API retorna 503.
-  // true  → tudo volta ao normal — única linha a alterar.
-  RADAR: false,
+  // NEXT_PUBLIC_FEATURE_RADAR=false oculta página, links, prefetch e API.
+  // Por padrão local, o Radar fica ativo para validar a arquitetura POPLOG V2.
+  RADAR: process.env.NEXT_PUBLIC_FEATURE_RADAR !== "false",
 } as const;

@@ -36,11 +36,13 @@ export async function fetchRadarCalendarWindow(startDate: string, days: number) 
   const [shows, movies] = await Promise.all([
     traktGet<TraktCalendarEpisodeItem[]>(`/calendars/all/shows/${startDate}/${days}`, {
       params,
+      cache: "no-store",
       ttlSeconds: 60 * 60,
       staleTtlSeconds: 24 * 60 * 60,
     }),
     traktGet<TraktCalendarMovieItem[]>(`/calendars/all/movies/${startDate}/${days}`, {
       params,
+      cache: "no-store",
       ttlSeconds: 60 * 60,
       staleTtlSeconds: 24 * 60 * 60,
     }),

@@ -1,4 +1,12 @@
-export type ApiName = "tmdb" | "omdb" | "watchmode" | "motn" | "balloonerismm" | "tvdb" | "trakt";
+export type ApiName =
+  | "tmdb"
+  | "watchmode"
+  | "motn"
+  | "balloonerismm"
+  | "trakt"
+  | "wikidata"
+  | "wikipedia"
+  | "justwatch";
 
 export type Origin =
   | "home"

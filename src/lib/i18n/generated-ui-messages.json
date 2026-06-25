@@ -1,0 +1,3734 @@
+{
+  "admin.operations.action.assets": {
+    "pt-BR": "Reidratar assets",
+    "en-US": "Rehydrate assets"
+  },
+  "admin.access.session": {
+    "pt-BR": "Acesso liberado pela conta admin {v1}",
+    "en-US": "Access granted by admin account {v1}"
+  },
+  "admin.operations.action.cache": {
+    "pt-BR": "Limpar cache do título",
+    "en-US": "Clear title cache"
+  },
+  "admin.operations.action.episodes": {
+    "pt-BR": "Reidratar episódios",
+    "en-US": "Rehydrate episodes"
+  },
+  "admin.operations.action.provider": {
+    "pt-BR": "Reprocessar provider",
+    "en-US": "Reprocess provider"
+  },
+  "admin.operations.action.radar": {
+    "pt-BR": "Reprocessar Radar",
+    "en-US": "Reprocess Radar"
+  },
+  "admin.operations.action.refresh": {
+    "pt-BR": "Atualizar painel",
+    "en-US": "Refresh panel"
+  },
+  "admin.operations.action.title": {
+    "pt-BR": "Reidratar título",
+    "en-US": "Rehydrate title"
+  },
+  "admin.operations.actions": {
+    "pt-BR": "Ações",
+    "en-US": "Actions"
+  },
+  "admin.operations.alerts": {
+    "pt-BR": "Alertas",
+    "en-US": "Alerts"
+  },
+  "admin.operations.assets": {
+    "pt-BR": "Revisão de assets e pôsters",
+    "en-US": "Assets and posters review"
+  },
+  "admin.operations.cache": {
+    "pt-BR": "Inspeção de cache por título",
+    "en-US": "Title cache inspection"
+  },
+  "admin.operations.cache.empty": {
+    "pt-BR": "Informe um IMDb ID e atualize o painel para inspecionar o cache.",
+    "en-US": "Enter an IMDb ID and refresh the panel to inspect cache."
+  },
+  "admin.operations.cache.redis": {
+    "pt-BR": "Redis",
+    "en-US": "Redis"
+  },
+  "admin.operations.cache.sections": {
+    "pt-BR": "Seções locais",
+    "en-US": "Local sections"
+  },
+  "admin.operations.cache.title": {
+    "pt-BR": "Cache do título",
+    "en-US": "Title cache"
+  },
+  "admin.operations.desc": {
+    "pt-BR": "Providers, SEO, traduções, cache, workers, Radar e reidratação manual",
+    "en-US": "Providers, SEO, translations, cache, workers, Radar, and manual rehydration"
+  },
+  "admin.operations.empty": {
+    "pt-BR": "Nada para revisar agora.",
+    "en-US": "Nothing to review now."
+  },
+  "admin.operations.errors": {
+    "pt-BR": "Títulos e jobs com erro",
+    "en-US": "Titles and jobs with errors"
+  },
+  "admin.operations.feedback.error": {
+    "pt-BR": "Não foi possível concluir a ação.",
+    "en-US": "The action could not be completed."
+  },
+  "admin.operations.feedback.success": {
+    "pt-BR": "Ação concluída.",
+    "en-US": "Action completed."
+  },
+  "admin.operations.filters": {
+    "pt-BR": "Filtros",
+    "en-US": "Filters"
+  },
+  "admin.operations.generated": {
+    "pt-BR": "Atualizado em {v1}",
+    "en-US": "Updated at {v1}"
+  },
+  "admin.operations.hydration": {
+    "pt-BR": "Erros de hidratação",
+    "en-US": "Hydration errors"
+  },
+  "admin.nav.label": {
+    "pt-BR": "Admin",
+    "en-US": "Admin"
+  },
+  "admin.operations.label": {
+    "pt-BR": "Operações",
+    "en-US": "Operations"
+  },
+  "admin.operations.logs": {
+    "pt-BR": "Logs filtráveis",
+    "en-US": "Filterable logs"
+  },
+  "admin.operations.logs.search": {
+    "pt-BR": "Buscar em ação, ator ou entidade",
+    "en-US": "Search action, actor, or entity"
+  },
+  "admin.operations.providers": {
+    "pt-BR": "Providers problemáticos",
+    "en-US": "Problem providers"
+  },
+  "admin.operations.radar": {
+    "pt-BR": "Radar",
+    "en-US": "Radar"
+  },
+  "admin.operations.reprocess": {
+    "pt-BR": "Reprocessar",
+    "en-US": "Reprocess"
+  },
+  "admin.operations.review.seo": {
+    "pt-BR": "Revisão SEO",
+    "en-US": "SEO review"
+  },
+  "admin.operations.review.translations": {
+    "pt-BR": "Revisão de traduções",
+    "en-US": "Translations review"
+  },
+  "admin.operations.running": {
+    "pt-BR": "Processando…",
+    "en-US": "Processing…"
+  },
+  "admin.operations.subtitle": {
+    "pt-BR": "Use esta tela para encontrar falhas operacionais e acionar reprocessamentos sem sair do Admin.",
+    "en-US": "Use this screen to find operational issues and trigger reprocessing without leaving Admin."
+  },
+  "admin.operations.stat.cron": {
+    "pt-BR": "Cron",
+    "en-US": "Cron"
+  },
+  "admin.operations.stat.duration": {
+    "pt-BR": "Duração",
+    "en-US": "Duration"
+  },
+  "admin.operations.stat.failed": {
+    "pt-BR": "Falhos",
+    "en-US": "Failed"
+  },
+  "admin.operations.stat.jobs_overdue": {
+    "pt-BR": "Jobs atrasados",
+    "en-US": "Overdue jobs"
+  },
+  "admin.operations.stat.last_cron": {
+    "pt-BR": "Último cron",
+    "en-US": "Last cron"
+  },
+  "admin.operations.stat.processed": {
+    "pt-BR": "Processados",
+    "en-US": "Processed"
+  },
+  "admin.operations.stat.provider_fallback": {
+    "pt-BR": "Provider fallback",
+    "en-US": "Provider fallback"
+  },
+  "admin.operations.stat.review": {
+    "pt-BR": "Revisão",
+    "en-US": "Review"
+  },
+  "admin.operations.table.api": {
+    "pt-BR": "API",
+    "en-US": "API"
+  },
+  "admin.operations.table.actor": {
+    "pt-BR": "Ator",
+    "en-US": "Actor"
+  },
+  "admin.operations.table.cache": {
+    "pt-BR": "Cache",
+    "en-US": "Cache"
+  },
+  "admin.operations.table.confidence": {
+    "pt-BR": "Confiança",
+    "en-US": "Confidence"
+  },
+  "admin.operations.table.entity": {
+    "pt-BR": "Entidade",
+    "en-US": "Entity"
+  },
+  "admin.operations.table.error": {
+    "pt-BR": "Erro",
+    "en-US": "Error"
+  },
+  "admin.operations.table.expires": {
+    "pt-BR": "Expira",
+    "en-US": "Expires"
+  },
+  "admin.operations.table.issue": {
+    "pt-BR": "Problema",
+    "en-US": "Issue"
+  },
+  "admin.operations.table.job": {
+    "pt-BR": "Job",
+    "en-US": "Job"
+  },
+  "admin.operations.table.key": {
+    "pt-BR": "Chave",
+    "en-US": "Key"
+  },
+  "admin.operations.table.kind": {
+    "pt-BR": "Tipo de job",
+    "en-US": "Job kind"
+  },
+  "admin.operations.table.locale": {
+    "pt-BR": "Locale",
+    "en-US": "Locale"
+  },
+  "admin.operations.table.op": {
+    "pt-BR": "Operação",
+    "en-US": "Operation"
+  },
+  "admin.operations.table.origin": {
+    "pt-BR": "Origem",
+    "en-US": "Origin"
+  },
+  "admin.operations.table.scope": {
+    "pt-BR": "Escopo",
+    "en-US": "Scope"
+  },
+  "admin.operations.table.source": {
+    "pt-BR": "Fonte",
+    "en-US": "Source"
+  },
+  "admin.operations.table.status": {
+    "pt-BR": "Status",
+    "en-US": "Status"
+  },
+  "admin.operations.table.title": {
+    "pt-BR": "Título",
+    "en-US": "Title"
+  },
+  "admin.operations.table.ttl": {
+    "pt-BR": "TTL",
+    "en-US": "TTL"
+  },
+  "admin.operations.table.type": {
+    "pt-BR": "Tipo",
+    "en-US": "Type"
+  },
+  "admin.operations.table.updated": {
+    "pt-BR": "Atualizado",
+    "en-US": "Updated"
+  },
+  "admin.operations.table.when": {
+    "pt-BR": "Quando",
+    "en-US": "When"
+  },
+  "admin.operations.workers": {
+    "pt-BR": "Workers e cron",
+    "en-US": "Workers and cron"
+  },
+  "radar.v2.block.discover": {
+    "pt-BR": "Descoberta",
+    "en-US": "Discovery"
+  },
+  "radar.v2.block.discover.desc": {
+    "pt-BR": "Sinais recentes e destaques que podem virar sua próxima lista.",
+    "en-US": "Recent signals and highlights that can become your next list."
+  },
+  "radar.v2.block.following": {
+    "pt-BR": "Acompanhando",
+    "en-US": "Following"
+  },
+  "radar.v2.block.following.desc": {
+    "pt-BR": "Eventos conectados à sua biblioteca, watchlist e histórico local.",
+    "en-US": "Events connected to your library, watchlist, and local history."
+  },
+  "radar.v2.block.for_me": {
+    "pt-BR": "Para mim",
+    "en-US": "For me"
+  },
+  "radar.v2.block.for_me.desc": {
+    "pt-BR": "Prioridade para títulos com identidade local e sinais mais fortes.",
+    "en-US": "Priority for titles with local identity and stronger signals."
+  },
+  "radar.v2.block.soon": {
+    "pt-BR": "Em breve",
+    "en-US": "Coming soon"
+  },
+  "radar.v2.block.soon.desc": {
+    "pt-BR": "Datas futuras, retornos, estreias e janelas próximas.",
+    "en-US": "Future dates, returns, premieres, and upcoming windows."
+  },
+  "radar.v2.block.today": {
+    "pt-BR": "Hoje",
+    "en-US": "Today"
+  },
+  "radar.v2.block.today.desc": {
+    "pt-BR": "Episódios, estreias e lançamentos mais urgentes.",
+    "en-US": "The most urgent episodes, premieres, and releases."
+  },
+  "radar.v2.block.week": {
+    "pt-BR": "Semana",
+    "en-US": "Week"
+  },
+  "radar.v2.block.week.desc": {
+    "pt-BR": "O que chega nos próximos dias, organizado para acompanhamento rápido.",
+    "en-US": "What lands in the next few days, organized for quick tracking."
+  },
+  "radar.v2.cache.hit": {
+    "pt-BR": "Hit",
+    "en-US": "Hit"
+  },
+  "radar.v2.cache.live": {
+    "pt-BR": "Live",
+    "en-US": "Live"
+  },
+  "radar.v2.empty": {
+    "pt-BR": "Radar sem eventos disponíveis agora.",
+    "en-US": "Radar has no available events right now."
+  },
+  "radar.v2.empty.following": {
+    "pt-BR": "Adicione séries e filmes à biblioteca ou watchlist para preencher este bloco.",
+    "en-US": "Add shows and movies to your library or watchlist to fill this block."
+  },
+  "radar.v2.error": {
+    "pt-BR": "Erro ao atualizar Radar: {v1}",
+    "en-US": "Radar refresh error: {v1}"
+  },
+  "radar.v2.eyebrow": {
+    "pt-BR": "Radar V2",
+    "en-US": "Radar V2"
+  },
+  "radar.v2.filter.all": {
+    "pt-BR": "Todos os filtros",
+    "en-US": "All filters"
+  },
+  "radar.v2.loading": {
+    "pt-BR": "Atualizando Radar",
+    "en-US": "Refreshing Radar"
+  },
+  "radar.v2.mode.general": {
+    "pt-BR": "Geral",
+    "en-US": "General"
+  },
+  "radar.v2.mode.personal": {
+    "pt-BR": "Para mim",
+    "en-US": "For me"
+  },
+  "radar.v2.search": {
+    "pt-BR": "Buscar no Radar",
+    "en-US": "Search Radar"
+  },
+  "radar.v2.stat.cache": {
+    "pt-BR": "Cache",
+    "en-US": "Cache"
+  },
+  "radar.v2.stat.events": {
+    "pt-BR": "Eventos",
+    "en-US": "Events"
+  },
+  "radar.v2.stat.library": {
+    "pt-BR": "Biblioteca",
+    "en-US": "Library"
+  },
+  "radar.v2.subtitle": {
+    "pt-BR": "Calendário Trakt-first com identidade POPLOG, filtros locais, biblioteca, watchlist e blocos de acompanhamento.",
+    "en-US": "Trakt-first calendar with POPLOG identity, local filters, library, watchlist, and tracking blocks."
+  },
+  "radar.v2.title": {
+    "pt-BR": "Radar",
+    "en-US": "Radar"
+  },
+  "ui.000cee287827": {
+    "pt-BR": "Quando você usar &quot;Não tenho interesse&quot;, ele aparece aqui e perde força nas recomendações.",
+    "en-US": "When you use &quot;I'm not interested&quot;, it appears here and loses power in recommendations."
+  },
+  "ui.0083d01d3a46": {
+    "pt-BR": "Pôster selecionado. Cache invalidado: {v1}.",
+    "en-US": "Selected poster. Invalidated cache: {v1}."
+  },
+  "ui.009433886003": {
+    "pt-BR": "Idioma",
+    "en-US": "Language"
+  },
+  "ui.00cab8f4b69a": {
+    "pt-BR": "Créditos & Fontes",
+    "en-US": "Credits & Sources"
+  },
+  "ui.01c119dc9e1b": {
+    "pt-BR": "Sem imagem",
+    "en-US": "No image"
+  },
+  "ui.01c600e77b74": {
+    "pt-BR": "Buscando reações…",
+    "en-US": "Looking for reactions…"
+  },
+  "ui.021f7037070c": {
+    "pt-BR": "Próximo: S",
+    "en-US": "Next: S"
+  },
+  "ui.0296207072a1": {
+    "pt-BR": "Adicionar serviço",
+    "en-US": "Add service"
+  },
+  "ui.02b07b6f2c29": {
+    "pt-BR": "Nenhum título guardado para outro clima.",
+    "en-US": "No title saved for another climate."
+  },
+  "ui.031b7febc33b": {
+    "pt-BR": "↺ Atualizar",
+    "en-US": "↺ Update"
+  },
+  "ui.0333ee4220df": {
+    "pt-BR": "Não foi possível remover o título da lista.",
+    "en-US": "Unable to remove title from list."
+  },
+  "ui.034f9bdadd28": {
+    "pt-BR": "Último episódio disponível",
+    "en-US": "Last episode available"
+  },
+  "ui.0375f325b2ac": {
+    "pt-BR": "&quot; nesta janela.",
+    "en-US": "&quot; in this window."
+  },
+  "ui.03fb3f29a4cc": {
+    "pt-BR": "Nenhum job pendente.",
+    "en-US": "No pending jobs."
+  },
+  "ui.04618adf1c1f": {
+    "pt-BR": "{v1}h atrás",
+    "en-US": "{v1}h ago"
+  },
+  "ui.04c60fd2a859": {
+    "pt-BR": "Lançamento",
+    "en-US": "Launch"
+  },
+  "ui.04fc2495c99d": {
+    "pt-BR": "Tentar novamente",
+    "en-US": "Try again"
+  },
+  "ui.0544643f71c4": {
+    "pt-BR": "Visão Completa da Biblioteca",
+    "en-US": "Complete View of the Library"
+  },
+  "ui.056e1978a57e": {
+    "pt-BR": "episódio restante",
+    "en-US": "remaining episode"
+  },
+  "ui.057b38cbe7fd": {
+    "pt-BR": "Carregando radar personalizado…",
+    "en-US": "Loading custom radar…"
+  },
+  "ui.06316f48cd61": {
+    "pt-BR": "Carregando historico...",
+    "en-US": "Loading history..."
+  },
+  "ui.066846d67f94": {
+    "pt-BR": "Isso ajuda o sistema a entender seu gosto.",
+    "en-US": "This helps the system understand your taste."
+  },
+  "ui.06752e6efb63": {
+    "pt-BR": "Nenhum título separado ainda.",
+    "en-US": "No separate title yet."
+  },
+  "ui.06ce174485a6": {
+    "pt-BR": "Sessões",
+    "en-US": "Sessions"
+  },
+  "ui.06d4427bf748": {
+    "pt-BR": "{v1} episódios novos",
+    "en-US": "{v1} new episodes"
+  },
+  "ui.0748e2f5bdcf": {
+    "pt-BR": "Com erro",
+    "en-US": "With error"
+  },
+  "ui.075d4d12844d": {
+    "pt-BR": "Novos títulos",
+    "en-US": "New titles"
+  },
+  "ui.0761dbd3ed3a": {
+    "pt-BR": "Não foi possível excluir a lista.",
+    "en-US": "Unable to delete the list."
+  },
+  "ui.078c11390ec0": {
+    "pt-BR": "Encerre a sessão neste dispositivo. Seus dados permanecem salvos.",
+    "en-US": "Log out of this device. Your data remains saved."
+  },
+  "ui.07b7f15360fe": {
+    "pt-BR": "A nova ordem não pôde ser salva.",
+    "en-US": "The new order could not be saved."
+  },
+  "ui.0837b2e9419b": {
+    "pt-BR": "Contexto social de {v1}",
+    "en-US": "Social context of {v1}"
+  },
+  "ui.08547620b5ee": {
+    "pt-BR": "Seleção manual de pôster via painel",
+    "en-US": "Manual poster selection via panel"
+  },
+  "ui.087c3ef11c45": {
+    "pt-BR": "Ver status",
+    "en-US": "View status"
+  },
+  "ui.08a1ed02dc57": {
+    "pt-BR": "Conhecido por",
+    "en-US": "Known for"
+  },
+  "ui.0965a57a34dc": {
+    "pt-BR": "Duração média",
+    "en-US": "Average duration"
+  },
+  "ui.09ad8c6bb371": {
+    "pt-BR": "Não agora",
+    "en-US": "Not now"
+  },
+  "ui.0a173217d307": {
+    "pt-BR": "Atualizar progresso",
+    "en-US": "Update progress"
+  },
+  "ui.0afa4ffdaee4": {
+    "pt-BR": "Ritual de descoberta",
+    "en-US": "Discovery ritual"
+  },
+  "ui.0b06d615a836": {
+    "pt-BR": "JSON inválido",
+    "en-US": "Invalid JSON"
+  },
+  "ui.0b09b32c689f": {
+    "pt-BR": "Seu streaming",
+    "en-US": "Your streaming"
+  },
+  "ui.0b699238f6ff": {
+    "pt-BR": "Qualquer vibe",
+    "en-US": "Any vibe"
+  },
+  "ui.0bb7700092ef": {
+    "pt-BR": "Buscar filmes e séries",
+    "en-US": "Search movies and series"
+  },
+  "ui.0c10e65b6432": {
+    "pt-BR": "Cronológica",
+    "en-US": "Chronological"
+  },
+  "ui.0c4a8a0e6f0a": {
+    "pt-BR": "Edição",
+    "en-US": "Edition"
+  },
+  "ui.0c664fca6df0": {
+    "pt-BR": "País",
+    "en-US": "Country"
+  },
+  "ui.0c9d45b92337": {
+    "pt-BR": "Quando você salvar algo para ver depois, ele aparece aqui como uma prateleira visual da sua coleção.",
+    "en-US": "When you save something for later, it appears here as a visual shelf of your collection."
+  },
+  "ui.0cb0e3e19090": {
+    "pt-BR": "Mover {v1} para a direita",
+    "en-US": "Move {v1} to the right"
+  },
+  "ui.0cc659bba427": {
+    "pt-BR": "Secret incorreto ou ADMIN_SECRET não configurado.",
+    "en-US": "Incorrect Secret or ADMIN_SECRET not configured."
+  },
+  "ui.0d498de6bbd1": {
+    "pt-BR": "Nenhuma série neste dia",
+    "en-US": "No series this day"
+  },
+  "ui.0d521e89105b": {
+    "pt-BR": "Marcado!",
+    "en-US": "Marked!"
+  },
+  "ui.0d7561c5b9a6": {
+    "pt-BR": "Ficaram pelo caminho",
+    "en-US": "They stayed along the way"
+  },
+  "ui.0db301482fbd": {
+    "pt-BR": "Estreia em {v1}d",
+    "en-US": "Debuts in {v1}d"
+  },
+  "ui.0dd0a0332779": {
+    "pt-BR": "[AcompanhandoPage] resposta não-ok:",
+    "en-US": "[AccompanyingPage] non-ok response:"
+  },
+  "ui.0dda5f4a8f73": {
+    "pt-BR": "Raw JSON e endpoints",
+    "en-US": "Raw JSON and endpoints"
+  },
+  "ui.0e09c4a7f690": {
+    "pt-BR": "% cache hit",
+    "en-US": "% cache hit"
+  },
+  "ui.0e98ed368c07": {
+    "pt-BR": "Meu Radar",
+    "en-US": "My Radar"
+  },
+  "ui.0f2df427042e": {
+    "pt-BR": "Agenda compactada",
+    "en-US": "Compressed agenda"
+  },
+  "ui.0f596df65aca": {
+    "pt-BR": "Radar · POPLOG",
+    "en-US": "Radar · POPLOG"
+  },
+  "ui.0f6dfca7d303": {
+    "pt-BR": "Em breve",
+    "en-US": "Shortly"
+  },
+  "ui.0fad93484d6a": {
+    "pt-BR": "O que reúne esta coleção?",
+    "en-US": "What brings together this collection?"
+  },
+  "ui.0fd7a4fd4433": {
+    "pt-BR": "Tudo já está atualizado.",
+    "en-US": "Everything is already updated."
+  },
+  "ui.101889a7f2b8": {
+    "pt-BR": "Histórico de overrides",
+    "en-US": "Override history"
+  },
+  "ui.10b81983c8fa": {
+    "pt-BR": "Filtrar por tipo",
+    "en-US": "Filter by type"
+  },
+  "ui.110c405bba79": {
+    "pt-BR": "Tipo de midia desconhecido.",
+    "en-US": "Unknown media type."
+  },
+  "ui.123816f7a517": {
+    "pt-BR": "Buscar serviço...",
+    "en-US": "Search for service..."
+  },
+  "ui.1245676ca2b0": {
+    "pt-BR": "Nova carta",
+    "en-US": "New letter"
+  },
+  "ui.1312499b3477": {
+    "pt-BR": "Entre para avaliar",
+    "en-US": "Sign in to rate"
+  },
+  "ui.13931a582f3f": {
+    "pt-BR": "Reverter",
+    "en-US": "Reverse"
+  },
+  "ui.144b0ea52865": {
+    "pt-BR": "boa ficção.",
+    "en-US": "good fiction."
+  },
+  "ui.14638ad58001": {
+    "pt-BR": "ms avg",
+    "en-US": "ms avg"
+  },
+  "ui.148871039ca4": {
+    "pt-BR": "Isso vai apagar",
+    "en-US": "This will erase"
+  },
+  "ui.14f09eb49bb0": {
+    "pt-BR": "Nada encontrado para “{v1}”.",
+    "en-US": "Nothing found for “{v1}”."
+  },
+  "ui.16216325dc6b": {
+    "pt-BR": "Títulos originais de {v1} no POPLOG",
+    "en-US": "Original titles from {v1} on POPLOG"
+  },
+  "ui.1625d4ac3a1b": {
+    "pt-BR": "Listagem local preservando identidade, contas OAuth e sessões.",
+    "en-US": "Local listing preserving identity, OAuth accounts and sessions."
+  },
+  "ui.1636071796b1": {
+    "pt-BR": "⚠ Spoiler",
+    "en-US": "⚠ Spoiler"
+  },
+  "ui.170c477815e7": {
+    "pt-BR": "crédito",
+    "en-US": "credit"
+  },
+  "ui.177cecc372f8": {
+    "pt-BR": "Aleatório",
+    "en-US": "Random"
+  },
+  "ui.1812e1ea46ab": {
+    "pt-BR": "Trocar sugestões",
+    "en-US": "Exchange suggestions"
+  },
+  "ui.18d249eece54": {
+    "pt-BR": "Mais de 120 min",
+    "en-US": "More than 120 minutes"
+  },
+  "ui.1909f7b2e8d9": {
+    "pt-BR": "Consultado às",
+    "en-US": "Consulted at"
+  },
+  "ui.198d9acefa3c": {
+    "pt-BR": "Não foi possível ler as listas do título.",
+    "en-US": "Unable to read title lists."
+  },
+  "ui.19de4dd51601": {
+    "pt-BR": "Nenhuma recomendação disponível",
+    "en-US": "No recommendations available"
+  },
+  "ui.1a9b34a02b91": {
+    "pt-BR": "Nenhum dado de gênero disponível ainda.",
+    "en-US": "No gender data available yet."
+  },
+  "ui.1b3b488148c5": {
+    "pt-BR": "POPLOG ADMIN",
+    "en-US": "POPLOG ADMIN"
+  },
+  "ui.1bd55b39ec55": {
+    "pt-BR": "Central do Perfil",
+    "en-US": "Profile Center"
+  },
+  "ui.1c3fec71b133": {
+    "pt-BR": "Seção atual: {v1}",
+    "en-US": "Current section: {v1}"
+  },
+  "ui.1d4f276f4ac3": {
+    "pt-BR": "Fechar modal",
+    "en-US": "Close modal"
+  },
+  "ui.1d64930bf7be": {
+    "pt-BR": "episódios lançados",
+    "en-US": "episodes released"
+  },
+  "ui.1dc929406e22": {
+    "pt-BR": "Em uma ou mais listas personalizadas",
+    "en-US": "In one or more custom lists"
+  },
+  "ui.1debc1d0c0b8": {
+    "pt-BR": "Tem certeza absoluta?",
+    "en-US": "Are you absolutely sure?"
+  },
+  "ui.1f073b366ba6": {
+    "pt-BR": "Nenhuma chamada registrada nos ultimos {v1} dias.",
+    "en-US": "No calls logged in the last {v1} days."
+  },
+  "ui.1f77dbb2bd3d": {
+    "pt-BR": "Ordenar por",
+    "en-US": "Sort by"
+  },
+  "ui.1fdf014b55cb": {
+    "pt-BR": "Visão Geral",
+    "en-US": "Overview"
+  },
+  "ui.1fee98d4e7eb": {
+    "pt-BR": "Radar Cache",
+    "en-US": "Radar Cache"
+  },
+  "ui.204e7e2f417c": {
+    "pt-BR": "Mais Curtos",
+    "en-US": "Shortest"
+  },
+  "ui.207d86c4a7e5": {
+    "pt-BR": "Trailer: {v1}",
+    "en-US": "Trailer: {v1}"
+  },
+  "ui.20ab66e32e83": {
+    "pt-BR": "Titulo nao encontrado.",
+    "en-US": "Title not found."
+  },
+  "ui.20f32b306e08": {
+    "pt-BR": "Fila persistente, concorrência e renovação em segundo plano",
+    "en-US": "Persistent queue, competition and background renewal"
+  },
+  "ui.21b2319d3099": {
+    "pt-BR": "Apaga o cache e dispara /api/ics/agenda em background",
+    "en-US": "Clear the cache and launch /api/ics/agenda in the background"
+  },
+  "ui.220a008d3e08": {
+    "pt-BR": "Sandbox tecnico para comparar potencial, resposta, cobertura e complementaridade entre APIs antes de definir arquitetura final.",
+    "en-US": "Technical sandbox to compare potential, response, coverage and complementarity between APIs before defining final architecture."
+  },
+  "ui.227a06a3c6a2": {
+    "pt-BR": "episódio lançado",
+    "en-US": "episode released"
+  },
+  "ui.227d13da0294": {
+    "pt-BR": "O Trakt ainda não tem reações úteis para este episódio. Quando aparecerem, elas entram aqui traduzidas para PT-BR.",
+    "en-US": "Trakt has no useful reactions for this episode yet. When they appear, they are translated into PT-BR here."
+  },
+  "ui.22a8b6615250": {
+    "pt-BR": "Zerar buffer",
+    "en-US": "Clear buffer"
+  },
+  "ui.22aca24afa95": {
+    "pt-BR": "Carregando lista",
+    "en-US": "Loading list"
+  },
+  "ui.22c0abec3f9c": {
+    "pt-BR": "Também adicionar à Watchlist",
+    "en-US": "Also add to Watchlist"
+  },
+  "ui.22d0b86c2f41": {
+    "pt-BR": "Sua curadoria começa aqui",
+    "en-US": "Your curation starts here"
+  },
+  "ui.22eb889fda61": {
+    "pt-BR": "Histórico concluído",
+    "en-US": "Completed history"
+  },
+  "ui.23e4fc23e6dd": {
+    "pt-BR": "Invalide o cache e dispare rebuild para que a mudanca apareca no Radar.",
+    "en-US": "Invalidate the cache and trigger rebuild so that the change appears on the Radar."
+  },
+  "ui.23f93a61e395": {
+    "pt-BR": "não",
+    "en-US": "no"
+  },
+  "ui.245fda308246": {
+    "pt-BR": "Filtrar e ordenar",
+    "en-US": "Filter and sort"
+  },
+  "ui.24e42ce09060": {
+    "pt-BR": "Laboratorio tecnico para explorar APIs cinematograficas e streaming.",
+    "en-US": "Technical laboratory to explore cinematographic and streaming APIs."
+  },
+  "ui.2532353bba47": {
+    "pt-BR": "Série encerrada",
+    "en-US": "Series ended"
+  },
+  "ui.2677f29adf16": {
+    "pt-BR": "Títulos",
+    "en-US": "Titles"
+  },
+  "ui.26d1e8cbd5b0": {
+    "pt-BR": "Bem-vindo de volta.",
+    "en-US": "Welcome back."
+  },
+  "ui.26d4d20c99ed": {
+    "pt-BR": "Carregar status",
+    "en-US": "Upload status"
+  },
+  "ui.26e736e80dca": {
+    "pt-BR": "Esta area ainda nao foi religada.",
+    "en-US": "This area has not yet been reconnected."
+  },
+  "ui.26f630caadb7": {
+    "pt-BR": "Grátis",
+    "en-US": "Free"
+  },
+  "ui.26f92e18010d": {
+    "pt-BR": "Usar pôster",
+    "en-US": "Use poster"
+  },
+  "ui.26ffb91f221b": {
+    "pt-BR": "Remover desta lista",
+    "en-US": "Remove from this list"
+  },
+  "ui.2730414d794d": {
+    "pt-BR": "Secret incorreto.",
+    "en-US": "Incorrect Secret."
+  },
+  "ui.275a3916b059": {
+    "pt-BR": "POPLOG API LAB",
+    "en-US": "POPLOG API LAB"
+  },
+  "ui.276aaacdf374": {
+    "pt-BR": "Séries do dia",
+    "en-US": "Series of the day"
+  },
+  "ui.28d8c482dacc": {
+    "pt-BR": "Fechar créditos",
+    "en-US": "Close credits"
+  },
+  "ui.29b552496571": {
+    "pt-BR": "títulos organizados",
+    "en-US": "organized titles"
+  },
+  "ui.29c3bc91f32e": {
+    "pt-BR": "Encontre qualquer coisa.",
+    "en-US": "Find anything."
+  },
+  "ui.29da66cb15f8": {
+    "pt-BR": "Não foi possível carregar os episódios agora.",
+    "en-US": "Unable to load episodes now."
+  },
+  "ui.2a527b3a7ec7": {
+    "pt-BR": "{v1}sem atrás",
+    "en-US": "{v1}no ago"
+  },
+  "ui.2a5f848c4d2b": {
+    "pt-BR": "incrível para",
+    "en-US": "amazing for"
+  },
+  "ui.2a6cd37db731": {
+    "pt-BR": "Observacoes tecnicas",
+    "en-US": "Technical observations"
+  },
+  "ui.2a9d98119db7": {
+    "pt-BR": "A navegacao existe, mas a logica de indexacao foi removida.",
+    "en-US": "Navigation exists, but the indexing logic has been removed."
+  },
+  "ui.2b7527ae8580": {
+    "pt-BR": "Esta area esta pronta para receber uma nova integracao isolada de filmes.",
+    "en-US": "This area is ready to receive a new isolated film integration."
+  },
+  "ui.2d649ba13949": {
+    "pt-BR": "Últimos vistos",
+    "en-US": "Last visas"
+  },
+  "ui.2d6ed25060b2": {
+    "pt-BR": "ões",
+    "en-US": "ions"
+  },
+  "ui.2dab74cbd0f6": {
+    "pt-BR": "Nenhum override registrado.",
+    "en-US": "No overrides recorded."
+  },
+  "ui.2dd2a3936dee": {
+    "pt-BR": "Carregando listas",
+    "en-US": "Loading lists"
+  },
+  "ui.2ddad126feed": {
+    "pt-BR": "Verificar status",
+    "en-US": "Check status"
+  },
+  "ui.2de6b54415ae": {
+    "pt-BR": "Capacidades exploradas",
+    "en-US": "Capabilities explored"
+  },
+  "ui.2e5f13d0e135": {
+    "pt-BR": "Buscar nesta lista",
+    "en-US": "Search this list"
+  },
+  "ui.2e6069c318cf": {
+    "pt-BR": "Toda sua coleção",
+    "en-US": "Your entire collection"
+  },
+  "ui.2e6de5ce8bf8": {
+    "pt-BR": "Digite o secret e carregue a listagem.",
+    "en-US": "Enter the secret and load the listing."
+  },
+  "ui.2facd3dd693d": {
+    "pt-BR": "Nenhum resultado encontrado.",
+    "en-US": "No results found."
+  },
+  "ui.2fb1bc805ca9": {
+    "pt-BR": "Marcar episódios anteriores?",
+    "en-US": "Bookmark previous episodes?"
+  },
+  "ui.2fd479649689": {
+    "pt-BR": "Guarde títulos para decidir depois sem perder nada.",
+    "en-US": "Save titles to decide later without losing anything."
+  },
+  "ui.30049e653bb1": {
+    "pt-BR": "Lançamento (+ antigo)",
+    "en-US": "Release (+ old)"
+  },
+  "ui.30ec8e73d0ba": {
+    "pt-BR": "Avaliação: {v1} de {v2} estrelas",
+    "en-US": "Rating: {v1} out of {v2} stars"
+  },
+  "ui.310ab52b9602": {
+    "pt-BR": "ID do titulo invalido.",
+    "en-US": "Invalid title ID."
+  },
+  "ui.312b22c7a207": {
+    "pt-BR": "Sua avaliação",
+    "en-US": "Your review"
+  },
+  "ui.3148e021963c": {
+    "pt-BR": "Último ciclo:",
+    "en-US": "Last cycle:"
+  },
+  "ui.3199efe9db09": {
+    "pt-BR": "Séries premiadas, bem avaliadas e fáceis de entrar — priorizadas por disponibilidade e relevância editorial.",
+    "en-US": "Award-winning, well-reviewed, and easy-to-get-into series — prioritized by availability and editorial relevance."
+  },
+  "ui.31a21a98a493": {
+    "pt-BR": "Os itens sairão desta coleção. Watchlist, favoritos, progresso e títulos assistidos continuarão intactos.",
+    "en-US": "The items will come from this collection. Watchlist, favorites, progress and watched titles will remain intact."
+  },
+  "ui.31a37e0e0ccb": {
+    "pt-BR": "Nenhuma chamada registrada ainda.",
+    "en-US": "No calls logged yet."
+  },
+  "ui.31eaca45f1f8": {
+    "pt-BR": "Avaliação bloqueada para visitantes",
+    "en-US": "Review blocked for visitors"
+  },
+  "ui.31f0bc374227": {
+    "pt-BR": "Concorrência",
+    "en-US": "Competition"
+  },
+  "ui.321d7e4b3b3b": {
+    "pt-BR": "Adicione títulos à sua biblioteca para que possamos personalizar sugestões para você.",
+    "en-US": "Add titles to your library so we can customize suggestions for you."
+  },
+  "ui.3287d7697dc0": {
+    "pt-BR": "Adicionar à lista",
+    "en-US": "Add to list"
+  },
+  "ui.32ea611419a9": {
+    "pt-BR": "Retorno de hiato",
+    "en-US": "Return from hiatus"
+  },
+  "ui.331e23a40e3d": {
+    "pt-BR": "Sugestão anterior",
+    "en-US": "Previous suggestion"
+  },
+  "ui.3337877d3db4": {
+    "pt-BR": "Os créditos podem aparecer aqui quando as fontes externas forem atualizadas.",
+    "en-US": "Credits may appear here when external sources are updated."
+  },
+  "ui.33b332595fe4": {
+    "pt-BR": "Favoritos",
+    "en-US": "Favorites"
+  },
+  "ui.3419722402a7": {
+    "pt-BR": "Nenhum comentário em destaque por enquanto.",
+    "en-US": "No featured comments yet."
+  },
+  "ui.34438cc2215c": {
+    "pt-BR": "Lista privada",
+    "en-US": "Private list"
+  },
+  "ui.3485ebcaf6df": {
+    "pt-BR": "concluídos,",
+    "en-US": "completed,"
+  },
+  "ui.351f539a27c7": {
+    "pt-BR": "títulos no corte atual",
+    "en-US": "titles in current cut"
+  },
+  "ui.354ab5391b5e": {
+    "pt-BR": "Fechar episódio",
+    "en-US": "Close episode"
+  },
+  "ui.35ba0d43cb40": {
+    "pt-BR": "Nos cinemas",
+    "en-US": "In cinemas"
+  },
+  "ui.35f2ab991300": {
+    "pt-BR": "Painel centralizado de diagnóstico e operações administrativas.",
+    "en-US": "Centralized diagnostic panel and administrative operations."
+  },
+  "ui.364b6ce885c6": {
+    "pt-BR": "Sua jornada · POPLOG",
+    "en-US": "Your journey · POPLOG"
+  },
+  "ui.36a3cb556b08": {
+    "pt-BR": "Métricas persistidas das últimas 24h.",
+    "en-US": "Persisted metrics from the last 24h."
+  },
+  "ui.36b45aec1e0d": {
+    "pt-BR": " · {v1} crédito{v2} técnicos",
+    "en-US": "· {v1} credit{v2} technicians"
+  },
+  "ui.37237a7a2574": {
+    "pt-BR": "Enriquecendo…",
+    "en-US": "Enriching…"
+  },
+  "ui.374a26c2f319": {
+    "pt-BR": "Ação & aventura",
+    "en-US": "Action & adventure"
+  },
+  "ui.37a757965d1e": {
+    "pt-BR": "Desmarque para manter o título somente nas listas escolhidas.",
+    "en-US": "Uncheck to keep the title only in chosen lists."
+  },
+  "ui.37afbcb110c7": {
+    "pt-BR": "Mistério",
+    "en-US": "Mystery"
+  },
+  "ui.3942fa6d8b81": {
+    "pt-BR": " episódio assistido",
+    "en-US": "episode watched"
+  },
+  "ui.396be89197d3": {
+    "pt-BR": "Detalhes do episódio {v1}",
+    "en-US": "Episode details {v1}"
+  },
+  "ui.39e48577bf66": {
+    "pt-BR": "Você está aqui",
+    "en-US": "You are here"
+  },
+  "ui.39e59932407d": {
+    "pt-BR": "Consulta o status do cache da Agenda/Radar e permite invalidação forçada com ou sem rebuild imediato.",
+    "en-US": "Checks the status of the Calendar/Radar cache and allows forced invalidation with or without immediate rebuild."
+  },
+  "ui.39fda122f238": {
+    "pt-BR": "Duração indisponível",
+    "en-US": "Duration unavailable"
+  },
+  "ui.3a1488d4b774": {
+    "pt-BR": "Carregar mais episódios",
+    "en-US": "Load more episodes"
+  },
+  "ui.3a441aa37472": {
+    "pt-BR": "Feed TMDB Trending",
+    "en-US": "TMDB Trending Feed"
+  },
+  "ui.3a535ca93078": {
+    "pt-BR": "Google OAuth não está configurado. ",
+    "en-US": "Google OAuth is not configured."
+  },
+  "ui.3a68a538e644": {
+    "pt-BR": "Reenfileirar falhos",
+    "en-US": "Requeue failures"
+  },
+  "ui.3b6b38a966cd": {
+    "pt-BR": "título organizado",
+    "en-US": "organized title"
+  },
+  "ui.3b79237730c4": {
+    "pt-BR": "sair da conta",
+    "en-US": "log out of account"
+  },
+  "ui.3bbd538880d0": {
+    "pt-BR": "Salvar alterações",
+    "en-US": "Save changes"
+  },
+  "ui.3c2862f24d9f": {
+    "pt-BR": "Acesse outras áreas da Poplog",
+    "en-US": "Access other areas of Poplog"
+  },
+  "ui.3c8d6f0c2c9f": {
+    "pt-BR": "Assistir",
+    "en-US": "To attend"
+  },
+  "ui.3cbb32f03f65": {
+    "pt-BR": "Sem preview",
+    "en-US": "No preview"
+  },
+  "ui.3cefe204cebd": {
+    "pt-BR": "Admin Secret",
+    "en-US": "Admin Secret"
+  },
+  "ui.3d80292f41d1": {
+    "pt-BR": "Episódios",
+    "en-US": "Episodes"
+  },
+  "ui.3da8343bc5a0": {
+    "pt-BR": "{v1}m atrás",
+    "en-US": "{v1}m ago"
+  },
+  "ui.3da9c0d11219": {
+    "pt-BR": "Consultando estado do feed...",
+    "en-US": "Checking feed status..."
+  },
+  "ui.3e5522640572": {
+    "pt-BR": "Combina com você",
+    "en-US": "Suits you"
+  },
+  "ui.3e8ce31ad1ef": {
+    "pt-BR": "Ação executada.",
+    "en-US": "Action taken."
+  },
+  "ui.3ec461caa9d1": {
+    "pt-BR": "DISPONÍVEL",
+    "en-US": "AVAILABLE"
+  },
+  "ui.3ec8b657b72a": {
+    "pt-BR": "Nenhum comentário encontrado nesta aba.",
+    "en-US": "No comments found on this tab."
+  },
+  "ui.3efd4fc123b7": {
+    "pt-BR": "← Ver tradução",
+    "en-US": "← See translation"
+  },
+  "ui.3f3979e815c3": {
+    "pt-BR": "Também na Watchlist",
+    "en-US": "Also on Watchlist"
+  },
+  "ui.3fd41e355b24": {
+    "pt-BR": "Override runtime: dura enquanto o processo Node estiver ativo. Para persistencia, defina",
+    "en-US": "Override runtime: lasts as long as the Node process is active. For persistence, set"
+  },
+  "ui.40e6c383e3f4": {
+    "pt-BR": "Ignora os TTLs de título e ratings e re-puxa a fonte canônica atual.",
+    "en-US": "Ignores title and ratings TTLs and re-pulls the current canonical source."
+  },
+  "ui.40e76332b289": {
+    "pt-BR": "Buscar títulos, pessoas e conteúdos...",
+    "en-US": "Search titles, people and content..."
+  },
+  "ui.417257875f42": {
+    "pt-BR": "Detalhe do dia",
+    "en-US": "Detail of the day"
+  },
+  "ui.41753ccecae7": {
+    "pt-BR": "Nova série",
+    "en-US": "New series"
+  },
+  "ui.41ae936a79bf": {
+    "pt-BR": "Ficha técnica",
+    "en-US": "Technical sheet"
+  },
+  "ui.41b73fafed6f": {
+    "pt-BR": "Marque filmes e séries como favoritos nas páginas de título para eles aparecerem aqui.",
+    "en-US": "Mark movies and series as favorites on title pages so they appear here."
+  },
+  "ui.4237f8b115c7": {
+    "pt-BR": "Status do cache",
+    "en-US": "Cache status"
+  },
+  "ui.4242453a7bb0": {
+    "pt-BR": "Rebuild acontece na próxima visita ao Radar",
+    "en-US": "Rebuild happens on the next visit to Radar"
+  },
+  "ui.42b49908c016": {
+    "pt-BR": "Busque um filme ou série e adicione direto a esta lista.",
+    "en-US": "Search for a film or series and add it directly to this list."
+  },
+  "ui.437e23102e92": {
+    "pt-BR": "Marcar episódios anteriores",
+    "en-US": "Mark previous episodes"
+  },
+  "ui.43a94f5ce3bc": {
+    "pt-BR": "Produção",
+    "en-US": "Production"
+  },
+  "ui.443a8091410a": {
+    "pt-BR": "Comece a digitar para buscar títulos.",
+    "en-US": "Start typing to search for titles."
+  },
+  "ui.4538b3cf48d8": {
+    "pt-BR": "[AcompanhandoPage] Novos episódios falhou:",
+    "en-US": "[TrackingPage] New episodes failed:"
+  },
+  "ui.454ea6968d53": {
+    "pt-BR": "Concluídos",
+    "en-US": "Completed"
+  },
+  "ui.457d5be36359": {
+    "pt-BR": "Explore todos os títulos com filtros e ordenação avançada.",
+    "en-US": "Explore all titles with filters and advanced ordering."
+  },
+  "ui.45a25136ea07": {
+    "pt-BR": "Sorteio",
+    "en-US": "Prize draw"
+  },
+  "ui.45d98ac8f604": {
+    "pt-BR": "Remover {v1} desta lista",
+    "en-US": "Remove {v1} from this list"
+  },
+  "ui.465935e1595d": {
+    "pt-BR": "Digite o secret e carregue um IMDb ID.",
+    "en-US": "Enter the secret and upload an IMDb ID."
+  },
+  "ui.46bd9a9985ea": {
+    "pt-BR": "Último cron",
+    "en-US": "Last cron"
+  },
+  "ui.46d28aa2a67a": {
+    "pt-BR": "Já está",
+    "en-US": "It's already"
+  },
+  "ui.475d3f7ea387": {
+    "pt-BR": "Nenhum conteúdo neste período.",
+    "en-US": "No content this period."
+  },
+  "ui.47629b2ccf90": {
+    "pt-BR": "T{v1} liberada · {v2} episódios",
+    "en-US": "T{v1} released · {v2} episodes"
+  },
+  "ui.48b42bf2d377": {
+    "pt-BR": "Esta temporada estreia em {v1}. Os episódios aparecem aqui conforme se aproximam da estreia.",
+    "en-US": "This season premieres on {v1}. Episodes appear here as they approach their premiere."
+  },
+  "ui.48cbb02e73b5": {
+    "pt-BR": "{v1} · {v2} · {v3} usuário(s) na biblioteca",
+    "en-US": "{v1} · {v2} · {v3} user(s) in the library"
+  },
+  "ui.48efd80c60ce": {
+    "pt-BR": "Título não encontrado",
+    "en-US": "Title not found"
+  },
+  "ui.490f79b27c84": {
+    "pt-BR": "Logs administrativos",
+    "en-US": "Administrative logs"
+  },
+  "ui.49741a38c35a": {
+    "pt-BR": "Todas as lojas desta categoria já foram adicionadas.",
+    "en-US": "All stores in this category have already been added."
+  },
+  "ui.497ac5c11bf3": {
+    "pt-BR": "Biblioteca",
+    "en-US": "Library"
+  },
+  "ui.49c555ac2731": {
+    "pt-BR": "Outros créditos",
+    "en-US": "Other credits"
+  },
+  "ui.4a1f3712cb7f": {
+    "pt-BR": "Nenhum resultado encontrado para essa categoria no momento.",
+    "en-US": "No results found for this category at this time."
+  },
+  "ui.4a4a71aac1d0": {
+    "pt-BR": "Créditos e fontes de dados",
+    "en-US": "Credits and data sources"
+  },
+  "ui.4a5f3e98aa4e": {
+    "pt-BR": "inválido",
+    "en-US": "invalid"
+  },
+  "ui.4a75d6d4deca": {
+    "pt-BR": "Nada por aqui ainda",
+    "en-US": "Nothing here yet"
+  },
+  "ui.4a8d4465195a": {
+    "pt-BR": "Buscar na sua biblioteca",
+    "en-US": "Search your library"
+  },
+  "ui.4a8daa02ea20": {
+    "pt-BR": "Não foi possível atualizar as listas.",
+    "en-US": "Unable to update lists."
+  },
+  "ui.4ac740f7ea43": {
+    "pt-BR": "Orçamento",
+    "en-US": "Budget"
+  },
+  "ui.4add6fa61612": {
+    "pt-BR": "Marcar S01E01 como assistido",
+    "en-US": "Mark S01E01 as watched"
+  },
+  "ui.4b03ab5a79d0": {
+    "pt-BR": "Nenhum dado de origem ainda.",
+    "en-US": "No source data yet."
+  },
+  "ui.4b3256098982": {
+    "pt-BR": "Consulta operacional por IMDb ID, idioma e região.",
+    "en-US": "Operational query by IMDb ID, language and region."
+  },
+  "ui.4c07aff1feae": {
+    "pt-BR": "séries",
+    "en-US": "series"
+  },
+  "ui.4c2b7a2845b0": {
+    "pt-BR": "Saúde do cron",
+    "en-US": "Cron health"
+  },
+  "ui.4c37e5977dcb": {
+    "pt-BR": "Separados para depois",
+    "en-US": "Separated for later"
+  },
+  "ui.4c7d226a65ee": {
+    "pt-BR": "Carregando engine…",
+    "en-US": "Loading engine…"
+  },
+  "ui.4cb35ef6d7bc": {
+    "pt-BR": "Mover para Abandonado",
+    "en-US": "Move to Abandoned"
+  },
+  "ui.4d7fb18c89a7": {
+    "pt-BR": "Comunidade reagindo",
+    "en-US": "Community reacting"
+  },
+  "ui.4d81d66fa4b9": {
+    "pt-BR": "Excluir “",
+    "en-US": "Delete “"
+  },
+  "ui.4e5bcaa44d8f": {
+    "pt-BR": "Visualização temporária — a ordem manual da lista não é alterada.",
+    "en-US": "Temporary view — the manual order of the list is not changed."
+  },
+  "ui.4ef9a15d2b9b": {
+    "pt-BR": "atuaç",
+    "en-US": "performance"
+  },
+  "ui.4f68f91c927f": {
+    "pt-BR": "Payload do Radar vazio",
+    "en-US": "Empty Radar Payload"
+  },
+  "ui.4f91051edd00": {
+    "pt-BR": "Atuação",
+    "en-US": "Performance"
+  },
+  "ui.4f92fb48923f": {
+    "pt-BR": "Arraste para reorganizar",
+    "en-US": "Drag to rearrange"
+  },
+  "ui.4f9f75b91c82": {
+    "pt-BR": "Abrir lista {v1}",
+    "en-US": "Open list {v1}"
+  },
+  "ui.509c4c1a0ccc": {
+    "pt-BR": "Dados encontrados",
+    "en-US": "Data found"
+  },
+  "ui.50ae045690c9": {
+    "pt-BR": "Salvos para ver depois",
+    "en-US": "Saved for later"
+  },
+  "ui.50ddbd8c5207": {
+    "pt-BR": "Chamadas por origem",
+    "en-US": "Calls by origin"
+  },
+  "ui.512ae76d872e": {
+    "pt-BR": "NOVO EP",
+    "en-US": "NOVO EP"
+  },
+  "ui.512af74b6f5e": {
+    "pt-BR": "Este episódio ainda não estreou. A POPLOG evita buscar reações antes da hora para não gastar API sem necessidade.",
+    "en-US": "This episode has not yet premiered. POPLOG avoids looking for reactions ahead of time so as not to waste APIs unnecessarily."
+  },
+  "ui.5138733bd6ca": {
+    "pt-BR": "Sua coleção",
+    "en-US": "Your collection"
+  },
+  "ui.516fbde88a2e": {
+    "pt-BR": "O que ver primeiro?",
+    "en-US": "What to see first?"
+  },
+  "ui.5209e8d95203": {
+    "pt-BR": "Hype alto",
+    "en-US": "High hype"
+  },
+  "ui.521b9c59d715": {
+    "pt-BR": "Nenhum título salvo corresponde à sua busca. Tente outro termo ou ajuste os filtros e o estado selecionado.",
+    "en-US": "No titles saved match your search. Try another term or adjust the filters and selected state."
+  },
+  "ui.5228c4eda63a": {
+    "pt-BR": "Desligar feed TMDB",
+    "en-US": "Turn off TMDB feed"
+  },
+  "ui.524db4e00a48": {
+    "pt-BR": "fonte disponível",
+    "en-US": "source available"
+  },
+  "ui.526c7f28eb89": {
+    "pt-BR": "Não conseguimos carregar os comentários:",
+    "en-US": "We were unable to load the comments:"
+  },
+  "ui.527040e848e3": {
+    "pt-BR": "Falha na ação ({v1}).",
+    "en-US": "Action failed ({v1})."
+  },
+  "ui.527832d33724": {
+    "pt-BR": "Explodindo agora",
+    "en-US": "Exploding now"
+  },
+  "ui.528917b5f629": {
+    "pt-BR": "Preferências negativas",
+    "en-US": "Negative preferences"
+  },
+  "ui.52e1d332c12a": {
+    "pt-BR": "Configuração local",
+    "en-US": "Local configuration"
+  },
+  "ui.52e96f4067cd": {
+    "pt-BR": "Acervo completo",
+    "en-US": "Complete collection"
+  },
+  "ui.53a2b1cbc1f0": {
+    "pt-BR": "Laboratorio de APIs cinematograficas",
+    "en-US": "Cinematographic APIs Laboratory"
+  },
+  "ui.53c505a0e40b": {
+    "pt-BR": "Mais como este",
+    "en-US": "More like this"
+  },
+  "ui.53c5a0aa59bf": {
+    "pt-BR": "Adicionar a “",
+    "en-US": "Add to &quot;"
+  },
+  "ui.53cb20b74365": {
+    "pt-BR": "Toque para avaliar",
+    "en-US": "Tap to rate"
+  },
+  "ui.54478aced8ad": {
+    "pt-BR": "Não foi possível carregar a busca agora. Tente novamente em instantes.",
+    "en-US": "Unable to load search now. Please try again in a moment."
+  },
+  "ui.5486d30276b3": {
+    "pt-BR": "Slide anterior",
+    "en-US": "Previous slide"
+  },
+  "ui.54d3900b005d": {
+    "pt-BR": "Seus serviços",
+    "en-US": "Your services"
+  },
+  "ui.54e2e6d8b351": {
+    "pt-BR": "Fechar erro",
+    "en-US": "Close error"
+  },
+  "ui.54f28cc45101": {
+    "pt-BR": "Também relevantes",
+    "en-US": "Also relevant"
+  },
+  "ui.553f501bc5c7": {
+    "pt-BR": "Marcar como assistido",
+    "en-US": "Mark as watched"
+  },
+  "ui.559a1e5d00f1": {
+    "pt-BR": "Pesquise e selecione filmes e séries para incluir.",
+    "en-US": "Search and select films and series to include."
+  },
+  "ui.559fb30750fc": {
+    "pt-BR": "% assistido",
+    "en-US": "% watched"
+  },
+  "ui.55b585433a25": {
+    "pt-BR": "Indisponível na região selecionada no momento.",
+    "en-US": "Not available in the selected region at this time."
+  },
+  "ui.55ccb577cc05": {
+    "pt-BR": "próximo título",
+    "en-US": "next title"
+  },
+  "ui.55f8f15fa29d": {
+    "pt-BR": "&rdquo;",
+    "en-US": "&rdquo;"
+  },
+  "ui.5682da3e235a": {
+    "pt-BR": "Produção executiva",
+    "en-US": "Executive production"
+  },
+  "ui.56c6eef6ab5b": {
+    "pt-BR": "Já vi",
+    "en-US": "I've seen"
+  },
+  "ui.578afe0c7fba": {
+    "pt-BR": "Música",
+    "en-US": "Music"
+  },
+  "ui.5795f0c201ac": {
+    "pt-BR": "% concluído",
+    "en-US": "% complete"
+  },
+  "ui.5891b7e007e7": {
+    "pt-BR": "Usuários",
+    "en-US": "Users"
+  },
+  "ui.58c35efb0fad": {
+    "pt-BR": "Leve, esperto e bom para descompressão",
+    "en-US": "Light, smart and good for decompression"
+  },
+  "ui.594c8b53b08c": {
+    "pt-BR": "Salve alguns filmes, marque o que já viu e sua HOME começa a ganhar blocos pessoais, recomendações vivas e atalhos para continuar suas séries.",
+    "en-US": "Save some movies, mark what you've already seen and your HOME starts to gain personal blocks, live recommendations and shortcuts to continue your series."
+  },
+  "ui.5988e9350caf": {
+    "pt-BR": "Ficção científica",
+    "en-US": "Science fiction"
+  },
+  "ui.59f25599e7cf": {
+    "pt-BR": "Algo intenso",
+    "en-US": "Something intense"
+  },
+  "ui.5a11b642a82e": {
+    "pt-BR": "Cache hit rate",
+    "en-US": "cache hit rate"
+  },
+  "ui.5a8d8f77e799": {
+    "pt-BR": "Criar nova lista",
+    "en-US": "Create new list"
+  },
+  "ui.5aa1dd0def0b": {
+    "pt-BR": "Identidade local, contas, sessões e permissões atuais",
+    "en-US": "Current local identity, accounts, sessions, and permissions"
+  },
+  "ui.5b0e1516d230": {
+    "pt-BR": "Nenhum lançamento futuro nesta seleção.",
+    "en-US": "No future releases in this selection."
+  },
+  "ui.5bdcb569dcc5": {
+    "pt-BR": "Universo pausado.",
+    "en-US": "Universe paused."
+  },
+  "ui.5c38cb273e13": {
+    "pt-BR": "Indice desativado.",
+    "en-US": "Index disabled."
+  },
+  "ui.5c6aa7681a3a": {
+    "pt-BR": "Ficção & fantasia",
+    "en-US": "Fiction & fantasy"
+  },
+  "ui.5ca3739c28b7": {
+    "pt-BR": "Em andamento",
+    "en-US": "In progress"
+  },
+  "ui.5cfe199b8592": {
+    "pt-BR": "Título, pessoa, estúdio ou saga...",
+    "en-US": "Title, person, studio or saga..."
+  },
+  "ui.5d0212663502": {
+    "pt-BR": "Em progresso",
+    "en-US": "In progress"
+  },
+  "ui.5d18d3ed3bc8": {
+    "pt-BR": "Empresas encontradas",
+    "en-US": "Companies found"
+  },
+  "ui.5d51f46807ce": {
+    "pt-BR": "Combina as fontes disponíveis em escala /10.",
+    "en-US": "Combines available fonts in /10 scale."
+  },
+  "ui.5da53a7a65e3": {
+    "pt-BR": "Criação",
+    "en-US": "Creation"
+  },
+  "ui.5db14b73479d": {
+    "pt-BR": "Invalidar cache (sem rebuild automático)?",
+    "en-US": "Invalidate cache (without automatic rebuild)?"
+  },
+  "ui.5e02f4acdcc2": {
+    "pt-BR": "eventos disponíveis nos filtros.",
+    "en-US": "events available in the filters."
+  },
+  "ui.5e1b8c66a151": {
+    "pt-BR": "Ver titulo",
+    "en-US": "See title"
+  },
+  "ui.5e5e95109c55": {
+    "pt-BR": "concluídos",
+    "en-US": "completed"
+  },
+  "ui.5f286d25da63": {
+    "pt-BR": "OAuth não configurado — use modo local dev",
+    "en-US": "OAuth not configured — use local dev mode"
+  },
+  "ui.5f347dd92391": {
+    "pt-BR": "Biblioteca apagada. Sua conta está zerada.",
+    "en-US": "Library deleted. Your account is zero."
+  },
+  "ui.5f6eaf29220a": {
+    "pt-BR": "Títulos ainda não lançados aparecem aqui quando estiverem salvos na sua biblioteca.",
+    "en-US": "Unreleased titles appear here when saved in your library."
+  },
+  "ui.5f7808b17704": {
+    "pt-BR": "Coleções",
+    "en-US": "Collections"
+  },
+  "ui.5f7970bcbecb": {
+    "pt-BR": "Direção",
+    "en-US": "Direction"
+  },
+  "ui.5f872742d21f": {
+    "pt-BR": "Em alta",
+    "en-US": "On the rise"
+  },
+  "ui.602b6331b5d1": {
+    "pt-BR": "O que você mais assiste",
+    "en-US": "What do you watch most"
+  },
+  "ui.603c0ae0c0ca": {
+    "pt-BR": "Revelar comentário",
+    "en-US": "Reveal comment"
+  },
+  "ui.60cd80af9fc2": {
+    "pt-BR": "Mover {v1} para baixo",
+    "en-US": "Move {v1} down"
+  },
+  "ui.60cf8de1ba68": {
+    "pt-BR": "Amanhã",
+    "en-US": "Tomorrow"
+  },
+  "ui.60fa9fef02b7": {
+    "pt-BR": "Nenhum título encontrado para",
+    "en-US": "No titles found for"
+  },
+  "ui.61cee82d790a": {
+    "pt-BR": "Valor no .env",
+    "en-US": "Value in .env"
+  },
+  "ui.62ada494dc46": {
+    "pt-BR": "Disponível agora",
+    "en-US": "Available now"
+  },
+  "ui.63b596c9cdd3": {
+    "pt-BR": "So invalidar (sem rebuild)",
+    "en-US": "Just invalidate (without rebuild)"
+  },
+  "ui.64084f1d9199": {
+    "pt-BR": "O caminho desta pagina espera /title/movie/{id} ou /title/tv/{id}.",
+    "en-US": "The path of this page expects /title/movie/{id} or /title/tv/{id}."
+  },
+  "ui.6409e1339e58": {
+    "pt-BR": "Ver categorias anteriores",
+    "en-US": "View previous categories"
+  },
+  "ui.64182bea939f": {
+    "pt-BR": "{v1} estrela{v2}",
+    "en-US": "{v1} star{v2}"
+  },
+  "ui.64b2d0d63475": {
+    "pt-BR": "Próximo",
+    "en-US": "Next"
+  },
+  "ui.64c83ca67fb8": {
+    "pt-BR": "Atualizar recomendações",
+    "en-US": "Update recommendations"
+  },
+  "ui.64e75461498f": {
+    "pt-BR": "Buscar na sua biblioteca…",
+    "en-US": "Search your library…"
+  },
+  "ui.650a05ae8938": {
+    "pt-BR": "Reivindicar job",
+    "en-US": "Claim job"
+  },
+  "ui.65ab8aef6faf": {
+    "pt-BR": "Tensão com pulso de maratona",
+    "en-US": "Tension with marathon pulse"
+  },
+  "ui.65b9ea4e95b4": {
+    "pt-BR": "Serviços gratuitos e com acesso aberto.",
+    "en-US": "Free and open access services."
+  },
+  "ui.65ba80381083": {
+    "pt-BR": "Entre para ver suas recomendações",
+    "en-US": "Sign in to see your recommendations"
+  },
+  "ui.662e731d7b06": {
+    "pt-BR": "Hit rate, latências e log de chamadas às APIs externas",
+    "en-US": "Hit rate, latencies and call log to external APIs"
+  },
+  "ui.66b03983c7d7": {
+    "pt-BR": "Não conseguimos abrir este título.",
+    "en-US": "We were unable to open this title."
+  },
+  "ui.66c341b3e963": {
+    "pt-BR": "Ações",
+    "en-US": "Actions"
+  },
+  "ui.66f3415f4168": {
+    "pt-BR": "Carregar",
+    "en-US": "To load"
+  },
+  "ui.673546971a88": {
+    "pt-BR": "Coleção pessoal",
+    "en-US": "Personal collection"
+  },
+  "ui.67635af7aa71": {
+    "pt-BR": "Ficção",
+    "en-US": "Fiction"
+  },
+  "ui.68286a28e284": {
+    "pt-BR": "Selecione uma janela e clique em Carregar.",
+    "en-US": "Select a window and click Load."
+  },
+  "ui.686fabb09449": {
+    "pt-BR": "Salvo em",
+    "en-US": "Saved in"
+  },
+  "ui.687a318c19a2": {
+    "pt-BR": "Confiança",
+    "en-US": "Trust"
+  },
+  "ui.688f512a1784": {
+    "pt-BR": "Rebuild disparado em background — pode levar 30–60s para completar.",
+    "en-US": "Rebuild triggered in the background — may take 30–60s to complete."
+  },
+  "ui.68c939499a70": {
+    "pt-BR": "Universo Compartilhado",
+    "en-US": "Shared Universe"
+  },
+  "ui.68c9f0fc6026": {
+    "pt-BR": "Todos os serviços gratuitos desta categoria já foram adicionados.",
+    "en-US": "All free services in this category have already been added."
+  },
+  "ui.68d1e85196ef": {
+    "pt-BR": "Em destaque",
+    "en-US": "Featured"
+  },
+  "ui.68fafc187fe6": {
+    "pt-BR": "Duração (+ curto)",
+    "en-US": "Duration (+ short)"
+  },
+  "ui.691413bd9d17": {
+    "pt-BR": "Informações da conta",
+    "en-US": "Account information"
+  },
+  "ui.69308de7edf2": {
+    "pt-BR": "[AcompanhandoPage] Falha ao carregar últimos assistidos:",
+    "en-US": "[AccompanyingPage] Failed to load last watched:"
+  },
+  "ui.69831a3d732c": {
+    "pt-BR": "Séries — {v1}",
+    "en-US": "Series — {v1}"
+  },
+  "ui.69ab4a2e78ad": {
+    "pt-BR": "Zona de perigo",
+    "en-US": "Danger zone"
+  },
+  "ui.6a07e2d3a014": {
+    "pt-BR": "Recomendações personalizadas com base na sua biblioteca.",
+    "en-US": "Personalized recommendations based on your library."
+  },
+  "ui.6a33d0fbabbe": {
+    "pt-BR": "Status da série",
+    "en-US": "Series status"
+  },
+  "ui.6a9b6fcb6d11": {
+    "pt-BR": "Salvar override",
+    "en-US": "Save override"
+  },
+  "ui.6b4e36a3c2ab": {
+    "pt-BR": "Nenhum registro.",
+    "en-US": "No registration."
+  },
+  "ui.6bdabd19fee5": {
+    "pt-BR": "Perfil de consumo",
+    "en-US": "Consumption profile"
+  },
+  "ui.6bf740d3af70": {
+    "pt-BR": "Continue de onde parou",
+    "en-US": "Continue where you left off"
+  },
+  "ui.6c6a2e4f29b0": {
+    "pt-BR": "Sem títulos disponíveis.",
+    "en-US": "No titles available."
+  },
+  "ui.6c7f6bb7b10f": {
+    "pt-BR": "Aguardando…",
+    "en-US": "Waiting…"
+  },
+  "ui.6c81e0473c4b": {
+    "pt-BR": "Abrir em {v1}",
+    "en-US": "Open in {v1}"
+  },
+  "ui.6cfce90efbec": {
+    "pt-BR": "Season finale",
+    "en-US": "Season finale"
+  },
+  "ui.6d8348f14383": {
+    "pt-BR": "Nenhuma chamada ainda.",
+    "en-US": "No calls yet."
+  },
+  "ui.6d8d80b0960e": {
+    "pt-BR": "Sinopse",
+    "en-US": "Synopsis"
+  },
+  "ui.6d9b8dedfdc6": {
+    "pt-BR": "Nenhum resultado rápido.",
+    "en-US": "No quick results."
+  },
+  "ui.6db878b37972": {
+    "pt-BR": "Rolar elenco para a direita",
+    "en-US": "Scroll cast to the right"
+  },
+  "ui.6dc39a06184d": {
+    "pt-BR": "Remover avaliação",
+    "en-US": "Remove review"
+  },
+  "ui.6dd8ad93fb3b": {
+    "pt-BR": "✓ Assistido",
+    "en-US": "✓ Assisted"
+  },
+  "ui.6f1b2f578c71": {
+    "pt-BR": "Comece uma coleção",
+    "en-US": "Start a collection"
+  },
+  "ui.6f9327cf090e": {
+    "pt-BR": "Nenhum pôster registrado em TitleAsset.",
+    "en-US": "No posters registered in TitleAsset."
+  },
+  "ui.6fa5c47902fa": {
+    "pt-BR": "As séries mais assistidas agora.",
+    "en-US": "The most watched series right now."
+  },
+  "ui.70004a57858b": {
+    "pt-BR": "Obras marcadas como especiais no seu acervo",
+    "en-US": "Works marked as special in your collection"
+  },
+  "ui.702e559c8d95": {
+    "pt-BR": "Começar série",
+    "en-US": "Start series"
+  },
+  "ui.7032cff4ee8c": {
+    "pt-BR": "Temporada 1",
+    "en-US": "Season 1"
+  },
+  "ui.703602a24dc4": {
+    "pt-BR": "Preferências",
+    "en-US": "Preferences"
+  },
+  "ui.7044e5ebcd19": {
+    "pt-BR": "Adicione títulos à sua biblioteca para ver seus gêneros favoritos.",
+    "en-US": "Add titles to your library to view your favorite genres."
+  },
+  "ui.70a8e722f48f": {
+    "pt-BR": "Jobs locais de renovação gradual, com trava e limites configuráveis.",
+    "en-US": "Local jobs with gradual renewal, with configurable locks and limits."
+  },
+  "ui.716b3c08a253": {
+    "pt-BR": "Sua coleção começa no próximo título.",
+    "en-US": "Your collection starts with the next title."
+  },
+  "ui.7253e18d098f": {
+    "pt-BR": "Necessário para ações protegidas",
+    "en-US": "Required for protected actions"
+  },
+  "ui.726dff4f68b2": {
+    "pt-BR": "Sessão atual",
+    "en-US": "Current session"
+  },
+  "ui.728cf6eaa47b": {
+    "pt-BR": "Somente este episódio",
+    "en-US": "This episode only"
+  },
+  "ui.72bcc6c53028": {
+    "pt-BR": "A rota permanece reservada para a futura camada de discover limpa.",
+    "en-US": "The route remains reserved for the future clean discover layer."
+  },
+  "ui.72eae8bad5da": {
+    "pt-BR": "Gêneros",
+    "en-US": "Genres"
+  },
+  "ui.72f7bc2c1781": {
+    "pt-BR": "Site oficial →",
+    "en-US": "Official website →"
+  },
+  "ui.72f95f3882fc": {
+    "pt-BR": "Escolha até qual episódio você assistiu.",
+    "en-US": "Choose which episode you watched."
+  },
+  "ui.738130adcbc8": {
+    "pt-BR": "Últimas falhas registradas.",
+    "en-US": "Latest recorded faults."
+  },
+  "ui.73b965ee4b0d": {
+    "pt-BR": "Tente outro termo, tipo ou vibe.",
+    "en-US": "Try another term, type or vibe."
+  },
+  "ui.7401f7aca7e3": {
+    "pt-BR": "Fontes de dados",
+    "en-US": "Data Sources"
+  },
+  "ui.742a21da47b6": {
+    "pt-BR": "Pronto para assistir",
+    "en-US": "Ready to watch"
+  },
+  "ui.7458eb22633c": {
+    "pt-BR": "&ldquo;",
+    "en-US": "&ldquo;"
+  },
+  "ui.74f19285073a": {
+    "pt-BR": "Série",
+    "en-US": "Series"
+  },
+  "ui.74f2a2d5425d": {
+    "pt-BR": "Nada ficou pelo caminho.",
+    "en-US": "Nothing got in the way."
+  },
+  "ui.7550542e4e2b": {
+    "pt-BR": "Digite o ADMIN_SECRET e clique em Carregar.",
+    "en-US": "Enter ADMIN_SECRET and click Load."
+  },
+  "ui.7573ba85155c": {
+    "pt-BR": "Entrar",
+    "en-US": "To enter"
+  },
+  "ui.75a11d86534d": {
+    "pt-BR": "Adicionados Recentemente",
+    "en-US": "Recently Added"
+  },
+  "ui.75a5413ad524": {
+    "pt-BR": "Esta area esta pronta para receber uma nova integracao isolada de series.",
+    "en-US": "This area is ready to receive a new isolated series integration."
+  },
+  "ui.75bd823d69d5": {
+    "pt-BR": "Encerramento da temporada atual.",
+    "en-US": "End of current season."
+  },
+  "ui.75e4bc6b0ceb": {
+    "pt-BR": "Próximo episódio",
+    "en-US": "Next episode"
+  },
+  "ui.76702e529b43": {
+    "pt-BR": "Separe maratonas, favoritos temáticos ou qualquer coleção pessoal.",
+    "en-US": "Set aside marathons, themed favorites, or any personal collection."
+  },
+  "ui.76f5fe6d7dae": {
+    "pt-BR": "Slides do Hero",
+    "en-US": "Hero Slides"
+  },
+  "ui.7764591f8a88": {
+    "pt-BR": "Adicionar títulos",
+    "en-US": "Add titles"
+  },
+  "ui.7818290148b4": {
+    "pt-BR": "Chamadas mais recentes em ordem decrescente.",
+    "en-US": "Most recent calls in descending order."
+  },
+  "ui.78210d70c9a3": {
+    "pt-BR": "Marcar anteriores também",
+    "en-US": "Mark previous ones too"
+  },
+  "ui.782ccbaa74fc": {
+    "pt-BR": "{v1}d atrás",
+    "en-US": "{v1}d ago"
+  },
+  "ui.789e3a38d00d": {
+    "pt-BR": "Apaga toda a sua biblioteca, histórico de episódios, avaliações e dados de comportamento. Suas preferências de streaming são mantidas. Essa ação é irreversível.",
+    "en-US": "Erases your entire library, episode history, ratings, and behavior data. Your streaming preferences are maintained. This action is irreversible."
+  },
+  "ui.7950a332d64b": {
+    "pt-BR": "Carregando fila...",
+    "en-US": "Loading queue..."
+  },
+  "ui.797f0464d53e": {
+    "pt-BR": "Títulos, pessoas, estúdios e tendências da semana.",
+    "en-US": "Titles, people, studios and trends of the week."
+  },
+  "ui.798c30eb2104": {
+    "pt-BR": "Duração (+ longo)",
+    "en-US": "Duration (+ long)"
+  },
+  "ui.79c7443231cc": {
+    "pt-BR": "Sair da conta",
+    "en-US": "Log out of account"
+  },
+  "ui.7a08afed9250": {
+    "pt-BR": "Limpar busca",
+    "en-US": "Clear search"
+  },
+  "ui.7a13022bd85a": {
+    "pt-BR": "Episódio {v1}",
+    "en-US": "Episode {v1}"
+  },
+  "ui.7a394d39e682": {
+    "pt-BR": "Ver tudo",
+    "en-US": "See all"
+  },
+  "ui.7a4304790175": {
+    "pt-BR": "Minha watchlist",
+    "en-US": "My watchlist"
+  },
+  "ui.7aca214a611c": {
+    "pt-BR": "Imperdível",
+    "en-US": "Unmissable"
+  },
+  "ui.7acf2976fb40": {
+    "pt-BR": "Reativação via painel",
+    "en-US": "Reactivation via panel"
+  },
+  "ui.7aea725c0eb9": {
+    "pt-BR": "Não tenho interesse",
+    "en-US": "I'm not interested"
+  },
+  "ui.7b4d1bfe485b": {
+    "pt-BR": "Serviços disponíveis",
+    "en-US": "Available services"
+  },
+  "ui.7b7150b2c8ed": {
+    "pt-BR": "Nota referência do site, calculada com",
+    "en-US": "Website reference score, calculated with"
+  },
+  "ui.7bb65bb52948": {
+    "pt-BR": "Descrição opcional",
+    "en-US": "Optional description"
+  },
+  "ui.7be3c0585389": {
+    "pt-BR": "Salve filmes e séries pela busca ou pelas páginas de título para começar a construir sua biblioteca POPLOG.",
+    "en-US": "Save movies and series via search or title pages to start building your POPLOG library."
+  },
+  "ui.7c40ae2cc8d2": {
+    "pt-BR": "Totais — ultimos {v1} dias",
+    "en-US": "Totals — last {v1} days"
+  },
+  "ui.7cde75a9ff0f": {
+    "pt-BR": "Sortear outros",
+    "en-US": "Draw others"
+  },
+  "ui.7d3cafa368ed": {
+    "pt-BR": "Dê um nome para a lista.",
+    "en-US": "Give the list a name."
+  },
+  "ui.7d864a769abb": {
+    "pt-BR": "De onde partem as requisições às APIs externas.",
+    "en-US": "Where requests to external APIs come from."
+  },
+  "ui.7dd6b1850fdb": {
+    "pt-BR": "Séries em alta",
+    "en-US": "Trending series"
+  },
+  "ui.7e9031b0c7e5": {
+    "pt-BR": "Seu estado atual na Biblioteca será preservado.",
+    "en-US": "Your current status in the Library will be preserved."
+  },
+  "ui.7eb6b29e49c9": {
+    "pt-BR": "Os últimos títulos registrados no acervo",
+    "en-US": "The latest titles recorded in the collection"
+  },
+  "ui.7ed81fa447b9": {
+    "pt-BR": "Atualizar",
+    "en-US": "To update"
+  },
+  "ui.7ee1d4193e34": {
+    "pt-BR": "Somente você",
+    "en-US": "Only you"
+  },
+  "ui.7f0beca3e6b9": {
+    "pt-BR": "{v1} episódios",
+    "en-US": "{v1} episodes"
+  },
+  "ui.7f6320ba178c": {
+    "pt-BR": "comentários",
+    "en-US": "comments"
+  },
+  "ui.7f9df4fc72df": {
+    "pt-BR": "Limpar concluídos",
+    "en-US": "Clear completed"
+  },
+  "ui.7fc137bad37f": {
+    "pt-BR": "Comece seu POPLOG",
+    "en-US": "Start your POPLOG"
+  },
+  "ui.8001800f20fc": {
+    "pt-BR": "comentário",
+    "en-US": "comment"
+  },
+  "ui.804c17356c6d": {
+    "pt-BR": "Direção de fotografia",
+    "en-US": "Photography direction"
+  },
+  "ui.808684900947": {
+    "pt-BR": "Não consegui carregar esta temporada:",
+    "en-US": "I couldn't load this season:"
+  },
+  "ui.80fa8ab35d89": {
+    "pt-BR": "Todos os anos",
+    "en-US": "Every year"
+  },
+  "ui.81182f76c1f4": {
+    "pt-BR": "Começa bem",
+    "en-US": "Starts well"
+  },
+  "ui.811ec711ecdd": {
+    "pt-BR": "Alteração de role via painel",
+    "en-US": "Role change via panel"
+  },
+  "ui.8121c6be3ac1": {
+    "pt-BR": "Nenhum título da sua biblioteca está no radar agora.",
+    "en-US": "No titles in your library are on your radar right now."
+  },
+  "ui.81a69330a639": {
+    "pt-BR": "Últimas falhas registradas pelo engine logger.",
+    "en-US": "Latest crashes recorded by the engine logger."
+  },
+  "ui.81df2f31ad08": {
+    "pt-BR": "Nenhum streaming adicionado ainda.",
+    "en-US": "No streaming added yet."
+  },
+  "ui.81f21ae2a76d": {
+    "pt-BR": "Descubra, organize e acompanhe filmes e séries em uma experiência pessoal.",
+    "en-US": "Discover, organize and follow films and series in a personal experience."
+  },
+  "ui.829d6c18f768": {
+    "pt-BR": "Novo episódio",
+    "en-US": "New episode"
+  },
+  "ui.82a4b8939fb4": {
+    "pt-BR": "Adicione ao lado para personalizar sua experiência.",
+    "en-US": "Add to the side to personalize your experience."
+  },
+  "ui.82c2c48b9f6e": {
+    "pt-BR": "créditos não exibidos",
+    "en-US": "credits not shown"
+  },
+  "ui.82dea273127d": {
+    "pt-BR": "Seu acervo pessoal de filmes e séries — organizado, registrado e curado.",
+    "en-US": "Your personal collection of films and series — organized, recorded and curated."
+  },
+  "ui.8320aee0a8bc": {
+    "pt-BR": "Radar ativo",
+    "en-US": "Active radar"
+  },
+  "ui.833b7d9fdcc9": {
+    "pt-BR": "Erro ao carregar comentários",
+    "en-US": "Error loading comments"
+  },
+  "ui.835ffc42ca4e": {
+    "pt-BR": "Mostrar mesmo assim",
+    "en-US": "Show anyway"
+  },
+  "ui.836843739108": {
+    "pt-BR": "Detalhamento diario",
+    "en-US": "Daily breakdown"
+  },
+  "ui.83760022f740": {
+    "pt-BR": "Em alta hoje",
+    "en-US": "Trending today"
+  },
+  "ui.839296b6acf8": {
+    "pt-BR": "Pensado para não saturar banco local nem o futuro ambiente Hostinger.",
+    "en-US": "Designed to not saturate the local bank or the future Hostinger environment."
+  },
+  "ui.84322429ced2": {
+    "pt-BR": "Resultado ampliado com títulos populares do gênero — índice retornou poucos itens para &quot;",
+    "en-US": "Result expanded with popular titles of the genre — index returned few items for &quot;"
+  },
+  "ui.84870489f89e": {
+    "pt-BR": "Lista compacta",
+    "en-US": "Compact list"
+  },
+  "ui.84928d980af0": {
+    "pt-BR": "Não foi possível remover o título.",
+    "en-US": "Unable to remove title."
+  },
+  "ui.84b1ee8a1f1a": {
+    "pt-BR": "O POPLOG combina fontes externas para metadados, disponibilidade, avaliações e sinais de comunidade. A interface mostra créditos contextuais apenas onde eles ajudam a explicar os dados.",
+    "en-US": "POPLOG combines external sources for metadata, availability, ratings, and community signals. The interface shows contextual credits only where they help explain the data."
+  },
+  "ui.84edb60ff412": {
+    "pt-BR": "Episódio recente",
+    "en-US": "Recent episode"
+  },
+  "ui.8525894f4831": {
+    "pt-BR": "Adicione títulos à sua watchlist para ver sugestões personalizadas.",
+    "en-US": "Add titles to your watchlist to see personalized suggestions."
+  },
+  "ui.86ba1a7ce714": {
+    "pt-BR": "Disponível",
+    "en-US": "Available"
+  },
+  "ui.86cba3fafa01": {
+    "pt-BR": "Consultado as",
+    "en-US": "consulted the"
+  },
+  "ui.86ea2f9b5ef9": {
+    "pt-BR": "Não foi possível carregar os títulos em andamento agora.",
+    "en-US": "Unable to load titles in progress right now."
+  },
+  "ui.86ffbbf551c6": {
+    "pt-BR": "Simula a retirada segura de até 1 job.",
+    "en-US": "Simulates the safe removal of up to 1 job."
+  },
+  "ui.8704663e8da4": {
+    "pt-BR": "Não foi possível carregar suas listas.",
+    "en-US": "Your lists could not be loaded."
+  },
+  "ui.87ef46e99fb3": {
+    "pt-BR": "Salvando…",
+    "en-US": "Saving…"
+  },
+  "ui.88415da1e766": {
+    "pt-BR": "com referências externas",
+    "en-US": "with external references"
+  },
+  "ui.888ed0b0b9e0": {
+    "pt-BR": "toda a sua biblioteca, histórico, avaliações, episódios assistidos e sinais de recomendação. Essa ação não pode ser desfeita.",
+    "en-US": "your entire library, history, ratings, episodes watched, and recommendation signals. This action cannot be undone."
+  },
+  "ui.88e79d9b9adf": {
+    "pt-BR": "Nenhuma lista ainda",
+    "en-US": "No list yet"
+  },
+  "ui.88ef9f5e136c": {
+    "pt-BR": "Opiniões Populares",
+    "en-US": "Popular Opinions"
+  },
+  "ui.890733e4087e": {
+    "pt-BR": "horas est.",
+    "en-US": "est."
+  },
+  "ui.895c44e1966d": {
+    "pt-BR": "Baseado na sua watchlist e histórico",
+    "en-US": "Based on your watchlist and history"
+  },
+  "ui.89f46d45a0ab": {
+    "pt-BR": "Nenhum conteúdo personalizado disponível.",
+    "en-US": "No custom content available."
+  },
+  "ui.8a1be36de69d": {
+    "pt-BR": "título",
+    "en-US": "title"
+  },
+  "ui.8a2041cfdbee": {
+    "pt-BR": "Este comentário pode revelar detalhes do episódio.",
+    "en-US": "This comment may reveal details of the episode."
+  },
+  "ui.8a40b64dac52": {
+    "pt-BR": "Selecionar um pôster salva override por idioma/região.",
+    "en-US": "Selecting a poster saves override per language/region."
+  },
+  "ui.8a6ec37c6474": {
+    "pt-BR": "Em Breve",
+    "en-US": "Shortly"
+  },
+  "ui.8b074ab04271": {
+    "pt-BR": "técnicos",
+    "en-US": "technicians"
+  },
+  "ui.8c972667fbbc": {
+    "pt-BR": "Fila persistente",
+    "en-US": "Persistent queue"
+  },
+  "ui.8d2f088cd382": {
+    "pt-BR": "Séries populares",
+    "en-US": "Popular series"
+  },
+  "ui.8d40668af1ca": {
+    "pt-BR": "Com anúncios",
+    "en-US": "With ads"
+  },
+  "ui.8d48f81748c7": {
+    "pt-BR": "Filmes em alta e populares",
+    "en-US": "Trending and popular movies"
+  },
+  "ui.8d4d416a772d": {
+    "pt-BR": "Gêneros favoritos",
+    "en-US": "Favorite genres"
+  },
+  "ui.8d6bcca28bf3": {
+    "pt-BR": "Adicione séries e filmes",
+    "en-US": "Add series and movies"
+  },
+  "ui.8df23f2ad4e3": {
+    "pt-BR": "Ratings não sincronizados.",
+    "en-US": "Ratings not synchronized."
+  },
+  "ui.8e00df49be24": {
+    "pt-BR": "Mover para Abandonado preserva os episodios assistidos.",
+    "en-US": "Moving to Abandoned preserves watched episodes."
+  },
+  "ui.8e06a86685da": {
+    "pt-BR": "Alguns títulos não foram adicionados: {v1}.",
+    "en-US": "Some titles were not added: {v1}."
+  },
+  "ui.8e0987373047": {
+    "pt-BR": "Você chegou ao fim das recomendações desta sessão.",
+    "en-US": "You have reached the end of this session's recommendations."
+  },
+  "ui.8e390f29d7f7": {
+    "pt-BR": "60–120 min",
+    "en-US": "60–120 min"
+  },
+  "ui.8e522e2be8fd": {
+    "pt-BR": "Login &amp; segurança",
+    "en-US": "Login &amp; security"
+  },
+  "ui.8e93cd453e04": {
+    "pt-BR": "Plano com anúncios",
+    "en-US": "Plan with ads"
+  },
+  "ui.8ebb62a1676c": {
+    "pt-BR": "Exibição hoje",
+    "en-US": "Showing today"
+  },
+  "ui.8ec4505e01de": {
+    "pt-BR": "Estreia de série",
+    "en-US": "Series premiere"
+  },
+  "ui.8f1a85bb1fef": {
+    "pt-BR": "Voltar pra busca",
+    "en-US": "Back to search"
+  },
+  "ui.8f453e63fe4d": {
+    "pt-BR": "Mais opções",
+    "en-US": "More options"
+  },
+  "ui.8fcdcd62c4bc": {
+    "pt-BR": "Títulos abandonados ficam separados aqui, fora da continuidade principal, mas ainda dentro da sua história.",
+    "en-US": "Abandoned titles are separated here, outside of the main continuity, but still within their story."
+  },
+  "ui.90390f1eae3a": {
+    "pt-BR": "pra você.",
+    "en-US": "for you."
+  },
+  "ui.903c2c59dd61": {
+    "pt-BR": "começa aqui.",
+    "en-US": "starts here."
+  },
+  "ui.9068ed739054": {
+    "pt-BR": "Quando você marcar filmes e séries como vistos, sua memória audiovisual começa a ganhar forma.",
+    "en-US": "When you mark films and series as seen, your audiovisual memory begins to take shape."
+  },
+  "ui.911f6ea69bdf": {
+    "pt-BR": "A ordem é salva automaticamente. Os botões também funcionam pelo teclado.",
+    "en-US": "The order is saved automatically. The buttons also work via the keyboard."
+  },
+  "ui.92532bb59911": {
+    "pt-BR": "JSON inválido no valor do override.",
+    "en-US": "Invalid JSON in the override value."
+  },
+  "ui.92fabe45d0c3": {
+    "pt-BR": "Duração",
+    "en-US": "Duration"
+  },
+  "ui.934247c9b461": {
+    "pt-BR": "Coleções pessoais, sem alterar o estado da Biblioteca",
+    "en-US": "Personal collections, without changing the Library status"
+  },
+  "ui.93851da121a8": {
+    "pt-BR": "Remover da watchlist",
+    "en-US": "Remove from watchlist"
+  },
+  "ui.93a31e6fb94b": {
+    "pt-BR": "Recarregar amostra",
+    "en-US": "Reload sample"
+  },
+  "ui.93bf2d32ec33": {
+    "pt-BR": "Salvar",
+    "en-US": "Save"
+  },
+  "ui.941160072235": {
+    "pt-BR": "Guardados para outro clima",
+    "en-US": "Saved for another climate"
+  },
+  "ui.94f5aec5c813": {
+    "pt-BR": "Nenhum título marcado.",
+    "en-US": "No titles marked."
+  },
+  "ui.959b7e4aefb2": {
+    "pt-BR": "Consultando cache...",
+    "en-US": "Querying cache..."
+  },
+  "ui.95b275130868": {
+    "pt-BR": "Progresso geral",
+    "en-US": "Overall progress"
+  },
+  "ui.95ca2703390d": {
+    "pt-BR": "{v1} opções",
+    "en-US": "{v1} options"
+  },
+  "ui.9693322d6b79": {
+    "pt-BR": "Temporada invalida",
+    "en-US": "Invalid season"
+  },
+  "ui.96ce1b809d20": {
+    "pt-BR": "Recomendações",
+    "en-US": "Recommendations"
+  },
+  "ui.97155974c4a0": {
+    "pt-BR": "Adicione séries à sua watchlist para vê-las aqui quando tiverem novidades.",
+    "en-US": "Add series to your watchlist to see them here when they are new."
+  },
+  "ui.97aac5ede103": {
+    "pt-BR": "Está no seu streaming favorito: {v1}",
+    "en-US": "It's on your favorite stream: {v1}"
+  },
+  "ui.97cd773c5e6a": {
+    "pt-BR": "Todos os canais desta categoria já foram adicionados.",
+    "en-US": "All channels in this category have already been added."
+  },
+  "ui.97f531783cfd": {
+    "pt-BR": "Jobs atrasados",
+    "en-US": "Late jobs"
+  },
+  "ui.980a8de676ed": {
+    "pt-BR": "Selecione os streamings, canais ou lojas que você assina ou acessa.",
+    "en-US": "Select the streams, channels or stores you subscribe to or access."
+  },
+  "ui.98246c2b87e8": {
+    "pt-BR": "Ex.: Maratona de domingo",
+    "en-US": "Example: Sunday Marathon"
+  },
+  "ui.983aae8da091": {
+    "pt-BR": "Estreou há {v1} dias",
+    "en-US": "Premiered {v1} days ago"
+  },
+  "ui.98a5efa60beb": {
+    "pt-BR": "Título",
+    "en-US": "Title"
+  },
+  "ui.98a879200d6a": {
+    "pt-BR": "Nenhum cache encontrado.",
+    "en-US": "No cache found."
+  },
+  "ui.9901c75a55bc": {
+    "pt-BR": "Quem está por trás",
+    "en-US": "Who is behind"
+  },
+  "ui.99775c46fa0a": {
+    "pt-BR": "Selecao POPLOG",
+    "en-US": "POPLOG Selection"
+  },
+  "ui.9a33cb3df328": {
+    "pt-BR": "Ocorreu um erro inesperado. Tente novamente ou volte para a busca.",
+    "en-US": "An unexpected error has occurred. Try again or return to the search."
+  },
+  "ui.9abdd2cd5386": {
+    "pt-BR": "Carregando dados do engine...",
+    "en-US": "Loading engine data..."
+  },
+  "ui.9ad3a3e65198": {
+    "pt-BR": "Em alta na semana",
+    "en-US": "High this week"
+  },
+  "ui.9b02721b1343": {
+    "pt-BR": "Títulos que ainda vão chegar na sua coleção",
+    "en-US": "Titles that will still arrive in your collection"
+  },
+  "ui.9b44569bd1b9": {
+    "pt-BR": "Ver todos os resultados em Busca",
+    "en-US": "See all results in Search"
+  },
+  "ui.9b59d3e3e7d5": {
+    "pt-BR": "Explorar em alta",
+    "en-US": "Explore on the rise"
+  },
+  "ui.9b63d74160ce": {
+    "pt-BR": "acesse sua biblioteca",
+    "en-US": "access your library"
+  },
+  "ui.9b97e8e89d6a": {
+    "pt-BR": "Surpresa total",
+    "en-US": "Total surprise"
+  },
+  "ui.9bbab516ebfc": {
+    "pt-BR": "Séries e títulos marcados como assistindo ficam aqui e também alimentam a lógica do Acompanhando.",
+    "en-US": "Series and titles marked as watching are here and also feed the Follow-up logic."
+  },
+  "ui.9c37bc8a2216": {
+    "pt-BR": "{v1} {v2}",
+    "en-US": "{v1} {v2}"
+  },
+  "ui.9c44d09e40c6": {
+    "pt-BR": "Sem foto",
+    "en-US": "No photo"
+  },
+  "ui.9cb686d9031b": {
+    "pt-BR": "Log de chamadas ({v1})",
+    "en-US": "Call log ({v1})"
+  },
+  "ui.9da31443718f": {
+    "pt-BR": "Fechar menu",
+    "en-US": "Close menu"
+  },
+  "ui.9db99fc86593": {
+    "pt-BR": "Sortear outros títulos",
+    "en-US": "Draw other titles"
+  },
+  "ui.9e63d4cc70a1": {
+    "pt-BR": "sem imagem",
+    "en-US": "no image"
+  },
+  "ui.9e7e80142502": {
+    "pt-BR": "Nenhum título marcado como favorito.",
+    "en-US": "No titles marked as favorites."
+  },
+  "ui.9f8a9882c1e4": {
+    "pt-BR": "Faz melhor",
+    "en-US": "Do better"
+  },
+  "ui.a005c7da6a45": {
+    "pt-BR": "Colecoes e relacoes serao reconstruidas em uma etapa propria.",
+    "en-US": "Collections and relationships will be rebuilt in their own step."
+  },
+  "ui.a01e83c7c231": {
+    "pt-BR": "Próximos 30 dias",
+    "en-US": "Next 30 days"
+  },
+  "ui.a02fc4e19a9b": {
+    "pt-BR": "Até 60 min",
+    "en-US": "Up to 60 minutes"
+  },
+  "ui.a0a285dc8719": {
+    "pt-BR": "Buscar &amp; Explorar",
+    "en-US": "Search &amp; Explore"
+  },
+  "ui.a0b010e18386": {
+    "pt-BR": "Não foi possível adicionar o título.",
+    "en-US": "Unable to add title."
+  },
+  "ui.a0b7d5ae55e3": {
+    "pt-BR": "Carregar usuários",
+    "en-US": "Load users"
+  },
+  "ui.a0feceb7ec70": {
+    "pt-BR": "Série no ar",
+    "en-US": "Series on air"
+  },
+  "ui.a10f364f057f": {
+    "pt-BR": "Batimento do cron e sinais de pressão da fila.",
+    "en-US": "Cron beat and queue pressure signals."
+  },
+  "ui.a150260d1b89": {
+    "pt-BR": "a série.",
+    "en-US": "the series."
+  },
+  "ui.a292bb04a8ae": {
+    "pt-BR": "Busca indisponível.",
+    "en-US": "Search unavailable."
+  },
+  "ui.a2ff6876f791": {
+    "pt-BR": "Buscar filmes, séries, pessoas e conteúdos",
+    "en-US": "Search for films, series, people and content"
+  },
+  "ui.a3dd68e1f3ff": {
+    "pt-BR": "{v1} dias atrás",
+    "en-US": "{v1} days ago"
+  },
+  "ui.a3ecf1f4868b": {
+    "pt-BR": "Na fila",
+    "en-US": "In line"
+  },
+  "ui.a43ecccd27a7": {
+    "pt-BR": "Tendências",
+    "en-US": "Tendencies"
+  },
+  "ui.a450ad6293b0": {
+    "pt-BR": "Anúncios",
+    "en-US": "Ads"
+  },
+  "ui.a501be444841": {
+    "pt-BR": "Duração prevista",
+    "en-US": "Expected duration"
+  },
+  "ui.a52a2029e55b": {
+    "pt-BR": "Ver mais categorias",
+    "en-US": "See more categories"
+  },
+  "ui.a5462dcc478d": {
+    "pt-BR": "O que todo mundo está assistindo.",
+    "en-US": "What everyone is watching."
+  },
+  "ui.a5a9dc8c5479": {
+    "pt-BR": "Qualquer duração",
+    "en-US": "Any duration"
+  },
+  "ui.a5aac651ecf6": {
+    "pt-BR": "Voce tem progresso nesta serie",
+    "en-US": "You have progress in this series"
+  },
+  "ui.a5c92bb757e2": {
+    "pt-BR": "Série assistida",
+    "en-US": "Series watched"
+  },
+  "ui.a5dd8329e419": {
+    "pt-BR": "S{v1} · {v2} episódios",
+    "en-US": "S{v1} · {v2} episodes"
+  },
+  "ui.a5e7719ccdc8": {
+    "pt-BR": "O que você mais gosta",
+    "en-US": "What do you like most"
+  },
+  "ui.a610f539c6ec": {
+    "pt-BR": "Selecionadas a partir do mesmo universo cinematográfico, ritmo e atmosfera.",
+    "en-US": "Selected from the same cinematic universe, rhythm and atmosphere."
+  },
+  "ui.a62405e2cefb": {
+    "pt-BR": "Buscar",
+    "en-US": "Search"
+  },
+  "ui.a63b48edd000": {
+    "pt-BR": "Entre na sua conta para ver sua biblioteca, preferencias e historico na Poplog.",
+    "en-US": "Log in to your account to see your library, preferences and history on Poplog."
+  },
+  "ui.a676ad477a61": {
+    "pt-BR": "Override granular",
+    "en-US": "Granular override"
+  },
+  "ui.a688e65bc4c7": {
+    "pt-BR": "{v1} {v2} no seu acervo — watchlist, favoritos, obras em andamento, pausas e memória da sua jornada.",
+    "en-US": "{v1} {v2} in your collection — watchlist, favorites, works in progress, breaks and memories of your journey."
+  },
+  "ui.a6d350f4d4aa": {
+    "pt-BR": "Estado atual",
+    "en-US": "Current status"
+  },
+  "ui.a711ee61cb33": {
+    "pt-BR": "Estreia hoje",
+    "en-US": "Premieres today"
+  },
+  "ui.a711f64932dc": {
+    "pt-BR": "Títulos mais rápidos do seu acervo",
+    "en-US": "Fastest titles in your collection"
+  },
+  "ui.a771a4d4507f": {
+    "pt-BR": "Ainda não há sinopse oficial para este episódio.",
+    "en-US": "There is no official synopsis for this episode yet."
+  },
+  "ui.a817be3030ff": {
+    "pt-BR": "Ver todos →",
+    "en-US": "See all →"
+  },
+  "ui.a82ce52d3e5c": {
+    "pt-BR": "Da sua watchlist",
+    "en-US": "From your watchlist"
+  },
+  "ui.a85d7caa4bc9": {
+    "pt-BR": "Resetar biblioteca",
+    "en-US": "Reset library"
+  },
+  "ui.a8a4fd7ec4be": {
+    "pt-BR": "Usuário atualizado e ação registrada em auditoria.",
+    "en-US": "User updated and action recorded in audit."
+  },
+  "ui.a8b1ccadf64b": {
+    "pt-BR": "Insônia é melhor",
+    "en-US": "Insomnia is better"
+  },
+  "ui.a92056bdb7c3": {
+    "pt-BR": "Engine Monitor · Poplog Admin",
+    "en-US": "Engine Monitor · Poplog Admin"
+  },
+  "ui.a921b4aa277c": {
+    "pt-BR": "Estúdios e produtoras relacionados à busca.",
+    "en-US": "Search-related studios and production companies."
+  },
+  "ui.aa3c68762846": {
+    "pt-BR": "Assistir trailer: {v1}",
+    "en-US": "Watch trailer: {v1}"
+  },
+  "ui.aa751c0cf93b": {
+    "pt-BR": "Erros recentes ({v1})",
+    "en-US": "Recent errors ({v1})"
+  },
+  "ui.aad82db2cb77": {
+    "pt-BR": "Radar",
+    "en-US": "Radar"
+  },
+  "ui.aaefc57004b9": {
+    "pt-BR": "Compactar logs antigos",
+    "en-US": "Compress old logs"
+  },
+  "ui.ab53b20a28e7": {
+    "pt-BR": "Assistido",
+    "en-US": "Watched"
+  },
+  "ui.ab8e09d69f45": {
+    "pt-BR": "[AcompanhandoPage] Falha ao carregar novos episódios:",
+    "en-US": "[TrackingPage] Failed to load new episodes:"
+  },
+  "ui.abc641851e91": {
+    "pt-BR": "Liga/desliga o enriquecimento do Radar com trending/day, trending/week e airing_today da API TMDB.",
+    "en-US": "Turns on/off Radar enrichment with trending/day, trending/week and airing_today from the TMDB API."
+  },
+  "ui.aca2abaec964": {
+    "pt-BR": "Entre para salvar este título",
+    "en-US": "Sign in to save this title"
+  },
+  "ui.acbb2a66e7c7": {
+    "pt-BR": "Sua watchlist ainda não tem títulos sorteáveis neste corte.",
+    "en-US": "Your watchlist does not yet have any titles eligible for this cut."
+  },
+  "ui.acbfb9e1bf50": {
+    "pt-BR": "Slide {v1}",
+    "en-US": "Slide {v1}"
+  },
+  "ui.ace6e4682f54": {
+    "pt-BR": "Atores, diretores e criadores relacionados à busca.",
+    "en-US": "Actors, directors and creators related to the search."
+  },
+  "ui.ad0ef0fce87e": {
+    "pt-BR": "Final de temporada",
+    "en-US": "End of season"
+  },
+  "ui.add25f610f65": {
+    "pt-BR": "Rolar elenco para a esquerda",
+    "en-US": "Scroll cast to the left"
+  },
+  "ui.aecba4a21d24": {
+    "pt-BR": "Providers {v1}",
+    "en-US": "Providers {v1}"
+  },
+  "ui.aeda4552e020": {
+    "pt-BR": "falhos em",
+    "en-US": "failed in"
+  },
+  "ui.aeec9eca91b8": {
+    "pt-BR": "Recarregar status",
+    "en-US": "Reload status"
+  },
+  "ui.aef1b13b3134": {
+    "pt-BR": "Comédia",
+    "en-US": "Comedy"
+  },
+  "ui.af1cde8c04b9": {
+    "pt-BR": "Em destaque no seu acervo",
+    "en-US": "Featured in your collection"
+  },
+  "ui.afb5a240ac91": {
+    "pt-BR": "SEM STILL",
+    "en-US": "SEM STILL"
+  },
+  "ui.b015ccc78db6": {
+    "pt-BR": "Permissões administrativas padrão via painel",
+    "en-US": "Default administrative permissions via dashboard"
+  },
+  "ui.b02746e0ca16": {
+    "pt-BR": "Os dados de rede são sincronizados progressivamente ao visitar páginas de título.",
+    "en-US": "Network data is synchronized progressively when visiting title pages."
+  },
+  "ui.b0716ac1f255": {
+    "pt-BR": "Marca tudo que já foi lançado.",
+    "en-US": "Mark everything that has already been released."
+  },
+  "ui.b11349f63682": {
+    "pt-BR": "Temporada",
+    "en-US": "Season"
+  },
+  "ui.b138dd12d03a": {
+    "pt-BR": "Radar Cache · Poplog Admin",
+    "en-US": "Radar Cache · Poplog Admin"
+  },
+  "ui.b1e36b618993": {
+    "pt-BR": "A POPLOG 3.0 esta sendo reconstruida em fases. Esta rota mantem o lugar guardado enquanto a sua experiencia definitiva chega.",
+    "en-US": "POPLOG 3.0 is being rebuilt in phases. This route keeps your seat saved while your ultimate experience arrives."
+  },
+  "ui.b1f4804e0ef9": {
+    "pt-BR": "Sua nota para este episódio",
+    "en-US": "Your rating for this episode"
+  },
+  "ui.b23028cc53da": {
+    "pt-BR": "fontes disponíveis",
+    "en-US": "available fonts"
+  },
+  "ui.b357cfe89fe1": {
+    "pt-BR": "Conteúdos",
+    "en-US": "Contents"
+  },
+  "ui.b3a7f96a26dc": {
+    "pt-BR": "Página",
+    "en-US": "Page"
+  },
+  "ui.b3d6f025873a": {
+    "pt-BR": "{v1} título{v2}",
+    "en-US": "{v1} title{v2}"
+  },
+  "ui.b40823655a69": {
+    "pt-BR": "Não foi possível salvar a lista.",
+    "en-US": "Unable to save the list."
+  },
+  "ui.b41f9ffd0e27": {
+    "pt-BR": "Em tendência",
+    "en-US": "In trend"
+  },
+  "ui.b44dacb6467a": {
+    "pt-BR": "{v1} min atrás",
+    "en-US": "{v1} min ago"
+  },
+  "ui.b5140bd53a54": {
+    "pt-BR": "Último visto: {v1}{v2}",
+    "en-US": "Last seen: {v1}{v2}"
+  },
+  "ui.b52925b92409": {
+    "pt-BR": "Ver comentários",
+    "en-US": "See comments"
+  },
+  "ui.b5310f24fcbb": {
+    "pt-BR": "Sáb",
+    "en-US": "Sat"
+  },
+  "ui.b5462477ec30": {
+    "pt-BR": "Comentário indisponível.",
+    "en-US": "Comment unavailable."
+  },
+  "ui.b5ec228dd202": {
+    "pt-BR": "Histórico vazio",
+    "en-US": "Empty history"
+  },
+  "ui.b5efcd17e77d": {
+    "pt-BR": "o que assistir.",
+    "en-US": "what to watch."
+  },
+  "ui.b5fa08920aa0": {
+    "pt-BR": "Nova temporada",
+    "en-US": "New season"
+  },
+  "ui.b62cda3d1f55": {
+    "pt-BR": "Explorar títulos",
+    "en-US": "Explore titles"
+  },
+  "ui.b6308ccb6a05": {
+    "pt-BR": "Os seus preferidos",
+    "en-US": "Your favorites"
+  },
+  "ui.b654e894ee3c": {
+    "pt-BR": "Equipe técnica",
+    "en-US": "Technical team"
+  },
+  "ui.b6c55536b2f9": {
+    "pt-BR": "Já visto",
+    "en-US": "Already seen"
+  },
+  "ui.b730a645d35b": {
+    "pt-BR": " episódios assistidos",
+    "en-US": "episodes watched"
+  },
+  "ui.b7e553d6fbc9": {
+    "pt-BR": "Buscar filmes e séries…",
+    "en-US": "Search for films and series…"
+  },
+  "ui.b83db2d50188": {
+    "pt-BR": "ID de série inválido ou não disponível",
+    "en-US": "Invalid or unavailable serial ID"
+  },
+  "ui.b8401c8280f4": {
+    "pt-BR": "Pessoas encontradas",
+    "en-US": "People found"
+  },
+  "ui.b94941b7a04c": {
+    "pt-BR": "Escolha uma ou mais listas pessoais.",
+    "en-US": "Choose one or more playlists."
+  },
+  "ui.b951b1d6d3f9": {
+    "pt-BR": "Desativa o enriquecimento - Radar usa apenas o Banco de Series",
+    "en-US": "Disable enrichment - Radar only uses the Series Bank"
+  },
+  "ui.b956c68a1f32": {
+    "pt-BR": "A produção ainda não divulgou episódios desta temporada. Tudo aparece aqui assim que os dados forem publicados.",
+    "en-US": "The production has not yet released episodes from this season. Everything appears here as soon as the data is published."
+  },
+  "ui.b991e6dc2d88": {
+    "pt-BR": "Nenhum crédito encontrado no catálogo POPLOG para esta pessoa.",
+    "en-US": "No credit found in the POPLOG catalog for this person."
+  },
+  "ui.b9a6a1c349af": {
+    "pt-BR": "as séries",
+    "en-US": "the series"
+  },
+  "ui.b9de4993db8b": {
+    "pt-BR": "mídia física",
+    "en-US": "physical media"
+  },
+  "ui.ba009dc9f1d5": {
+    "pt-BR": "Nenhuma entrada.",
+    "en-US": "No entry."
+  },
+  "ui.ba67676e7286": {
+    "pt-BR": "Onde assistir",
+    "en-US": "Where to watch"
+  },
+  "ui.bb52126e3f25": {
+    "pt-BR": "Descoberta desativada.",
+    "en-US": "Discovery disabled."
+  },
+  "ui.bb641b6104ae": {
+    "pt-BR": "Assistir agora",
+    "en-US": "Watch now"
+  },
+  "ui.bb8332b45a95": {
+    "pt-BR": "Filmes e séries ganhando atenção agora.",
+    "en-US": "Films and series gaining attention now."
+  },
+  "ui.bb837cf4b105": {
+    "pt-BR": "APIs externas",
+    "en-US": "External APIs"
+  },
+  "ui.bbce6d2d298a": {
+    "pt-BR": "Por Temporada",
+    "en-US": "By Season"
+  },
+  "ui.bbd6aff280f3": {
+    "pt-BR": "Índice",
+    "en-US": "Index"
+  },
+  "ui.bc230bfcb6f4": {
+    "pt-BR": "Última sincronização:",
+    "en-US": "Last sync:"
+  },
+  "ui.bd7a76234f22": {
+    "pt-BR": "Status e flush do cache da Agenda/Radar",
+    "en-US": "Calendar/Radar cache status and flush"
+  },
+  "ui.bdf06a649c3a": {
+    "pt-BR": "Comentários liberados após a estreia",
+    "en-US": "Comments released after premiere"
+  },
+  "ui.be0f096ae3b3": {
+    "pt-BR": "Buscar filmes, séries e pessoas...",
+    "en-US": "Search for films, series and people..."
+  },
+  "ui.be3f81690ea2": {
+    "pt-BR": "Tudo que você salvou para assistir",
+    "en-US": "Everything you saved to watch"
+  },
+  "ui.be5238b8d58e": {
+    "pt-BR": "Sua vitrine pessoal aparece assim que você começar a acompanhar algum título.",
+    "en-US": "Your personal showcase appears as soon as you start following a title."
+  },
+  "ui.bea29e92ac2b": {
+    "pt-BR": "Histórico",
+    "en-US": "History"
+  },
+  "ui.bed2b1e66550": {
+    "pt-BR": "✓ Salvo",
+    "en-US": "✓ Saved"
+  },
+  "ui.bed37b43245f": {
+    "pt-BR": "Permissões",
+    "en-US": "Permissions"
+  },
+  "ui.bee226d85f29": {
+    "pt-BR": "Documentário",
+    "en-US": "Documentary"
+  },
+  "ui.bf271a8c249e": {
+    "pt-BR": "Na lista",
+    "en-US": "On the list"
+  },
+  "ui.bf2d2ee2525b": {
+    "pt-BR": "Falha ao sincronizar:",
+    "en-US": "Failed to sync:"
+  },
+  "ui.bf99e8fd2124": {
+    "pt-BR": "Re-sincronizando…",
+    "en-US": "Re-syncing…"
+  },
+  "ui.bfe08a2d3bb6": {
+    "pt-BR": "Mistério em cartaz",
+    "en-US": "Mystery on display"
+  },
+  "ui.c01b9403c8f7": {
+    "pt-BR": "inválid",
+    "en-US": "invalid"
+  },
+  "ui.c0fd0545d118": {
+    "pt-BR": "POPLOG API Lab",
+    "en-US": "POPLOG API Lab"
+  },
+  "ui.c159bcfd0562": {
+    "pt-BR": "Crie sua primeira lista",
+    "en-US": "Create your first list"
+  },
+  "ui.c1a5f3c8e157": {
+    "pt-BR": "Em alta agora",
+    "en-US": "Trending now"
+  },
+  "ui.c20d42d624fa": {
+    "pt-BR": "Admin · Poplog",
+    "en-US": "Admin · Poplog"
+  },
+  "ui.c21f42f3ce8a": {
+    "pt-BR": "Erro ao carregar feed:",
+    "en-US": "Error loading feed:"
+  },
+  "ui.c245b2cfc0ba": {
+    "pt-BR": "Historico de APIs",
+    "en-US": "API history"
+  },
+  "ui.c2a8d2ebb28e": {
+    "pt-BR": "Ainda não lançados",
+    "en-US": "Not yet released"
+  },
+  "ui.c2fd90eeb479": {
+    "pt-BR": "Nenhum título combina com os filtros.",
+    "en-US": "No titles match the filters."
+  },
+  "ui.c32cf8713d8f": {
+    "pt-BR": "· primário",
+    "en-US": "· primary"
+  },
+  "ui.c35e2be2b0a6": {
+    "pt-BR": "Rotten Tom.",
+    "en-US": "Rotten Tom."
+  },
+  "ui.c37df3f67156": {
+    "pt-BR": "Baseado em {v1} até haver outra referência.",
+    "en-US": "Based on {v1} until there is another reference."
+  },
+  "ui.c384beb215bf": {
+    "pt-BR": "Concluída",
+    "en-US": "Completed"
+  },
+  "ui.c3986cd9c359": {
+    "pt-BR": "Próximos jobs",
+    "en-US": "Upcoming jobs"
+  },
+  "ui.c3be11961873": {
+    "pt-BR": "Erro ao salvar",
+    "en-US": "Error when saving"
+  },
+  "ui.c42145027242": {
+    "pt-BR": "Selecione sua avaliação de 0 a 5 estrelas",
+    "en-US": "Select your rating from 0 to 5 stars"
+  },
+  "ui.c4938fe924b1": {
+    "pt-BR": "S01E01 marcado!",
+    "en-US": "S01E01 marked!"
+  },
+  "ui.c4956f3821f9": {
+    "pt-BR": "Rebuild acontece na proxima visita ao Radar",
+    "en-US": "Rebuild happens on the next visit to Radar"
+  },
+  "ui.c4e7aed998c0": {
+    "pt-BR": "Episódios ainda não anunciados",
+    "en-US": "Episodes not yet announced"
+  },
+  "ui.c4ff704a8c10": {
+    "pt-BR": "Schema version",
+    "en-US": "Schema version"
+  },
+  "ui.c5238281782e": {
+    "pt-BR": "via índices externos",
+    "en-US": "via external indexes"
+  },
+  "ui.c53995aec599": {
+    "pt-BR": "Ordem manual",
+    "en-US": "Manual order"
+  },
+  "ui.c6f2bf7046b4": {
+    "pt-BR": "Em dia",
+    "en-US": "Up to date"
+  },
+  "ui.c823dd5e8f30": {
+    "pt-BR": "Série pausada e fora do radar. Retorne quando quiser continuar.",
+    "en-US": "Series paused and off the radar. Return when you want to continue."
+  },
+  "ui.c865f5889582": {
+    "pt-BR": "Arrastar para reordenar",
+    "en-US": "Drag to reorder"
+  },
+  "ui.c956cbf819b0": {
+    "pt-BR": "A nova ordem não pôde ser salva. Recarregue a página e tente novamente.",
+    "en-US": "The new order could not be saved. Reload the page and try again."
+  },
+  "ui.c9701a7da6bb": {
+    "pt-BR": "Atenção",
+    "en-US": "Attention"
+  },
+  "ui.c985aaa5c211": {
+    "pt-BR": "Filmografia e créditos de {v1} no catálogo POPLOG.",
+    "en-US": "Filmography and credits of {v1} in the POPLOG catalog."
+  },
+  "ui.c99fe7c4a211": {
+    "pt-BR": "Guardados por ora",
+    "en-US": "Saved for now"
+  },
+  "ui.ca05314f62ef": {
+    "pt-BR": "Arrastar {v1} para reordenar",
+    "en-US": "Drag {v1} to reorder"
+  },
+  "ui.ca36d93189e3": {
+    "pt-BR": "Quem dá vida a esta história",
+    "en-US": "Who brings this story to life?"
+  },
+  "ui.ca85076869fd": {
+    "pt-BR": "Sem poster",
+    "en-US": "No poster"
+  },
+  "ui.cabde91ae714": {
+    "pt-BR": "* Calculado a partir dos títulos da sua biblioteca.",
+    "en-US": "* Calculated from titles in your library."
+  },
+  "ui.cb734293cf03": {
+    "pt-BR": "Buscar um título",
+    "en-US": "Search for a title"
+  },
+  "ui.cc01158b70e5": {
+    "pt-BR": "Catalogo pausado.",
+    "en-US": "Catalog paused."
+  },
+  "ui.cc74a23b8c5e": {
+    "pt-BR": "Esta semana",
+    "en-US": "This week"
+  },
+  "ui.cc85e897e2a5": {
+    "pt-BR": "Ir para o início",
+    "en-US": "Go to top"
+  },
+  "ui.cd435800aca8": {
+    "pt-BR": "Descubra, salve e acompanhe",
+    "en-US": "Discover, save and track"
+  },
+  "ui.cd84493a004d": {
+    "pt-BR": "Há 1 episódio anterior ainda não marcado como assistido.",
+    "en-US": "There is 1 previous episode not yet marked as watched."
+  },
+  "ui.cd8829d56b63": {
+    "pt-BR": "Abrir {v1}",
+    "en-US": "Open {v1}"
+  },
+  "ui.cd8e4f045232": {
+    "pt-BR": "O ID na URL nao e um numero valido.",
+    "en-US": "The ID in the URL is not a valid number."
+  },
+  "ui.ce79b6787590": {
+    "pt-BR": "Nenhum título assistido por enquanto.",
+    "en-US": "No titles watched yet."
+  },
+  "ui.ceb21330eacf": {
+    "pt-BR": "Crie uma coleção para guardar este título.",
+    "en-US": "Create a collection to store this title."
+  },
+  "ui.cf2c802a2b88": {
+    "pt-BR": "fonte oficial",
+    "en-US": "official source"
+  },
+  "ui.cf5c6822241c": {
+    "pt-BR": "Monitoramento contínuo",
+    "en-US": "Continuous monitoring"
+  },
+  "ui.cfa97f559e97": {
+    "pt-BR": "Biblioteca vazia",
+    "en-US": "Empty library"
+  },
+  "ui.cfac8cf97a3f": {
+    "pt-BR": "Índice geral",
+    "en-US": "General index"
+  },
+  "ui.d0d3d306c87f": {
+    "pt-BR": "Ver todos",
+    "en-US": "See all"
+  },
+  "ui.d0d9d9fcdd14": {
+    "pt-BR": "Jobs travados",
+    "en-US": "Jobs stuck"
+  },
+  "ui.d1c65a54bdc7": {
+    "pt-BR": "Digite o secret e carregue a fila.",
+    "en-US": "Enter the secret and load the queue."
+  },
+  "ui.d1ecacfaeb46": {
+    "pt-BR": "Marcar como em dia",
+    "en-US": "Mark as up to date"
+  },
+  "ui.d22f68306a54": {
+    "pt-BR": "Limpar filtros",
+    "en-US": "Clear filters"
+  },
+  "ui.d28e16bd049f": {
+    "pt-BR": "Selecionado: E",
+    "en-US": "Selected: E"
+  },
+  "ui.d2ae2659f73e": {
+    "pt-BR": "Começar: S01E01",
+    "en-US": "Start: S01E01"
+  },
+  "ui.d30838893a55": {
+    "pt-BR": "Visão geral",
+    "en-US": "Overview"
+  },
+  "ui.d30d0f766455": {
+    "pt-BR": "Engine Monitor",
+    "en-US": "Engine Monitor"
+  },
+  "ui.d337cd963547": {
+    "pt-BR": "Só invalidar (sem rebuild)",
+    "en-US": "Just invalidate (no rebuild)"
+  },
+  "ui.d3b117a5c4a8": {
+    "pt-BR": "Histórico finalizado",
+    "en-US": "Completed history"
+  },
+  "ui.d3cb39ec28d1": {
+    "pt-BR": "Descoberta ampla — todos os lançamentos",
+    "en-US": "Broad discovery — all releases"
+  },
+  "ui.d3e75bbc154a": {
+    "pt-BR": "títulos",
+    "en-US": "titles"
+  },
+  "ui.d3f7f7955818": {
+    "pt-BR": "Comentários da comunidade",
+    "en-US": "Community feedback"
+  },
+  "ui.d46678c6c160": {
+    "pt-BR": "Forçar re-sync agora",
+    "en-US": "Force re-sync now"
+  },
+  "ui.d4c2c40cef75": {
+    "pt-BR": "Sem pôster",
+    "en-US": "No poster"
+  },
+  "ui.d540e9d196e5": {
+    "pt-BR": "Comentários do Trakt são traduzidos automaticamente para PT-BR quando possível.",
+    "en-US": "Trakt comments are automatically translated into PT-BR when possible."
+  },
+  "ui.d5745b35e1bf": {
+    "pt-BR": "Invalidar cache + rebuild imediato",
+    "en-US": "Invalidate cache + immediate rebuild"
+  },
+  "ui.d5dd638b81b3": {
+    "pt-BR": "Resposta não é JSON",
+    "en-US": "Response is not JSON"
+  },
+  "ui.d621dc82376b": {
+    "pt-BR": "Ação",
+    "en-US": "Action"
+  },
+  "ui.d62d7a15902c": {
+    "pt-BR": "Ver detalhes",
+    "en-US": "View details"
+  },
+  "ui.d64bb1532b7a": {
+    "pt-BR": "Sem biografia disponível.",
+    "en-US": "No biography available."
+  },
+  "ui.d6f07188174d": {
+    "pt-BR": "Remover {v1}",
+    "en-US": "Remove {v1}"
+  },
+  "ui.d78bff23f629": {
+    "pt-BR": "Acesse sua conta",
+    "en-US": "Access your account"
+  },
+  "ui.d7ed27279c4a": {
+    "pt-BR": "O índice geral aparece quando houver ao menos uma fonte de avaliação disponível.",
+    "en-US": "The general index appears when there is at least one evaluation source available."
+  },
+  "ui.d802ca9571e2": {
+    "pt-BR": "Métricas acumuladas na sessão atual.",
+    "en-US": "Metrics accumulated in the current session."
+  },
+  "ui.d85ff6757c89": {
+    "pt-BR": "Avaliação POPLOG",
+    "en-US": "POPLOG Assessment"
+  },
+  "ui.d899b84ef6f9": {
+    "pt-BR": "Você largou no meio",
+    "en-US": "You dropped it in the middle"
+  },
+  "ui.d8c06af81a34": {
+    "pt-BR": "Lista personalizada",
+    "en-US": "Custom list"
+  },
+  "ui.d8fd65a307de": {
+    "pt-BR": "Buscar títulos",
+    "en-US": "Search titles"
+  },
+  "ui.d91779a7e8a0": {
+    "pt-BR": "Crime / Mistério",
+    "en-US": "Crime/Mystery"
+  },
+  "ui.d92b8115c4c9": {
+    "pt-BR": "Catálogo",
+    "en-US": "Catalog"
+  },
+  "ui.d9b4e88fae4d": {
+    "pt-BR": "Disponível em {v1}",
+    "en-US": "Available at {v1}"
+  },
+  "ui.d9ce679d03dd": {
+    "pt-BR": "Sem provider confirmado",
+    "en-US": "No confirmed provider"
+  },
+  "ui.d9e9aac89ac0": {
+    "pt-BR": "Há {v1} episódios anteriores ainda não marcados como assistidos.",
+    "en-US": "There are {v1} previous episodes not yet marked as watched."
+  },
+  "ui.da3160f7e8cd": {
+    "pt-BR": "História",
+    "en-US": "History"
+  },
+  "ui.db7f6f5da502": {
+    "pt-BR": "Tente outro termo ou ajuste os filtros aplicados.",
+    "en-US": "Try another term or adjust the applied filters."
+  },
+  "ui.dba44fe37106": {
+    "pt-BR": "Sem comentários por enquanto",
+    "en-US": "No comments for now"
+  },
+  "ui.dbd833e760c5": {
+    "pt-BR": "Organize títulos sem alterar o estado real deles na sua Biblioteca.",
+    "en-US": "Organize titles without changing their actual status in your Library."
+  },
+  "ui.dc93b1e6f914": {
+    "pt-BR": "Digite o secret e clique em Carregar.",
+    "en-US": "Enter the secret and click Load."
+  },
+  "ui.dcae67dbb060": {
+    "pt-BR": "Cache da Title Page",
+    "en-US": "Title Page Cache"
+  },
+  "ui.dcc5fe32276a": {
+    "pt-BR": "Série em circulação agora",
+    "en-US": "Series in circulation now"
+  },
+  "ui.dd3437242fa5": {
+    "pt-BR": "Carregando comentários do público…",
+    "en-US": "Loading public comments…"
+  },
+  "ui.dd462667bf9e": {
+    "pt-BR": "Total de chamadas",
+    "en-US": "Total calls"
+  },
+  "ui.dd9460f8553e": {
+    "pt-BR": "Filmes ganhando atenção e os mais assistidos agora.",
+    "en-US": "Films gaining attention and most watched now."
+  },
+  "ui.ddaefba8c861": {
+    "pt-BR": "via índices externos + TMDB",
+    "en-US": "via external indexes + TMDB"
+  },
+  "ui.ddd93803c30a": {
+    "pt-BR": "Mover {v1} para cima",
+    "en-US": "Move {v1} up"
+  },
+  "ui.ddea4d7d5434": {
+    "pt-BR": "Filmes vs Séries",
+    "en-US": "Movies vs Series"
+  },
+  "ui.de10fc0cb78c": {
+    "pt-BR": "Sessão",
+    "en-US": "Session"
+  },
+  "ui.de212174bc0c": {
+    "pt-BR": "Séries",
+    "en-US": "Series"
+  },
+  "ui.de4780f1e590": {
+    "pt-BR": "Para você",
+    "en-US": "For you"
+  },
+  "ui.dee760064556": {
+    "pt-BR": "Título sem nome",
+    "en-US": "Title without name"
+  },
+  "ui.def42e8b86c4": {
+    "pt-BR": "Elenco principal",
+    "en-US": "Main cast"
+  },
+  "ui.df06c04a11d2": {
+    "pt-BR": "Listas personalizadas",
+    "en-US": "Custom Lists"
+  },
+  "ui.df35c87bd2c6": {
+    "pt-BR": "Membro desde",
+    "en-US": "Member since"
+  },
+  "ui.e0195239e5c9": {
+    "pt-BR": "Não estreou",
+    "en-US": "Did not debut"
+  },
+  "ui.e05054e51324": {
+    "pt-BR": "Mover {v1} para a esquerda",
+    "en-US": "Move {v1} to the left"
+  },
+  "ui.e070416e0755": {
+    "pt-BR": "Este comentário pode revelar partes importantes da história.",
+    "en-US": "This comment may reveal important parts of the story."
+  },
+  "ui.e0a8ab275d9f": {
+    "pt-BR": "· PRÓXIMO DA CONTINUIDADE",
+    "en-US": "· NEAR CONTINUITY"
+  },
+  "ui.e145da845aa8": {
+    "pt-BR": "Atualizando resultados...",
+    "en-US": "Updating results..."
+  },
+  "ui.e184042b6cb6": {
+    "pt-BR": "Indisponível no BR",
+    "en-US": "Unavailable in BR"
+  },
+  "ui.e2136a1c422b": {
+    "pt-BR": "esta semana",
+    "en-US": "this week"
+  },
+  "ui.e25f843e3e8b": {
+    "pt-BR": "Pôsters ({v1})",
+    "en-US": "Posters ({v1})"
+  },
+  "ui.e275420be986": {
+    "pt-BR": "Monitoramento em tempo real das chamadas às APIs externas — Trakt, Balloonerismm, TMDB, Watchmode e JustWatch. Cache hit rate, latências e log de erros.",
+    "en-US": "Real-time monitoring of calls to external APIs — Trakt, Balloonerismm, TMDB, Watchmode and JustWatch. Cache hit rate, latencies and error log."
+  },
+  "ui.e2a02b58dcfc": {
+    "pt-BR": "títulos bloqueados",
+    "en-US": "blocked titles"
+  },
+  "ui.e2bbf209ae0e": {
+    "pt-BR": "&quot;",
+    "en-US": "&quot;"
+  },
+  "ui.e35d4574a4b2": {
+    "pt-BR": "Saindo em breve",
+    "en-US": "Leaving soon"
+  },
+  "ui.e45e696ac0c5": {
+    "pt-BR": "Novo episódio disponível",
+    "en-US": "New episode available"
+  },
+  "ui.e46ac1203940": {
+    "pt-BR": "Todos os serviços desta categoria já foram adicionados.",
+    "en-US": "All services in this category have already been added."
+  },
+  "ui.e55e864d3fb6": {
+    "pt-BR": "Aguardando novos eventos no feed.",
+    "en-US": "Waiting for new events in the feed."
+  },
+  "ui.e5db797bd446": {
+    "pt-BR": "Família",
+    "en-US": "Family"
+  },
+  "ui.e5e0e8ff7b94": {
+    "pt-BR": "Nome (A–Z)",
+    "en-US": "Name (A–Z)"
+  },
+  "ui.e5f52d40e3a5": {
+    "pt-BR": "Próxima",
+    "en-US": "Next"
+  },
+  "ui.e6781e2cbf39": {
+    "pt-BR": "Suas Listas",
+    "en-US": "Your Lists"
+  },
+  "ui.e69ff1624558": {
+    "pt-BR": "HTTP {v1}",
+    "en-US": "HTTP {v1}"
+  },
+  "ui.e6aa88aa09d9": {
+    "pt-BR": "Títulos encontrados",
+    "en-US": "Titles found"
+  },
+  "ui.e6accb0c4e3a": {
+    "pt-BR": "{v1} dias",
+    "en-US": "{v1} days"
+  },
+  "ui.e7973f8e2e89": {
+    "pt-BR": "Próxima sugestão",
+    "en-US": "Next suggestion"
+  },
+  "ui.e86577f48928": {
+    "pt-BR": "Carregando amostra tecnica...",
+    "en-US": "Loading technical sample..."
+  },
+  "ui.e8b82c9cdea6": {
+    "pt-BR": "Nenhum dado ainda.",
+    "en-US": "No data yet."
+  },
+  "ui.e97cb37f3f15": {
+    "pt-BR": "Leitura financeira POPLOG",
+    "en-US": "POPLOG financial reading"
+  },
+  "ui.e9b8aa9b871e": {
+    "pt-BR": "episódios restantes",
+    "en-US": "remaining episodes"
+  },
+  "ui.e9e0387ac99d": {
+    "pt-BR": "Criar lista",
+    "en-US": "Create list"
+  },
+  "ui.ea4cf25ae9c7": {
+    "pt-BR": "Sem dados nesta amostra.",
+    "en-US": "No data in this sample."
+  },
+  "ui.eb0d384d24a7": {
+    "pt-BR": "Não consegui carregar os comentários agora:",
+    "en-US": "I couldn't load the comments now:"
+  },
+  "ui.eb187cee8966": {
+    "pt-BR": "Nao foi possivel carregar os dados deste titulo. Pode ser um ID inexistente ou uma falha temporaria.",
+    "en-US": "Unable to load data for this title. It could be a non-existent ID or a temporary failure."
+  },
+  "ui.eb2cb20e7a5e": {
+    "pt-BR": "A curadoria fica melhor quando chegam novos eventos.",
+    "en-US": "The curation gets better when new events arrive."
+  },
+  "ui.eb48bbd37055": {
+    "pt-BR": "Carregar mais",
+    "en-US": "Load more"
+  },
+  "ui.eb490825a4f7": {
+    "pt-BR": "Nada forte o bastante para este recorte.",
+    "en-US": "Nothing strong enough for this cut."
+  },
+  "ui.eb554f998961": {
+    "pt-BR": "Nova Série",
+    "en-US": "New Series"
+  },
+  "ui.eb98cc59921c": {
+    "pt-BR": "Agrupando séries…",
+    "en-US": "Grouping series…"
+  },
+  "ui.ec72566126cf": {
+    "pt-BR": "Marque o que já viu",
+    "en-US": "Mark what you've seen"
+  },
+  "ui.ec9fc0703eaa": {
+    "pt-BR": "Não foi possível adicionar os títulos. Tente novamente.",
+    "en-US": "Unable to add titles. Please try again."
+  },
+  "ui.edb5ca21e20b": {
+    "pt-BR": "Adicionados recente",
+    "en-US": "Added recently"
+  },
+  "ui.edf5e7e810db": {
+    "pt-BR": "Você ainda não começou nenhuma jornada.",
+    "en-US": "You haven't started any journey yet."
+  },
+  "ui.ee8a86e0edcd": {
+    "pt-BR": "Nova lista",
+    "en-US": "New list"
+  },
+  "ui.ef3c67f32bf6": {
+    "pt-BR": "Lançamento (+ novo)",
+    "en-US": "Release (+ new)"
+  },
+  "ui.ef611ea36b08": {
+    "pt-BR": "Crie uma conta ou faça login para receber sugestões personalizadas com base na sua biblioteca.",
+    "en-US": "Create an account or log in to receive personalized suggestions based on your library."
+  },
+  "ui.efb4c97d4d2c": {
+    "pt-BR": "Próxima estreia",
+    "en-US": "Next premiere"
+  },
+  "ui.f08f8ca2d4d4": {
+    "pt-BR": "ão",
+    "en-US": "to the"
+  },
+  "ui.f1219f27f8c9": {
+    "pt-BR": "Receba recomendações",
+    "en-US": "Receive recommendations"
+  },
+  "ui.f12984c040b8": {
+    "pt-BR": "Monte sua watchlist",
+    "en-US": "Create your watchlist"
+  },
+  "ui.f257b57376e8": {
+    "pt-BR": "Próximos",
+    "en-US": "Upcoming"
+  },
+  "ui.f32c134523d4": {
+    "pt-BR": "Usuário",
+    "en-US": "User"
+  },
+  "ui.f3871e052ef6": {
+    "pt-BR": "Use a geladeira para pausar títulos sem misturar tudo com watchlist, assistindo ou abandonados.",
+    "en-US": "Use the fridge to pause titles without mixing it up with watchlist, watching or abandoned."
+  },
+  "ui.f407d3932105": {
+    "pt-BR": "marcado em",
+    "en-US": "marked in"
+  },
+  "ui.f51ab2e8c6ea": {
+    "pt-BR": "Sua página fica mais inteligente conforme você usa.",
+    "en-US": "Your page gets smarter the more you use it."
+  },
+  "ui.f544e973085a": {
+    "pt-BR": "Ficar em dia",
+    "en-US": "Stay up to date"
+  },
+  "ui.f5ae3da969d5": {
+    "pt-BR": "Boa hora pra começar",
+    "en-US": "Good time to start"
+  },
+  "ui.f5f77c02c119": {
+    "pt-BR": "T{v1} · Série",
+    "en-US": "T{v1} · Series"
+  },
+  "ui.f6932c188eba": {
+    "pt-BR": "série",
+    "en-US": "series"
+  },
+  "ui.f6a78bec8c50": {
+    "pt-BR": "Pausar série",
+    "en-US": "Pause series"
+  },
+  "ui.f6b8d09a41c1": {
+    "pt-BR": "Pronto para continuar",
+    "en-US": "Ready to continue"
+  },
+  "ui.f6d421b3bc20": {
+    "pt-BR": "Próximo slide",
+    "en-US": "Next slide"
+  },
+  "ui.f75cb112cc9b": {
+    "pt-BR": "✓ Visto",
+    "en-US": "✓ Visa"
+  },
+  "ui.f77da1519cfb": {
+    "pt-BR": "Escolhas personalizadas com base no que você ama.",
+    "en-US": "Personalized choices based on what you love."
+  },
+  "ui.f7b39c80e925": {
+    "pt-BR": "Nenhum resultado para “",
+    "en-US": "No results for “"
+  },
+  "ui.f84a0cea3681": {
+    "pt-BR": "Sua Watchlist",
+    "en-US": "Your Watchlist"
+  },
+  "ui.f869eb17cc2f": {
+    "pt-BR": "episódios",
+    "en-US": "episodes"
+  },
+  "ui.f8f1a38a3a05": {
+    "pt-BR": "Nenhum título disponível no momento.",
+    "en-US": "No titles available at this time."
+  },
+  "ui.f9456d73076b": {
+    "pt-BR": "Secret incorreto ou ADMIN_SECRET não configurado no .env.local.",
+    "en-US": "Incorrect Secret or ADMIN_SECRET not configured in .env.local."
+  },
+  "ui.f9b84cd395c7": {
+    "pt-BR": "Continue sua curadoria pessoal de filmes e séries.",
+    "en-US": "Continue your personal curation of films and series."
+  },
+  "ui.fa3d474bca4e": {
+    "pt-BR": "episódio",
+    "en-US": "episode"
+  },
+  "ui.fa52b70aaa2a": {
+    "pt-BR": "Estúdios",
+    "en-US": "Studios"
+  },
+  "ui.fad2415d4676": {
+    "pt-BR": "Animação",
+    "en-US": "Animation"
+  },
+  "ui.fb439b07da23": {
+    "pt-BR": "Títulos reordenáveis",
+    "en-US": "Reorderable titles"
+  },
+  "ui.fb83e3680246": {
+    "pt-BR": "[AcompanhandoPage] Falha ao carregar séries para começar:",
+    "en-US": "[AccompanyingPage] Failed to load series to start:"
+  },
+  "ui.fbb8b2d69ebe": {
+    "pt-BR": "Sua coleção ainda está esperando o primeiro título.",
+    "en-US": "Your collection is still waiting for the first title."
+  },
+  "ui.fbcca1f960bc": {
+    "pt-BR": "Nenhuma série",
+    "en-US": "No series"
+  },
+  "ui.fbd1ced29e56": {
+    "pt-BR": "Algo leve",
+    "en-US": "Something light"
+  },
+  "ui.fc2c74003cb1": {
+    "pt-BR": "Início",
+    "en-US": "Start"
+  },
+  "ui.fc60943bc924": {
+    "pt-BR": "Cache & re-sync",
+    "en-US": "Cache & re-sync"
+  },
+  "ui.fc6868868ec7": {
+    "pt-BR": "Ligar feed TMDB",
+    "en-US": "Connect TMDB feed"
+  },
+  "ui.fce266ba876c": {
+    "pt-BR": "Séries ganhando atenção agora.",
+    "en-US": "Series gaining attention now."
+  },
+  "ui.fd17514822f3": {
+    "pt-BR": "Novos episódios esperando",
+    "en-US": "New episodes waiting"
+  },
+  "ui.fe152e7f2fa9": {
+    "pt-BR": "Café pronto?",
+    "en-US": "Coffee ready?"
+  },
+  "ui.ff0b10ed9323": {
+    "pt-BR": "Resumo geral",
+    "en-US": "General summary"
+  },
+  "ui.ff82a6038441": {
+    "pt-BR": "Deseja marcá-los também?",
+    "en-US": "Want to tag them too?"
+  }
+}

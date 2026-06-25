@@ -6,10 +6,11 @@
  * (`getProvidersFromCache`) e à rota `/api/poplog3/providers`.
  *
  * Pipeline de resolução (POPLOG-first):
- *   1. Cache persistente `catalog_availability` (por imdbId, fresco) — inclui estado negativo
- *   2. Balloonerismm /watch/providers (ao vivo, BR padrão) — fonte primária
- *   3. Fallback: cache local legado (TMDB/Watchmode/MOTN por tmdbId/imdbId)
- *   4. Status "nos cinemas"/futuro via /release_dates (apenas filmes sem streaming)
+ *   1. Cache persistente `catalog_availability` (por imdbId+região, fresco)
+ *   2. JustWatch (live) — fonte protagonista de providers e canais
+ *   3. Balloonerismm — fallback residual IMDb-first quando JustWatch falha/vem vazio
+ *   4. Fallback local legado (TMDB/Watchmode/MOTN por tmdbId/imdbId)
+ *   5. Status "nos cinemas"/futuro via /release_dates (apenas filmes sem streaming)
  *
  * Garantias:
  *   - Nunca lança — falha de um título nunca derruba a lista/grade.
@@ -19,6 +20,8 @@
 
 import type { ProviderType, CatalogAvailabilitySource, SourceConfidence } from "@prisma/client";
 import type { TitleProvider, TitleProviderType } from "@/features/title/types";
+import { db } from "@/server/db/client";
+import { traktGet } from "@/server/api-clients/trakt/client";
 import {
   listAvailability,
   replaceAvailability,
@@ -51,9 +54,11 @@ import {
   DEFAULT_STREAMING_REGION,
   normalizeStreamingRegion,
 } from "@/server/streaming/region";
+import { normalizeCatalogLanguage } from "@/server/source-engine/locale";
 import { getUserProviderDisplayPreferences } from "@/server/streaming/user-provider-preferences";
 import {
   getJustWatchUnofficialProviders,
+  isJustWatchPrimaryEnabled,
   isJustWatchUnofficialEnabled,
   isJustWatchChannelEnrichmentEnabled,
 } from "@/server/streaming/justwatch-graphql-unofficial-source";
@@ -73,20 +78,58 @@ import {
 
 const DEFAULT_REGION = DEFAULT_STREAMING_REGION;
 
+function scheduleAvailabilityRefresh(input: {
+  imdbId: string;
+  mediaType: "movie" | "tv";
+  region: string;
+  language: string;
+  priority?: number;
+  reason: string;
+}) {
+  void import("@/server/workers/refresh-queue")
+    .then(({ enqueueRefreshJob }) =>
+      enqueueRefreshJob({
+        kind: "availability",
+        cacheKey: [
+          "availability",
+          input.mediaType,
+          input.imdbId,
+          input.region,
+          input.language,
+        ].join(":"),
+        mediaType: input.mediaType,
+        imdbId: input.imdbId,
+        priority: input.priority ?? 60,
+      }),
+    )
+    .then((job) => {
+      console.log(
+        `[availability] refreshQueued imdb=${input.imdbId} region=${input.region} language=${input.language} reason=${input.reason} job=${job.id.toString()}`,
+      );
+    })
+    .catch((error) => {
+      console.warn("[availability] refreshQueueSkipped", {
+        imdbId: input.imdbId,
+        region: input.region,
+        language: input.language,
+        reason: input.reason,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    });
+}
+
 // Sentinela de estado negativo persistido (sem providers encontrados).
 const NONE_PROVIDER_NAME = "__none__";
 
-// TTLs (dias). Providers 7d; antigo estável 21d; recente/futuro 1d.
-// NEGATIVO = 1d: a cobertura BR do Balloonerismm é inconsistente (às vezes retorna só
-// {link} sem ofertas para títulos que existem), então "sem providers" precisa re-checar
-// rápido para não esconder providers por dias.
-const TTL_PROVIDERS_DEFAULT = 2;
-const TTL_NONE_FOUND = 2;
-const TTL_CRITICAL = 1;
-const TTL_RECENT = 2;
-const TTL_STABLE_OLD = 21;
-// Fonte experimental JustWatch: TTL curto (2d) — confiança menor, re-checa mais cedo.
-const TTL_JUSTWATCH = 2;
+// TTLs (dias): POPLOG lê banco primeiro e renova JustWatch gradualmente.
+const TTL_PROVIDERS_DEFAULT = 1;       // 24h
+const TTL_NONE_FOUND = 0.5;            // 12h
+const TTL_CRITICAL = 0.25;             // 6h
+const TTL_RECENT = 0.25;               // lançamentos/quentes: 6h
+const TTL_STABLE_OLD = 7;              // catálogo frio: até 7d
+const TTL_JUSTWATCH = 1;               // fonte protagonista: 24h fresco
+const TTL_BALLOON_FALLBACK = 0.5;      // fallback residual: 6-12h
+const STALE_WINDOW_DAYS = 3;           // retorno stale imediato + refresh background
 const STABLE_AGE_DAYS = 180;
 const THEATRICAL_GATE_DAYS = 120;
 
@@ -110,6 +153,8 @@ type CachedRead = {
   providers: TitleProvider[];
   /** Houve cache fresco (mesmo que negativo) — evita nova chamada externa. */
   hit: boolean;
+  /** Cache expirado, mas ainda aceitável para retorno imediato enquanto renova. */
+  stale: boolean;
   /** O cache fresco estava marcado como "sem providers". */
   negative: boolean;
   /**
@@ -121,37 +166,54 @@ type CachedRead = {
   negativeRevalidable: boolean;
   /** Expiração da linha mais próxima (debug). */
   expiresAt: string | null;
+  /** Fonte predominante das linhas frescas. */
+  source: CatalogAvailabilitySource | null;
 };
 
 async function readProvidersFromCache(
   imdbId: string,
   mediaType: "movie" | "tv",
   region: string,
+  language: string,
 ): Promise<CachedRead> {
   try {
     const rows = await listAvailability({
       imdbId,
       mediaType,
       providerRegion: region,
-      // includeExpired: false (padrão) → só linhas frescas (expiresAt > now)
+      providerLanguage: language,
+      includeExpired: true,
     });
     if (rows.length === 0)
-      return { providers: [], hit: false, negative: false, negativeRevalidable: false, expiresAt: null };
+      return { providers: [], hit: false, stale: false, negative: false, negativeRevalidable: false, expiresAt: null, source: null };
+
+    const now = Date.now();
+    const freshRows = rows.filter((row) => new Date(row.expires_at).getTime() > now);
+    const staleRows = rows.filter((row) =>
+      new Date(row.expires_at).getTime() <= now &&
+      row.stale_until &&
+      new Date(row.stale_until).getTime() > now,
+    );
+    const usableRows = freshRows.length > 0 ? freshRows : staleRows;
+    if (usableRows.length === 0) {
+      return { providers: [], hit: false, stale: false, negative: false, negativeRevalidable: false, expiresAt: null, source: null };
+    }
+    const stale = freshRows.length === 0;
 
     const expiresAt =
-      rows
+      usableRows
         .map((r) => r.expires_at)
         .filter((v): v is string => Boolean(v))
         .sort()[0] ?? null;
 
     // Sentinela negativa. "low" = checado incluindo o fallback JustWatch (confiável até TTL);
     // qualquer outra confiança = legado/incompleto → REVALIDÁVEL.
-    if (rows.length === 1 && rows[0].provider_name === NONE_PROVIDER_NAME) {
-      const negativeRevalidable = rows[0].source_confidence !== "low";
-      return { providers: [], hit: true, negative: true, negativeRevalidable, expiresAt };
+    if (usableRows.length === 1 && usableRows[0].provider_name === NONE_PROVIDER_NAME) {
+      const negativeRevalidable = usableRows[0].source_confidence !== "low";
+      return { providers: [], hit: true, stale, negative: true, negativeRevalidable, expiresAt, source: usableRows[0].source };
     }
 
-    const providers: TitleProvider[] = rows
+    const providers: TitleProvider[] = usableRows
       .filter((r) => r.provider_name !== NONE_PROVIDER_NAME)
       .map((r) => ({
         name: r.provider_name,
@@ -162,9 +224,17 @@ async function readProvidersFromCache(
         country: r.provider_region,
       }));
 
-    return { providers, hit: providers.length > 0, negative: false, negativeRevalidable: false, expiresAt };
+    return {
+      providers,
+      hit: providers.length > 0,
+      stale,
+      negative: false,
+      negativeRevalidable: false,
+      expiresAt,
+      source: usableRows.find((r) => r.provider_name !== NONE_PROVIDER_NAME)?.source ?? null,
+    };
   } catch {
-    return { providers: [], hit: false, negative: false, negativeRevalidable: false, expiresAt: null };
+    return { providers: [], hit: false, stale: false, negative: false, negativeRevalidable: false, expiresAt: null, source: null };
   }
 }
 
@@ -195,6 +265,27 @@ function computeTtlDays(input: {
   return TTL_PROVIDERS_DEFAULT;
 }
 
+function compactProviderRawPayload(provider: TitleProvider) {
+  return {
+    source: provider.source ?? null,
+    providerId: provider.providerId ?? provider.tmdbProviderId ?? null,
+    name: provider.name,
+    originalName: provider.originalName ?? provider.providerName ?? provider.name,
+    type: provider.type,
+    normalizedType: provider.normalizedType ?? null,
+    accessKind: provider.accessKind ?? null,
+    rootKey: provider.rootKey ?? null,
+    rootName: provider.rootName ?? null,
+    familyKey: provider.familyKey ?? null,
+    familyName: provider.familyName ?? null,
+    variantKey: provider.variantKey ?? null,
+    variantName: provider.variantName ?? null,
+    isOfficial: provider.isOfficial ?? null,
+    deepLink: provider.deepLink ?? provider.deeplink ?? null,
+    logoUrl: provider.logoUrl ?? provider.logoPath ?? null,
+  };
+}
+
 async function writeProvidersToCache(input: {
   imdbId: string;
   /** tmdbId (real ou sintético) do título, quando conhecido — persistido na linha
@@ -202,6 +293,7 @@ async function writeProvidersToCache(input: {
   tmdbId?: number | null;
   mediaType: "movie" | "tv";
   region: string;
+  language: string;
   providers: TitleProvider[];
   ttlDays: number;
   /** Origem dos providers positivos (default balloonerismm). A sentinela negativa
@@ -210,10 +302,12 @@ async function writeProvidersToCache(input: {
   sourceConfidence?: SourceConfidence;
 }): Promise<void> {
   const { imdbId, tmdbId, mediaType, region, providers, ttlDays } = input;
+  const language = normalizeCatalogLanguage(input.language);
   const source: CatalogAvailabilitySource = input.source ?? "balloonerismm";
   const sourceConfidence: SourceConfidence = input.sourceConfidence ?? "high";
   const now = new Date();
   const expiresAt = new Date(now.getTime() + ttlDays * 86_400_000);
+  const staleUntil = new Date(expiresAt.getTime() + STALE_WINDOW_DAYS * 86_400_000);
   const tmdbIdForRow = tmdbId ?? null;
 
   const rows =
@@ -221,8 +315,6 @@ async function writeProvidersToCache(input: {
       ? providers.map((p) => {
           const rowSource: CatalogAvailabilitySource =
             p.source === "justwatch_graphql_unofficial" ? "justwatch" : source;
-          const rowConfidence: SourceConfidence =
-            rowSource === "justwatch" ? "low" : sourceConfidence;
           return {
             imdbId,
             tmdbId: tmdbIdForRow,
@@ -230,13 +322,16 @@ async function writeProvidersToCache(input: {
             // Rastreabilidade: o cache persiste o nome da fonte, nunca o rótulo da UI.
             providerName: p.originalName ?? p.name,
             providerRegion: region,
+            providerLanguage: language,
             providerType: titleTypeToProviderType(p.type),
             providerUrl: p.deepLink ?? p.deeplink ?? null,
             providerLogoUrl: p.logoUrl ?? null,
             source: rowSource,
-            sourceConfidence: rowConfidence,
+            sourceConfidence,
             checkedAt: now,
             expiresAt,
+            staleUntil,
+            rawPayloadJson: compactProviderRawPayload(p),
           };
         })
       : [
@@ -249,11 +344,13 @@ async function writeProvidersToCache(input: {
             mediaType,
             providerName: NONE_PROVIDER_NAME,
             providerRegion: region,
+            providerLanguage: language,
             providerType: "unknown" as const,
             source: "balloonerismm" as const,
             sourceConfidence,
             checkedAt: now,
             expiresAt,
+            staleUntil,
           },
         ];
 
@@ -261,6 +358,7 @@ async function writeProvidersToCache(input: {
     imdbId,
     mediaType,
     providerRegion: region,
+    providerLanguage: language,
     rows,
   }).catch(() => false);
 }
@@ -482,6 +580,82 @@ async function resolveTitleForJustWatch(
 ): Promise<{ title: string | null; year: number | null }> {
   const fromInput = input.title?.trim();
   if (fromInput) return { title: fromInput, year: input.year ?? yearFromInput(input) };
+  const language = normalizeCatalogLanguage(input.language);
+  const region = normalizeStreamingRegion(input.region, {
+    source: "availability:justwatch-title-region",
+    explicit: input.region != null,
+  });
+
+  if (input.imdbId) {
+    try {
+      const translation = await db.titleTranslation.findFirst({
+        where: {
+          imdbId: input.imdbId,
+          language,
+          OR: [{ region }, { region: "US" }, { region: "BR" }],
+        },
+        orderBy: [{ region: "asc" }, { updatedAt: "desc" }],
+        select: { title: true },
+      });
+      if (translation?.title) {
+        return { title: translation.title, year: input.year ?? yearFromInput(input) };
+      }
+    } catch {
+      /* best-effort */
+    }
+
+    try {
+      const localTitle = await db.poplog3Title.findFirst({
+        where: { imdbId: input.imdbId, mediaType },
+        select: { title: true, originalTitle: true, year: true, tmdbId: true },
+      });
+      const title = localTitle?.title ?? localTitle?.originalTitle ?? null;
+      if (title) {
+        return { title, year: input.year ?? yearFromInput(input) ?? localTitle?.year ?? null };
+      }
+    } catch {
+      /* best-effort */
+    }
+
+    try {
+      const external = await db.titleExternalId.findFirst({
+        where: { imdbId: input.imdbId, mediaType },
+        select: { tmdbId: true },
+      });
+      if (external?.tmdbId) {
+        const localByExternal = await db.poplog3Title.findUnique({
+          where: { tmdbId_mediaType: { tmdbId: external.tmdbId, mediaType } },
+          select: { title: true, originalTitle: true, year: true },
+        });
+        const title = localByExternal?.title ?? localByExternal?.originalTitle ?? null;
+        if (title) {
+          return { title, year: input.year ?? yearFromInput(input) ?? localByExternal?.year ?? null };
+        }
+      }
+    } catch {
+      /* best-effort */
+    }
+
+    try {
+      type TraktSearchHit = {
+        movie?: { title?: string | null; year?: number | null; ids?: { tmdb?: number | null } };
+        show?: { title?: string | null; year?: number | null; ids?: { tmdb?: number | null } };
+      };
+      const type = mediaType === "movie" ? "movie" : "show";
+      const hits = await traktGet<TraktSearchHit[]>(`/search/imdb/${input.imdbId}`, {
+        params: { type, extended: "full" },
+        ttlSeconds: 7 * 86_400,
+        staleTtlSeconds: 30 * 86_400,
+      }).catch(() => null);
+      const hit = hits?.[0]?.movie ?? hits?.[0]?.show ?? null;
+      const title = hit?.title?.trim() || null;
+      if (title) {
+        return { title, year: input.year ?? yearFromInput(input) ?? hit?.year ?? null };
+      }
+    } catch {
+      /* best-effort */
+    }
+  }
 
   if (input.tmdbId != null) {
     try {
@@ -534,12 +708,19 @@ type ResolvedProviders = {
   /** Outcome do fetch ao vivo, quando houve. */
   balloonOutcome: WatchProvidersOutcome | null;
   /** Trace do cache para debug. */
-  cache: { hit: boolean; negative: boolean; expiresAt: string | null };
+  cache: {
+    hit: boolean;
+    stale: boolean;
+    negative: boolean;
+    expiresAt: string | null;
+    source: CatalogAvailabilitySource | null;
+  };
   /**
    * Um negativo REVALIDÁVEL foi encontrado em cacheOnly e devolvido como soft-"unresolved"
    * (em vez de "unavailable") para que o warmCold o reprocesse ao vivo em background.
    */
   negativeRevalidationPending: boolean;
+  staleRefreshPending: boolean;
   /** Path chamado (debug). */
   providerPath: string | null;
   errors: string[];
@@ -565,7 +746,7 @@ async function resolveProviders(input: AvailabilityIdInput): Promise<ResolvedPro
   // Trace do fallback JustWatch — objeto único mutável compartilhado por todos os
   // returns via `base`; o bloco de fallback abaixo o preenche quando roda.
   const justwatch: JustWatchDebug = {
-    enabled: isJustWatchUnofficialEnabled(),
+    enabled: isJustWatchPrimaryEnabled() || isJustWatchUnofficialEnabled(),
     attempted: false,
     outcome: null,
     queryTitle: null,
@@ -588,8 +769,15 @@ async function resolveProviders(input: AvailabilityIdInput): Promise<ResolvedPro
     resolvedImdbId: imdbId,
     imdbVia,
     justwatch,
-    cache: { hit: false, negative: false, expiresAt: null as string | null },
+    cache: {
+      hit: false,
+      stale: false,
+      negative: false,
+      expiresAt: null as string | null,
+      source: null as CatalogAvailabilitySource | null,
+    },
     negativeRevalidationPending: false,
+    staleRefreshPending: false,
     providerPath: null as string | null,
     errors,
   };
@@ -603,10 +791,45 @@ async function resolveProviders(input: AvailabilityIdInput): Promise<ResolvedPro
   //        prender títulos disponíveis nas listas.
   //  - Negativo CONFIÁVEL ("low", já checado incl. JustWatch): definitivo até o TTL,
   //    salvo bypassNegativeCache (force_live).
-  if (imdbId) {
-    const cached = await readProvidersFromCache(imdbId, mediaType, region);
+  const language = normalizeCatalogLanguage(input.language);
+
+  if (imdbId && !input.bypassProviderCache) {
+    const cached = await readProvidersFromCache(imdbId, mediaType, region, language);
     if (cached.hit) {
       if (!cached.negative) {
+        const shouldRevalidateWithJustWatch =
+          !input.cacheOnly &&
+          isJustWatchPrimaryEnabled() &&
+          cached.source !== "justwatch";
+
+        if (cached.stale) {
+          console.log(
+            `[availability] staleCacheHit imdb=${imdbId} region=${region} language=${language} source=${cached.source ?? "unknown"}`,
+          );
+          scheduleAvailabilityRefresh({
+            imdbId,
+            mediaType,
+            region,
+            language,
+            priority: cached.source === "justwatch" ? 30 : 45,
+            reason: "stale-cache-hit",
+          });
+          return {
+            ...base,
+            cache: { hit: true, stale: true, negative: false, expiresAt: cached.expiresAt, source: cached.source },
+            staleRefreshPending: true,
+            providers: cached.providers,
+            source: "cache",
+            live: false,
+            balloonOutcome: null,
+          };
+        }
+
+        if (shouldRevalidateWithJustWatch) {
+          console.log(
+            `[availability] revalidatingProviderCacheWithJustWatch imdb=${imdbId} region=${region} cachedSource=${cached.source ?? "unknown"}`,
+          );
+        } else {
         if (
           region === "BR" &&
           !input.cacheOnly &&
@@ -616,7 +839,7 @@ async function resolveProviders(input: AvailabilityIdInput): Promise<ResolvedPro
           const { title: searchTitle, year } = await resolveTitleForJustWatch(input, mediaType);
           justwatch.queryTitle = searchTitle;
           justwatch.queryYear = year;
-          if (searchTitle) {
+          if (searchTitle || imdbId || input.tmdbId != null) {
             justwatch.enrichmentAttempted = true;
             const jw = await getJustWatchUnofficialProviders({
               title: searchTitle,
@@ -647,7 +870,7 @@ async function resolveProviders(input: AvailabilityIdInput): Promise<ResolvedPro
                   );
                   return {
                     ...base,
-                    cache: { hit: true, negative: false, expiresAt: cached.expiresAt },
+                    cache: { hit: true, stale: false, negative: false, expiresAt: cached.expiresAt, source: cached.source },
                     providerPath: "cache+justwatch:channel-enrichment",
                     providers: merged.providers,
                     source: "balloonerismm",
@@ -658,18 +881,19 @@ async function resolveProviders(input: AvailabilityIdInput): Promise<ResolvedPro
               }
             }
           } else {
-            justwatch.emptyReason = "missing_title_local";
+            justwatch.emptyReason = "missing_title_and_ids";
           }
         }
 
         return {
           ...base,
-          cache: { hit: true, negative: false, expiresAt: cached.expiresAt },
+          cache: { hit: true, stale: false, negative: false, expiresAt: cached.expiresAt, source: cached.source },
           providers: cached.providers,
           source: "cache",
           live: false,
           balloonOutcome: null,
         };
+        }
       }
 
       // Negativo encontrado.
@@ -683,7 +907,7 @@ async function resolveProviders(input: AvailabilityIdInput): Promise<ResolvedPro
         // Negativo confiável → definitivo até o TTL.
         return {
           ...base,
-          cache: { hit: true, negative: true, expiresAt: cached.expiresAt },
+          cache: { hit: true, stale: cached.stale, negative: true, expiresAt: cached.expiresAt, source: cached.source },
           providers: [],
           source: "none",
           live: false,
@@ -696,9 +920,17 @@ async function resolveProviders(input: AvailabilityIdInput): Promise<ResolvedPro
         console.log(
           `[availability] negativeCacheRevalidationScheduled imdb=${imdbId} region=${region}`,
         );
+        scheduleAvailabilityRefresh({
+          imdbId,
+          mediaType,
+          region,
+          language,
+          priority: 35,
+          reason: "negative-cache-revalidation",
+        });
         return {
           ...base,
-          cache: { hit: true, negative: false, expiresAt: cached.expiresAt },
+          cache: { hit: true, stale: false, negative: false, expiresAt: cached.expiresAt, source: cached.source },
           negativeRevalidationPending: true,
           providers: [],
           source: "none",
@@ -714,7 +946,60 @@ async function resolveProviders(input: AvailabilityIdInput): Promise<ResolvedPro
     }
   }
 
-  // 2. Balloonerismm ao vivo (fonte primária) — PULADO em modo cacheOnly.
+  // 2. JustWatch ao vivo (fonte protagonista) — PULADO em modo cacheOnly.
+  if (imdbId && !input.cacheOnly && isJustWatchPrimaryEnabled()) {
+    const { title: searchTitle, year } = await resolveTitleForJustWatch(input, mediaType);
+    justwatch.queryTitle = searchTitle;
+    justwatch.queryYear = year;
+
+    if (searchTitle || imdbId || input.tmdbId != null) {
+      justwatch.attempted = true;
+      const jw = await getJustWatchUnofficialProviders({
+        title: searchTitle,
+        year,
+        imdbId,
+        tmdbId: input.tmdbId ?? null,
+        mediaType,
+        region,
+        language: input.language ?? undefined,
+      }).catch(() => null);
+
+      if (jw) {
+        justwatch.outcome = jw.outcome;
+        justwatch.offersCount = jw.offersCount;
+        justwatch.providersParsed = jw.providers.length;
+        justwatch.emptyReason = jw.emptyReason;
+        if (jw.matched) {
+          justwatch.matchedTitle = jw.matched.title;
+          justwatch.matchedImdbId = jw.matched.imdbId;
+          justwatch.matchedTmdbId = jw.matched.tmdbId;
+          justwatch.matchReason = jw.matched.matchedVia;
+        }
+
+        if (jw.outcome === "ok" && jw.providers.length > 0) {
+          return {
+            ...base,
+            providerPath: "justwatch:graphql/GetSearchTitles",
+            providers: jw.providers,
+            source: "justwatch_graphql_unofficial",
+            live: true,
+            balloonOutcome: null,
+          };
+        }
+
+        errors.push(`justwatch_primary_outcome:${jw.outcome}`);
+      } else {
+        justwatch.outcome = "error";
+        justwatch.emptyReason = "throw";
+        errors.push("justwatch_primary_throw");
+      }
+    } else {
+      justwatch.emptyReason = "missing_title_and_ids";
+      errors.push("justwatch_primary_missing_title_and_ids");
+    }
+  }
+
+  // 3. Balloonerismm ao vivo (fallback residual) — PULADO em modo cacheOnly.
   // Em listas (Home/Watchlist/Biblioteca) não disparamos fetch ao vivo: a tempestade
   // de chamadas sob carga, combinada à cobertura BR inconsistente da fonte, gravava
   // negativos falsos. Nesses contextos, cache-miss → "unresolved" (desconhecido).
@@ -755,12 +1040,13 @@ async function resolveProviders(input: AvailabilityIdInput): Promise<ResolvedPro
     if (
       region === "BR" &&
       (detailed.outcome === "error" || detailed.outcome === "empty") &&
+      !isJustWatchPrimaryEnabled() &&
       isJustWatchUnofficialEnabled()
     ) {
       const { title: searchTitle, year } = await resolveTitleForJustWatch(input, mediaType);
       justwatch.queryTitle = searchTitle;
       justwatch.queryYear = year;
-      if (searchTitle) {
+      if (searchTitle || imdbId || input.tmdbId != null) {
         justwatch.attempted = true;
         const jw = await getJustWatchUnofficialProviders({
           title: searchTitle,
@@ -799,7 +1085,7 @@ async function resolveProviders(input: AvailabilityIdInput): Promise<ResolvedPro
           justwatch.emptyReason = "throw";
         }
       } else {
-        justwatch.emptyReason = "missing_title_local";
+        justwatch.emptyReason = "missing_title_and_ids";
       }
     }
 
@@ -820,7 +1106,7 @@ async function resolveProviders(input: AvailabilityIdInput): Promise<ResolvedPro
       const { title: searchTitle, year } = await resolveTitleForJustWatch(input, mediaType);
       justwatch.queryTitle = searchTitle;
       justwatch.queryYear = year;
-      if (searchTitle) {
+      if (searchTitle || imdbId || input.tmdbId != null) {
         justwatch.enrichmentAttempted = true;
         const jw = await getJustWatchUnofficialProviders({
           title: searchTitle,
@@ -854,7 +1140,7 @@ async function resolveProviders(input: AvailabilityIdInput): Promise<ResolvedPro
           }
         }
       } else {
-        justwatch.emptyReason = "missing_title_local";
+        justwatch.emptyReason = "missing_title_and_ids";
       }
     }
 
@@ -901,7 +1187,13 @@ export async function resolveTitleProviders(
 export type AvailabilityDebug = {
   input: { id: string | null; mediaType: "movie" | "tv"; region: string };
   resolved: { imdbId: string | null; via: ImdbResolutionSource };
-  cache: { hit: boolean; isNegative: boolean; expiresAt: string | null };
+  cache: {
+    hit: boolean;
+    stale: boolean;
+    isNegative: boolean;
+    expiresAt: string | null;
+    source: CatalogAvailabilitySource | null;
+  };
   providerRequest: {
     path: string | null;
     attempted: boolean;
@@ -1033,11 +1325,12 @@ async function resolveAvailabilityCore(
       releaseDate: releaseStatus?.earliestRelevantDate ?? knownDate,
     });
     const ttlDays = isJustWatch ? Math.min(baseTtl, TTL_JUSTWATCH) : baseTtl;
+    const effectiveTtlDays = isJustWatch ? ttlDays : Math.min(ttlDays, TTL_BALLOON_FALLBACK);
 
     // Confiança da sentinela negativa: "low" SÓ quando a checagem foi completa (o fallback
     // JustWatch foi tentado). Caso contrário "unverified" → permanece REVALIDÁVEL.
     const confidence: SourceConfidence = hasProviders
-      ? (isJustWatch ? "low" : "high")
+      ? (isJustWatch ? "high" : "medium")
       : (resolved.justwatch.attempted ? "low" : "unverified");
 
     if (hasProviders && isJustWatch) {
@@ -1053,8 +1346,9 @@ async function resolveAvailabilityCore(
       tmdbId: input.tmdbId ?? null,
       mediaType,
       region,
+      language: input.language ?? "pt-BR",
       providers,
-      ttlDays,
+      ttlDays: effectiveTtlDays,
       source: hasProviders && isJustWatch ? "justwatch" : "balloonerismm",
       sourceConfidence: confidence,
     });
@@ -1080,7 +1374,13 @@ async function resolveAvailabilityCore(
   const debug: AvailabilityDebug = {
     input: { id: input.imdbId ?? (input.tmdbId != null ? String(input.tmdbId) : null), mediaType, region },
     resolved: { imdbId: resolvedImdbId, via: resolved.imdbVia },
-    cache: { hit: resolved.cache.hit, isNegative: resolved.cache.negative, expiresAt: resolved.cache.expiresAt },
+    cache: {
+      hit: resolved.cache.hit,
+      stale: resolved.cache.stale,
+      isNegative: resolved.cache.negative,
+      expiresAt: resolved.cache.expiresAt,
+      source: resolved.cache.source,
+    },
     providerRequest: {
       path: resolved.providerPath,
       attempted: resolved.providerPath !== null,
@@ -1111,8 +1411,11 @@ async function resolveAvailabilityCore(
   // revalidação live em background pelo fluxo canônico. Suprimido quando o caller é o
   // hydrateManyTitleAvailability (que já agenda o warm em lote, de forma limitada).
   if (resolved.negativeRevalidationPending && !input.suppressAutoWarm) {
-    console.log(`[availability] negativeCacheRevalidationScheduled(auto-warm) imdb=${resolvedImdbId}`);
-    warmAvailabilityInBackground([{ ...input, suppressAutoWarm: true }]);
+    console.log(`[availability] negativeCacheRevalidationQueued imdb=${resolvedImdbId}`);
+  }
+
+  if (resolved.staleRefreshPending && !input.suppressAutoWarm) {
+    console.log(`[availability] staleCacheRefreshQueued imdb=${resolvedImdbId} region=${region}`);
   }
 
   return { summary, debug };
@@ -1149,8 +1452,14 @@ export async function hydrateTitleAvailability(
 }
 
 /** Teto de aquecimento em background por chamada (evita re-criar a tempestade). */
-const WARM_BACKGROUND_LIMIT = 12;
-const WARM_BACKGROUND_CONCURRENCY = 3;
+const WARM_BACKGROUND_LIMIT = Math.max(
+  1,
+  Number(process.env.POPLOG_AVAILABILITY_WARM_LIMIT ?? process.env.POPLOG_WORKER_MAX_CONCURRENCY ?? 12),
+);
+const WARM_BACKGROUND_CONCURRENCY = Math.max(
+  1,
+  Number(process.env.POPLOG_AVAILABILITY_WARM_CONCURRENCY ?? process.env.POPLOG_WORKER_MAX_CONCURRENCY ?? 3),
+);
 
 /**
  * Aquece o cache ao vivo (fora do caminho da resposta) para títulos que vieram

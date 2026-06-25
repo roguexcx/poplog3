@@ -25,6 +25,8 @@ export async function getLocalAuthUser(): Promise<AuthUser | null> {
       update: {},
       create: { id, email: `${id}@poplog.dev`, name: "POPLOG Local Dev" },
     });
+    if (user.accessStatus === "blocked") return null;
+
     if (!user.username) {
       await ensureUserUsername({ userId: user.id, email: user.email, name: user.name });
     }
@@ -33,6 +35,11 @@ export async function getLocalAuthUser(): Promise<AuthUser | null> {
       email: user.email,
       name: user.name,
       image: user.image,
+      role: user.role,
+      accessStatus: user.accessStatus,
+      adminPermissions: Array.isArray(user.adminPermissions)
+        ? user.adminPermissions.filter((item): item is string => typeof item === "string")
+        : [],
       created_at: user.createdAt.toISOString(),
       authProvider: "local",
       user_metadata: {

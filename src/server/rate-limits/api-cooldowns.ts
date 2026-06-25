@@ -3,10 +3,6 @@ export const API_COOLDOWNS = {
     minIntervalMs: 250,
   },
 
-  omdb: {
-    minIntervalMs: 1000,
-  },
-
   watchmode: {
     minIntervalMs: 4000,
   },

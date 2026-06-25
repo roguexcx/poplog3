@@ -1,7 +1,6 @@
 export type ApiSourceId =
   | "tmdb"
   | "watchmode"
-  | "omdb"
   | "trakt"
   | "movieofthenight"
   | "bancodeseries"

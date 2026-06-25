@@ -2,7 +2,7 @@ import { debugLog, rateLimitedWarn } from "@/server/logging/log-control";
 import { API_BUDGETS } from "./api-budgets";
 import { API_COOLDOWNS } from "./api-cooldowns";
 
-type PremiumApi = "omdb" | "watchmode" | "movieofthenight";
+type PremiumApi = "watchmode" | "movieofthenight";
 type MediaType = "movie" | "tv";
 
 type BudgetOrigin = {

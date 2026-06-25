@@ -8,7 +8,7 @@ import type { UserTitle } from "@/types/user";
 
 const synthetic = titleIdentityKeys({ mediaType: "tv", tmdbId: -9419884 });
 assert(synthetic.includes("tv:tmdb:-9419884"));
-assert(synthetic.includes("tv:imdb:tt9419884"));
+assert(synthetic.includes("g:imdb:tt9419884"));
 
 const aliases = titleIdentityKeys({
   mediaType: "movie",
@@ -19,10 +19,10 @@ const aliases = titleIdentityKeys({
   slug: "Fight-Club",
 });
 assert.deepEqual(new Set(aliases), new Set([
-  "movie:poplog:poplog-cuid",
-  "movie:imdb:tt0137523",
-  "movie:trakt:727",
-  "movie:slug:fight-club",
+  "g:poplog:poplog-cuid",
+  "g:imdb:tt0137523",
+  "g:trakt:727",
+  "g:slug:fight-club",
   "movie:tmdb:550",
 ]));
 assert(!aliases.includes("tv:tmdb:550"), "movie and TV ID spaces must stay isolated");

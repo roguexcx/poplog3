@@ -1,5 +1,4 @@
 "use client";
-
 import type { AgendaEvent } from "@/server/agenda/types";
 import HiatusReturnBanner from "@/features/agenda/cards/HiatusReturnBanner";
 import SeasonFinaleCard from "@/features/agenda/cards/SeasonFinaleCard";

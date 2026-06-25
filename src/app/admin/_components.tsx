@@ -1,5 +1,4 @@
 "use client";
-
 import { AlertTriangle, CheckCircle2, RefreshCw } from "lucide-react";
 
 // ─── AdminCard ────────────────────────────────────────────────────────────────

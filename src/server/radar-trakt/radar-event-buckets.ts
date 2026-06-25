@@ -10,6 +10,15 @@ const SECTION_META: Record<RadarBucketId, { title: string; description: string }
   anticipated: { title: "Mais aguardados", description: "Sinais editoriais do Trakt para ficar de olho." },
 };
 
+const SECTION_LIMITS: Record<RadarBucketId, number> = {
+  now: 64,
+  highlights: 14,
+  week: 96,
+  next: 128,
+  recent: 96,
+  anticipated: 42,
+};
+
 export function bucketForEvent(event: RadarEvent): RadarBucketId | null {
   if (event.bucket === "anticipated") return "anticipated";
   const diff = dayDiff(event.date);
@@ -50,7 +59,7 @@ export function buildRadarSections(events: RadarEvent[]): Record<RadarBucketId, 
         : withBuckets.filter((event) => event.bucket === id).sort((a, b) => {
             if (id === "recent" || id === "anticipated") return b.score - a.score;
             return a.date.localeCompare(b.date) || b.score - a.score;
-          });
+          }).slice(0, SECTION_LIMITS[id]);
     sections[id] = {
       id,
       title: SECTION_META[id].title,

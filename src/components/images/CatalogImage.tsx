@@ -1,10 +1,9 @@
 "use client";
-
 /**
  * CatalogImage — componente de imagem agnóstico de fonte.
  *
  * Substitui TmdbImage como componente padrão de imagem do POPLOG.
- * Aceita URLs completas (Trakt, TheTVDB, Balloonerismm, CDN próprio)
+ * Aceita URLs completas (Trakt, Balloonerismm, CDN próprio)
  * ou paths TMDB legados (/abc.jpg) para compatibilidade histórica.
  *
  * Fluxo recomendado:
@@ -25,8 +24,10 @@ export type { CatalogImageSize } from "@/lib/images/resolve";
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
 export type CatalogImageProps = Omit<ImageProps, "src" | "alt"> & {
+  /** Chave local/portavel salva no banco, ex.: posters/tt5950044/pt-BR/main.webp */
+  assetKey?: string | null;
   /** URL completa ou path legado TMDB */
-  src: string | null | undefined;
+  src?: string | null;
   alt: string;
   /** Tamanho para paths TMDB legados (ignorado para URLs completas) */
   size?: CatalogImageSize;
@@ -43,6 +44,7 @@ export type CatalogImageProps = Omit<ImageProps, "src" | "alt"> & {
  * Use dentro de um container com position: relative e tamanho definido.
  */
 export default function CatalogImage({
+  assetKey,
   src,
   alt,
   size = "w500",
@@ -52,7 +54,7 @@ export default function CatalogImage({
 }: CatalogImageProps) {
   const [errorCount, setErrorCount] = useState(0);
 
-  const primary = resolveForRender(src, size);
+  const primary = resolveForRender(assetKey ?? src, size);
   const secondary = resolveForRender(fallbackSrc, size);
 
   const resolved =
@@ -75,7 +77,8 @@ export default function CatalogImage({
 // ─── Variante inline (tamanho fixo via width/height) ─────────────────────────
 
 export type CatalogImageInlineProps = {
-  src: string | null | undefined;
+  assetKey?: string | null;
+  src?: string | null;
   alt?: string;
   width: number;
   height: number;
@@ -87,6 +90,7 @@ export type CatalogImageInlineProps = {
 };
 
 export function CatalogImageInline({
+  assetKey,
   src,
   alt = "",
   width,
@@ -99,7 +103,7 @@ export function CatalogImageInline({
 }: CatalogImageInlineProps) {
   const [errorCount, setErrorCount] = useState(0);
 
-  const primary = resolveForRender(src, size);
+  const primary = resolveForRender(assetKey ?? src, size);
   const secondary = resolveForRender(fallbackSrc, size);
   const resolved =
     errorCount === 0 ? primary :
@@ -124,7 +128,8 @@ export function CatalogImageInline({
 // ─── Variante fill com placeholder (cards de lista) ──────────────────────────
 
 type CatalogPosterProps = {
-  src: string | null | undefined;
+  assetKey?: string | null;
+  src?: string | null;
   alt?: string;
   size?: CatalogImageSize;
   fallbackSrc?: string | null;
@@ -134,6 +139,7 @@ type CatalogPosterProps = {
 };
 
 export function CatalogPoster({
+  assetKey,
   src,
   alt = "",
   size = "w342",
@@ -144,6 +150,7 @@ export function CatalogPoster({
 }: CatalogPosterProps) {
   return (
     <CatalogImage
+      assetKey={assetKey}
       src={src}
       alt={alt}
       size={size}

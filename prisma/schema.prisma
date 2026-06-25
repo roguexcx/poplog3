@@ -136,19 +136,19 @@ enum AvailabilitySource {
 }
 
 enum PremiumApi {
-  omdb
   watchmode
   movieofthenight
 }
 
 enum EngineApi {
   tmdb
-  omdb
   watchmode
   motn
   trakt
-  tvdb
   balloonerismm
+  wikidata
+  wikipedia
+  justwatch
 }
 
 enum CacheStatus {
@@ -192,6 +192,17 @@ enum SearchQueryType {
   slug
 }
 
+enum UserRole {
+  user
+  admin
+  master
+}
+
+enum UserAccessStatus {
+  active
+  blocked
+}
+
 model User {
   id            String    @id @default(cuid()) @db.VarChar(191)
   email         String?   @unique @db.VarChar(191)
@@ -201,6 +212,12 @@ model User {
   username      String?   @unique @db.VarChar(64)
   createdAt     DateTime  @default(now()) @map("created_at")
   updatedAt     DateTime  @updatedAt @map("updated_at")
+  role          UserRole  @default(user)
+  accessStatus  UserAccessStatus @default(active) @map("access_status")
+  blockedAt     DateTime? @map("blocked_at")
+  blockedReason String?   @map("blocked_reason") @db.Text
+  adminPermissions Json?  @map("admin_permissions")
+  lastAdminActionAt DateTime? @map("last_admin_action_at")
 
   accounts                   Account[]
   sessions                   Session[]
@@ -220,6 +237,8 @@ model User {
   availabilityFallbackStates Poplog3AvailabilityFallbackState[]
   premiumApiUsages           Poplog3PremiumApiUsage[]
 
+  @@index([role])
+  @@index([accessStatus])
   @@map("users")
 }
 
@@ -483,6 +502,9 @@ model UserCuradoriaPreference {
   avgEpisodesPerSession           Decimal? @map("avg_episodes_per_session") @db.Decimal(4, 2)
   prefersShortContent             Boolean  @default(false) @map("prefers_short_content")
   bingeTendencyScore              Decimal  @default(0.5) @map("binge_tendency_score") @db.Decimal(3, 2)
+  interfaceLanguage               String   @default("pt-BR") @map("interface_language") @db.VarChar(16)
+  catalogLanguage                 String   @default("pt-BR") @map("catalog_language") @db.VarChar(16)
+  availabilityRegion              String   @default("BR") @map("availability_region") @db.VarChar(16)
   updatedAt                       DateTime @updatedAt @map("updated_at")
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -549,6 +571,8 @@ model Poplog3Title {
   @@unique([traktId, mediaType])
   @@unique([imdbId, mediaType])
   @@index([slug, mediaType])
+  @@index([imdbId, slug])
+  @@index([imdbId, source])
   @@index([mediaType, tmdbId])
   @@index([mediaType, expiresAt])
   @@index([staleAt])
@@ -656,7 +680,146 @@ model TitleExternalId {
   updatedAt   DateTime  @updatedAt @map("updated_at")
 
   @@unique([tmdbId, mediaType])
+  @@index([imdbId])
+  @@index([traktId])
+  @@index([watchmodeId])
+  @@index([motnId])
   @@map("title_external_ids")
+}
+
+model TitleSourceIdentity {
+  source     String     @db.VarChar(64)
+  externalId String     @map("external_id") @db.VarChar(191)
+  imdbId     String     @map("imdb_id") @db.VarChar(64)
+  mediaType  MediaType? @map("media_type")
+  createdAt  DateTime   @default(now()) @map("created_at")
+  updatedAt  DateTime   @updatedAt @map("updated_at")
+
+  @@id([source, externalId])
+  @@index([imdbId])
+  @@index([imdbId, source])
+  @@map("title_source_identities")
+}
+
+model TitleTranslation {
+  imdbId    String   @map("imdb_id") @db.VarChar(64)
+  language  String   @db.VarChar(16)
+  region    String   @db.VarChar(16)
+  title     String   @db.VarChar(512)
+  overview  String?  @db.Text
+  tagline   String?  @db.VarChar(512)
+  slug      String?  @db.VarChar(191)
+  aliases   Json?
+  source    String?  @db.VarChar(64)
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  @@id([imdbId, language, region])
+  @@index([imdbId, language])
+  @@index([language, region])
+  @@index([slug, language, region])
+  @@map("title_translations")
+}
+
+model TitleAlias {
+  id              String     @id @default(cuid()) @db.VarChar(191)
+  imdbId          String     @map("imdb_id") @db.VarChar(64)
+  mediaType       MediaType? @map("media_type")
+  language        String?    @db.VarChar(16)
+  region          String?    @db.VarChar(16)
+  value           String     @db.VarChar(512)
+  normalizedValue String     @map("normalized_value") @db.VarChar(512)
+  source          String?    @db.VarChar(64)
+  createdAt       DateTime   @default(now()) @map("created_at")
+  updatedAt       DateTime   @updatedAt @map("updated_at")
+
+  @@index([imdbId])
+  @@index([normalizedValue(length: 191), language, region])
+  @@index([imdbId, language, region])
+  @@map("title_aliases")
+}
+
+model TitleAsset {
+  id         String   @id @default(cuid()) @db.VarChar(191)
+  imdbId     String   @map("imdb_id") @db.VarChar(64)
+  type       String   @db.VarChar(32)
+  language   String?  @db.VarChar(16)
+  region     String?  @db.VarChar(16)
+  assetKey   String?  @map("asset_key") @db.VarChar(512)
+  sourceUrl  String?  @map("source_url") @db.Text
+  source     String?  @db.VarChar(64)
+  width      Int?
+  height     Int?
+  isPrimary  Boolean  @default(false) @map("is_primary")
+  isOverride Boolean  @default(false) @map("is_override")
+  metadata   Json?
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  @@index([imdbId, type, language, region])
+  @@index([imdbId, type, isPrimary])
+  @@index([assetKey])
+  @@map("title_assets")
+}
+
+model TitleOverride {
+  id           String   @id @default(cuid()) @db.VarChar(191)
+  imdbId       String   @map("imdb_id") @db.VarChar(64)
+  field        String   @db.VarChar(64)
+  language     String?  @db.VarChar(16)
+  region       String?  @db.VarChar(16)
+  valueJson    Json     @map("value_json")
+  previousJson Json?    @map("previous_json")
+  reason       String?  @db.Text
+  actorUserId  String   @map("actor_user_id") @db.VarChar(191)
+  active       Boolean  @default(true)
+  cacheKey     String?  @map("cache_key") @db.VarChar(512)
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  @@index([imdbId, field, language, region])
+  @@index([actorUserId, createdAt])
+  @@index([active])
+  @@map("title_overrides")
+}
+
+model AdminActionLog {
+  id               String   @id @default(cuid()) @db.VarChar(191)
+  actorUserId      String   @map("actor_user_id") @db.VarChar(191)
+  entityType       String   @map("entity_type") @db.VarChar(64)
+  entityId         String   @map("entity_id") @db.VarChar(191)
+  field            String?  @db.VarChar(64)
+  language         String?  @db.VarChar(16)
+  region           String?  @db.VarChar(16)
+  previousJson     Json?    @map("previous_json")
+  nextJson         Json?    @map("next_json")
+  action           String   @db.VarChar(64)
+  reason           String?  @db.Text
+  cacheKey         String?  @map("cache_key") @db.VarChar(512)
+  cacheInvalidated Boolean  @default(false) @map("cache_invalidated")
+  metadata         Json?
+  ip               String?  @db.VarChar(64)
+  createdAt        DateTime @default(now()) @map("created_at")
+
+  @@index([entityType, entityId])
+  @@index([actorUserId, createdAt])
+  @@index([entityId, field, language, region])
+  @@map("admin_action_logs")
+}
+
+model UserLibraryIdentity {
+  userId    String     @map("user_id") @db.VarChar(191)
+  imdbId    String     @map("imdb_id") @db.VarChar(64)
+  mediaType MediaType? @map("media_type")
+  status    String?    @db.VarChar(64)
+  source    String?    @db.VarChar(64)
+  createdAt DateTime   @default(now()) @map("created_at")
+  updatedAt DateTime   @updatedAt @map("updated_at")
+
+  @@id([userId, imdbId])
+  @@index([userId, status])
+  @@index([imdbId])
+  @@map("user_library_identities")
 }
 
 model TitleRating {
@@ -1014,6 +1177,7 @@ model CatalogAvailability {
   mediaType           MediaType                 @map("media_type")
   providerName        String                    @map("provider_name") @db.VarChar(191)
   providerRegion      String                    @map("provider_region") @db.VarChar(8)
+  providerLanguage    String                    @default("pt-BR") @map("provider_language") @db.VarChar(16)
   providerType        ProviderType              @map("provider_type")
   providerUrl         String?                   @map("provider_url") @db.Text
   providerLogoUrl     String?                   @map("provider_logo_url") @db.Text
@@ -1021,15 +1185,17 @@ model CatalogAvailability {
   sourceConfidence    SourceConfidence          @map("source_confidence")
   checkedAt           DateTime                  @default(now()) @map("checked_at")
   expiresAt           DateTime                  @map("expires_at")
+  staleUntil          DateTime?                 @map("stale_until")
   evidencePayloadHash String?                   @map("evidence_payload_hash") @db.VarChar(191)
   rawPayloadJson      Json?                     @map("raw_payload_json")
   createdAt           DateTime                  @default(now()) @map("created_at")
   updatedAt           DateTime                  @updatedAt @map("updated_at")
 
-  @@unique([imdbId, traktId, providerName, providerRegion, providerType])
-  @@index([imdbId, providerRegion])
+  @@unique([imdbId, traktId, providerName, providerRegion, providerLanguage, providerType], map: "catalog_avail_identity_lang_uq")
+  @@index([imdbId, providerRegion, providerLanguage], map: "catalog_avail_imdb_region_lang_idx")
   @@index([traktId, providerRegion])
   @@index([expiresAt])
+  @@index([staleUntil], map: "catalog_avail_stale_until_idx")
   @@index([source, sourceConfidence])
   @@map("catalog_availability")
 }

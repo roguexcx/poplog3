@@ -1,5 +1,4 @@
 "use client";
-
 /**
  * TmdbImage — wrapper de compatibilidade.
  *

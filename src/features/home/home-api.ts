@@ -102,12 +102,14 @@ function trendingTitleToTMDBItem(t: EnrichedTrendingTitle): TMDBItem {
  */
 export async function getTrending(
   userId?: string | null,
-  options: { fast?: boolean; includeProviders?: boolean } = {},
+  options: { fast?: boolean; includeProviders?: boolean; language?: string | null; region?: string | null } = {},
 ): Promise<TMDBItem[]> {
   const feed = await getTrendingFeed({
     fast: options.fast,
     includeProviders: options.includeProviders,
     backgroundRefresh: options.fast,
+    language: options.language,
+    region: options.region,
   });
 
   const feedbackMap = userId

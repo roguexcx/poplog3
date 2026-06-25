@@ -3,6 +3,7 @@ import { getCurrentUser } from "@/server/auth/get-current-user";
 import { getUserFeedbackMap } from "@/lib/personalization/feedback";
 import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
 import { getTrendingFeed, withTimeout } from "@/features/home/trending-feed";
+import { resolveLocaleScope } from "@/server/source-engine/locale";
 
 const TRENDING_AUTH_TIMEOUT_MS = 500;
 
@@ -30,6 +31,13 @@ export async function GET(request: NextRequest) {
   const debugSource = request.nextUrl.searchParams.get("debugSource") === "1";
   const includeProviders = request.nextUrl.searchParams.get("includeProviders") !== "0";
   const fast = request.nextUrl.searchParams.get("fast") === "1";
+  const localeScope = resolveLocaleScope({
+    language:
+      request.nextUrl.searchParams.get("language") ??
+      request.nextUrl.searchParams.get("locale") ??
+      request.cookies.get("poplog_catalog_language")?.value,
+    region: request.nextUrl.searchParams.get("region") ?? request.cookies.get("poplog_region")?.value,
+  });
   const totalStartedAt = Date.now();
   const perf: Record<string, number> = { request_parse: 0 };
   const stageRef = { value: totalStartedAt };
@@ -43,6 +51,8 @@ export async function GET(request: NextRequest) {
       fast,
       includeProviders,
       backgroundRefresh: fast,
+      language: localeScope.catalogLanguage,
+      region: localeScope.region,
       recordStage: (stage) => markStage(perf, stageRef, stage),
     });
 
@@ -63,6 +73,8 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       ok: true,
       count: results.length,
+      language: localeScope.catalogLanguage,
+      region: localeScope.region,
       results,
       ...(feed.fromCache ? { cacheStatus: feed.cacheReadStatus } : {}),
       ...(debugSource ? { debugSource: feed.debugSource } : {}),

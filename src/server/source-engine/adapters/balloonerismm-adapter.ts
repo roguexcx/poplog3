@@ -603,7 +603,7 @@ export const balloonerismAdapter: CatalogAdapter & {
       : params.mediaType === "show" ? "/search/tv"
       : "/search/multi";
     const raw = await balloonerismGet<unknown>(path, {
-      params: { query: params.query, page: params.page ?? 1, language: "pt-BR" },
+      params: { query: params.query, page: params.page ?? 1, language: params.language ?? "pt-BR" },
       ttlSeconds: 3600,
     });
     if (raw === null) return [];

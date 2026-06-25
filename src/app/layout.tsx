@@ -1,30 +1,32 @@
+import { uiMessage } from "@/lib/i18n/ui-message";
 import type { Metadata } from "next";
+import { cookies } from "next/headers";
 import Sidebar from "@/components/layout/Sidebar";
 import GlobalSearchHeader from "@/components/layout/GlobalSearchHeader";
 import AgendaBackgroundRefresh from "@/components/layout/AgendaBackgroundRefresh";
 import RadarBackgroundPrefetch from "@/components/layout/RadarBackgroundPrefetch";
+import LocaleFooterSwitch from "@/components/layout/LocaleFooterSwitch";
 import AuthSessionProvider from "@/components/auth/AuthSessionProvider";
+import AdSenseBootstrap from "@/components/ads/AdSenseBootstrap";
 import { FEATURES } from "@/lib/features";
+import { normalizeInterfaceLanguage } from "@/server/source-engine/locale";
 import "./globals.css";
-
 export const metadata: Metadata = {
-  title: {
-    default: "POPLOG",
-    template: "POPLOG — %s",
-  },
-  description:
-    "Descubra, organize e acompanhe filmes e séries em uma experiência pessoal.",
+    title: {
+        default: "POPLOG",
+        template: "POPLOG — %s",
+    },
+    description: uiMessage("ui.81f21ae2a76d"),
 };
-
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode;
+export default async function RootLayout({ children, }: {
+    children: React.ReactNode;
 }) {
-  return (
-    <html lang="pt-BR" className="dark antialiased">
+    const cookieStore = await cookies();
+    const interfaceLanguage = normalizeInterfaceLanguage(cookieStore.get("poplog_interface_language")?.value);
+    return (<html lang={interfaceLanguage} className="dark antialiased">
       <body>
         <AuthSessionProvider>
+          <AdSenseBootstrap />
           <Sidebar />
           <AgendaBackgroundRefresh />
           {FEATURES.RADAR && <RadarBackgroundPrefetch />}
@@ -34,8 +36,9 @@ export default function RootLayout({
               {children}
             </div>
           </main>
+          <LocaleFooterSwitch />
         </AuthSessionProvider>
       </body>
-    </html>
-  );
+    </html>);
 }
+

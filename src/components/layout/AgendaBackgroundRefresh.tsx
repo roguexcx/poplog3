@@ -1,5 +1,4 @@
 "use client";
-
 import { useEffect } from "react";
 
 // Fires once per browser session to keep the agenda cache warm.

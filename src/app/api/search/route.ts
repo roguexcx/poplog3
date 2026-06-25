@@ -13,6 +13,8 @@ import {
   hydrateCatalogResultsWithDebug,
   type HydrationDebug,
 } from "@/server/source-engine/hydrate-catalog-results";
+import { resolveLocaleScope } from "@/server/source-engine/locale";
+import { sourceEngineLog } from "@/server/source-engine/source-log";
 
 type SearchTitleSummary = {
   id: number;
@@ -62,6 +64,13 @@ export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const query = searchParams.get("q")?.trim();
   const debugSource = searchParams.get("debugSource") === "1";
+  const localeScope = resolveLocaleScope({
+    language:
+      searchParams.get("language") ??
+      searchParams.get("locale") ??
+      request.cookies.get("poplog_catalog_language")?.value,
+    region: searchParams.get("region") ?? request.cookies.get("poplog_region")?.value,
+  });
 
   if (!query) {
     return NextResponse.json(
@@ -86,7 +95,11 @@ export async function GET(request: NextRequest) {
 
     let catalogDebug: HydrationDebug | null = null;
     try {
-      const catalogResults = await catalogSearch({ query });
+      const catalogResults = await catalogSearch({
+        query,
+        language: localeScope.catalogLanguage,
+        region: localeScope.region,
+      });
       const hydratedResult = await hydrateCatalogResultsWithDebug(catalogResults);
       const hydrated = hydratedResult.titles;
       catalogDebug = hydratedResult.debug;
@@ -113,12 +126,20 @@ export async function GET(request: NextRequest) {
           preserveOrder: true,
         });
 
-        console.log(`[search] source=balloonerismm count=${validTitles.length} fuzzy=${fuzzyTitles.length}`);
+        sourceEngineLog("search_resolved", {
+          query,
+          locale: localeScope.catalogLanguage,
+          region: localeScope.region,
+          count: validTitles.length,
+          fuzzy: fuzzyTitles.length,
+        });
 
         return NextResponse.json({
           ok: true,
           query,
           normalizedQuery: normalizeSearchTerm(query),
+          language: localeScope.catalogLanguage,
+          region: localeScope.region,
           count: results.length,
           fuzzyCount: fuzzyTitles.length,
           results,
@@ -128,7 +149,12 @@ export async function GET(request: NextRequest) {
 
       catalogDebug.fallbackUsed = true;
       catalogDebug.fallbackReason = catalogResults.length === 0 ? "raw_empty" : "normalized_empty";
-      console.log(`[search] source=balloonerismm_fallback reason=${catalogDebug.fallbackReason}`);
+      sourceEngineLog("search_fallback", {
+        query,
+        locale: localeScope.catalogLanguage,
+        region: localeScope.region,
+        reason: catalogDebug.fallbackReason,
+      }, "warn");
     } catch (err) {
       catalogDebug = {
         source: "trakt",
@@ -149,7 +175,13 @@ export async function GET(request: NextRequest) {
           temporaryCandidates: 0,
         },
       };
-      console.warn("[search] source=balloonerismm_fallback reason=error", err instanceof Error ? err.message : err);
+      sourceEngineLog("search_fallback", {
+        query,
+        locale: localeScope.catalogLanguage,
+        region: localeScope.region,
+        reason: "error",
+        error: err instanceof Error ? err.message : String(err),
+      }, "warn");
     }
 
     const fuzzyTitles = await findCachedFuzzyTitles({ query, mediaType: "all" });
@@ -165,6 +197,8 @@ export async function GET(request: NextRequest) {
       ok: true,
       query,
       normalizedQuery: normalizeSearchTerm(query),
+      language: localeScope.catalogLanguage,
+      region: localeScope.region,
       count: results.length,
       fuzzyCount: fuzzyTitles.length,
       results,

@@ -363,13 +363,14 @@ async function performTraktRequest<T>(
   if (method !== "GET") await waitForWriteSlot();
 
   try {
+    const shouldUseNextDataCache = method === "GET" && options.cache !== "no-store";
     const response = await fetch(url, {
       method,
       headers: buildTraktHeaders(options.accessToken),
       cache: method === "GET" ? options.cache ?? "default" : "no-store",
       signal: options.signal ?? controller.signal,
       body: options.body == null ? undefined : JSON.stringify(options.body),
-      ...(method === "GET" ? { next: { revalidate: options.ttlSeconds } } : {}),
+      ...(shouldUseNextDataCache ? { next: { revalidate: options.ttlSeconds } } : {}),
     } as RequestInit & { next?: { revalidate: number } });
 
     const durationMs = Date.now() - startedAt;

@@ -38,6 +38,8 @@ import {
   type LibraryIdentityIndex,
 } from "@/server/library/library-identity-index";
 import { titleIdentityKeys } from "@/lib/user-title-identity";
+import { resolveLocaleScope, type LocaleScope } from "@/server/source-engine/locale";
+import { sourceEngineLog } from "@/server/source-engine/source-log";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -46,8 +48,6 @@ const DEFAULT_FINAL_COUNT   = 6;   // home desktop exibe 1 featured + 5 small = 
 const MAX_FINAL_COUNT       = 30;
 const SESSION_EXCLUDE_CAP   = 150;
 const HOME_FAST_COUNT       = 6;
-const FOR_YOU_REGION        = "BR";
-const FOR_YOU_LANGUAGE      = "pt-BR";
 // Balloonerismm is the primary source. All seeds with imdbId are queried.
 // Concurrency cap avoids rate-limit cascades; hydration cap limits Trakt calls.
 const BALLOON_CONCURRENCY   = 4;
@@ -547,8 +547,12 @@ async function runWithConcurrency<T>(
 // Concurrency cap: max 8 simultaneous requests to avoid Trakt rate-limit cascade.
 // Candidate cap: top 60 by score — beyond this, translations rarely affect outcome.
 
-async function enrichWithTraktTranslations(candidates: RecCandidate[]): Promise<void> {
+async function enrichWithTraktTranslations(
+  candidates: RecCandidate[],
+  scope: LocaleScope,
+): Promise<void> {
   if (!isTraktActive()) return;
+  if (scope.catalogLanguage !== "pt-BR") return;
 
   // Prioritize candidates most likely to be selected before hitting the cap
   const sorted = [...candidates].sort((a, b) => score(b) - score(a));
@@ -643,7 +647,12 @@ function weightedSample<T>(items: T[], getW: (i: T) => number, n: number): T[] {
 
 const ROUTE_IN_FLIGHT = new Map<string, Promise<unknown>>();
 
-function buildRouteKey(titles: UserTitle[], limit: number, excludeKeys: Set<string>): string {
+function buildRouteKey(
+  titles: UserTitle[],
+  limit: number,
+  excludeKeys: Set<string>,
+  scope: LocaleScope,
+): string {
   const ids = titles
     .map((t) => [
       t.media_type,
@@ -655,7 +664,7 @@ function buildRouteKey(titles: UserTitle[], limit: number, excludeKeys: Set<stri
     ].join(":"))
     .sort()
     .join(",");
-  return `fy:${ids}:exclude=${[...excludeKeys].sort().join(",")}:limit=${limit}`;
+  return `fy:${scope.catalogLanguage}:${scope.region}:${ids}:exclude=${[...excludeKeys].sort().join(",")}:limit=${limit}`;
 }
 
 // ─── Candidate pool cache ─────────────────────────────────────────────────────
@@ -672,6 +681,8 @@ type PoolCachePayload = {
   source: string;
   generatedAt: string;
   libraryHash: string;
+  language: string;
+  region: string;
 };
 
 type PoolCacheRead = {
@@ -707,12 +718,12 @@ function buildLibraryHash(titles: UserTitle[]): string {
   return hashText(buildLibrarySignature(titles));
 }
 
-function buildPoolKey(titles: UserTitle[], userId: string | null): string {
-  return `pool:${userId ?? "anon"}:${buildLibraryHash(titles)}`;
+function buildPoolKey(titles: UserTitle[], userId: string | null, scope: LocaleScope): string {
+  return `pool:${userId ?? "anon"}:${scope.catalogLanguage}:${scope.region}:${buildLibraryHash(titles)}`;
 }
 
-function buildPersistentPoolSectionKey(libraryHash: string): string {
-  return `for_you_pool_v${FOR_YOU_POOL_CACHE_VERSION}:${libraryHash}`;
+function buildPersistentPoolSectionKey(libraryHash: string, scope: LocaleScope): string {
+  return `for_you_pool_v${FOR_YOU_POOL_CACHE_VERSION}:${scope.catalogLanguage}:${scope.region}:${libraryHash}`;
 }
 
 function cloneCandidates(candidates: RecCandidate[]): RecCandidate[] {
@@ -756,13 +767,14 @@ function writePoolCache(key: string, eligible: RecCandidate[], source: string): 
 async function readPersistentPoolCache(input: {
   userId: string | null;
   libraryHash: string;
+  scope: LocaleScope;
 }): Promise<PoolCacheRead | null> {
   const cached = await readContinuitySectionCache<PoolCachePayload>(
-    buildPersistentPoolSectionKey(input.libraryHash),
+    buildPersistentPoolSectionKey(input.libraryHash, input.scope),
     {
       userId: input.userId,
-      region: FOR_YOU_REGION,
-      language: FOR_YOU_LANGUAGE,
+      region: input.scope.region,
+      language: input.scope.catalogLanguage,
     },
   );
 
@@ -770,6 +782,8 @@ async function readPersistentPoolCache(input: {
     !cached?.payload ||
     cached.payload.version !== FOR_YOU_POOL_CACHE_VERSION ||
     cached.payload.libraryHash !== input.libraryHash ||
+    cached.payload.language !== input.scope.catalogLanguage ||
+    cached.payload.region !== input.scope.region ||
     !Array.isArray(cached.payload.eligible)
   ) {
     return null;
@@ -789,14 +803,15 @@ function writePersistentPoolCache(input: {
   libraryHash: string;
   eligible: RecCandidate[];
   source: string;
+  scope: LocaleScope;
   ttlMs?: number;
 }): void {
   const generatedAt = new Date().toISOString();
   void writeContinuitySectionCache({
-    sectionKey: buildPersistentPoolSectionKey(input.libraryHash),
+    sectionKey: buildPersistentPoolSectionKey(input.libraryHash, input.scope),
     userId: input.userId,
-    region: FOR_YOU_REGION,
-    language: FOR_YOU_LANGUAGE,
+    region: input.scope.region,
+    language: input.scope.catalogLanguage,
     ttlMs: input.ttlMs ?? PERSISTENT_POOL_TTL_MS,
     payload: {
       version: FOR_YOU_POOL_CACHE_VERSION,
@@ -804,6 +819,8 @@ function writePersistentPoolCache(input: {
       source: input.source,
       generatedAt,
       libraryHash: input.libraryHash,
+      language: input.scope.catalogLanguage,
+      region: input.scope.region,
     } satisfies PoolCachePayload,
   });
 }
@@ -967,6 +984,7 @@ async function buildForYouResponse(
     perf: PerfTracker;
     includeProviders?: boolean;
     compact?: boolean;
+    scope: LocaleScope;
   },
 ): Promise<ForYouApiResponse> {
   // Filtro de sessão (`exclude`) — por request, nunca cacheado.
@@ -1047,6 +1065,7 @@ async function buildForYouResponse(
   const itemsWithProviders = options.includeProviders
     ? await attachBestProvider(items, {
         block: "for-you",
+        region: options.scope.region,
         getMediaType: (it) => it.mediaType,
         getTmdbId: (it) => it.id,
         getImdbId: (it) => it.imdbId ?? null,
@@ -1079,14 +1098,16 @@ async function buildForYouResponse(
     meta: {
       surface: options.surface,
       mode: options.mode,
-      cacheStatus: options.cacheStatus,
-      stale: Boolean(options.stale),
-      source,
-      returned,
-      generatedAt: options.generatedAt,
-      perf,
-    },
-  };
+        cacheStatus: options.cacheStatus,
+        stale: Boolean(options.stale),
+        source,
+        returned,
+        generatedAt: options.generatedAt,
+        perf,
+        language: options.scope.catalogLanguage,
+        region: options.scope.region,
+      },
+  } as ForYouApiResponse;
 }
 
 // ─── Pipeline ─────────────────────────────────────────────────────────────────
@@ -1102,6 +1123,7 @@ async function runForYouPipeline(
     mode: ForYouMode;
     includeProviders?: boolean;
     perf: PerfTracker;
+    scope: LocaleScope;
   },
 ): Promise<ForYouApiResponse> {
     // Auth primeiro — necessário para lookup autoritativo da biblioteca no DB.
@@ -1111,7 +1133,7 @@ async function runForYouPipeline(
     // A chave ainda permite reaproveitar o trabalho externo, mas a biblioteca
     // autoritativa é carregada antes de qualquer cache-hit para nunca servir um
     // título recém-adicionado ou representado por outro alias.
-    const poolKey = buildPoolKey(titles, user?.id ?? null);
+    const poolKey = buildPoolKey(titles, user?.id ?? null, options.scope);
     const libraryHash = buildLibraryHash(titles);
 
     // Índice canônico compartilhado por todas as superfícies de descoberta.
@@ -1150,6 +1172,7 @@ async function runForYouPipeline(
           perf: options.perf,
           includeProviders: Boolean(options.includeProviders),
           compact: options.surface === "home",
+          scope: options.scope,
         },
       );
     }
@@ -1157,6 +1180,7 @@ async function runForYouPipeline(
     const persistentEligible = await readPersistentPoolCache({
       userId: user?.id ?? null,
       libraryHash,
+      scope: options.scope,
     });
     if (
       persistentEligible &&
@@ -1183,6 +1207,7 @@ async function runForYouPipeline(
           perf: options.perf,
           includeProviders: Boolean(options.includeProviders),
           compact: options.surface === "home",
+          scope: options.scope,
         },
       );
     }
@@ -1204,6 +1229,7 @@ async function runForYouPipeline(
           libraryHash,
           eligible: localEligible,
           source: "local_fallback",
+          scope: options.scope,
           ttlMs: LOCAL_FALLBACK_TTL_MS,
         });
 
@@ -1221,6 +1247,7 @@ async function runForYouPipeline(
             perf: options.perf,
             includeProviders: false,
             compact: true,
+            scope: options.scope,
           },
         );
       }
@@ -1554,7 +1581,7 @@ async function runForYouPipeline(
     // ── FASE 6b — Localização pt-BR via endpoint dedicado Trakt ───────────────
     // Para candidatos ainda sem pt-BR (inline Trakt não retornou ou DB não tinha),
     // busca /translations/pt separadamente. Resposta em cache TTL=86400.
-    await enrichWithTraktTranslations(candidates);
+    await enrichWithTraktTranslations(candidates, options.scope);
     markPerf(options.perf, "translation_enrichment");
 
     // ── FASE 7 — Filtro not_interested ────────────────────────────────────────
@@ -1588,8 +1615,18 @@ async function runForYouPipeline(
       `lib_removed=${libRemoved} deduped=${deduped} ` +
       `with_images=${withImagesCount} eligible=${eligible.length} source=${source} ` +
       `exclusion_keys=canonical(poplog+tmdb+imdb+trakt+slug) ` +
-      `library_aliases=${libraryIdentities.size}`,
+      `library_aliases=${libraryIdentities.size} ` +
+      `locale=${options.scope.catalogLanguage} region=${options.scope.region}`,
     );
+    sourceEngineLog("recommendations_filtered", {
+      user: user?.id ?? "anonymous",
+      locale: options.scope.catalogLanguage,
+      region: options.scope.region,
+      candidates: candidates.length,
+      lib_removed: libRemoved,
+      deduped,
+      eligible: eligible.length,
+    });
 
     // Cacheia o pool elegível (independente de sessão/seleção) para recargas baratas.
     if (eligible.length > 0) {
@@ -1599,6 +1636,7 @@ async function runForYouPipeline(
         libraryHash,
         eligible,
         source,
+        scope: options.scope,
       });
     }
     markPerf(options.perf, "cache_write");
@@ -1618,6 +1656,7 @@ async function runForYouPipeline(
         perf: options.perf,
         includeProviders: Boolean(options.includeProviders),
         compact: options.surface === "home",
+        scope: options.scope,
       },
     );
 }
@@ -1627,6 +1666,12 @@ async function runForYouPipeline(
 export async function POST(req: NextRequest) {
   const body     = await req.json().catch(() => null);
   const titles: UserTitle[] = Array.isArray(body?.titles) ? body.titles : [];
+  const scope = resolveLocaleScope({
+    interfaceLanguage: body?.interfaceLanguage,
+    catalogLanguage: body?.catalogLanguage,
+    language: body?.language ?? body?.locale,
+    region: body?.region,
+  });
   const surface: ForYouSurface = body?.surface === "page" ? "page" : "home";
   const mode: ForYouMode = body?.mode === "full" || surface === "page" ? "full" : "summary";
   const includeProviders = body?.includeProviders === true;
@@ -1655,12 +1700,14 @@ export async function POST(req: NextRequest) {
         source: "empty",
         returned: 0,
         perf: finishPerf(perf),
+        language: scope.catalogLanguage,
+        region: scope.region,
       },
-    } satisfies ForYouApiResponse);
+    } as ForYouApiResponse);
   }
 
   // ── Route-level dedup (burst protection) ─────────────────────────────────
-  const routeKey = `${surface}:${mode}:${includeProviders ? "providers" : "compact"}:${buildRouteKey(titles, FINAL_COUNT, excludeKeys)}`;
+  const routeKey = `${surface}:${mode}:${includeProviders ? "providers" : "compact"}:${buildRouteKey(titles, FINAL_COUNT, excludeKeys, scope)}`;
   const inflight = ROUTE_IN_FLIGHT.get(routeKey);
   if (inflight) {
     console.log(`[for-you] dedup_inflight key="${routeKey}"`);
@@ -1675,6 +1722,7 @@ export async function POST(req: NextRequest) {
       mode,
       includeProviders,
       perf,
+      scope,
     })
   ).catch((err: unknown) => {
     console.error("[for-you]", err);
@@ -1691,8 +1739,10 @@ export async function POST(req: NextRequest) {
         source: "error",
         returned: 0,
         perf: finishPerf(perf),
+        language: scope.catalogLanguage,
+        region: scope.region,
       },
-    } satisfies ForYouApiResponse;
+    } as ForYouApiResponse;
   });
 
   ROUTE_IN_FLIGHT.set(routeKey, pipelinePromise);

@@ -7,10 +7,33 @@ Esta branch mantém a identidade visual e a estrutura mínima do frontend, mas r
 ## Como rodar
 
 ```bash
+docker compose up -d mysql redis
 npm run dev
 ```
 
 Abra `http://localhost:3000`.
+
+## Redis local
+
+O Redis local roda via Docker Compose em `redis://127.0.0.1:6379`.
+
+```bash
+docker compose up -d redis
+npm run cache:smoke:redis
+```
+
+O smoke valida PING, escrita JSON, leitura JSON e limpeza por namespace.
+
+## Cron de workers
+
+A fila de refresh pode rodar de duas formas:
+
+```bash
+npm run workers:refresh
+npm run workers:cron:smoke
+```
+
+Em produção, configure um scheduler externo para chamar `POST /api/cron/refresh-workers` com `Authorization: Bearer $POPLOG_CRON_SECRET`. O workflow `.github/workflows/poplog-worker-cron.yml` já faz essa chamada a cada 5 minutos quando os secrets `POPLOG_CRON_URL` e `POPLOG_CRON_SECRET` estiverem configurados.
 
 ## O que ficou
 

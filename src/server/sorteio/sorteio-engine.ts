@@ -7,6 +7,7 @@ import {
 } from "@/server/source-engine/engine";
 import type { CatalogSearchResult } from "@/server/source-engine/types/catalog.types";
 import { syntheticTmdbFromImdbId } from "@/lib/ids/synthetic-tmdb-id";
+import { ensureMinimumSorteioSeed } from "@/server/sorteio/minimum-pool";
 
 type MediaType = "movie" | "tv";
 export type SorteioMode = "discovery" | "watchlist";
@@ -64,10 +65,16 @@ export type SorteioPoolResult = {
   };
 };
 
+type BuildSorteioPoolOptions = {
+  externalDiscovery?: boolean;
+  warmAvailability?: boolean;
+};
+
 const INTENSE_GENRES = new Set([18, 80, 53, 27, 9648, 10752]);
 const LIGHT_GENRES = new Set([35, 10751, 10749, 16]);
 const STREAMING_TYPES = new Set(["streaming", "subscription", "flatrate", "free", "ads"]);
 const DIGITAL_TYPES = new Set(["rent", "buy"]);
+const MIN_LOCAL_DISCOVERY_ITEMS = 12;
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -139,6 +146,7 @@ function sourceStrength(source?: string) {
   if (source.includes("discover")) return 7;
   if (source.includes("popular")) return 6;
   if (source.includes("top_rated")) return 5;
+  if (source.includes("poplog_seed")) return 4;
   return 1;
 }
 
@@ -150,6 +158,14 @@ function normalizeProviderType(type?: string | null) {
 
 function dateOnly(value: Date | null | undefined): string | null {
   return value ? value.toISOString().slice(0, 10) : null;
+}
+
+function genreIdsFromJson(value: unknown): number[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => Number(item))
+    .filter((item) => Number.isFinite(item) && item > 0)
+    .map((item) => Math.floor(item));
 }
 
 /** Chave de comparação canônica para nomes de provider (alias-aware + lowercase). */
@@ -185,7 +201,7 @@ function recentWindowDays(poolSize: number) {
   return 7;
 }
 
-function weightedPick(items: SorteioItem[]) {
+export function pickWeightedSorteioItem(items: SorteioItem[]) {
   const total = items.reduce((sum, item) => sum + (item.sorteio_weight ?? 1), 0);
   let cursor = Math.random() * total;
   for (const item of items) {
@@ -227,6 +243,13 @@ async function fetchBalloonerismmDiscovery(): Promise<SorteioItem[]> {
 }
 
 async function fetchLocalDiscovery(): Promise<SorteioItem[]> {
+  await ensureMinimumSorteioSeed({
+    minCount: MIN_LOCAL_DISCOVERY_ITEMS,
+    reason: "sorteio_local_discovery",
+  }).catch((err) => {
+    console.warn("[sorteio-engine] minimum seed skipped", err);
+  });
+
   const rows = await db.poplog3Title.findMany({
     where: { posterPath: { not: null } },
     orderBy: { popularity: "desc" },
@@ -236,13 +259,17 @@ async function fetchLocalDiscovery(): Promise<SorteioItem[]> {
       mediaType: true,
       title: true,
       originalTitle: true,
+      overview: true,
       posterPath: true,
       backdropPath: true,
       releaseDate: true,
       firstAirDate: true,
       voteAverage: true,
+      voteCount: true,
       popularity: true,
+      genres: true,
       originalLanguage: true,
+      source: true,
     },
   });
 
@@ -262,32 +289,41 @@ async function fetchLocalDiscovery(): Promise<SorteioItem[]> {
         release_date: mediaType === "movie" ? date ?? "" : "",
         first_air_date: mediaType === "tv" ? date ?? "" : "",
         vote_average: row.voteAverage === null ? 0 : Number(row.voteAverage),
-        vote_count: 0,
+        vote_count: row.voteCount ?? 0,
         popularity: row.popularity === null ? 0 : Number(row.popularity),
-        overview: "",
-        genre_ids: [],
+        overview: row.overview ?? "",
+        genre_ids: genreIdsFromJson(row.genres),
         original_language: row.originalLanguage ?? null,
         availability_scope: "none",
-        sorteio_source: "local_db",
+        sorteio_source: row.source === "poplog_seed" ? "poplog_seed" : "local_db",
       };
     })
     .filter((item): item is SorteioItem => item !== null);
 }
 
-async function fetchDiscoveryPool(_favoriteProviderIds: string[], _region: string): Promise<{ items: SorteioItem[]; poolSource: string; skippedReasons: string[] }> {
+async function fetchDiscoveryPool(
+  _favoriteProviderIds: string[],
+  _region: string,
+  options: BuildSorteioPoolOptions = {},
+): Promise<{ items: SorteioItem[]; poolSource: string; skippedReasons: string[] }> {
   const skippedReasons: string[] = [];
+  const allowExternal = options.externalDiscovery !== false;
   const [balloonerismmItems, localItems] = await Promise.all([
-    fetchBalloonerismmDiscovery().catch((err) => {
-      console.warn("[sorteio-engine] fetchBalloonerismmDiscovery failed", err);
-      skippedReasons.push("balloonerismm_unavailable");
-      return [] as SorteioItem[];
-    }),
+    allowExternal
+      ? fetchBalloonerismmDiscovery().catch((err) => {
+          console.warn("[sorteio-engine] fetchBalloonerismmDiscovery failed", err);
+          skippedReasons.push("balloonerismm_unavailable");
+          return [] as SorteioItem[];
+        })
+      : Promise.resolve([] as SorteioItem[]),
     fetchLocalDiscovery().catch((err) => {
       console.warn("[sorteio-engine] fetchLocalDiscovery failed", err);
       skippedReasons.push("local_db_unavailable");
       return [] as SorteioItem[];
     }),
   ]);
+
+  if (!allowExternal) skippedReasons.push("external_discovery_disabled_for_draw");
 
   const poolSource = balloonerismmItems.length > 0 ? "balloonerismm+local_db" : "local_db";
   const items = dedupe([...balloonerismmItems, ...localItems]).filter((item) => {
@@ -414,7 +450,7 @@ async function fetchWatchlistPool(userId: string): Promise<SorteioItem[]> {
  * P4: disponibilidade do Sorteio agora vem do FLUXO CANÔNICO
  * (hydrateManyTitleAvailability, cacheOnly + warmCold) — sem ler catalog_availability direto.
  */
-async function enrichAvailability(items: SorteioItem[], region: string) {
+async function enrichAvailability(items: SorteioItem[], region: string, options: BuildSorteioPoolOptions = {}) {
   if (items.length === 0) return;
 
   const availabilityMap = await hydrateManyTitleAvailability(
@@ -422,7 +458,7 @@ async function enrichAvailability(items: SorteioItem[], region: string) {
       key: `${item.media_type}-${item.id}`,
       input: { mediaType: item.media_type, tmdbId: item.id, region },
     })),
-    { cacheOnly: true, warmCold: true },
+    { cacheOnly: true, warmCold: options.warmAvailability !== false },
   );
 
   for (const item of items) {
@@ -464,7 +500,7 @@ async function fetchRecentDraws(userId: string, days: number, mode: SorteioMode)
     }));
 }
 
-async function logDraw(userId: string, item: SorteioItem, meta: SorteioPoolResult["meta"]) {
+export async function logSorteioDraw(userId: string, item: SorteioItem, meta: SorteioPoolResult["meta"]) {
   await db.userEvent.create({
     data: {
     userId,
@@ -504,7 +540,11 @@ function applyFallback(items: SorteioItem[], filters: SorteioFilters) {
   return { items: filtered, fallback };
 }
 
-export async function buildSorteioPool(userId: string, filters: SorteioFilters): Promise<SorteioPoolResult> {
+export async function buildSorteioPool(
+  userId: string,
+  filters: SorteioFilters,
+  options: BuildSorteioPoolOptions = {},
+): Promise<SorteioPoolResult> {
   const preferences = await getUserProviderPreferences();
   const region = preferences.region ?? "BR";
   const favoriteProviderIds = new Set(preferences.favoriteProviderIds ?? []);
@@ -522,7 +562,7 @@ export async function buildSorteioPool(userId: string, filters: SorteioFilters):
   if (filters.mode === "watchlist") {
     initialItems = await fetchWatchlistPool(userId);
   } else {
-    const discovery = await fetchDiscoveryPool([...favoriteProviderIds], region);
+    const discovery = await fetchDiscoveryPool([...favoriteProviderIds], region, options);
     poolSource = discovery.poolSource;
     skippedReasons = discovery.skippedReasons;
     initialItems = discovery.items.filter(
@@ -530,8 +570,8 @@ export async function buildSorteioPool(userId: string, filters: SorteioFilters):
     );
   }
 
-  if (filters.mode === "discovery") {
-    await enrichAvailability(initialItems, region);
+  if (filters.mode === "discovery" && options.warmAvailability !== false) {
+    await enrichAvailability(initialItems, region, options);
   }
 
   const strictCandidates = initialItems.filter((item) => {
@@ -582,7 +622,7 @@ export async function buildSorteioPool(userId: string, filters: SorteioFilters):
 
 export async function drawSorteioItem(userId: string, filters: SorteioFilters) {
   const pool = await buildSorteioPool(userId, filters);
-  const item = weightedPick(pool.items);
-  if (item) await logDraw(userId, item, pool.meta);
+  const item = pickWeightedSorteioItem(pool.items);
+  if (item) await logSorteioDraw(userId, item, pool.meta);
   return { item: item ?? null, meta: pool.meta };
 }

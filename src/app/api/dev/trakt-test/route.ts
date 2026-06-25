@@ -5,7 +5,7 @@ import { getTraktClientStatus, traktGet } from "@/server/api-clients/trakt/clien
 export const dynamic = "force-dynamic";
 
 export async function GET(request: Request) {
-  if (!isAdminRequest(request)) return adminUnauthorizedResponse();
+  if (!(await isAdminRequest(request))) return adminUnauthorizedResponse();
 
   const data = await traktGet<unknown[]>("/movies/popular", {
     ttlSeconds: 300,

@@ -16,6 +16,25 @@ export type RadarResponse = RadarPayload;
 const DEFAULT_LANGUAGE = "pt-BR";
 const WINDOW_DAYS = 62;
 
+function radarLegacyResponse(payload: RadarPayload): Record<string, unknown> {
+  return {
+    mode: payload.mode,
+    source: payload.source,
+    generatedAt: payload.generatedAt,
+    cachedAt: payload.cachedAt,
+    fromCache: payload.fromCache,
+    cacheVersion: payload.cacheVersion,
+    region: payload.region,
+    language: payload.language,
+    stats: payload.stats,
+    libraryFiltered: payload.libraryFiltered,
+    librarySize: payload.librarySize,
+    matchedCount: payload.matchedCount,
+    missingLibraryCount: payload.missingLibraryCount,
+    general: radarPayloadToLegacyAgenda(payload),
+  };
+}
+
 export async function GET(req: NextRequest) {
   if (!FEATURES.RADAR) {
     return NextResponse.json(
@@ -26,12 +45,13 @@ export async function GET(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
     const mode: RadarMode = searchParams.get("mode") === "personal" ? "personal" : "general";
-    const region = normalizeStreamingRegion(searchParams.get("region"), {
+    const region = normalizeStreamingRegion(searchParams.get("region") ?? req.cookies.get("poplog_region")?.value, {
       source: "api:radar:region",
-      explicit: searchParams.has("region"),
+      explicit: searchParams.has("region") || req.cookies.has("poplog_region"),
     });
-    const language = searchParams.get("language") ?? DEFAULT_LANGUAGE;
+    const language = searchParams.get("language") ?? req.cookies.get("poplog_catalog_language")?.value ?? DEFAULT_LANGUAGE;
     const debug = searchParams.get("debug") === "1" || searchParams.get("debug") === "true";
+    const legacy = searchParams.get("legacy") === "1" || searchParams.get("legacy") === "true";
 
     const key = radarCacheKey(region, language, WINDOW_DAYS);
     const general = await getRadarCachedPayload(key, region, language, async () =>
@@ -43,22 +63,24 @@ export async function GET(req: NextRequest) {
       const library = await getRadarLibraryIdentity(user?.id ?? null);
       const personal = applyRadarPersonalFilter(general, library);
       return NextResponse.json(
-        {
-          ...personal,
-          generatedAt: new Date().toISOString(),
-          general: radarPayloadToLegacyAgenda(personal),
-        } satisfies RadarPayload,
+        legacy
+          ? radarLegacyResponse({ ...personal, generatedAt: new Date().toISOString() })
+          : ({
+              ...personal,
+              generatedAt: new Date().toISOString(),
+            } satisfies RadarPayload),
         { headers: { "Cache-Control": user ? "no-store" : "public, max-age=60" } },
       );
     }
 
     return NextResponse.json(
-      {
-        ...general,
-        mode: "general",
-        generatedAt: new Date().toISOString(),
-        general: radarPayloadToLegacyAgenda(general),
-      } satisfies RadarPayload,
+      legacy
+        ? radarLegacyResponse({ ...general, mode: "general", generatedAt: new Date().toISOString() })
+        : ({
+            ...general,
+            mode: "general",
+            generatedAt: new Date().toISOString(),
+          } satisfies RadarPayload),
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {

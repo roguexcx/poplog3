@@ -17,6 +17,11 @@ import { attachBestProvider } from "@/server/availability/attach-best-provider";
 import { filterValidTitles } from "@/server/utils/filter-valid-titles";
 import type { PoplogTitle } from "@/server/types/title";
 import { db } from "@/server/db/client";
+import { sourceEngineLog } from "@/server/source-engine/source-log";
+import {
+  normalizeCatalogLanguage,
+  normalizeCatalogRegion,
+} from "@/server/source-engine/locale";
 import { isTraktIndexEnabled } from "@/lib/trakt-index/engine";
 import { getPoplogDailyTrendingIndex } from "@/lib/trakt-index/canonical";
 import type { TraktIndexItem } from "@/lib/trakt-index/types";
@@ -83,6 +88,10 @@ export interface GetTrendingFeedOptions {
   skipCache?: boolean;
   /** Se `fast` usar fallback local, agenda refresh externo fora do caminho crítico. */
   backgroundRefresh?: boolean;
+  /** Idioma do catálogo usado para cache/logs e consultas localizadas. */
+  language?: string | null;
+  /** Região de disponibilidade usada para providers/cache. */
+  region?: string | null;
 }
 
 export async function withTimeout<T>(
@@ -150,6 +159,7 @@ async function fetchLocalTrending(): Promise<PoplogTitle[]> {
         voteAverage: true,
         voteCount: true,
         originalLanguage: true,
+        imdbId: true,
       },
     });
 
@@ -174,10 +184,15 @@ async function fetchLocalTrending(): Promise<PoplogTitle[]> {
         vote_average: row.voteAverage != null ? Number(row.voteAverage) : null,
         vote_count: row.voteCount ?? null,
         original_language: row.originalLanguage ?? null,
-        imdb_id: undefined,
+        imdb_id: row.imdbId ?? undefined,
         poplogId: row.id,
-        externalIds: { tmdbId: row.tmdbId },
-        ...resolveCatalogIdentityFields({ tmdb_id: row.tmdbId, media_type: row.mediaType as "movie" | "tv", poplogId: row.id }, "legacy"),
+        externalIds: { tmdbId: row.tmdbId, ...(row.imdbId ? { imdbId: row.imdbId } : {}) },
+        ...resolveCatalogIdentityFields({
+          tmdb_id: row.tmdbId,
+          imdb_id: row.imdbId,
+          media_type: row.mediaType as "movie" | "tv",
+          poplogId: row.id,
+        }, "legacy"),
         normalizedFrom: "legacy" as const,
       }));
   } catch {
@@ -191,7 +206,7 @@ async function fetchLocalTrending(): Promise<PoplogTitle[]> {
  */
 async function enrichWithRuntime(
   titles: PoplogTitle[],
-  options: { includeProviders?: boolean } = {},
+  options: { includeProviders?: boolean; region?: string; language?: string } = {},
 ) {
   const tvIds = titles
     .filter((t) => t.media_type === "tv")
@@ -250,6 +265,7 @@ async function enrichWithRuntime(
     getMediaType: (t) => t.media_type,
     getTmdbId: (t) => t.tmdb_id,
     getImdbId: (t) => t.externalIds?.imdbId,
+    region: options.region,
   });
 }
 
@@ -274,9 +290,35 @@ type TrendingCachePayload = {
 
 const TRENDING_REFRESH_IN_FLIGHT = new Map<string, Promise<void>>();
 
+function logProtectedTrendingFeed(
+  area: string,
+  items: Array<{ externalIds?: { imdbId?: string | null }; imdb_id?: string | null }>,
+  scope: { language: string; region: string },
+) {
+  sourceEngineLog("protected_feed_preserved", {
+    area,
+    providers: "trakt+balloonerismm",
+    locale: scope.language,
+    region: scope.region,
+  });
+
+  for (const item of items.slice(0, 3)) {
+    const imdb = item.externalIds?.imdbId ?? item.imdb_id ?? null;
+    if (!imdb) continue;
+    sourceEngineLog("protected_feed_item_normalized", {
+      imdb,
+      source: "trakt+balloonerismm",
+      locale: scope.language,
+      region: scope.region,
+    }, "debug");
+  }
+}
+
 function scheduleTrendingRefresh(options: {
   includeProviders: boolean;
   sectionKey: string;
+  language: string;
+  region: string;
 }) {
   if (TRENDING_REFRESH_IN_FLIGHT.has(options.sectionKey)) return;
 
@@ -284,6 +326,8 @@ function scheduleTrendingRefresh(options: {
     includeProviders: options.includeProviders,
     skipCache: true,
     fast: false,
+    language: options.language,
+    region: options.region,
   })
     .then(() => undefined)
     .catch((error) => {
@@ -312,12 +356,14 @@ export async function getTrendingFeed(
 ): Promise<TrendingFeedResult> {
   const recordStage = options.recordStage ?? (() => {});
   const includeProviders = options.includeProviders ?? true;
+  const language = normalizeCatalogLanguage(options.language ?? TRENDING_LANGUAGE);
+  const region = normalizeCatalogRegion(options.region ?? TRENDING_REGION);
   const sectionKey = includeProviders ? TRENDING_SECTION_KEY : TRENDING_LIGHT_SECTION_KEY;
 
   if (!options.skipCache) {
     const cached = await readContinuitySectionCache<TrendingCachePayload>(sectionKey, {
-      region: TRENDING_REGION,
-      language: TRENDING_LANGUAGE,
+      region,
+      language,
     });
     recordStage("cache_read");
 
@@ -355,19 +401,20 @@ export async function getTrendingFeed(
     recordStage("local_fallback");
 
     if (localValid.length > 0) {
-      const withRuntime = await enrichWithRuntime(localValid, { includeProviders });
+      const withRuntime = await enrichWithRuntime(localValid, { includeProviders, region, language });
 
       void writeContinuitySectionCache({
         sectionKey,
-        region: TRENDING_REGION,
-        language: TRENDING_LANGUAGE,
+        region,
+        language,
         ttlMs: TRENDING_LIGHT_CACHE_TTL_MS,
         payload: { results: withRuntime, generatedAt: new Date().toISOString() } satisfies TrendingCachePayload,
       });
 
       if (options.backgroundRefresh) {
-        scheduleTrendingRefresh({ includeProviders, sectionKey });
+        scheduleTrendingRefresh({ includeProviders, sectionKey, region, language });
       }
+      logProtectedTrendingFeed("home-trending", withRuntime, { region, language });
 
       return {
         items: withRuntime,
@@ -384,12 +431,14 @@ export async function getTrendingFeed(
           identityUsed: "poplog_id",
           legacyCompatibilityUsed: true,
           includeProviders,
+          language,
+          region,
         },
       };
     }
 
     if (options.backgroundRefresh) {
-      scheduleTrendingRefresh({ includeProviders, sectionKey });
+      scheduleTrendingRefresh({ includeProviders, sectionKey, region, language });
     }
 
     return {
@@ -402,6 +451,8 @@ export async function getTrendingFeed(
         fallbackUsed: true,
         fallbackReason: "fast_home_no_local_results",
         includeProviders,
+        language,
+        region,
       },
     };
   }
@@ -418,23 +469,24 @@ export async function getTrendingFeed(
 
       if (traktItems.length >= TRENDING_MIN_RESULTS) {
         const titles = traktItems.map(traktIndexToPoplogTitle);
-        const withRuntime = await enrichWithRuntime(titles, { includeProviders });
+        const withRuntime = await enrichWithRuntime(titles, { includeProviders, region, language });
         recordStage("cache_tables_read");
 
         void writeContinuitySectionCache({
           sectionKey,
-          region: TRENDING_REGION,
-          language: TRENDING_LANGUAGE,
+          region,
+          language,
           ttlMs: TRENDING_CACHE_TTL_MS,
           payload: { results: withRuntime, generatedAt: new Date().toISOString() } satisfies TrendingCachePayload,
         });
+        logProtectedTrendingFeed("home-trending", withRuntime, { region, language });
 
         return {
           items: withRuntime,
           source: "trakt_index",
           cacheStatus: "trakt_index_primary",
           fromCache: false,
-          debugSource: { source: "trakt_index", period: "daily", fallbackUsed: false, includeProviders },
+          debugSource: { source: "trakt_index", period: "daily", fallbackUsed: false, includeProviders, language, region },
         };
       }
 
@@ -499,16 +551,17 @@ export async function getTrendingFeed(
     const validTitles = filterValidTitles(merged);
 
     if (validTitles.length >= TRENDING_MIN_RESULTS) {
-      const withRuntime = await enrichWithRuntime(validTitles, { includeProviders });
+      const withRuntime = await enrichWithRuntime(validTitles, { includeProviders, region, language });
       recordStage("cache_tables_read");
 
       void writeContinuitySectionCache({
         sectionKey,
-        region: TRENDING_REGION,
-        language: TRENDING_LANGUAGE,
+        region,
+        language,
         ttlMs: TRENDING_CACHE_TTL_MS,
         payload: { results: withRuntime, generatedAt: new Date().toISOString() } satisfies TrendingCachePayload,
       });
+      logProtectedTrendingFeed("home-trending", withRuntime, { region, language });
 
       return {
         items: withRuntime,
@@ -540,7 +593,8 @@ export async function getTrendingFeed(
   recordStage("local_fallback");
 
   if (localValid.length > 0) {
-    const withRuntime = await enrichWithRuntime(localValid, { includeProviders });
+    const withRuntime = await enrichWithRuntime(localValid, { includeProviders, region, language });
+    logProtectedTrendingFeed("home-trending", withRuntime, { region, language });
     return {
       items: withRuntime,
       source: "local_db",
@@ -555,6 +609,8 @@ export async function getTrendingFeed(
         normalizedFrom: "local_cache",
         identityUsed: "poplog_id",
         legacyCompatibilityUsed: true,
+        language,
+        region,
       },
     };
   }
@@ -573,6 +629,8 @@ export async function getTrendingFeed(
       normalizedFrom: "none",
       identityUsed: "none",
       legacyCompatibilityUsed: true,
+      language,
+      region,
     },
   };
 }

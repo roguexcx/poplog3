@@ -16,8 +16,9 @@ import { buildRadarSections } from "./radar-event-buckets";
 import { buildRadarFilters } from "./radar-event-filters";
 import type { RadarEvent, RadarPayload } from "./types";
 import { addDays, toDateStr } from "./radar-event-utils";
+import { resolveAssetUrl } from "@/server/source-engine/asset-urls";
 
-export const RADAR_TRAKT_CACHE_VERSION = 2;
+export const RADAR_TRAKT_CACHE_VERSION = 3;
 
 type LocalTitleRow = Awaited<ReturnType<typeof db.poplog3Title.findMany>>[number];
 
@@ -63,7 +64,10 @@ export async function buildRadarGeneralPayload(options: {
   const pureAnticipated = anticipated.filter((event) => event.confidence === "low").slice(0, 18);
   normalized.push(...datedAnticipated, ...pureAnticipated);
 
-  const enriched = await enrichWithLocalCatalog(normalized);
+  const enriched = await enrichWithLocalCatalog(normalized, {
+    language: options.language,
+    region: options.region,
+  });
   const grouped = groupRadarEvents(enriched);
   const scored = scoreRadarEvents(grouped);
   const sections = buildRadarSections(scored);
@@ -118,7 +122,10 @@ async function enrichMovieReleases(baseEvents: RadarEvent[], region: string): Pr
   return releases.flat();
 }
 
-async function enrichWithLocalCatalog(events: RadarEvent[]): Promise<RadarEvent[]> {
+async function enrichWithLocalCatalog(
+  events: RadarEvent[],
+  options: { language: string; region: string },
+): Promise<RadarEvent[]> {
   const tmdbMovieIds = events.filter((event) => event.mediaType === "movie" && event.ids.tmdb).map((event) => event.ids.tmdb!);
   const tmdbTvIds = events.filter((event) => event.mediaType !== "movie" && event.ids.tmdb).map((event) => event.ids.tmdb!);
   const [movies, shows] = await Promise.all([
@@ -130,20 +137,73 @@ async function enrichWithLocalCatalog(events: RadarEvent[]): Promise<RadarEvent[
       : Promise.resolve([] as LocalTitleRow[]),
   ]);
   const byKey = new Map([...movies, ...shows].map((row) => [`${row.mediaType}:${row.tmdbId}`, row]));
+  const imdbIds = [...new Set([...movies, ...shows].map((row) => row.imdbId).filter((id): id is string => Boolean(id)))];
+  const [translations, assets] = await Promise.all([
+    imdbIds.length
+      ? db.titleTranslation.findMany({ where: { imdbId: { in: imdbIds } } }).catch(() => [])
+      : Promise.resolve([]),
+    imdbIds.length
+      ? db.titleAsset.findMany({
+          where: { imdbId: { in: imdbIds }, type: { in: ["poster", "backdrop"] } },
+          orderBy: [{ isOverride: "desc" }, { isPrimary: "desc" }, { updatedAt: "desc" }],
+        }).catch(() => [])
+      : Promise.resolve([]),
+  ]);
+  const translationsByImdb = new Map<string, typeof translations>();
+  for (const translation of translations) {
+    const list = translationsByImdb.get(translation.imdbId) ?? [];
+    list.push(translation);
+    translationsByImdb.set(translation.imdbId, list);
+  }
+  const assetsByImdb = new Map<string, typeof assets>();
+  for (const asset of assets) {
+    const list = assetsByImdb.get(asset.imdbId) ?? [];
+    list.push(asset);
+    assetsByImdb.set(asset.imdbId, list);
+  }
+
+  function pickTranslation(imdbId: string | null | undefined) {
+    if (!imdbId) return null;
+    const rows = translationsByImdb.get(imdbId) ?? [];
+    return (
+      rows.find((row) => row.language === options.language && row.region === options.region) ??
+      rows.find((row) => row.language === options.language) ??
+      rows.find((row) => row.language === "en-US") ??
+      rows[0] ??
+      null
+    );
+  }
+
+  function pickAsset(imdbId: string | null | undefined, type: "poster" | "backdrop") {
+    if (!imdbId) return null;
+    const rows = (assetsByImdb.get(imdbId) ?? []).filter((asset) => asset.type === type);
+    const picked =
+      rows.find((asset) => asset.language === options.language && asset.region === options.region) ??
+      rows.find((asset) => asset.language === options.language && !asset.region) ??
+      rows.find((asset) => asset.language === options.language) ??
+      rows.find((asset) => asset.language === null) ??
+      rows.find((asset) => asset.language === "en-US") ??
+      rows[0] ??
+      null;
+    return resolveAssetUrl(picked?.assetKey ?? picked?.sourceUrl ?? null);
+  }
 
   return events.map((event) => {
     const mediaType = event.mediaType === "movie" ? "movie" : "tv";
     const row = event.ids.tmdb ? byKey.get(`${mediaType}:${event.ids.tmdb}`) : null;
     if (!row) return event;
+    const translation = pickTranslation(row.imdbId);
+    const poster = pickAsset(row.imdbId, "poster");
+    const backdrop = pickAsset(row.imdbId, "backdrop");
     return {
       ...event,
       poplogId: row.id,
-      title: row.title ?? event.title,
+      title: translation?.title ?? row.title ?? event.title,
       originalTitle: row.originalTitle ?? event.originalTitle,
-      overview: row.overview ?? event.overview,
-      poster: row.posterPath ?? event.poster,
-      backdrop: row.backdropPath ?? event.backdrop,
-      ids: { ...event.ids, poplog: row.id },
+      overview: translation?.overview ?? row.overview ?? event.overview,
+      poster: poster ?? row.posterPath ?? event.poster,
+      backdrop: backdrop ?? row.backdropPath ?? event.backdrop,
+      ids: { ...event.ids, poplog: row.id, imdb: row.imdbId ?? event.ids.imdb },
     };
   });
 }

@@ -1,8 +1,10 @@
 /**
  * POPLOG Source Engine.
  *
- * Balloonerismm is the primary external catalog source (IMDb-first, enriched).
- * Trakt is the fallback when Balloonerismm is inactive or returns no results.
+ * Trakt is the primary external catalog source for structure, search and
+ * identity. Balloonerismm remains a residual fallback, except for protected
+ * Home editorial feeds that intentionally preserve the Trakt + Balloonerismm
+ * curation pipeline outside this generic engine entrypoint.
  */
 
 import { traktAdapter } from "./adapters/trakt-adapter";
@@ -24,6 +26,7 @@ import type {
   PeopleParams,
   VideoParams,
 } from "./types/catalog.types";
+import { sourceEngineLog } from "./source-log";
 
 export function isBalloonerismSearchEnabled(): boolean {
   return true;
@@ -45,10 +48,32 @@ export const isBalloonerismTrendingEnabled = isTraktTrendingEnabled;
 export const isBalloonerismDiscoverEnabled = isTraktDiscoverEnabled;
 
 export async function catalogSearch(params: SearchParams): Promise<CatalogSearchResult[]> {
-  // Balloonerismm is primary (IMDb-first, pt-BR enriched); Trakt is fallback.
+  const traktResults = await traktAdapter.searchTitles(params);
+  if (traktResults.length > 0) {
+    sourceEngineLog("trakt_primary_resolved", {
+      op: "search",
+      query: params.query,
+      language: params.language ?? null,
+      region: params.region ?? null,
+      results: traktResults.length,
+    });
+    return traktResults;
+  }
+
   const balloonerismResults = await balloonerismAdapter.searchTitles(params);
-  if (balloonerismResults.length > 0) return balloonerismResults;
-  return traktAdapter.searchTitles(params);
+  sourceEngineLog(
+    balloonerismResults.length > 0 ? "balloon_fallback_used" : "balloon_fallback_skipped",
+    {
+      op: "search",
+      query: params.query,
+      language: params.language ?? null,
+      region: params.region ?? null,
+      reason: balloonerismResults.length > 0 ? "trakt_empty" : "fallback_empty",
+      results: balloonerismResults.length,
+    },
+    balloonerismResults.length > 0 ? "warn" : "debug",
+  );
+  return balloonerismResults;
 }
 
 export async function catalogSearchPeople(query: string) {

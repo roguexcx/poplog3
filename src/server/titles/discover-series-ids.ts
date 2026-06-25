@@ -1,19 +1,17 @@
 /**
  * Descoberta de IDs externos para séries de TV.
  *
- * Usado quando `titleExternalId` não tem `imdbId` nem `tvdbId` para uma série,
- * o que impede Trakt, Balloonerismm e TVDB de funcionar.
+ * Usado quando `titleExternalId` não tem `imdbId` para uma série,
+ * o que impede Trakt e Balloonerismm de funcionarem com identidade canônica.
  *
  * Estratégias em ordem de preferência:
  *   1. Trakt /search/tmdb/{id}?type=show  — cross-reference por TMDB ID (mais preciso)
  *   2. Trakt /search/show?query={title}    — busca por nome+ano (fallback)
- *   3. TVDB /search?query={title}&type=series — último recurso
  *
  * Resultado é cacheado por 30 dias via Next.js fetch TTL.
  */
 
 import { traktGet, isTraktActive } from "@/server/api-clients/trakt/client";
-import { tvdbGet, isTvdbActive } from "@/server/api-clients/tvdb/client";
 import { normalizeSearchTerm } from "@/server/search/fuzzy-title-search";
 
 export type DiscoveredSeriesIds = {
@@ -48,7 +46,7 @@ type TraktSearchByIdResult = {
  * get the full ID bundle for a TV series given only its TMDB ID.
  *
  * This is the primary bridge between TMDB IDs (our DB) and IMDb/TVDB IDs
- * (needed by Trakt episodes, TVDB episodes, and Balloonerismm fallback).
+ * (needed by Trakt episodes and Balloonerismm fallback).
  */
 export async function discoverTvSeriesIdsByTmdbId(
   tmdbId: number,
@@ -90,13 +88,13 @@ export async function discoverTvSeriesIdsByTmdbId(
   return null;
 }
 
-// ─── Strategy 2+3: discovery by title+year ───────────────────────────────────
+// ─── Strategy 2: discovery by title+year ─────────────────────────────────────
 
 /**
  * Discovers the ID bundle for a TV series by title + year.
  * Used as a last resort when `tmdbId` is unavailable or the TMDB lookup failed.
  *
- * Tries Trakt text search first, then TVDB text search.
+ * Tries Trakt text search as the only remote fallback.
  */
 export async function discoverTvSeriesIdsByTitle(
   title: string,
@@ -145,47 +143,6 @@ export async function discoverTvSeriesIdsByTitle(
     }
   }
 
-  // Strategy 3: TVDB text search
-  if (isTvdbActive()) {
-    try {
-      type TvdbSearchItem = {
-        tvdb_id?: string;
-        type?: string;
-        name?: string;
-        year?: string;
-        remote_ids?: Array<{ id: string; sourceName: string }>;
-      };
-
-      const results = await tvdbGet<TvdbSearchItem[]>(`/search`, {
-        params: { query: title, type: "series", limit: 5 },
-        ttlSeconds: 86400,
-      });
-
-      const match = results?.find((r) => {
-        const nameOk = normalizeSearchTerm(r.name ?? "") === normalizedTitle;
-        const yearOk = !year || !r.year || Math.abs(Number(r.year) - year) <= 1;
-        return nameOk && yearOk;
-      });
-
-      if (match) {
-        const imdb = match.remote_ids?.find((r) => r.sourceName === "IMDB")?.id;
-        const tvdbId = match.tvdb_id ? Number(match.tvdb_id) : undefined;
-        console.log("[discover-series-ids] IDs descobertos via TVDB search", {
-          title,
-          year,
-          imdbId: imdb,
-          tvdbId,
-        });
-        return { imdbId: imdb, tvdbId };
-      }
-    } catch (err) {
-      console.warn("[discover-series-ids] TVDB search falhou", {
-        title,
-        error: (err as Error)?.message,
-      });
-    }
-  }
-
   return null;
 }
 
@@ -204,7 +161,7 @@ export async function discoverTvSeriesIds(params: {
     if (byTmdb?.imdbId || byTmdb?.tvdbId) return byTmdb;
   }
 
-  // Strategy 2+3: title + year search (fallback for synthetic/missing TMDB IDs)
+  // Strategy 2: title + year search (fallback for synthetic/missing TMDB IDs)
   if (params.title) {
     return discoverTvSeriesIdsByTitle(params.title, params.year);
   }

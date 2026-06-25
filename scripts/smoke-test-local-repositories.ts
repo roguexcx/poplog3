@@ -253,7 +253,7 @@ async function main() {
   const premiumUsage = await assertOk(
     "premium api usage write",
     await createPremiumApiUsage({
-      api: "omdb",
+      api: "watchmode",
       periodDay: new Date().toISOString().slice(0, 10),
       periodMonth: new Date().toISOString().slice(0, 7),
       endpoint: "/",

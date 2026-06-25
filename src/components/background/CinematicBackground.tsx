@@ -1,5 +1,5 @@
-// src/components/CinematicBackground.tsx
 "use client";
+// src/components/CinematicBackground.tsx
 
 import Image from "next/image";
 import { useEffect, useState } from "react";

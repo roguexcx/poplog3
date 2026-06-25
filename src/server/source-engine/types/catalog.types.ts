@@ -178,6 +178,8 @@ export type SearchParams = {
   query: string;
   mediaType?: "movie" | "show";
   page?: number;
+  language?: string | null;
+  region?: string | null;
 };
 
 export type GetTitleParams = {

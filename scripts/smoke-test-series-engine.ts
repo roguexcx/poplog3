@@ -36,7 +36,7 @@ function ep(input: {
 }
 
 function run() {
-  // Série com TheTVDB completo + Trakt com datas melhores.
+  // Série com fonte secundária completa + Trakt com datas melhores.
   const mergedComplete = mergeEpisodeSources(
     [
       ep({ source: "tvdb", season: 1, number: 1, title: "Piloto", tvdbId: 10, stillPath: "tvdb.jpg" }),

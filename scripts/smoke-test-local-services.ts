@@ -234,7 +234,7 @@ async function main() {
     p95Ms: 11,
   }));
   const premiumUsage = await assertRepoOk("premium usage reserve", await apiUsageLocalService.reservePremiumUsage({
-    api: "omdb",
+    api: "watchmode",
     periodDay: new Date().toISOString().slice(0, 10),
     periodMonth: new Date().toISOString().slice(0, 7),
     endpoint: "/",

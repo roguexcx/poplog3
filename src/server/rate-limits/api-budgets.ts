@@ -1,8 +1,4 @@
 export const API_BUDGETS = {
-  omdb: {
-    daily: 500,
-  },
-
   watchmode: {
     daily: 40,
     monthly: 1250,

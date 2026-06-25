@@ -14,6 +14,7 @@ export type CatalogAvailabilityLocalRow = {
   media_type: MediaType;
   provider_name: string;
   provider_region: string;
+  provider_language: string;
   provider_type: ProviderType;
   provider_url: string | null;
   provider_logo_url: string | null;
@@ -21,6 +22,7 @@ export type CatalogAvailabilityLocalRow = {
   source_confidence: SourceConfidence;
   checked_at: string;
   expires_at: string;
+  stale_until: string | null;
   evidence_payload_hash: string | null;
   raw_payload_json: unknown;
 };
@@ -31,6 +33,7 @@ export async function listAvailability(input: {
   tmdbId?: bigint | number | null;
   mediaType?: MediaType;
   providerRegion?: string;
+  providerLanguage?: string;
   includeExpired?: boolean;
 }): Promise<CatalogAvailabilityLocalRow[]> {
   const rows = await listCatalogAvailability(input);
@@ -41,6 +44,7 @@ export async function listAvailability(input: {
     media_type: row.mediaType,
     provider_name: row.providerName,
     provider_region: row.providerRegion,
+    provider_language: row.providerLanguage,
     provider_type: row.providerType,
     provider_url: row.providerUrl,
     provider_logo_url: row.providerLogoUrl,
@@ -48,6 +52,7 @@ export async function listAvailability(input: {
     source_confidence: row.sourceConfidence,
     checked_at: row.checkedAt.toISOString(),
     expires_at: row.expiresAt.toISOString(),
+    stale_until: row.staleUntil?.toISOString() ?? null,
     evidence_payload_hash: row.evidencePayloadHash,
     raw_payload_json: row.rawPayloadJson,
   }));
@@ -60,6 +65,7 @@ export async function replaceAvailability(input: {
   mediaType?: MediaType;
   source?: CatalogAvailabilitySource;
   providerRegion: string;
+  providerLanguage?: string;
   rows: CatalogAvailabilityLocalInput[];
 }): Promise<boolean> {
   return replaceCatalogAvailability(input);

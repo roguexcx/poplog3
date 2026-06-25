@@ -12,7 +12,7 @@ const LANGUAGE = "pt-BR";
 const WINDOW_DAYS = 62;
 
 export async function GET(req: NextRequest) {
-  if (!isAdminRequest(req)) return adminUnauthorizedResponse();
+  if (!(await isAdminRequest(req))) return adminUnauthorizedResponse();
 
   const user = await getCurrentUser().catch(() => null);
   if (!user) {

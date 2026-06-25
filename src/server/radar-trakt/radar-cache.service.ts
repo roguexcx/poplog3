@@ -10,7 +10,7 @@ const memory = new Map<string, MemoryEntry>();
 const rebuildLocks = new Map<string, Promise<RadarPayload>>();
 
 export function radarCacheKey(region: string, language: string, windowDays: number) {
-  return `radar_trakt_general:v2:${region}:${language}:${windowDays}`;
+  return `radar_trakt_general:v3:${region}:${language}:${windowDays}`;
 }
 
 export async function getRadarCachedPayload(

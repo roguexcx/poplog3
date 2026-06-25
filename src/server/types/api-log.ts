@@ -1,5 +1,5 @@
 export type ApiLogEntry = {
-  api: "tmdb" | "omdb" | "watchmode" | "movieofthenight";
+  api: "tmdb" | "watchmode" | "movieofthenight" | "trakt" | "balloonerismm";
 
   endpoint: string;
 
