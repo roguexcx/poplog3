@@ -4,7 +4,9 @@ export type ApiSourceId =
   | "trakt"
   | "movieofthenight"
   | "bancodeseries"
-  | "balloonerismm";
+  | "balloonerismm"
+  | "wikidata"
+  | "wikipedia";
 
 export type AttributionContext =
   | "metadata"

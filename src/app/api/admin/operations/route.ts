@@ -668,6 +668,7 @@ export async function POST(request: NextRequest) {
       sourceHint: "imdb",
       force: true,
       country: region,
+      language,
       debugSource: true,
     });
     const cache = await invalidateCatalogCaches({ imdbId, language, region });

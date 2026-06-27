@@ -10,17 +10,24 @@ export type LegalSection = {
 
 export type LegalDocument = {
   title: string;
+  metaTitle: string;
+  metaDescription: string;
   updatedLabel: string;
   intro: string;
+  referencesLabel: string;
   sections: LegalSection[];
   references: string[];
 };
 
 const ptBR: LegalDocument = {
   title: "Termos, Disclaimer e Privacidade",
+  metaTitle: "Termos, Disclaimer e Privacidade",
+  metaDescription:
+    "Aviso legal, isencao de responsabilidade, protecao de dados (LGPD) e canal de remocao/correcao de metadados do POPLOG.",
   updatedLabel: "Atualizado em",
   intro:
     "Este documento e um aviso operacional de conformidade do POPLOG. Nao substitui aconselhamento juridico e deve ser revisado por profissional habilitado antes da publicacao em producao.",
+  referencesLabel: "Referencias legais",
   sections: [
     {
       heading: "Aviso de Isencao de Responsabilidade",
@@ -57,9 +64,13 @@ const ptBR: LegalDocument = {
 
 const en: LegalDocument = {
   title: "Terms, Disclaimer and Privacy",
+  metaTitle: "Terms, Disclaimer and Privacy",
+  metaDescription:
+    "Legal notice, disclaimer, data protection (LGPD) and the metadata removal/correction channel for POPLOG.",
   updatedLabel: "Last updated",
   intro:
     "This document is an operational compliance notice for POPLOG. It is not a substitute for legal advice and should be reviewed by qualified counsel before publication in production.",
+  referencesLabel: "Legal References",
   sections: [
     {
       heading: "Disclaimer",

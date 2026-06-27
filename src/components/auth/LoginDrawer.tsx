@@ -70,7 +70,7 @@ export default function LoginDrawer({ open, onClose, oauthAvailable = false, }: 
           ${open ? "opacity-100 translate-x-0" : "opacity-0 -translate-x-full pointer-events-none"}
         `}>
         <div className="flex h-full flex-col overflow-y-auto px-8 py-10">
-          <button type="button" onClick={onClose} aria-label="Fechar" className="
+          <button type="button" onClick={onClose} aria-label={uiMessage("auth.login.close")} className="
               absolute right-4 top-4
               flex h-9 w-9 items-center justify-center
               rounded-full border border-white/10
@@ -101,7 +101,7 @@ export default function LoginDrawer({ open, onClose, oauthAvailable = false, }: 
               disabled:opacity-50
               active:scale-[0.98]
             ">
-            {oauthLoading ? "Redirecionando..." : "Continuar com Google"}
+            {oauthLoading ? uiMessage("auth.login.redirecting") : uiMessage("auth.login.google")}
           </button>
 
           {!oauthAvailable && (<p className="mb-4 text-center text-[11px] text-zinc-600">{uiMessage("ui.5f286d25da63")}</p>)}

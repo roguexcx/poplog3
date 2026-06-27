@@ -1,9 +1,12 @@
 import { db } from "@/server/db/client";
 import type { PoplogTitle } from "@/server/types/title";
+import { resolveCatalogLocalization } from "@/lib/i18n/catalog-localization";
+import { getCatalogLocalizationsByPoplogId } from "@/server/catalog/catalog-localization-store";
 
 type SearchMediaType = "all" | "movie" | "tv";
 
 type CachedTitleRow = {
+  id: string;
   tmdbId: number;
   mediaType: "movie" | "tv";
   title: string | null;
@@ -47,13 +50,23 @@ export function normalizeSearchTerm(value: string): string {
     .replace(/\s+/g, " ");
 }
 
-function titleFromRow(row: CachedTitleRow): PoplogTitle {
+async function titleFromRow(row: CachedTitleRow, language?: string | null): Promise<PoplogTitle> {
+  const localizations = await getCatalogLocalizationsByPoplogId(row.id).catch(() => []);
+  const resolved = resolveCatalogLocalization(
+    {
+      title: row.title,
+      originalTitle: row.originalTitle,
+      overview: row.overview,
+      localizations,
+    },
+    language,
+  );
   return {
     tmdb_id: row.tmdbId,
     media_type: row.mediaType,
-    title: row.title ?? row.originalTitle ?? "Untitled",
+    title: resolved.title ?? row.title ?? row.originalTitle ?? "Untitled",
     original_title: row.originalTitle,
-    overview: row.overview,
+    overview: resolved.overview ?? row.overview,
     poster_path: row.posterPath,
     backdrop_path: row.backdropPath,
     release_date: row.releaseDate?.toISOString().slice(0, 10) ?? null,
@@ -67,6 +80,14 @@ function titleFromRow(row: CachedTitleRow): PoplogTitle {
     vote_average: row.voteAverage === null ? null : Number(row.voteAverage),
     vote_count: row.voteCount,
     original_language: row.originalLanguage,
+    poplogId: row.id,
+    localized: {
+      [resolved.language]: {
+        title: resolved.title,
+        overview: resolved.overview,
+        tagline: resolved.tagline,
+      },
+    },
   };
 }
 
@@ -186,11 +207,13 @@ export async function findCachedFuzzyTitles({
   mediaType,
   genre,
   excludeKeys = new Set<string>(),
+  language,
 }: {
   query: string;
   mediaType: SearchMediaType;
   genre?: number;
   excludeKeys?: Set<string>;
+  language?: string | null;
 }): Promise<FuzzyTitleMatch[]> {
   const normalizedQuery = normalizeSearchTerm(query);
 
@@ -212,8 +235,9 @@ export async function findCachedFuzzyTitles({
     return [];
   }
 
-  return data
-    .map(titleFromRow)
+  const titles = await Promise.all(data.map((row) => titleFromRow(row, language)));
+
+  return titles
     .filter((title) => {
       if (excludeKeys.has(`${title.media_type}-${title.tmdb_id}`)) return false;
       if (genre && !(title.genres ?? []).includes(genre)) return false;

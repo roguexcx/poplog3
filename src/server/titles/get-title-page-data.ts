@@ -3,7 +3,7 @@
  *
  * Lógica central para montar o TitlePageData de um título.
  * Usada tanto pela page.tsx (diretamente, sem fetch HTTP)
- * quanto pela route handler /api/poplog3/titles/[mediaType]/[id].
+ * quanto pela route handler /api/title/[mediaType]/[id] (poplog3/titles delega para ela).
  */
 
 import { getCurrentUser } from "@/server/auth/get-current-user";
@@ -58,10 +58,10 @@ import { enqueueSeriesEpisodeHydrationJob } from "@/server/workers/series-prehyd
 import { getMovieFinancials } from "@/server/titles/title-financials";
 import { resolveDirectFranchiseForTitle } from "@/server/franchises/direct-franchise-service";
 import { resolveTitleUniverseForTitle } from "@/server/franchises/title-universe-service";
+import { normalizeCatalogLanguage } from "@/server/source-engine/locale";
 
 type MediaType = "movie" | "tv";
 
-const TITLE_PAGE_LOCALE = "pt-BR";
 const TITLE_RELATED_CACHE_TTL_MS = 6 * 60 * 60_000;
 const TITLE_COLD_SEASON_LIST_SYNC = process.env.POPLOG_TITLE_COLD_SEASON_LIST_SYNC === "true";
 const TITLE_COLD_SERIES_SYNC = process.env.POPLOG_TITLE_COLD_SERIES_SYNC === "true";
@@ -92,6 +92,7 @@ async function getProvidersFromCache(
   tmdbId: number | undefined,
   imdbId: string | undefined,
   country: string,
+  language: string,
   releaseDate?: string | null,
   firstAirDate?: string | null,
 ): Promise<TitleProvider[]> {
@@ -101,6 +102,7 @@ async function getProvidersFromCache(
     imdbId: imdbId ?? null,
     tmdbId: tmdbId ?? null,
     region: country.toUpperCase() || "BR",
+    language,
     releaseDate: releaseDate ?? null,
     firstAirDate: firstAirDate ?? null,
   });
@@ -281,6 +283,7 @@ export type GetTitlePageDataOptions = {
   sourceHint?: PoplogTitleSourceHint;
   force?: boolean;
   country?: string;
+  language?: string | null;
   debugSource?: boolean;
 };
 
@@ -490,6 +493,7 @@ function poplogDetailsToTitlePageData(
       ratings: null,
       availability: null,
     },
+    catalogLocalization: details.catalogLocalization,
   };
 }
 
@@ -507,9 +511,12 @@ function poplogDetailsToTitlePageData(
 async function getUnifiedRelated({
   mediaType,
   imdbId,
+  locale,
 }: {
   mediaType: RelatedMediaType;
   imdbId?: string | null;
+  locale?: string | null;
+  region?: string | null;
   traktId?: number | string | null;  // kept for call-site compat, unused
   traktSlug?: string | null;         // kept for call-site compat, unused
 }): Promise<CatalogSearchResult[]> {
@@ -517,7 +524,7 @@ async function getUnifiedRelated({
 
   const apiMediaType = mediaType === "movie" ? "movie" as const : "tv" as const;
 
-  const balloonFetch = await fetchBalloonerismForSeed(imdbId, apiMediaType, "title-related");
+  const balloonFetch = await fetchBalloonerismForSeed(imdbId, apiMediaType, "title-related", locale);
   if (!balloonFetch.items.length) return [];
 
   // mergeBalloonCandidates expects BalloonSeedResult[]; single-seed call here.
@@ -652,6 +659,7 @@ async function enrichRelatedWithPtBrTitles(
 
 async function enrichRelatedWithLocalImages(
   related: CatalogSearchResult[],
+  locale: string,
 ): Promise<CatalogSearchResult[]> {
   const lookups = related
     .map((item) => ({
@@ -693,19 +701,21 @@ async function enrichRelatedWithLocalImages(
     ]),
   );
 
+  const useLocalTitle = normalizeCatalogLanguage(locale) !== "en-US";
+
   return related.map((item) => {
     const tmdbId = item.ids.tmdbId;
     if (!tmdbId) return item;
     const mediaType = item.mediaType === "show" ? "tv" : "movie";
     const local = imageByKey.get(`${mediaType}:${tmdbId}`);
     if (!local) return item;
-    const title = item.originalTitle ? item.title : local.title ?? item.title;
+    const title = useLocalTitle && !item.originalTitle ? local.title ?? item.title : item.title;
 
     return {
       ...item,
       title,
       poplogId: local.poplogId,
-      originalTitle: item.originalTitle ?? local.originalTitle ?? undefined,
+      originalTitle: item.originalTitle ?? (useLocalTitle ? local.originalTitle ?? undefined : undefined),
       posterPath: item.posterPath ?? local.posterPath ?? undefined,
       backdropPath: item.backdropPath ?? local.backdropPath ?? null,
     };
@@ -724,13 +734,20 @@ function titleRelatedSectionKey(mediaType: RelatedMediaType, imdbId: string) {
 async function buildTitleRelatedCandidates(input: {
   mediaType: RelatedMediaType;
   imdbId: string;
+  locale: string;
+  region?: string;
 }): Promise<CatalogSearchResult[]> {
   const relatedRaw = await getUnifiedRelated({
     mediaType: input.mediaType,
     imdbId: input.imdbId,
+    locale: input.locale,
+    region: input.region,
   });
-  const relatedWithPtBrTitles = await enrichRelatedWithPtBrTitles(relatedRaw);
-  return enrichRelatedWithLocalImages(relatedWithPtBrTitles);
+  const relatedLocalized =
+    normalizeCatalogLanguage(input.locale) === "en-US"
+      ? relatedRaw
+      : await enrichRelatedWithPtBrTitles(relatedRaw);
+  return enrichRelatedWithLocalImages(relatedLocalized, input.locale);
 }
 
 const titleRelatedRefreshes = new Set<string>();
@@ -930,6 +947,7 @@ export async function getTitlePageData(
   options: GetTitlePageDataOptions,
 ): Promise<TitlePageData | null> {
   const { mediaType, id, sourceHint = "auto", country = "BR", debugSource = false } = options;
+  const language = normalizeCatalogLanguage(options.language);
 
   if (mediaType !== "movie" && mediaType !== "tv") return null;
   const requestedId = String(id).trim();
@@ -942,7 +960,7 @@ export async function getTitlePageData(
         id: requestedId,
         sourceHint,
         region: country,
-        locale: TITLE_PAGE_LOCALE,
+        locale: language,
       });
 
       if (poplogDetails && poplogDetails.sourceMeta.primarySource !== "legacy") {
@@ -963,12 +981,20 @@ export async function getTitlePageData(
 
         const [currentUser, providers, relatedRaw, seriesCanonical, traktEnrichment, movieFinancials, directFranchise] = await Promise.all([
           getCurrentUser().catch(() => null),
-          getProvidersFromCache(resolvedMediaType, tmdbId, imdbId, country, base.releaseDate, base.firstAirDate),
+          getProvidersFromCache(
+            resolvedMediaType,
+            tmdbId,
+            imdbId,
+            country,
+            language,
+            base.releaseDate,
+            base.firstAirDate,
+          ),
           getTitleRelatedCandidates({
             mediaType: catalogMediaType,
             imdbId,
             region: country,
-            locale: TITLE_PAGE_LOCALE,
+            locale: language,
           }),
           // Para séries TV: buscar metadados canônicos de todas as fontes em paralelo
           resolvedMediaType === "tv" && (imdbId || tvdbId || traktId)
@@ -1173,6 +1199,7 @@ export async function getTitlePageData(
             getTmdbId: (r) => r.tmdbId ?? null,
             getImdbId: (r) => r.imdbId ?? null,
             region: country,
+            language,
           },
         );
 

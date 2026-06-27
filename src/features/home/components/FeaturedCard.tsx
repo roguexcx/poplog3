@@ -1,4 +1,4 @@
-import { uiMessage } from "@/lib/i18n/ui-message";
+import { uiMessageFor } from "@/lib/i18n/ui-message";
 import Image from "next/image";
 import Link from "next/link";
 import LibraryStateBadge from "@/components/ui/LibraryStateBadge";
@@ -19,8 +19,26 @@ type Props = {
     seasons: number | null;
     genres: string | null;
     overview: string | null;
+    interfaceLanguage: string;
 };
-export default function FeaturedCard({ item, mediaType, title, featuredRank, featuredTypeLabel, posterUrl, year, runtime, seasons, genres, overview, }: Props) {
+const FEATURED_COPY = {
+    "pt-BR": {
+        trendingNow: "Em alta agora",
+        among: "entre",
+        trending: "em alta",
+        seasonSingular: "temporada",
+        seasonPlural: "temporadas",
+    },
+    "en-US": {
+        trendingNow: "Trending now",
+        among: "among",
+        trending: "trending",
+        seasonSingular: "season",
+        seasonPlural: "seasons",
+    },
+} as const;
+export default function FeaturedCard({ item, mediaType, title, featuredRank, featuredTypeLabel, posterUrl, year, runtime, seasons, genres, overview, interfaceLanguage, }: Props) {
+    const copy = FEATURED_COPY[interfaceLanguage === "en-US" ? "en-US" : "pt-BR"];
     const originalTitle = getOriginalTitle(item);
     const linkId = item.linkIdUsed ?? item.poplogId ?? item.externalIds?.imdbId ?? item.id;
     return (<div className="hidden justify-end lg:flex">
@@ -28,8 +46,8 @@ export default function FeaturedCard({ item, mediaType, title, featuredRank, fea
         <p className="mb-3 flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.28em] text-sky-300">
           <span className="text-violet-300">↗</span>
           {featuredRank
-            ? `#${featuredRank} entre ${featuredTypeLabel} em alta`
-            : "Em alta agora"}
+            ? `#${featuredRank} ${copy.among} ${featuredTypeLabel} ${copy.trending}`
+            : copy.trendingNow}
         </p>
 
         <div className="grid grid-cols-[132px_1fr] gap-5">
@@ -48,7 +66,7 @@ export default function FeaturedCard({ item, mediaType, title, featuredRank, fea
 
               {mediaType === "movie" && runtime && <span>• {runtime}</span>}
 
-              {mediaType === "tv" && seasons && (<span>• {seasons} {seasons === 1 ? "temporada" : "temporadas"}</span>)}
+              {mediaType === "tv" && seasons && (<span>• {seasons} {seasons === 1 ? copy.seasonSingular : copy.seasonPlural}</span>)}
 
               {mediaType === "tv" && runtime && <span>• {runtime}</span>}
 
@@ -58,7 +76,7 @@ export default function FeaturedCard({ item, mediaType, title, featuredRank, fea
             <SynopsisText text={overview} collapsedLines={3} className="mt-4 max-w-[320px]"/>
 
             <div className="mt-5 flex items-center gap-2">
-              <Link href={`/title/${mediaType}/${linkId}`} className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-xs font-bold text-white backdrop-blur-md transition hover:bg-white/15">{uiMessage("ui.d62d7a15902c")}</Link>
+              <Link href={`/title/${mediaType}/${linkId}`} className="rounded-xl border border-white/10 bg-white/10 px-4 py-2 text-xs font-bold text-white backdrop-blur-md transition hover:bg-white/15">{uiMessageFor(interfaceLanguage, "ui.d62d7a15902c")}</Link>
 
               <FeaturedCardActions tmdbId={item.id} poplogId={item.poplogId ?? null} imdbId={item.externalIds?.imdbId ?? null} slug={item.externalIds?.slug ?? null} mediaType={mediaType} title={title} releaseYear={year ? Number(year) : null}/>
             </div>
@@ -67,4 +85,3 @@ export default function FeaturedCard({ item, mediaType, title, featuredRank, fea
       </div>
     </div>);
 }
-

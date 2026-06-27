@@ -41,7 +41,7 @@ export async function POST(request: Request) {
     const language = typeof body.language === "string"
       ? body.language
       : cookieLanguage ? decodeURIComponent(cookieLanguage) : "pt-BR";
-    const key = sorteioSectionKey(filters);
+    const key = sorteioSectionKey(filters, { region, language });
 
     const cached = await readContinuitySectionCache<SorteioPoolCachePayload>(key, {
       userId: user.id,
@@ -63,6 +63,7 @@ export async function POST(request: Request) {
     const localPool = await buildSorteioPool(user.id, filters, {
       externalDiscovery: false,
       warmAvailability: false,
+      catalogLanguage: language,
     });
     const item = pickWeightedSorteioItem(localPool.items);
     if (item) await logSorteioDraw(user.id, item, localPool.meta);

@@ -60,6 +60,7 @@ import { normalizeTitle } from "../normalizers/normalize-title";
 import { normalizeSearchResult } from "../normalizers/normalize-search";
 import { normalizeSeason } from "../normalizers/normalize-season";
 import { normalizeEpisode } from "../normalizers/normalize-episode";
+import { normalizeCatalogLanguage } from "../locale";
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -95,6 +96,10 @@ function ptBrTranslationTitle(entry: TraktShowFull | TraktMovieFull): string | n
     translations.find((t) => t.language === "pt" && t.title)?.title ??
     null
   );
+}
+
+function shouldUsePtBrTranslations(language?: string | null): boolean {
+  return normalizeCatalogLanguage(language) !== "en-US";
 }
 
 function normalizeGenreToId(genre: string | null | undefined): number | undefined {
@@ -375,8 +380,9 @@ export const traktAdapter: CatalogAdapter = {
   async getTrending(params: TrendingParams): Promise<CatalogSearchResult[]> {
     type TraktTrending = { watchers: number; show?: TraktShowFull; movie?: TraktMovieFull };
     const endpoint = params.mediaType === "movie" ? "/movies/trending" : "/shows/trending";
+    const usePtBr = shouldUsePtBrTranslations(params.language);
     const results = await traktGet<TraktTrending[]>(endpoint, {
-      params: { limit: params.limit ?? 20, extended: "full,images" },
+      params: { limit: params.limit ?? 20, extended: usePtBr ? "full,images,translations" : "full,images" },
       ttlSeconds: 3600,
     });
     if (!results) return [];
@@ -385,6 +391,7 @@ export const traktAdapter: CatalogAdapter = {
       .map((item) => {
         const entry = item.show ?? item.movie;
         if (!entry) return null;
+        const localizedTitle = usePtBr ? ptBrTranslationTitle(entry) : null;
         return normalizeSearchResult(
           {
             ids: {
@@ -395,7 +402,8 @@ export const traktAdapter: CatalogAdapter = {
               tmdbId: entry.ids.tmdb,
             },
             mediaType: item.show ? "show" : "movie",
-            title: entry.title,
+            title: localizedTitle ?? entry.title,
+            originalTitle: localizedTitle ? entry.title : undefined,
             year: entry.year,
             overview: entry.overview ?? undefined,
             posterRemoteUrl: entry.images?.poster?.[0] ?? null,
@@ -412,14 +420,16 @@ export const traktAdapter: CatalogAdapter = {
 
   async getPopular(params: PopularParams): Promise<CatalogSearchResult[]> {
     const endpoint = params.mediaType === "movie" ? "/movies/popular" : "/shows/popular";
+    const usePtBr = shouldUsePtBrTranslations(params.language);
     const results = await traktGet<Array<TraktShowFull | TraktMovieFull>>(endpoint, {
-      params: { limit: params.limit ?? 20, extended: "full,images" },
+      params: { limit: params.limit ?? 20, extended: usePtBr ? "full,images,translations" : "full,images" },
       ttlSeconds: 3600,
     });
     if (!results) return [];
 
-    return results.map((entry) =>
-      normalizeSearchResult(
+    return results.map((entry) => {
+      const localizedTitle = usePtBr ? ptBrTranslationTitle(entry) : null;
+      return normalizeSearchResult(
         {
           ids: {
             traktId: entry.ids.trakt,
@@ -430,7 +440,8 @@ export const traktAdapter: CatalogAdapter = {
             tvdbId: (entry as TraktShowFull).ids?.tvdb,
           },
           mediaType: params.mediaType,
-          title: entry.title,
+          title: localizedTitle ?? entry.title,
+          originalTitle: localizedTitle ? entry.title : undefined,
           year: entry.year,
           releaseDate: params.mediaType === "movie" ? (entry as TraktMovieFull).released ?? undefined : undefined,
           firstAirDate: params.mediaType === "show" ? (entry as TraktShowFull).first_aired ?? undefined : undefined,
@@ -442,12 +453,18 @@ export const traktAdapter: CatalogAdapter = {
           voteCount: entry.votes,
         },
         MED,
-      )
-    );
+      );
+    });
   },
 
   async getDiscover(params: DiscoverParams): Promise<CatalogSearchResult[]> {
-    const popular = await this.getPopular({ mediaType: params.mediaType, limit: 50, page: params.page });
+    const popular = await this.getPopular({
+      mediaType: params.mediaType,
+      limit: 50,
+      page: params.page,
+      language: params.language,
+      region: params.region,
+    });
     return popular.filter((item) => item.genreIds?.includes(params.genreId) || item.genres?.some((genre) => normalizeGenreToId(genre) === params.genreId));
   },
 
@@ -456,14 +473,15 @@ export const traktAdapter: CatalogAdapter = {
     if (!id) return [];
 
     const type = params.mediaType === "movie" ? "movies" : "shows";
+    const usePtBr = shouldUsePtBrTranslations(params.language);
     const results = await traktGet<Array<TraktShowFull | TraktMovieFull>>(`/${type}/${id}/related`, {
-      params: { limit: 24, extended: "full,images,translations" },
+      params: { limit: 24, extended: usePtBr ? "full,images,translations" : "full,images" },
       ttlSeconds: 86400,
     });
     if (!results) return [];
 
     return results.map((entry) => {
-      const localizedTitle = ptBrTranslationTitle(entry);
+      const localizedTitle = usePtBr ? ptBrTranslationTitle(entry) : null;
       return normalizeSearchResult(
         {
           ids: {

@@ -3,7 +3,7 @@
  *
  * Ponto único para consultar, cachear e normalizar disponibilidade de QUALQUER
  * título do site. Substitui a lógica antes acoplada à title page
- * (`getProvidersFromCache`) e à rota `/api/poplog3/providers`.
+ * (`getProvidersFromCache`) e à rota `/api/providers`.
  *
  * Pipeline de resolução (POPLOG-first):
  *   1. Cache persistente `catalog_availability` (por imdbId+região, fresco)

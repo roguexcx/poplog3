@@ -1,68 +1,88 @@
-import { uiMessage } from "@/lib/i18n/ui-message";
 import { formatEpisodeRuntimeLabel, formatRuntimeLabel, parseYearLabel, translateGenreName, } from "@/lib/domain-labels";
 import { resolveRuntimeByMediaType } from "@/lib/runtime";
-const HEADLINES: Record<string, [
+type HeroHeadline = [
     string,
     string,
     string
-][]> = {
-    madrugada: [
-        ["Ainda acordado?", "Temos algo", uiMessage("ui.90390f1eae3a")],
-        [uiMessage("ui.a8b1ccadf64b"), "com um bom", "filme."],
-        ["Noite funda.", "Escolha algo", "marcante."],
-    ],
-    manha: [
-        ["Bom dia.", "O que vamos", "assistir hoje?"],
-        [uiMessage("ui.fe152e7f2fa9"), "Falta escolher", uiMessage("ui.a150260d1b89")],
-        [uiMessage("ui.81182f76c1f4"), "o dia com", uiMessage("ui.144b0ea52865")],
-    ],
-    tarde: [
-        ["Tarde livre?", "Aproveite com", "um bom filme."],
-        ["Descubra algo", uiMessage("ui.2a5f848c4d2b"), "mais tarde."],
-        ["Relaxa.", "A curadoria", "chegou."],
-    ],
-    noite: [
-        ["Descubra o", uiMessage("ui.55ccb577cc05"), "da sua noite."],
-        ["Pipoca pronta?", "Escolha o", "filme de hoje."],
-        ["Noite de", "cinema", uiMessage("ui.903c2c59dd61")],
-    ],
+];
+type HeroPeriod = "madrugada" | "manha" | "tarde" | "noite";
+const HEADLINES: Record<"pt-BR" | "en-US", Record<HeroPeriod, HeroHeadline[]>> = {
+    "pt-BR": {
+        madrugada: [
+            ["Ainda acordado?", "Temos algo", "para agora."],
+            ["Silencio na casa.", "Combina com um", "bom filme."],
+            ["Noite funda.", "Escolha algo", "marcante."],
+        ],
+        manha: [
+            ["Bom dia.", "O que vamos", "assistir hoje?"],
+            ["Cafe pronto.", "Falta escolher", "a companhia."],
+            ["Comece", "o dia com", "uma historia."],
+        ],
+        tarde: [
+            ["Tarde livre?", "Aproveite com", "um bom filme."],
+            ["Descubra algo", "para ver", "mais tarde."],
+            ["Relaxa.", "A curadoria", "chegou."],
+        ],
+        noite: [
+            ["Descubra o", "ritmo", "da sua noite."],
+            ["Pipoca pronta?", "Escolha o", "filme de hoje."],
+            ["Noite de", "cinema", "em casa."],
+        ],
+    },
+    "en-US": {
+        madrugada: [
+            ["Still awake?", "We found", "something for now."],
+            ["Quiet house.", "Good time for", "a film."],
+            ["Deep night.", "Pick something", "memorable."],
+        ],
+        manha: [
+            ["Good morning.", "What should we", "watch today?"],
+            ["Coffee is ready.", "Now choose", "the company."],
+            ["Start", "the day with", "a story."],
+        ],
+        tarde: [
+            ["Free afternoon?", "Make it", "a good movie."],
+            ["Find something", "to watch", "later."],
+            ["Settle in.", "The curation", "is here."],
+        ],
+        noite: [
+            ["Find the", "right mood", "for tonight."],
+            ["Popcorn ready?", "Pick today's", "movie."],
+            ["Movie night", "starts", "at home."],
+        ],
+    },
 };
 function getBrasiliaHour(): number {
     return (new Date().getUTCHours() - 3 + 24) % 24;
 }
-export function getHeroHeadline(): [
-    string,
-    string,
-    string
-] {
+export function getHeroHeadline(language: string | null | undefined = "pt-BR"): HeroHeadline {
     const hour = getBrasiliaHour();
-    let pool: [
-        string,
-        string,
-        string
-    ][];
+    let period: HeroPeriod;
     if (hour >= 6 && hour < 12) {
-        pool = HEADLINES.manha;
+        period = "manha";
     }
     else if (hour >= 12 && hour < 18) {
-        pool = HEADLINES.tarde;
+        period = "tarde";
     }
     else if (hour >= 18 && hour < 24) {
-        pool = HEADLINES.noite;
+        period = "noite";
     }
     else {
-        pool = HEADLINES.madrugada;
+        period = "madrugada";
     }
+    const normalized = language === "en-US" ? "en-US" : "pt-BR";
+    const pool = HEADLINES[normalized][period];
     return pool[Math.floor(Math.random() * pool.length)];
 }
 export function translateGenres(genres: Array<string | {
     name: string;
-}>, limit = 2): string {
+}>, limit = 2, language: string | null | undefined = "pt-BR"): string {
+    const shouldTranslate = language !== "en-US";
     return genres
         .slice(0, limit)
         .map((g) => {
         const name = typeof g === "string" ? g : (typeof g === "object" && g !== null ? g.name : String(g));
-        return translateGenreName(name) ?? name;
+        return shouldTranslate ? translateGenreName(name) ?? name : name;
     })
         .join(" • ");
 }
@@ -87,4 +107,3 @@ export function formatRuntime(mediaType: "movie" | "tv", runtime?: number | null
 export function parseYear(releaseDate?: string | null, firstAirDate?: string | null): string | null {
     return parseYearLabel(releaseDate, firstAirDate);
 }
-

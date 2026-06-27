@@ -9,6 +9,10 @@
 import { buildTraktIndex, isTraktIndexEnabled } from "./engine";
 import type { TraktIndexItem } from "./types";
 import {
+  pickLocalized,
+  normalizeCatalogLanguageStrict,
+} from "@/lib/i18n/catalog-localization";
+import {
   readContinuitySectionCache,
   writeContinuitySectionCache,
   invalidateContinuitySectionCacheLocal,
@@ -34,8 +38,17 @@ export function traktIndexCacheKey(period = "daily"): string {
  */
 export const TRAKT_INDEX_LEGACY_CACHE_KEY = "trakt_index_top50_daily";
 
-/** Chave do cache geral de trending da HOME (Balloonerismm/local DB). */
+/** Chave do cache de trending REAL da HOME (com providers). */
 export const HOME_TRENDING_CACHE_KEY = "home_trending";
+
+/** Chave do cache de trending REAL leve da HOME/Hero (sem providers). */
+export const HOME_TRENDING_LIGHT_CACHE_KEY = "home_trending_light";
+
+/** Chave do cache de FALLBACK local (popularidade) — separada do trending real. */
+export const HOME_TRENDING_LOCAL_CACHE_KEY = "home_trending_local";
+
+/** Chave do cache de FALLBACK local leve (popularidade, sem providers). */
+export const HOME_TRENDING_LOCAL_LIGHT_CACHE_KEY = "home_trending_local_light";
 
 // ─── TTL ──────────────────────────────────────────────────────────────────────
 
@@ -55,28 +68,58 @@ type TraktIndexCachePayload = {
 // ─── Função canônica ──────────────────────────────────────────────────────────
 
 /**
- * Retorna o TOP 50 POPLOG calculado pelos 7 sinais Trakt para o período diário.
- * Lê do cache persistente (MySQL via Prisma) e grava se necessário.
+ * Projeta os campos legados (`title`/`overview`/`tagline`) para o idioma pedido
+ * a partir do bloco `localized`, sem mutar o array cacheado (clona cada item).
+ * `original_title` permanece sempre o original do Trakt.
+ */
+function projectIndexLanguage(
+  items: TraktIndexItem[],
+  language: string,
+): TraktIndexItem[] {
+  return items.map((item) => {
+    const picked = pickLocalized(item.localized, language);
+    return {
+      ...item,
+      title: picked.text.title ?? item.original_title ?? item.title,
+      overview: picked.text.overview ?? item.overview,
+      tagline: picked.text.tagline ?? item.tagline,
+    };
+  });
+}
+
+/**
+ * Retorna o TOP 50 POPLOG calculado pelos 7 sinais Trakt para o período diário,
+ * projetado para o idioma de catálogo pedido.
  *
- * @param opts.fresh  true = ignora cache e reconstrói
+ * O índice é a fonte da verdade BILÍNGUE: um único payload cacheado guarda
+ * `localized` (pt-BR + en-US). A projeção por idioma acontece na leitura, então
+ * o mesmo cache serve os dois idiomas sem contaminação (cada chamada recebe os
+ * campos já no idioma pedido).
+ *
+ * @param opts.language  idioma de catálogo (pt-BR padrão)
+ * @param opts.fresh     true = ignora cache e reconstrói
+ * @param opts.peek      true = só lê cache (não reconstrói); cache frio → []
  */
 export async function getPoplogDailyTrendingIndex(opts: {
+  language?: string | null;
   fresh?: boolean;
+  peek?: boolean;
 } = {}): Promise<TraktIndexItem[]> {
   if (!isTraktIndexEnabled()) {
-    console.warn("[trakt-canonical] Trakt Index disabled — returning []");
+    if (!opts.peek) console.warn("[trakt-canonical] Trakt Index disabled — returning []");
     return [];
   }
 
   const period = "daily";
+  const language = normalizeCatalogLanguageStrict(opts.language);
   const cacheKey = traktIndexCacheKey(period);
   const startedAt = Date.now();
 
-  // ── 1. Cache hit ─────────────────────────────────────────────────────────
+  // ── 1. Cache hit (payload bilíngue, projetado para o idioma pedido) ────────
   if (!opts.fresh) {
     const cached = await readContinuitySectionCache<TraktIndexCachePayload>(cacheKey, {
       region: "BR",
-      language: "pt-BR",
+      language: "bilingual",
     });
 
     if (
@@ -85,14 +128,17 @@ export async function getPoplogDailyTrendingIndex(opts: {
       cached.payload.algorithmVersion === POPLOG_TRENDING_ALGORITHM_VERSION
     ) {
       console.log(
-        "[trakt-canonical] cache=hit period=%s items=%d ms=%d",
-        period, cached.payload.results.length, Date.now() - startedAt,
+        "[trakt-canonical] cache=hit period=%s lang=%s items=%d ms=%d",
+        period, language, cached.payload.results.length, Date.now() - startedAt,
       );
-      return cached.payload.results;
+      return projectIndexLanguage(cached.payload.results, language);
     }
   }
 
-  // ── 2. Build fresco ───────────────────────────────────────────────────────
+  // Peek (caminho fast da Home): nunca reconstrói no caminho crítico.
+  if (opts.peek) return [];
+
+  // ── 2. Build fresco (bilíngue) ────────────────────────────────────────────
   console.log("[trakt-canonical] cache=miss building fresh period=%s", period);
 
   const results = await buildTraktIndex({
@@ -117,17 +163,17 @@ export async function getPoplogDailyTrendingIndex(opts: {
   void writeContinuitySectionCache({
     sectionKey: cacheKey,
     region: "BR",
-    language: "pt-BR",
+    language: "bilingual",
     ttlMs: CACHE_TTL_MS,
     payload,
   });
 
   console.log(
-    "[trakt-canonical] built period=%s items=%d ms=%d",
-    period, results.length, Date.now() - startedAt,
+    "[trakt-canonical] built period=%s lang=%s items=%d ms=%d",
+    period, language, results.length, Date.now() - startedAt,
   );
 
-  return results;
+  return projectIndexLanguage(results, language);
 }
 
 // ─── Reset de caches ──────────────────────────────────────────────────────────
@@ -165,10 +211,14 @@ export type TrendingCacheResetResult = {
  * Reseta SOMENTE caches de conteúdo público — NUNCA dados de usuário
  * (histórico, watchlist, avaliações, progresso).
  *
- * Chaves invalidadas:
- *  - `trakt_index_top50_daily_<version>`  (índice versionado atual)
+ * Chaves invalidadas (todas as variações de idioma/região via wildcard):
+ *  - `trakt_index_top50_daily_<version>`  (índice versionado atual, bilíngue)
  *  - `trakt_index_top50_daily`            (chave legada sem versão)
- *  - `home_trending`                      (cache geral Balloonerismm/local DB)
+ *  - `home_trending` / `home_trending_light`         (trending REAL)
+ *  - `home_trending_local` / `home_trending_local_light` (FALLBACK local)
+ *
+ * Limpa tanto o cache persistente (MySQL via Prisma) quanto o Redis, para que o
+ * bump de versão/algoritmo reflita na Home na primeira request seguinte.
  */
 export async function resetPoplogTrendingCaches(
   opts: TrendingCacheResetOptions = {},
@@ -183,9 +233,12 @@ export async function resetPoplogTrendingCaches(
   const errors: string[] = [];
 
   const keysToInvalidate = [
-    traktIndexCacheKey("daily"),   // versioned key
-    TRAKT_INDEX_LEGACY_CACHE_KEY,  // legacy key (no version)
-    HOME_TRENDING_CACHE_KEY,       // home general cache
+    traktIndexCacheKey("daily"),          // versioned bilingual index
+    TRAKT_INDEX_LEGACY_CACHE_KEY,         // legacy key (no version)
+    HOME_TRENDING_CACHE_KEY,              // real trending (providers)
+    HOME_TRENDING_LIGHT_CACHE_KEY,        // real trending (light) — consumido pela Home/Hero
+    HOME_TRENDING_LOCAL_CACHE_KEY,        // fallback local (providers)
+    HOME_TRENDING_LOCAL_LIGHT_CACHE_KEY,  // fallback local (light)
   ];
 
   console.log("[trakt-cache-reset] scope=%s keys=%j", scope, keysToInvalidate);
@@ -203,6 +256,21 @@ export async function resetPoplogTrendingCaches(
         }
       }),
     );
+
+    // Redis: a Home lê via camada de continuidade que prefere Redis, então o
+    // reset precisa limpar TODAS as variações idioma/região de cada sectionKey.
+    try {
+      const { redisDeleteByPattern } = await import("@/server/cache/redis-client");
+      await Promise.allSettled(
+        keysToInvalidate.map((key) =>
+          redisDeleteByPattern(`continuity:section:${encodeURIComponent(key)}:*`),
+        ),
+      );
+    } catch (error) {
+      errors.push(
+        `redis pattern delete skipped: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   const ms = Date.now() - startedAt;

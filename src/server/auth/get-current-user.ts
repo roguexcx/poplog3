@@ -5,14 +5,6 @@ import { db } from "@/server/db/client";
 import type { AuthUser } from "@/server/auth/types";
 import type { Session } from "next-auth";
 
-async function isBlockedUser(userId: string) {
-  const user = await db.user.findUnique({
-    where: { id: userId },
-    select: { accessStatus: true },
-  }).catch(() => null);
-  return user?.accessStatus === "blocked";
-}
-
 async function userAccessFields(userId: string) {
   return db.user.findUnique({
     where: { id: userId },

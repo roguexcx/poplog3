@@ -15,6 +15,7 @@ import {
 } from "@/server/source-engine/hydrate-catalog-results";
 import { resolveLocaleScope } from "@/server/source-engine/locale";
 import { sourceEngineLog } from "@/server/source-engine/source-log";
+import { richSearchHandler } from "@/server/search/rich-search-handler";
 
 type SearchTitleSummary = {
   id: number;
@@ -60,7 +61,7 @@ function fuzzyMatchToTmdbSummary(
   };
 }
 
-export async function GET(request: NextRequest) {
+async function lightSearchHandler(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const query = searchParams.get("q")?.trim();
   const debugSource = searchParams.get("debugSource") === "1";
@@ -111,7 +112,12 @@ export async function GET(request: NextRequest) {
           validTitles.map((t) => `${t.media_type}-${t.tmdb_id}`)
         );
         const fuzzyTitles = shouldUseFuzzyFallback(validTitles.length, 1)
-          ? await findCachedFuzzyTitles({ query, mediaType: "all", excludeKeys: seenKeys })
+          ? await findCachedFuzzyTitles({
+              query,
+              mediaType: "all",
+              excludeKeys: seenKeys,
+              language: localeScope.catalogLanguage,
+            })
           : [];
 
         const rawCombined = [
@@ -184,7 +190,11 @@ export async function GET(request: NextRequest) {
       }, "warn");
     }
 
-    const fuzzyTitles = await findCachedFuzzyTitles({ query, mediaType: "all" });
+    const fuzzyTitles = await findCachedFuzzyTitles({
+      query,
+      mediaType: "all",
+      language: localeScope.catalogLanguage,
+    });
     const rawCombined = fuzzyTitles.map(fuzzyMatchToTmdbSummary);
     const results = applyUserFeedbackScoring(rawCombined, {
       userId,
@@ -227,4 +237,18 @@ export async function GET(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+/**
+ * Dispatcher do namespace canônico de busca.
+ * - `/api/search`                          → tier leve (só títulos)
+ * - `/api/search?include=people,companies` → tier rico (títulos + pessoas + empresas)
+ * Mantém os dois comportamentos exatos sob uma URL bare única.
+ */
+export async function GET(request: NextRequest) {
+  const include = request.nextUrl.searchParams.get("include");
+  if (include && include.trim().length > 0) {
+    return richSearchHandler(request);
+  }
+  return lightSearchHandler(request);
 }

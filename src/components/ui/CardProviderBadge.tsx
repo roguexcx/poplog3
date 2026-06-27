@@ -33,7 +33,7 @@ export default function CardProviderBadge({
   return (
     <div className="inline-flex items-center gap-1 rounded-md bg-black/60 px-1.5 py-0.5 backdrop-blur-sm">
       {logoSrc ? (
-        // eslint-disable-next-line @next/next/no-img-element
+         
         <img src={logoSrc} alt={displayName} className="h-3 w-3 rounded-sm object-contain" />
       ) : null}
       <span

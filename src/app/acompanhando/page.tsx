@@ -30,7 +30,7 @@ function getTmdbId(item: ScoredItem) {
     return str.replace(/\D/g, "");
 }
 async function postCuradoriaAction(body: unknown) {
-    await fetch("/api/poplog3/acompanhando", {
+    await fetch("/api/acompanhando", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify(body),
@@ -178,7 +178,7 @@ export default function AcompanhandoPage() {
     useEffect(() => {
         fetchJsonSafe<{
             candidates?: ScoredItem[];
-        }>("/api/poplog3/continuity/hero")
+        }>("/api/continuity/hero")
             .then((result) => {
             if (result.ok) {
                 if (Array.isArray(result.data.candidates)) {
@@ -210,7 +210,7 @@ export default function AcompanhandoPage() {
     useEffect(() => {
         fetchJsonSafe<{
             items?: NewEpisodeItem[];
-        }>("/api/poplog3/continuity/new-episodes")
+        }>("/api/continuity/new-episodes")
             .then((result) => {
             if (result.ok) {
                 if (Array.isArray(result.data.items)) {
@@ -233,7 +233,7 @@ export default function AcompanhandoPage() {
     useEffect(() => {
         fetchJsonSafe<{
             items?: ContinueItem[];
-        }>("/api/poplog3/continuity/continue")
+        }>("/api/continuity/continue")
             .then((result) => {
             if (result.ok) {
                 if (Array.isArray(result.data.items)) {
@@ -256,7 +256,7 @@ export default function AcompanhandoPage() {
     useEffect(() => {
         fetchJsonSafe<{
             items?: RecentlyWatchedItem[];
-        }>("/api/poplog3/continuity/recently-watched")
+        }>("/api/continuity/recently-watched")
             .then((result) => {
             if (result.ok && Array.isArray(result.data.items)) {
                 setRecentlyWatched(result.data.items);
@@ -277,7 +277,7 @@ export default function AcompanhandoPage() {
             : "";
         fetchJsonOrNull<{
             items?: WatchlistPickItem[];
-        }>(`/api/poplog3/continuity/watchlist-picks${params}`)
+        }>(`/api/continuity/watchlist-picks${params}`)
             .then((data) => {
             if (data && Array.isArray(data.items)) {
                 setWatchlistPicks(data.items);
@@ -304,7 +304,7 @@ export default function AcompanhandoPage() {
             params.set("exclude", excludeIds.join(","));
         fetchJsonOrNull<{
             items?: WatchlistPickItem[];
-        }>(`/api/poplog3/continuity/watchlist-picks?${params.toString()}`)
+        }>(`/api/continuity/watchlist-picks?${params.toString()}`)
             .then((data) => {
             if (data && Array.isArray(data.items)) {
                 setStartSeriesPicks(data.items);

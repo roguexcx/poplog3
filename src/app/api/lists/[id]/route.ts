@@ -4,7 +4,7 @@ import {
   serializeUserListRecord,
   updateUserList,
 } from "@/server/lists/list-service";
-import { jsonError, jsonSuccess, readJsonObject, requireListUser } from "../_shared";
+import { jsonError, jsonSuccess, readJsonObject, requireListUser } from "@/app/api/lists/_shared";
 
 type RouteContext = { params: Promise<{ id: string }> };
 

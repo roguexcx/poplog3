@@ -12,6 +12,15 @@ import { traktAdapter } from "@/server/source-engine/adapters/trakt-adapter";
 import { traktGet } from "@/server/api-clients/trakt/client";
 import type { TraktTranslation } from "@/server/api-clients/trakt/types";
 import type { CatalogPeople, CatalogTitle, CatalogVideo } from "@/server/source-engine/types/catalog.types";
+import { normalizeCatalogLanguage } from "@/server/source-engine/locale";
+import {
+  resolveCatalogLocalization,
+  type CatalogLocalizationEntry,
+} from "@/lib/i18n/catalog-localization";
+import {
+  getCatalogLocalizationsByPoplogId,
+  upsertCatalogLocalizations,
+} from "@/server/catalog/catalog-localization-store";
 import { db } from "@/server/db/client";
 import {
   canonicalInputFromCatalogTitle,
@@ -86,6 +95,12 @@ export type PoplogTitleDetailsResult = {
   spokenLanguages?: Array<{ code: string; name: string }>;
   inProduction?: boolean | null;
   seriesType?: string | null;
+  catalogLocalization?: {
+    language: string;
+    requestedLanguage: string;
+    fallbackUsed: boolean;
+    fallbackLanguage: string | null;
+  };
   sourceMeta: {
     primarySource: PoplogTitleDetailsSource;
     fallbackUsed?: boolean;
@@ -165,8 +180,13 @@ function mergeExternalIds(
   };
 }
 
-function localGenres(value: unknown): string[] {
+function shouldUsePortugueseCatalog(locale?: string | null): boolean {
+  return normalizeCatalogLanguage(locale) !== "en-US";
+}
+
+function localGenres(value: unknown, locale?: string | null): string[] {
   if (!Array.isArray(value)) return [];
+  const translateToPt = shouldUsePortugueseCatalog(locale);
   return value
     .map((genre) => {
       if (typeof genre === "string") return genre;
@@ -177,7 +197,7 @@ function localGenres(value: unknown): string[] {
       return null;
     })
     .filter((genre): genre is string => Boolean(genre))
-    .map((genre) => translateGenreName(genre) ?? genre);
+    .map((genre) => translateToPt ? translateGenreName(genre) ?? genre : genre);
 }
 
 function compactExternalIds(ids: PoplogTitleExternalIds): PoplogTitleExternalIds {
@@ -186,8 +206,9 @@ function compactExternalIds(ids: PoplogTitleExternalIds): PoplogTitleExternalIds
   ) as PoplogTitleExternalIds;
 }
 
-function remoteGenres(value: unknown): string[] {
+function remoteGenres(value: unknown, locale?: string | null): string[] {
   if (!Array.isArray(value)) return [];
+  const translateToPt = shouldUsePortugueseCatalog(locale);
   return value
     .map((genre) => {
       if (typeof genre === "string") return genre;
@@ -198,7 +219,7 @@ function remoteGenres(value: unknown): string[] {
       return null;
     })
     .filter((genre): genre is string => Boolean(genre))
-    .map((genre) => translateGenreName(genre) ?? genre);
+    .map((genre) => translateToPt ? translateGenreName(genre) ?? genre : genre);
 }
 
 /**
@@ -247,9 +268,89 @@ async function fetchTraktPtBrTranslation(imdbId: string, mediaType: MediaType): 
   };
 }
 
+async function persistTitleLocalizations(input: {
+  poplogId: string | number | null | undefined;
+  english?: {
+    title?: string | null;
+    overview?: string | null;
+    tagline?: string | null;
+    source?: string | null;
+  } | null;
+  ptBr?: {
+    title?: string | null;
+    overview?: string | null;
+    tagline?: string | null;
+    source?: string | null;
+  } | null;
+}) {
+  if (input.poplogId == null) return;
+  const hydratedAt = new Date();
+  await upsertCatalogLocalizations([
+    {
+      poplogId: input.poplogId,
+      language: "en-US",
+      title: input.english?.title ?? null,
+      overview: input.english?.overview ?? null,
+      tagline: input.english?.tagline ?? null,
+      source: input.english?.source ?? null,
+      hydratedAt,
+    },
+    {
+      poplogId: input.poplogId,
+      language: "pt-BR",
+      title: input.ptBr?.title ?? null,
+      overview: input.ptBr?.overview ?? null,
+      tagline: input.ptBr?.tagline ?? null,
+      source: input.ptBr?.source ?? null,
+      hydratedAt,
+    },
+  ]).catch((error) => {
+    console.warn(
+      "[catalog-localization] upsert_failed",
+      error instanceof Error ? error.message : error,
+    );
+  });
+}
+
+async function applyResolvedCatalogLocalization(
+  details: PoplogTitleDetailsResult,
+  locale?: string | null,
+  localizations?: CatalogLocalizationEntry[] | null,
+): Promise<PoplogTitleDetailsResult> {
+  const rows =
+    localizations ??
+    (details.poplogId != null
+      ? await getCatalogLocalizationsByPoplogId(details.poplogId).catch(() => [])
+      : []);
+  const resolved = resolveCatalogLocalization(
+    {
+      title: details.title,
+      originalTitle: details.originalTitle,
+      overview: details.overview,
+      tagline: details.tagline,
+      localizations: rows,
+    },
+    locale,
+  );
+
+  return {
+    ...details,
+    title: resolved.title ?? details.title,
+    overview: resolved.overview ?? details.overview ?? null,
+    tagline: resolved.tagline ?? details.tagline ?? null,
+    catalogLocalization: {
+      language: resolved.language,
+      requestedLanguage: resolved.requestedLanguage,
+      fallbackUsed: resolved.fallbackUsed,
+      fallbackLanguage: resolved.fallbackLanguage,
+    },
+  };
+}
+
 function localToDetails(
   identity: PoplogTitleIdentity,
   row: LocalTitleRow,
+  locale?: string | null,
 ): PoplogTitleDetailsResult {
   const releaseDate = row.mediaType === "movie"
     ? dateString(row.releaseDate)
@@ -274,7 +375,7 @@ function localToDetails(
     numberOfEpisodes: row.numberOfEpisodes ?? null,
     posterUrl: imageUrl(row.posterPath, "w500"),
     backdropUrl: imageUrl(row.backdropPath, "w1280"),
-    genres: localGenres(row.genres),
+    genres: localGenres(row.genres, locale),
     runtime: row.mediaType === "movie"
       ? row.runtime
       : Array.isArray(row.episodeRunTime)
@@ -299,6 +400,7 @@ function catalogTitleToDetails(
   people?: CatalogPeople | null,
   videos?: CatalogVideo[],
   source: Exclude<PoplogTitleDetailsSource, "local" | "legacy"> = "trakt",
+  locale?: string | null,
 ): PoplogTitleDetailsResult {
   return {
     poplogId: identity.poplogId,
@@ -310,7 +412,7 @@ function catalogTitleToDetails(
     releaseDate: title.year ? `${title.year}-01-01` : null,
     posterUrl: imageUrl(title.posterPath, "w500"),
     backdropUrl: imageUrl(title.backdropPath, "w1280"),
-    genres: remoteGenres(title.genres),
+    genres: remoteGenres(title.genres, locale),
     runtime: title.runtime ?? null,
     status: title.status ?? null,
     voteAverage: title.rating ?? null,
@@ -364,10 +466,14 @@ function catalogTitleToDetails(
   };
 }
 
-function localizeTitleDetails(details: PoplogTitleDetailsResult): PoplogTitleDetailsResult {
+function localizeTitleDetails(
+  details: PoplogTitleDetailsResult,
+  locale?: string | null,
+): PoplogTitleDetailsResult {
   // Titles, overviews and taglines are NEVER machine-translated.
   // PT-BR content must come from Trakt translations.
   // Genre labels use a static PT-BR mapping (not machine translation).
+  if (!shouldUsePortugueseCatalog(locale)) return details;
   return {
     ...details,
     genres: (details.genres ?? []).map((genre) => translateGenreName(genre) ?? genre),
@@ -511,7 +617,10 @@ async function loadPoplogTitleDetails({
   mediaType,
   id,
   sourceHint = "auto",
+  locale,
 }: LoaderInput): Promise<PoplogTitleDetailsResult | null> {
+  const effectiveLocale = normalizeCatalogLanguage(locale);
+  const usePortugueseCatalog = shouldUsePortugueseCatalog(effectiveLocale);
   const identity = await resolvePoplogTitleIdentity({ mediaType, id, sourceHint });
   const local = await findLocalTitle(identity);
   const lookupId = detailLookupId(identity);
@@ -595,6 +704,7 @@ async function loadPoplogTitleDetails({
         people,
         videos,
         remoteSource,
+        effectiveLocale,
       );
       const mergedExternalIds = {
         ...mergeExternalIds(identity, local),
@@ -631,25 +741,34 @@ async function loadPoplogTitleDetails({
 
       // Fetch Trakt translations (title + overview + tagline in PT-BR)
       let traktTranslation: TraktPtBrTranslation | null = null;
-      if (lookupId) {
+      if (usePortugueseCatalog && lookupId) {
         traktTranslation = await fetchTraktPtBrTranslation(lookupId, effectiveMediaType).catch(() => null);
       }
 
-      const localPtBr = (local?.title && looksLikeLocalizedTitle(local.title)) ? local.title : null;
-      const canonicalTitle = traktTranslation?.title ?? localPtBr ?? remoteEnglishTitle;
+      const localPtBr =
+        usePortugueseCatalog && local?.title && looksLikeLocalizedTitle(local.title)
+          ? local.title
+          : null;
+      const canonicalTitle = usePortugueseCatalog
+        ? traktTranslation?.title ?? localPtBr ?? remoteEnglishTitle
+        : remoteEnglishTitle;
 
       // Overview: Trakt > English
-      const canonicalOverview = traktTranslation?.overview ?? details.overview ?? null;
+      const canonicalOverview = usePortugueseCatalog
+        ? traktTranslation?.overview ?? details.overview ?? null
+        : details.overview ?? null;
 
       // Tagline: Trakt > English
-      const canonicalTagline = traktTranslation?.tagline ?? details.tagline ?? null;
+      const canonicalTagline = usePortugueseCatalog
+        ? traktTranslation?.tagline ?? details.tagline ?? null
+        : details.tagline ?? null;
 
       // The English original title falls back to the remote API title when a localized candidate won.
       const canonicalOriginalTitle: string | null | undefined =
         details.originalTitle ??
         (canonicalTitle !== remoteEnglishTitle ? remoteEnglishTitle : null);
 
-      if (canonicalTitle !== remoteEnglishTitle) {
+      if (usePortugueseCatalog && canonicalTitle !== remoteEnglishTitle) {
         console.log("[title-details] localized pt-BR title selected", {
           source: traktTranslation?.title ? "trakt" : "local_db",
           ptBrTitle: canonicalTitle,
@@ -657,7 +776,7 @@ async function loadPoplogTitleDetails({
         });
       }
 
-      return localizeTitleDetails({
+      const localizedDetails = localizeTitleDetails({
         ...details,
         title: canonicalTitle,
         originalTitle: canonicalOriginalTitle ?? undefined,
@@ -668,12 +787,30 @@ async function loadPoplogTitleDetails({
         numberOfSeasons,
         numberOfEpisodes: details.numberOfEpisodes ?? local?.numberOfEpisodes ?? null,
         externalIds: mergedExternalIds,
+      }, effectiveLocale);
+
+      await persistTitleLocalizations({
+        poplogId: localizedDetails.poplogId,
+        english: {
+          title: remoteEnglishTitle,
+          overview: details.overview ?? null,
+          tagline: details.tagline ?? null,
+          source: remoteSource,
+        },
+        ptBr: {
+          title: traktTranslation?.title ?? localPtBr ?? null,
+          overview: traktTranslation?.overview ?? null,
+          tagline: traktTranslation?.tagline ?? null,
+          source: traktTranslation ? "trakt_translations" : localPtBr ? "local_db" : null,
+        },
       });
+
+      return applyResolvedCatalogLocalization(localizedDetails, effectiveLocale);
     }
   }
 
   if (local) {
-    const localDetails = localToDetails(identity, local);
+    const localDetails = localToDetails(identity, local, effectiveLocale);
 
     // Se DB local tem numberOfSeasons null para série TV, tenta Trakt e agenda refresh.
     let numberOfSeasons = localDetails.numberOfSeasons;
@@ -690,7 +827,7 @@ async function loadPoplogTitleDetails({
       }
     }
 
-    return localizeTitleDetails({
+    const localizedDetails = localizeTitleDetails({
       ...localDetails,
       numberOfSeasons,
       sourceMeta: {
@@ -702,7 +839,19 @@ async function loadPoplogTitleDetails({
         rawSource: "local",
         aliasResolution: identity.aliasResolution,
       },
+    }, effectiveLocale);
+
+    await persistTitleLocalizations({
+      poplogId: localizedDetails.poplogId,
+      english: {
+        title: localizedDetails.originalTitle ?? localizedDetails.title,
+        overview: localizedDetails.overview ?? null,
+        tagline: localizedDetails.tagline ?? null,
+        source: "local_db_legacy",
+      },
     });
+
+    return applyResolvedCatalogLocalization(localizedDetails, effectiveLocale);
   }
 
   return {

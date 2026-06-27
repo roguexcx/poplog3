@@ -198,7 +198,7 @@ export function TabCatalogAdmin({ secret }: {
             <div className="grid gap-4 md:grid-cols-[120px_1fr]">
               <div className="relative aspect-[2/3] overflow-hidden rounded-lg border border-white/10 bg-white/[0.04]">
                 {view.data.title?.posterUrl ? (
-            // eslint-disable-next-line @next/next/no-img-element
+             
             <img src={view.data.title.posterUrl} alt="" className="h-full w-full object-cover"/>) : (<div className="flex h-full items-center justify-center text-xs text-zinc-600">{uiMessage("ui.d4c2c40cef75")}</div>)}
               </div>
               <div className="overflow-auto rounded-lg border border-white/10">
@@ -238,7 +238,7 @@ export function TabCatalogAdmin({ secret }: {
                 {posters.map((asset) => (<div key={asset.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-3">
                     <div className="relative aspect-[2/3] overflow-hidden rounded border border-white/10 bg-black/40">
                       {asset.publicUrl ? (
-                    // eslint-disable-next-line @next/next/no-img-element
+                     
                     <img src={asset.publicUrl} alt="" className="h-full w-full object-cover"/>) : (<div className="flex h-full items-center justify-center text-xs text-zinc-600">{uiMessage("ui.3cbb32f03f65")}</div>)}
                     </div>
                     <div className="mt-2 space-y-1 text-xs text-zinc-500">

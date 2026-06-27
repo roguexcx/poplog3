@@ -8,7 +8,8 @@ import { Reorder, useDragControls } from "framer-motion";
 import { signOut as signOutAuthJs } from "next-auth/react";
 import type { AuthUser } from "@/server/auth/types";
 import { useAuth } from "@/hooks/useAuth";
-import { GripVertical, X, Search, ChevronRight, LogOut, Mail, Lock, Check, Trash2, Film, Tv, BarChart2, ChevronDown, RotateCcw, AlertTriangle, } from "lucide-react";
+import { useLocale, type PoplogLocale } from "@/context/LocaleContext";
+import { GripVertical, X, Search, ChevronRight, LogOut, Mail, Lock, Check, Trash2, Film, Tv, BarChart2, ChevronDown, RotateCcw, AlertTriangle, Globe2, } from "lucide-react";
 // ─────────────────────────────────────────────────────────────────────────────
 // TYPES
 // ─────────────────────────────────────────────────────────────────────────────
@@ -804,6 +805,86 @@ function SaveStatusBadge({ status }: {
       {label}
     </span>);
 }
+const PROFILE_LOCALE_OPTIONS = [
+    {
+        language: "pt-BR",
+        region: "BR",
+        labelKey: "locale.portuguese",
+        helper: {
+            "pt-BR": "Interface e catalogo em portugues, disponibilidade no Brasil.",
+            "en-US": "Interface and catalog in Portuguese, availability in Brazil.",
+        },
+    },
+    {
+        language: "en-US",
+        region: "US",
+        labelKey: "locale.english",
+        helper: {
+            "pt-BR": "Interface e catalogo em ingles, disponibilidade nos Estados Unidos.",
+            "en-US": "Interface and catalog in English, availability in the United States.",
+        },
+    },
+] satisfies Array<{
+    language: PoplogLocale["interfaceLanguage"];
+    region: PoplogLocale["region"];
+    labelKey: "locale.portuguese" | "locale.english";
+    helper: Record<PoplogLocale["interfaceLanguage"], string>;
+}>;
+function LocalePreferencesBlock() {
+    const { locale, saveLocale, t } = useLocale();
+    const [status, setStatus] = useState<SaveStatus>("idle");
+    const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    async function choose(option: (typeof PROFILE_LOCALE_OPTIONS)[number]) {
+        if (locale.catalogLanguage === option.language && locale.region === option.region)
+            return;
+        setStatus("saving");
+        try {
+            // saveLocale() já faz PATCH /api/user/locale (seta cookies via Set-Cookie) e
+            // chama setLocaleState() internamente — todos os componentes com useLocale()
+            // re-renderizam imediatamente. window.location.reload() era redundante.
+            const saved = await saveLocale({
+                interfaceLanguage: option.language,
+                catalogLanguage: option.language,
+                region: option.region,
+            });
+            if (!saved)
+                throw new Error("locale save failed");
+            setStatus("saved");
+            if (savedTimerRef.current) clearTimeout(savedTimerRef.current);
+            savedTimerRef.current = setTimeout(() => setStatus("idle"), 2500);
+        }
+        catch {
+            setStatus("error");
+        }
+    }
+    return (<Block>
+      <div className="flex items-center justify-between mb-1.5">
+        <Eyebrow color="indigo">
+          <span className="inline-flex items-center gap-2"><Globe2 size={13}/>{t("locale.switch")}</span>
+        </Eyebrow>
+        <SaveStatusBadge status={status}/>
+      </div>
+      <BlockTitle>{t("profile.locale.title")}</BlockTitle>
+      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2">
+        {PROFILE_LOCALE_OPTIONS.map((option) => {
+            const active = locale.catalogLanguage === option.language && locale.region === option.region;
+            return (<button key={option.language} type="button" aria-pressed={active} disabled={status === "saving" || active} onClick={() => void choose(option)} className={[
+                    "rounded-2xl border px-4 py-3 text-left transition-all",
+                    active
+                        ? "border-teal-400/35 bg-teal-500/[0.10] text-teal-100"
+                        : "border-white/[0.08] bg-white/[0.035] text-white/60 hover:border-white/[0.16] hover:bg-white/[0.055] hover:text-white/80",
+                    status === "saving" ? "opacity-60" : "",
+                ].join(" ")}>
+              <span className="flex items-center justify-between gap-3">
+                <span className="text-[13px] font-black">{t(option.labelKey)}</span>
+                {active && <Check size={14} className="text-teal-300"/>}
+              </span>
+              <span className="mt-1 block text-[11px] leading-5 text-white/35">{option.helper[locale.interfaceLanguage]}</span>
+            </button>);
+        })}
+      </div>
+    </Block>);
+}
 // ─────────────────────────────────────────────────────────────────────────────
 // TAB: PREFERÊNCIAS
 // ─────────────────────────────────────────────────────────────────────────────
@@ -866,6 +947,7 @@ function TabPreferences({ allProviders, initialActiveIds, }: {
         .map(id => allProviders.find(p => p.id === id))
         .filter((p): p is StreamingProvider => !!p);
     return (<div className="space-y-4">
+      <LocalePreferencesBlock/>
 
       {/* Streaming: 2 cols desktop — direita fixa/sticky, esquerda com scroll */}
       <div className="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 lg:items-start">
@@ -1240,4 +1322,3 @@ export default function ProfilePageClient() {
 
     </div>);
 }
-

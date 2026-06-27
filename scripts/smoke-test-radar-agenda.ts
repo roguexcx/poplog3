@@ -112,27 +112,9 @@ async function seed() {
     },
   });
 
-  // Availability (for agenda enrichment)
-  // Using poplog3_title_availability — needs a provider entry; we use a simple insert
-  await db.poplog3TitleAvailability.deleteMany({ where: { tmdbId: { in: [FAKE_TV_ID, FAKE_MOVIE_ID] } } });
-  await db.poplog3TitleAvailability.create({
-    data: {
-      tmdbId: FAKE_TV_ID, mediaType: "tv", country: "BR",
-      providerName: "Netflix", availabilityType: "streaming",
-      source: "tmdb", tmdbProviderId: 8,
-    },
-  });
-  await db.poplog3TitleAvailability.create({
-    data: {
-      tmdbId: FAKE_MOVIE_ID, mediaType: "movie", country: "BR",
-      providerName: "Prime Video", availabilityType: "streaming",
-      source: "tmdb", tmdbProviderId: 9,
-    },
-  });
 }
 
 async function cleanup() {
-  await db.poplog3TitleAvailability.deleteMany({ where: { tmdbId: { in: [FAKE_TV_ID, FAKE_MOVIE_ID] } } });
   await db.userTitleState.deleteMany({ where: { userId: SMOKE_USER } });
   await db.userTitle.deleteMany({ where: { userId: SMOKE_USER } });
   await db.poplog3Episode.deleteMany({ where: { seriesTmdbId: FAKE_TV_ID } });

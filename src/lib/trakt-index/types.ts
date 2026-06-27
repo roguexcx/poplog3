@@ -51,6 +51,22 @@ export type TraktIndexTranslation = {
   country: string;
 };
 
+/** Sinais de recência/relevância usados pelo ranking "termômetro vivo". */
+export type TrendingRecency = {
+  /** Data base (released para filme, first_aired para série), ISO yyyy-mm-dd. */
+  date: string | null;
+  /** Idade em dias a partir de `date`; null quando a data é desconhecida. */
+  ageDays: number | null;
+  /** Lançamento/temporada recente dentro da janela de frescor. */
+  isRecent: boolean;
+  /** Presente em algum sinal `*_trending` (movimentação real agora), não só acumulado. */
+  hasLiveSpike: boolean;
+  /** Título antigo cujo ranking vem só de popularidade acumulada (sem spike atual). */
+  isEvergreenWithoutSpike: boolean;
+  /** Contribuição de recência somada ao score base (pode ser negativa via damp). */
+  recencyScore: number;
+};
+
 export type TraktIndexItem = {
   rank: number;
   score: number;
@@ -93,6 +109,16 @@ export type TraktIndexItem = {
 
   /** Objeto de tradução pt-BR preservado separadamente (título/sinopse/tagline). */
   translation?: TraktIndexTranslation | null;
+
+  /**
+   * Versões localizadas armazenadas por idioma (fonte da verdade multilíngue).
+   * `en-US` = dados originais do Trakt; `pt-BR` = tradução oficial quando existir.
+   * A projeção para `title/overview/tagline` é feita por idioma no consumo.
+   */
+  localized?: Partial<import("@/lib/i18n/catalog-localization").CatalogLocalized>;
+
+  /** Sinais de recência/relevância usados pelo ranking. */
+  recency?: TrendingRecency;
 
   // ─── Campos de identidade POPLOG ──────────────────────────────────────────
   poplogId: null;

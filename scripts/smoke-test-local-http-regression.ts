@@ -62,7 +62,7 @@ const checks: Check[] = [
   },
   {
     name: "Providers por titulo",
-    path: "/api/poplog3/providers?id=tt0993846&media_type=movie&region=BR&language=pt-BR&debug=1",
+    path: "/api/providers?id=tt0993846&media_type=movie&region=BR&language=pt-BR&debug=1",
     assert: (_response, text) => {
       const json = parseJson(text) as { ok?: boolean; providers?: unknown[]; debug?: unknown; result?: { hasProviders?: boolean }; cache?: unknown } | null;
       assert.ok(json, "providers retorna JSON");

@@ -4,6 +4,7 @@ import { getUserFeedbackMap } from "@/lib/personalization/feedback";
 import { applyUserFeedbackScoring } from "@/lib/personalization/scoring";
 import { getTrendingFeed, withTimeout } from "@/features/home/trending-feed";
 import { resolveLocaleScope } from "@/server/source-engine/locale";
+import { buildTrendingV2Response, type TrendingV2Source } from "@/lib/trending/trending-contract";
 
 const TRENDING_AUTH_TIMEOUT_MS = 500;
 
@@ -63,8 +64,19 @@ export async function GET(request: NextRequest) {
     });
     markStage(perf, stageRef, "response_build");
 
+    // Contrato V2 (idioma, região, fonte, recência, identidade, localized).
+    const v2 = buildTrendingV2Response({
+      items: results,
+      language: localeScope.catalogLanguage,
+      region: localeScope.region,
+      source: feed.source as TrendingV2Source,
+      cacheStatus: feed.cacheStatus,
+    });
+
     console.log("[trending/perf]", {
       cacheStatus: feed.cacheStatus,
+      source: feed.source,
+      realness: feed.realness,
       returned: results.length,
       ...perf,
       total: Date.now() - totalStartedAt,
@@ -75,7 +87,13 @@ export async function GET(request: NextRequest) {
       count: results.length,
       language: localeScope.catalogLanguage,
       region: localeScope.region,
+      // Transparência de fonte: trending real vs. contingência local.
+      source: feed.source,
+      realness: feed.realness,
+      languageStats: feed.languageStats,
+      generatedAt: v2.generatedAt,
       results,
+      trendingV2: v2,
       ...(feed.fromCache ? { cacheStatus: feed.cacheReadStatus } : {}),
       ...(debugSource ? { debugSource: feed.debugSource } : {}),
     });

@@ -1,5 +1,5 @@
 import { reorderUserListItems } from "@/server/lists/list-service";
-import { jsonError, jsonSuccess, readJsonObject, requireListUser, stringIds } from "../../../_shared";
+import { jsonError, jsonSuccess, readJsonObject, requireListUser, stringIds } from "@/app/api/lists/_shared";
 
 type RouteContext = { params: Promise<{ id: string }> };
 

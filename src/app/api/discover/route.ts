@@ -11,13 +11,14 @@ import {
   hydrateCatalogResultsWithDebug,
   resolveCatalogIdentityFields,
 } from "@/server/source-engine/hydrate-catalog-results";
+import { resolveLocaleScope } from "@/server/source-engine/locale";
 import { db } from "@/server/db/client";
 
 type MediaType = "movie" | "tv";
 const DISCOVER_MIN_RESULTS = 5;
 const DISCOVER_LOCAL_FALLBACK_LIMIT = 20;
 
-async function fetchLocalPopular(mediaType: MediaType) {
+async function fetchLocalPopular(mediaType: MediaType, language: string) {
   const rows = await db.poplog3Title.findMany({
     where: { mediaType, posterPath: { not: null } },
     orderBy: { popularity: "desc" },
@@ -30,14 +31,15 @@ async function fetchLocalPopular(mediaType: MediaType) {
     },
   }).catch(() => []);
 
+  const useOriginalTitle = language === "en-US";
   return rows
     .filter((row) => row.title ?? row.originalTitle)
     .map((row) => ({
       tmdb_id: row.tmdbId,
       id: row.tmdbId,
       media_type: mediaType,
-      title: row.title ?? row.originalTitle ?? "",
-      original_title: row.originalTitle ?? null,
+      title: useOriginalTitle ? row.originalTitle ?? row.title ?? "" : row.title ?? row.originalTitle ?? "",
+      original_title: useOriginalTitle ? null : row.originalTitle ?? null,
       overview: row.overview ?? null,
       poster_path: row.posterPath!,
       backdrop_path: row.backdropPath ?? null,
@@ -56,6 +58,15 @@ export async function GET(request: NextRequest) {
   const searchParams = request.nextUrl.searchParams;
   const mediaType = (searchParams.get("mediaType") as MediaType) || "movie";
   const debugSource = searchParams.get("debugSource") === "1";
+  const localeScope = resolveLocaleScope({
+    language:
+      searchParams.get("language") ??
+      searchParams.get("locale") ??
+      request.cookies.get("poplog_catalog_language")?.value,
+    region:
+      searchParams.get("region") ??
+      request.cookies.get("poplog_region")?.value,
+  });
 
   if (mediaType !== "movie" && mediaType !== "tv") {
     return NextResponse.json({ ok: false, error: "Invalid media type" }, { status: 400 });
@@ -79,7 +90,11 @@ export async function GET(request: NextRequest) {
     if (isBalloonerismDiscoverEnabled()) {
       try {
         const catalogMediaType = mediaType === "tv" ? "show" : "movie";
-        const catalogResults = await catalogGetPopular({ mediaType: catalogMediaType });
+        const catalogResults = await catalogGetPopular({
+          mediaType: catalogMediaType,
+          language: localeScope.catalogLanguage,
+          region: localeScope.region,
+        });
         const hydratedResult = await hydrateCatalogResultsWithDebug(catalogResults);
         const hydrated = hydratedResult.titles;
         const validTitles = filterValidTitles(hydrated);
@@ -127,7 +142,7 @@ export async function GET(request: NextRequest) {
 
     // ── Local DB fallback ─────────────────────────────────────────────────────
     try {
-      const localTitles = await fetchLocalPopular(mediaType);
+      const localTitles = await fetchLocalPopular(mediaType, localeScope.catalogLanguage);
       if (localTitles.length >= DISCOVER_MIN_RESULTS) {
         const scoredTitles = applyUserFeedbackScoring(
           localTitles,

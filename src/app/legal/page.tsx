@@ -6,11 +6,17 @@ import PageShell from "@/components/layout/PageShell";
 import { getLegalDocument, LEGAL_TERMS_VERSION } from "@/lib/legal/legal-content";
 import { normalizeInterfaceLanguage } from "@/server/source-engine/locale";
 
-export const metadata: Metadata = {
-  title: "Termos, Disclaimer e Privacidade",
-  description:
-    "Aviso legal, isencao de responsabilidade, protecao de dados (LGPD) e canal de remocao/correcao de metadados do POPLOG.",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const cookieStore = await cookies();
+  const interfaceLanguage = normalizeInterfaceLanguage(
+    cookieStore.get("poplog_interface_language")?.value,
+  );
+  const doc = getLegalDocument(interfaceLanguage);
+  return {
+    title: doc.metaTitle,
+    description: doc.metaDescription,
+  };
+}
 
 export default async function LegalPage() {
   const cookieStore = await cookies();
@@ -56,7 +62,7 @@ export default async function LegalPage() {
 
           <section className="space-y-2 border-t border-white/[0.08] pt-6">
             <h2 className="text-sm font-bold uppercase tracking-[0.16em] text-white/45">
-              Legal References
+              {doc.referencesLabel}
             </h2>
             <ul className="space-y-1.5">
               {doc.references.map((reference) => (

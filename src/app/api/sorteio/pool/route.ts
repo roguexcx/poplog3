@@ -27,8 +27,8 @@ function markStage(perf: Record<string, number>, stageRef: { value: number }, st
   stageRef.value = Date.now();
 }
 
-async function buildResponse(userId: string, filters: ReturnType<typeof parseSorteioFilters>) {
-  const pool = await buildSorteioPool(userId, filters);
+async function buildResponse(userId: string, filters: ReturnType<typeof parseSorteioFilters>, language: string) {
+  const pool = await buildSorteioPool(userId, filters, { catalogLanguage: language });
   return {
     items: pool.items.slice(0, 24),
     meta: pool.meta,
@@ -47,7 +47,7 @@ function refreshInBackground(input: {
 
   const promise = (async () => {
     try {
-      const response = await buildResponse(input.userId, input.filters);
+      const response = await buildResponse(input.userId, input.filters, input.language);
       await writeContinuitySectionCache({
         sectionKey: input.sectionKey,
         userId: input.userId,
@@ -79,7 +79,7 @@ export async function GET(request: NextRequest) {
       explicit: request.nextUrl.searchParams.has("region") || request.cookies.has("poplog_region"),
     });
     const language = request.nextUrl.searchParams.get("language") ?? request.cookies.get("poplog_catalog_language")?.value ?? DEFAULT_LANGUAGE;
-    const key = sorteioSectionKey(filters);
+    const key = sorteioSectionKey(filters, { region, language });
     markStage(perf, stageRef, "request_parse");
 
     const { user, response } = await requireSorteioUser();
@@ -124,7 +124,7 @@ export async function GET(request: NextRequest) {
       });
     }
 
-    const data = await buildResponse(user.id, filters);
+    const data = await buildResponse(user.id, filters, language);
     markStage(perf, stageRef, "candidate_pool");
 
     await writeContinuitySectionCache({

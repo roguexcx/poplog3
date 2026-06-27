@@ -15,13 +15,28 @@
 
 import { traktGet } from "@/server/api-clients/trakt/client";
 import { isExcludedFormat } from "@/lib/content-format/excluded-formats";
+import { syntheticTmdbFromImdbId } from "@/lib/ids/synthetic-tmdb-id";
+import type { LocalizedCatalogText } from "@/lib/i18n/catalog-localization";
 import type {
   TraktIndexItem,
   TraktIndexIds,
   TraktIndexItemDetail,
   TraktIndexSignal,
   TraktIndexTranslation,
+  TrendingRecency,
 } from "./types";
+
+// ─── Recência ("termômetro vivo") ─────────────────────────────────────────────
+// O Trending favorece movimentação atual: lançamentos recentes, novas temporadas
+// e títulos com spike real agora. Popularidade histórica acumulada NÃO basta —
+// um clássico evergreen só sobe se aparecer num sinal `*_trending` (spike vivo).
+const RECENCY_RECENT_DAYS = 120; // estreia/temporada recente forte
+const RECENCY_FRESH_DAYS = 545; // ~18 meses, ainda fresco
+const RECENCY_MID_DAYS = 1825; // 5 anos — limite do "atual"
+const RECENCY_BOOST_RECENT = 60;
+const RECENCY_BOOST_FRESH = 28;
+const RECENCY_BOOST_MID = 8;
+const EVERGREEN_DAMP = 0.55; // multiplicador para antigo sem spike vivo
 
 // ─── Configuração dos sinais ──────────────────────────────────────────────────
 
@@ -198,15 +213,85 @@ function mediaObjFrom(row: TraktPeriodRow | TraktTrendingRow, kind: "movie" | "s
   return (kind === "movie" ? row.movie : row.show) ?? null;
 }
 
-/** Deriva um tmdb_id sintético negativo quando não há TMDB ID. */
-function syntheticTmdbId(ids: TraktMediaIds, mediaType: "movie" | "tv"): number {
+/**
+ * Deriva um tmdb_id sintético quando não há TMDB ID real.
+ *
+ * IMDb-first: usa o sintético canônico derivado do IMDb (round-trip estável via
+ * `imdbIdFromSyntheticTmdbId`), depois Trakt. Sem ID estável → null (o item é
+ * descartado) para nunca gerar rotas instáveis com `Math.random()`.
+ */
+function syntheticTmdbId(ids: TraktMediaIds): number | null {
   if (ids.tmdb) return ids.tmdb;
-  if (ids.trakt) return -(ids.trakt);
   if (ids.imdb) {
-    const num = parseInt(ids.imdb.replace(/^tt/, ""), 10);
-    if (!isNaN(num)) return mediaType === "movie" ? -(num) : -(num + 10_000_000);
+    const synthetic = syntheticTmdbFromImdbId(ids.imdb);
+    if (synthetic != null) return synthetic;
   }
-  return -(Math.abs(Math.random() * 1e9 | 0) + 1);
+  if (ids.trakt) return -(ids.trakt);
+  return null;
+}
+
+// ─── Recência ─────────────────────────────────────────────────────────────────
+
+function parseAgeDays(date: string | null | undefined): number | null {
+  if (!date) return null;
+  const ms = Date.parse(date);
+  if (Number.isNaN(ms)) return null;
+  return Math.floor((Date.now() - ms) / 86_400_000);
+}
+
+/**
+ * Núcleo PURO do "termômetro vivo" (testável isoladamente).
+ *
+ * Lançamentos/temporadas recentes ganham boost; um título antigo (> 5 anos) que
+ * NÃO aparece em nenhum sinal `*_trending` (ou seja, sobe só por popularidade
+ * acumulada) é amortizado para não dominar "Em alta agora". Se houver spike vivo,
+ * o título antigo é poupado do damp (revival/relançamento/viralização real).
+ */
+export function recencyContribution(input: {
+  ageDays: number | null;
+  hasLiveSpike: boolean;
+  baseScore: number;
+}): {
+  boost: number;
+  isRecent: boolean;
+  isEvergreenWithoutSpike: boolean;
+  recencyScore: number;
+} {
+  const { ageDays, hasLiveSpike, baseScore } = input;
+  const isRecent = ageDays != null && ageDays <= RECENCY_FRESH_DAYS;
+  const isEvergreenWithoutSpike =
+    ageDays != null && ageDays > RECENCY_MID_DAYS && !hasLiveSpike;
+
+  let boost = 0;
+  if (ageDays != null) {
+    if (ageDays <= RECENCY_RECENT_DAYS) boost = RECENCY_BOOST_RECENT;
+    else if (ageDays <= RECENCY_FRESH_DAYS) boost = RECENCY_BOOST_FRESH;
+    else if (ageDays <= RECENCY_MID_DAYS) boost = RECENCY_BOOST_MID;
+  }
+  const damp = isEvergreenWithoutSpike ? -(baseScore * (1 - EVERGREEN_DAMP)) : 0;
+  const recencyScore = Math.round((boost + damp) * 10) / 10;
+
+  return { boost, isRecent, isEvergreenWithoutSpike, recencyScore };
+}
+
+/** Calcula sinais de recência do grupo (data, spike vivo, evergreen). */
+function computeRecency(group: Group, baseScore: number): TrendingRecency {
+  const dated = group.items
+    .map((i) =>
+      group.mediaType === "movie" ? i.obj.released : i.obj.first_aired,
+    )
+    .find((d): d is string => Boolean(d)) ?? null;
+  const date = dated ? dated.slice(0, 10) : null;
+  const ageDays = parseAgeDays(date);
+  const hasLiveSpike = group.items.some((i) => i.signal.id.endsWith("_trending"));
+
+  const { isRecent, isEvergreenWithoutSpike, recencyScore } = recencyContribution({
+    ageDays,
+    hasLiveSpike,
+    baseScore,
+  });
+
+  return { date, ageDays, isRecent, hasLiveSpike, isEvergreenWithoutSpike, recencyScore };
 }
 
 // ─── Deduplicação e agrupamento ───────────────────────────────────────────────
@@ -345,9 +430,10 @@ async function fetchSignal(
 
 // ─── Tradução pt-BR ───────────────────────────────────────────────────────────
 
-async function fetchPtBrTranslation(
+async function fetchTranslation(
   mediaType: "movie" | "tv",
   ids: TraktIndexIds,
+  lang: "pt",
   ttlSeconds: number,
 ): Promise<TraktTranslationRaw | null> {
   const id = ids.slug ?? ids.trakt;
@@ -355,13 +441,18 @@ async function fetchPtBrTranslation(
 
   const base = mediaType === "tv" ? "/shows" : "/movies";
   const data = await traktGet<TraktTranslationRaw[]>(
-    `${base}/${encodeURIComponent(String(id))}/translations/pt`,
+    `${base}/${encodeURIComponent(String(id))}/translations/${lang}`,
     { ttlSeconds },
   );
 
   if (!Array.isArray(data)) return null;
+  // pt-BR preferencial; cai para qualquer variante do idioma.
+  const preferredCountry = lang === "pt" ? "br" : null;
   return (
-    data.find((t) => String(t.country).toLowerCase() === "br") ??
+    (preferredCountry
+      ? data.find((t) => String(t.country).toLowerCase() === preferredCountry)
+      : null) ??
+    data.find((t) => String(t.language).toLowerCase() === lang) ??
     data[0] ??
     null
   );
@@ -423,9 +514,16 @@ export async function buildTraktIndex(
     (g) => !g.items.some((i) => isExcludedFormat(i.obj.genres)),
   );
 
-  // 3. Score + sort
+  // 3. Score base + recência ("termômetro vivo") + sort.
+  //    Lançamentos/temporadas recentes ganham boost; antigos sem spike vivo são
+  //    amortizados para não dominarem por popularidade histórica acumulada.
   const scored = filteredGroups
-    .map((g) => ({ ...g, score: scoreGroup(g.items) }))
+    .map((g) => {
+      const baseScore = scoreGroup(g.items);
+      const recency = computeRecency(g, baseScore);
+      const finalScore = Math.round((baseScore + recency.recencyScore) * 10) / 10;
+      return { ...g, score: finalScore, baseScore, recency };
+    })
     .sort((a, b) => b.score - a.score);
 
   // 4. Interleave filmes/séries (1 filme / 1 série alternado)
@@ -439,8 +537,8 @@ export async function buildTraktIndex(
     flat.length, groups.length, top.length, options.period, Date.now() - buildStart,
   );
 
-  // 6. Constrói TraktIndexItem base
-  const items: TraktIndexItem[] = top.map((g, idx) => {
+  // 6. Constrói TraktIndexItem base (descarta itens sem ID estável)
+  const items: TraktIndexItem[] = top.map((g, idx): TraktIndexItem | null => {
     // Escolhe o objeto com mais metadados (overview mais longa)
     const best = [...g.items].sort(
       (a, b) => (b.obj.overview?.length ?? 0) - (a.obj.overview?.length ?? 0),
@@ -459,7 +557,8 @@ export async function buildTraktIndex(
       g.items.find((i) => i.obj.images?.fanart?.length)?.obj.images?.fanart?.[0] ??
       null;
 
-    const tmdbIdNum = syntheticTmdbId(ids, g.mediaType);
+    const tmdbIdNum = syntheticTmdbId(ids);
+    if (tmdbIdNum == null) return null;
 
     const date =
       g.mediaType === "movie"
@@ -520,6 +619,16 @@ export async function buildTraktIndex(
 
       ids,
       translation: null,
+      // Fonte da verdade multilíngue: en-US = original do Trakt; pt-BR preenchido
+      // pela etapa de tradução (passo 7) sem inventar texto manualmente.
+      localized: {
+        "en-US": {
+          title: obj.title ?? null,
+          overview: obj.overview ?? null,
+          tagline: obj.tagline ?? null,
+        } satisfies LocalizedCatalogText,
+      },
+      recency: g.recency,
 
       poplogId: null,
       externalIds: {
@@ -535,14 +644,17 @@ export async function buildTraktIndex(
       normalizedFrom: "trakt_index" as const,
       legacyCompatibilityUsed: true as const,
     };
-  });
+  }).filter((item): item is TraktIndexItem => item !== null);
 
-  // 7. Busca traduções pt-BR para os top N e armazena em campo separado
+  // 7. Busca traduções pt-BR para os top N e armazena em `localized['pt-BR']`.
+  //    NÃO sobrescreve os campos legados (que ficam no original/en-US): a
+  //    projeção por idioma é responsabilidade do consumo, evitando contaminação
+  //    de idioma no payload bilíngue cacheado.
   if (options.translationLimit > 0) {
     const toTranslate = items.slice(0, options.translationLimit);
     await Promise.allSettled(
       toTranslate.map(async (item) => {
-        const t = await fetchPtBrTranslation(item.media_type, item.ids, options.ttlSeconds);
+        const t = await fetchTranslation(item.media_type, item.ids, "pt", options.ttlSeconds);
         if (!t) return;
         const translation: TraktIndexTranslation = {
           title: t.title ?? null,
@@ -552,10 +664,14 @@ export async function buildTraktIndex(
           country: t.country,
         };
         item.translation = translation;
-        // Aplica tradução no campo principal (mantém original_title intacto)
-        if (t.title) item.title = t.title;
-        if (t.overview) item.overview = t.overview;
-        if (t.tagline) item.tagline = t.tagline;
+        item.localized = {
+          ...item.localized,
+          "pt-BR": {
+            title: t.title?.trim() ? t.title : null,
+            overview: t.overview?.trim() ? t.overview : null,
+            tagline: t.tagline?.trim() ? t.tagline : null,
+          },
+        };
       }),
     );
   }

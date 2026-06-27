@@ -13,6 +13,7 @@
 import { hydrateManyTitleAvailability } from "./availability-service";
 import type { TitleAvailabilitySummary } from "./availability-types";
 import { normalizeStreamingRegion } from "@/server/streaming/region";
+import { normalizeCatalogLanguage } from "@/server/source-engine/locale";
 
 export type BestProviderBadgeFields = {
   best_provider_name: string | null;
@@ -37,6 +38,7 @@ export async function attachBestProvider<T extends object>(
     getTmdbId: (item: T) => number | null | undefined;
     getImdbId?: (item: T) => string | null | undefined;
     region?: string;
+    language?: string | null;
     /**
      * Modo LIVE (cache-first): além de reusar o cache, faz fetch dos títulos que faltam
      * (Balloonerismm + fallback JustWatch) e persiste — assim o badge aparece já no
@@ -54,6 +56,7 @@ export async function attachBestProvider<T extends object>(
     source: `availability:attach:${opts.block}`,
     explicit: opts.region != null,
   });
+  const language = normalizeCatalogLanguage(opts.language);
   const inputs = items.map((item, index) => ({
     key: index,
     input: {
@@ -61,6 +64,7 @@ export async function attachBestProvider<T extends object>(
       tmdbId: opts.getTmdbId(item) ?? null,
       imdbId: opts.getImdbId?.(item) ?? null,
       region,
+      language,
     },
   }));
 

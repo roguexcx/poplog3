@@ -1,5 +1,6 @@
 "use client";
 import { useState } from "react";
+import { uiMessage } from "@/lib/i18n/ui-message";
 
 type Props = {
   text: string | null;
@@ -39,7 +40,7 @@ export default function SynopsisText({
         }}
         className="mt-1.5 text-[11px] font-bold text-sky-300 transition hover:text-sky-200"
       >
-        {expanded ? "Mostrar menos" : "Continuar lendo"}
+        {expanded ? uiMessage("synopsis.showLess") : uiMessage("synopsis.readMore")}
       </button>
     </div>
   );

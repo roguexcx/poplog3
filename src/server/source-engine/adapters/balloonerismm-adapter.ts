@@ -52,6 +52,7 @@ import { normalizeTitle } from "../normalizers/normalize-title";
 import { normalizeSearchResult } from "../normalizers/normalize-search";
 import { normalizePeople } from "../normalizers/normalize-person";
 import { normalizeEpisode } from "../normalizers/normalize-episode";
+import { normalizeCatalogLanguage, normalizeCatalogRegion } from "../locale";
 
 // ─── Helpers de confiança ─────────────────────────────────────────────────────
 
@@ -783,7 +784,11 @@ export const balloonerismAdapter: CatalogAdapter & {
   async getTrending(params: TrendingParams): Promise<CatalogSearchResult[]> {
     const path = params.mediaType === "movie" ? "/popular/movie" : "/popular/tv";
     const raw = await balloonerismGet<unknown>(path, {
-      params: { limit: params.limit ?? 20, page: params.page ?? 1, language: "pt-BR" },
+      params: {
+        limit: params.limit ?? 20,
+        page: params.page ?? 1,
+        language: normalizeCatalogLanguage(params.language),
+      },
       ttlSeconds: 3600,
     });
     if (raw === null) return [];
@@ -795,7 +800,11 @@ export const balloonerismAdapter: CatalogAdapter & {
   async getPopular(params: PopularParams): Promise<CatalogSearchResult[]> {
     const path = params.mediaType === "movie" ? "/popular/movie" : "/popular/tv";
     const raw = await balloonerismGet<unknown>(path, {
-      params: { limit: params.limit ?? 20, page: params.page ?? 1, language: "pt-BR" },
+      params: {
+        limit: params.limit ?? 20,
+        page: params.page ?? 1,
+        language: normalizeCatalogLanguage(params.language),
+      },
       ttlSeconds: 21600,
     });
     if (raw === null) return [];
@@ -807,7 +816,12 @@ export const balloonerismAdapter: CatalogAdapter & {
   async getDiscover(params: DiscoverParams): Promise<CatalogSearchResult[]> {
     const path = params.mediaType === "movie" ? "/discover/movie" : "/discover/tv";
     const raw = await balloonerismGet<unknown>(path, {
-      params: { with_genres: params.genreId, language: "pt-BR", region: "BR", page: params.page ?? 1 },
+      params: {
+        with_genres: params.genreId,
+        language: normalizeCatalogLanguage(params.language),
+        region: normalizeCatalogRegion(params.region),
+        page: params.page ?? 1,
+      },
       ttlSeconds: 7200,
     });
     if (raw === null) {
@@ -826,7 +840,7 @@ export const balloonerismAdapter: CatalogAdapter & {
     if (!id) return [];
     const path = params.mediaType === "movie" ? `/movie/${id}/similar` : `/tv/${id}/similar`;
     const raw = await balloonerismGet<unknown>(path, {
-      params: { limit: 10, language: "pt-BR" },
+      params: { limit: 10, language: normalizeCatalogLanguage(params.language) },
       ttlSeconds: 86400,
     });
     if (raw === null) return [];

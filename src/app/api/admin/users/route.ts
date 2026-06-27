@@ -132,7 +132,7 @@ export async function PATCH(request: NextRequest) {
   }
 
   const now = new Date();
-  let action = body.action;
+  const action = body.action;
   let data: Parameters<typeof db.user.update>[0]["data"];
 
   if (action === "block") {

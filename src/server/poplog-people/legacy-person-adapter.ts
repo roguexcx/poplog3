@@ -1,6 +1,6 @@
 /**
  * Adapter camelCase → snake_case para o contrato legado de
- * /api/poplog3/people/[id] (campos person/acting/crew em snake_case).
+ * /api/people/[id] (campos person/acting/crew em snake_case).
  * O PersonPageClient já consome PoplogPersonPageData direto; remover este
  * adapter quando os consumidores da API migrarem para o campo `credits`.
  */

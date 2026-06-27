@@ -725,57 +725,7 @@ export async function getLocalUserLibraryTmdbIds(userId: string): Promise<{
   }
 }
 
-// ── Availability (LEGADO — DEPRECATED) ────────────────────────────────────────
 
-/**
- * @deprecated NÃO USAR. Lê a tabela legada `poplog3_title_availability`, que NÃO é mais
- * escrita pelo código atual. A Agenda (último consumidor) foi migrada para o fluxo
- * canônico `hydrateManyTitleAvailability(cacheOnly:true, warmCold:true)`. Esta função
- * está sem chamadores e será REMOVIDA junto com a tabela `poplog3_title_availability`.
- * Para disponibilidade, use SEMPRE `getTitleAvailability`/`hydrateManyTitleAvailability`.
- */
-export async function getLocalTitleAvailabilityBatch(
-  movieIds: number[],
-  tvIds: number[],
-  country: string,
-): Promise<LocalAvailabilityData[]> {
-  const results: LocalAvailabilityData[] = [];
-  try {
-    if (movieIds.length > 0) {
-      const rows = await db.poplog3TitleAvailability.findMany({
-        where: { mediaType: "movie", country, tmdbId: { in: movieIds } },
-      });
-      for (const row of rows) {
-        results.push({
-          tmdb_id: row.tmdbId,
-          media_type: "movie",
-          provider_name: row.providerName,
-          provider_logo_path: row.providerLogoPath,
-          availability_type: String(row.availabilityType),
-          tmdb_provider_id: row.tmdbProviderId,
-        });
-      }
-    }
-    if (tvIds.length > 0) {
-      const rows = await db.poplog3TitleAvailability.findMany({
-        where: { mediaType: "tv", country, tmdbId: { in: tvIds } },
-      });
-      for (const row of rows) {
-        results.push({
-          tmdb_id: row.tmdbId,
-          media_type: "tv",
-          provider_name: row.providerName,
-          provider_logo_path: row.providerLogoPath,
-          availability_type: String(row.availabilityType),
-          tmdb_provider_id: row.tmdbProviderId,
-        });
-      }
-    }
-  } catch (err) {
-    console.error("[continuity-local] getLocalTitleAvailabilityBatch error", err);
-  }
-  return results;
-}
 
 // ── Synthetic ID enrichment ───────────────────────────────────────────────────
 

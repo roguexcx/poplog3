@@ -18,6 +18,7 @@ import {
 import { traktGet, isTraktActive } from "@/server/api-clients/trakt/client";
 import { logger } from "@/server/logging/logger";
 import type { TraktMovieFull, TraktShowFull, TraktTranslation } from "@/server/api-clients/trakt/types";
+import { normalizeCatalogLanguage } from "@/server/source-engine/locale";
 
 // ─── Balloonerismm raw item (from /recommendations or /similar) ───────────────
 
@@ -206,6 +207,7 @@ export async function fetchBalloonerismForSeed(
   imdbId: string,
   mediaType: "movie" | "tv",
   surface = "unknown",
+  language?: string | null,
 ): Promise<BalloonSeedFetchResult> {
   const empty: BalloonSeedFetchResult = {
     items: [], partial: false, failedEndpoints: [], allBlocked: true, retryAfterMs: 0,
@@ -217,10 +219,17 @@ export async function fetchBalloonerismForSeed(
   const recPath = `/${kind}/${encodeURIComponent(imdbId)}/recommendations`;
   const simPath = `/${kind}/${encodeURIComponent(imdbId)}/similar`;
   const t0      = Date.now();
+  const providerLanguage = normalizeCatalogLanguage(language);
 
   const [recsResult, simResult] = await Promise.allSettled([
-    balloonerismGet<BalloonRelatedResponse>(recPath, { ttlSeconds: 86_400 }),
-    balloonerismGet<BalloonRelatedResponse>(simPath, { ttlSeconds: 86_400 }),
+    balloonerismGet<BalloonRelatedResponse>(recPath, {
+      params: { language: providerLanguage },
+      ttlSeconds: 86_400,
+    }),
+    balloonerismGet<BalloonRelatedResponse>(simPath, {
+      params: { language: providerLanguage },
+      ttlSeconds: 86_400,
+    }),
   ]);
 
   const recs = extractBalloonItems(recsResult, "recommendations");
@@ -261,6 +270,7 @@ export async function fetchBalloonerismForSeed(
     surface,
     mediaType,
     imdbId,
+    language: providerLanguage,
     recsCount:        recs.length,
     simsCount:        sims.length,
     mergedCount:      items.length,

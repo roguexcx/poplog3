@@ -7,7 +7,6 @@ import {
   writeContinuitySectionCache,
 } from "@/server/continuity/continuity-section-cache";
 
-type GenreObj = { id: number; name: string };
 type GenreStatsPayload = { ok: true; genres: Array<{ name: string; count: number; pct: number }> };
 
 const GENRE_STATS_CACHE_TTL_MS = 10 * 60_000;

@@ -5,7 +5,7 @@ import {
   readJsonObject,
   requireListUser,
   resolveTitleFromPayload,
-} from "../../_shared";
+} from "@/app/api/lists/_shared";
 
 type RouteContext = { params: Promise<{ id: string }> };
 

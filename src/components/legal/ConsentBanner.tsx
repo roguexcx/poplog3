@@ -13,13 +13,14 @@ import {
   type OptionalConsentCategory,
 } from "@/lib/legal/consent-storage";
 import { LEGAL_PRIVACY_VERSION, LEGAL_TERMS_VERSION } from "@/lib/legal/legal-content";
+import { useLocale } from "@/context/LocaleContext";
 
 type OptionalCategoryKey = "analytics" | "ads" | "personalization";
 
-const OPTIONAL_CATEGORIES: { key: OptionalCategoryKey; label: string; description: string }[] = [
-  { key: "analytics", label: "Analytics", description: "Metricas de uso para melhorar o produto." },
-  { key: "ads", label: "Anuncios", description: "Publicidade nao essencial e medicao." },
-  { key: "personalization", label: "Personalizacao", description: "Recomendacoes baseadas no seu uso." },
+const OPTIONAL_CATEGORIES: { key: OptionalCategoryKey; labelKey: string; descriptionKey: string }[] = [
+  { key: "analytics", labelKey: "legal.consent.category.analytics", descriptionKey: "legal.consent.category.analytics.description" },
+  { key: "ads", labelKey: "legal.consent.category.ads", descriptionKey: "legal.consent.category.ads.description" },
+  { key: "personalization", labelKey: "legal.consent.category.personalization", descriptionKey: "legal.consent.category.personalization.description" },
 ];
 
 function readCookie(name: string): string | undefined {
@@ -50,6 +51,7 @@ async function persistConsent(record: LegalConsentRecord) {
 }
 
 export default function ConsentBanner() {
+  const { ui } = useLocale();
   const [record, setRecord] = useState<LegalConsentRecord | null>(null);
   const [visible, setVisible] = useState(false);
   const [managing, setManaging] = useState(false);
@@ -129,14 +131,12 @@ export default function ConsentBanner() {
             </span>
             <div className="min-w-0">
               <p className="text-sm font-bold tracking-[-0.01em] text-white/90">
-                Privacidade e cookies
+                {ui("legal.consent.title")}
               </p>
               <p className="mt-1 text-[12.5px] leading-6 text-white/55">
-                Usamos cookies essenciais para login, idioma, regiao e funcionamento basico. Cookies
-                de analytics, anuncios e personalizacao so sao ativados com o seu consentimento. Veja
-                os{" "}
+                {ui("legal.consent.description")}{" "}
                 <Link href="/legal" className="font-semibold text-indigo-200 underline-offset-2 hover:underline">
-                  Termos e a Politica de Privacidade
+                  {ui("legal.consent.policyLink")}
                 </Link>
                 .
               </p>
@@ -151,8 +151,8 @@ export default function ConsentBanner() {
                   className="flex cursor-pointer items-center justify-between gap-3 rounded-lg px-2 py-1.5 transition hover:bg-white/[0.03]"
                 >
                   <span className="min-w-0">
-                    <span className="block text-[12.5px] font-bold text-white/85">{category.label}</span>
-                    <span className="block text-[11px] leading-5 text-white/40">{category.description}</span>
+                    <span className="block text-[12.5px] font-bold text-white/85">{ui(category.labelKey)}</span>
+                    <span className="block text-[11px] leading-5 text-white/40">{ui(category.descriptionKey)}</span>
                   </span>
                   <input
                     type="checkbox"
@@ -174,7 +174,7 @@ export default function ConsentBanner() {
                 onClick={savePreferences}
                 className="order-1 h-10 rounded-full bg-indigo-500 px-5 text-[12px] font-black uppercase tracking-[0.12em] text-white transition hover:bg-indigo-400 sm:order-3"
               >
-                Salvar preferencias
+                {ui("legal.consent.save")}
               </button>
             ) : (
               <button
@@ -182,7 +182,7 @@ export default function ConsentBanner() {
                 onClick={acceptAll}
                 className="order-1 h-10 rounded-full bg-indigo-500 px-5 text-[12px] font-black uppercase tracking-[0.12em] text-white transition hover:bg-indigo-400 sm:order-3"
               >
-                Aceitar todos
+                {ui("legal.consent.acceptAll")}
               </button>
             )}
             <button
@@ -190,14 +190,14 @@ export default function ConsentBanner() {
               onClick={acceptEssentialOnly}
               className="order-2 h-10 rounded-full border border-white/[0.1] bg-white/[0.03] px-5 text-[12px] font-black uppercase tracking-[0.12em] text-white/65 transition hover:bg-white/[0.07] hover:text-white/85 sm:order-1"
             >
-              Somente essenciais
+              {ui("legal.consent.essentialOnly")}
             </button>
             <button
               type="button"
               onClick={() => setManaging((value) => !value)}
               className="order-3 h-10 rounded-full px-5 text-[12px] font-black uppercase tracking-[0.12em] text-white/45 transition hover:text-white/70 sm:order-2"
             >
-              {managing ? "Ocultar" : "Personalizar"}
+              {managing ? ui("legal.consent.hide") : ui("legal.consent.customize")}
             </button>
           </div>
         </div>

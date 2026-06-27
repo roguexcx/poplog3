@@ -15,6 +15,8 @@ const SOURCE_ALIASES: Record<string, ApiSourceId> = {
   balloonerismm: "balloonerismm",
   justwatch: "balloonerismm",
   justwatch_graphql_unofficial: "balloonerismm",
+  wikidata: "wikidata",
+  wikipedia: "wikipedia",
 };
 
 const CONTEXT_LABELS: Record<AttributionContext, string> = {
@@ -35,7 +37,7 @@ export function normalizeSourceId(source: string | null | undefined) {
 
 export function getSource(source: string | null | undefined) {
   const id = normalizeSourceId(source);
-  return id ? API_SOURCES[id] : null;
+  return id ? API_SOURCES[id] ?? null : null;
 }
 
 export function getSourceLabel(source: string | null | undefined) {
@@ -51,8 +53,10 @@ export function resolveSources(
   for (const source of sourcesUsed) {
     const id = normalizeSourceId(source);
     if (!id || seen.has(id)) continue;
+    const definition = API_SOURCES[id];
+    if (!definition) continue;
     seen.add(id);
-    sources.push(API_SOURCES[id]);
+    sources.push(definition);
   }
 
   return sources;
@@ -81,7 +85,7 @@ export function getProviderSourceIds<T extends { source?: string | null }>(
   providers: T[] | null | undefined,
 ) {
   if (!providers?.length) return [];
-  return providers.map((provider) => provider.source ?? "tmdb");
+  return providers.map((provider) => provider.source ?? "balloonerismm");
 }
 
 export function getRatingSourceIds(input: {

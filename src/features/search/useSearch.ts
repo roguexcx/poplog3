@@ -99,7 +99,7 @@ export function useSearch(query: string) {
           type: "all",
           page: "1",
         });
-        const res = await fetch(`/api/poplog3/search?${params}`, {
+        const res = await fetch(`/api/search?${params}&include=people,companies`, {
           signal: controller.signal,
         });
 

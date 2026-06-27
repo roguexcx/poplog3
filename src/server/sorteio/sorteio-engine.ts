@@ -8,6 +8,8 @@ import {
 import type { CatalogSearchResult } from "@/server/source-engine/types/catalog.types";
 import { syntheticTmdbFromImdbId } from "@/lib/ids/synthetic-tmdb-id";
 import { ensureMinimumSorteioSeed } from "@/server/sorteio/minimum-pool";
+import { resolveCatalogLocalization } from "@/lib/i18n/catalog-localization";
+import { getCatalogLocalizationsByPoplogId } from "@/server/catalog/catalog-localization-store";
 
 type MediaType = "movie" | "tv";
 export type SorteioMode = "discovery" | "watchlist";
@@ -68,6 +70,7 @@ export type SorteioPoolResult = {
 type BuildSorteioPoolOptions = {
   externalDiscovery?: boolean;
   warmAvailability?: boolean;
+  catalogLanguage?: string | null;
 };
 
 const INTENSE_GENRES = new Set([18, 80, 53, 27, 9648, 10752]);
@@ -211,13 +214,13 @@ export function pickWeightedSorteioItem(items: SorteioItem[]) {
   return items[0];
 }
 
-async function fetchBalloonerismmDiscovery(): Promise<SorteioItem[]> {
+async function fetchBalloonerismmDiscovery(language?: string | null): Promise<SorteioItem[]> {
   const LIMIT = 20;
   const sources = await Promise.allSettled([
-    catalogGetTrending({ mediaType: "movie", limit: LIMIT }),
-    catalogGetTrending({ mediaType: "show", limit: LIMIT }),
-    catalogGetPopular({ mediaType: "movie", limit: LIMIT }),
-    catalogGetPopular({ mediaType: "show", limit: LIMIT }),
+    catalogGetTrending({ mediaType: "movie", limit: LIMIT, language }),
+    catalogGetTrending({ mediaType: "show", limit: LIMIT, language }),
+    catalogGetPopular({ mediaType: "movie", limit: LIMIT, language }),
+    catalogGetPopular({ mediaType: "show", limit: LIMIT, language }),
   ]);
 
   const sourceNames = [
@@ -242,7 +245,7 @@ async function fetchBalloonerismmDiscovery(): Promise<SorteioItem[]> {
   return items;
 }
 
-async function fetchLocalDiscovery(): Promise<SorteioItem[]> {
+async function fetchLocalDiscovery(language?: string | null): Promise<SorteioItem[]> {
   await ensureMinimumSorteioSeed({
     minCount: MIN_LOCAL_DISCOVERY_ITEMS,
     reason: "sorteio_local_discovery",
@@ -256,6 +259,7 @@ async function fetchLocalDiscovery(): Promise<SorteioItem[]> {
     take: 300,
     select: {
       tmdbId: true,
+      id: true,
       mediaType: true,
       title: true,
       originalTitle: true,
@@ -273,11 +277,28 @@ async function fetchLocalDiscovery(): Promise<SorteioItem[]> {
     },
   });
 
+  const localizationEntries = await Promise.all(
+    rows.map(async (row) => ({
+      poplogId: row.id,
+      rows: await getCatalogLocalizationsByPoplogId(row.id).catch(() => []),
+    })),
+  );
+  const localizationsByPoplogId = new Map(localizationEntries.map((entry) => [entry.poplogId, entry.rows]));
+
   return rows
     .map((row): SorteioItem | null => {
       const mediaType = row.mediaType as MediaType;
       const date = mediaType === "movie" ? dateOnly(row.releaseDate) : dateOnly(row.firstAirDate);
-      const title = row.title ?? row.originalTitle;
+      const resolved = resolveCatalogLocalization(
+        {
+          title: row.title,
+          originalTitle: row.originalTitle,
+          overview: row.overview,
+          localizations: localizationsByPoplogId.get(row.id) ?? [],
+        },
+        language,
+      );
+      const title = resolved.title ?? row.title ?? row.originalTitle;
       if (!title?.trim() || !row.posterPath || !isPastOrToday(date)) return null;
       return {
         id: row.tmdbId,
@@ -291,7 +312,7 @@ async function fetchLocalDiscovery(): Promise<SorteioItem[]> {
         vote_average: row.voteAverage === null ? 0 : Number(row.voteAverage),
         vote_count: row.voteCount ?? 0,
         popularity: row.popularity === null ? 0 : Number(row.popularity),
-        overview: row.overview ?? "",
+        overview: resolved.overview ?? row.overview ?? "",
         genre_ids: genreIdsFromJson(row.genres),
         original_language: row.originalLanguage ?? null,
         availability_scope: "none",
@@ -310,13 +331,13 @@ async function fetchDiscoveryPool(
   const allowExternal = options.externalDiscovery !== false;
   const [balloonerismmItems, localItems] = await Promise.all([
     allowExternal
-      ? fetchBalloonerismmDiscovery().catch((err) => {
+      ? fetchBalloonerismmDiscovery(options.catalogLanguage).catch((err) => {
           console.warn("[sorteio-engine] fetchBalloonerismmDiscovery failed", err);
           skippedReasons.push("balloonerismm_unavailable");
           return [] as SorteioItem[];
         })
       : Promise.resolve([] as SorteioItem[]),
-    fetchLocalDiscovery().catch((err) => {
+    fetchLocalDiscovery(options.catalogLanguage).catch((err) => {
       console.warn("[sorteio-engine] fetchLocalDiscovery failed", err);
       skippedReasons.push("local_db_unavailable");
       return [] as SorteioItem[];
@@ -373,7 +394,7 @@ async function fetchNotInterestedKeys(userId: string): Promise<Set<string>> {
   return new Set(rows.map((row) => `${row.mediaType}-${row.tmdbId}`));
 }
 
-async function fetchWatchlistPool(userId: string): Promise<SorteioItem[]> {
+async function fetchWatchlistPool(userId: string, language?: string | null): Promise<SorteioItem[]> {
   const states = (await db.userTitleState.findMany({
     where: {
       userId,
@@ -408,13 +429,29 @@ async function fetchWatchlistPool(userId: string): Promise<SorteioItem[]> {
       : Promise.resolve([]),
   ]);
   const stateMap = new Map(states.map((row) => [`${row.media_type}-${row.tmdb_id}`, row]));
+  const localizationEntries = await Promise.all(
+    [...movieTitles, ...tvTitles].map(async (row) => ({
+      poplogId: row.id,
+      rows: await getCatalogLocalizationsByPoplogId(row.id).catch(() => []),
+    })),
+  );
+  const localizationsByPoplogId = new Map(localizationEntries.map((entry) => [entry.poplogId, entry.rows]));
 
   const mapped: Array<SorteioItem | null> = [...movieTitles, ...tvTitles]
     .map((row): SorteioItem | null => {
       const mediaType = row.mediaType as MediaType;
       const tmdbId = row.tmdbId;
       const state = stateMap.get(`${mediaType}-${tmdbId}`);
-      const title = row.title ?? row.originalTitle;
+      const resolved = resolveCatalogLocalization(
+        {
+          title: row.title,
+          originalTitle: row.originalTitle,
+          overview: row.overview,
+          localizations: localizationsByPoplogId.get(row.id) ?? [],
+        },
+        language,
+      );
+      const title = resolved.title ?? row.title ?? row.originalTitle;
       const date = mediaType === "movie" ? dateOnly(row.releaseDate) : dateOnly(row.firstAirDate);
       if (!title || !row.posterPath || !isPastOrToday(date)) return null;
       return {
@@ -429,7 +466,7 @@ async function fetchWatchlistPool(userId: string): Promise<SorteioItem[]> {
         vote_average: row.voteAverage === null ? 0 : Number(row.voteAverage),
         vote_count: 0,
         popularity: row.popularity === null ? 0 : Number(row.popularity),
-        overview: "",
+        overview: resolved.overview ?? "",
         genre_ids: [],
         user_status: state?.status ?? "watchlist",
         user_computed_state: state?.computed_state ?? null,
@@ -560,7 +597,7 @@ export async function buildSorteioPool(
 
   let initialItems: SorteioItem[];
   if (filters.mode === "watchlist") {
-    initialItems = await fetchWatchlistPool(userId);
+    initialItems = await fetchWatchlistPool(userId, options.catalogLanguage);
   } else {
     const discovery = await fetchDiscoveryPool([...favoriteProviderIds], region, options);
     poolSource = discovery.poolSource;

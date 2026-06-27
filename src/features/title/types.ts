@@ -368,4 +368,10 @@ export type TitlePageData = {
   universe?: TitleUniverse | null;
   lastSyncedAt?: string | null;
   cacheInfo?: TitleCacheInfo | null;
+  catalogLocalization?: {
+    language: string;
+    requestedLanguage: string;
+    fallbackUsed: boolean;
+    fallbackLanguage: string | null;
+  };
 };

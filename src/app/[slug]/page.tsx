@@ -102,6 +102,9 @@ export default async function PublicSlugTitlePage({ params }: PageProps) {
   const { slug } = await params;
   const clean = normalizePublicTitleSlug(slug);
   if (!clean) notFound();
+  const cookieStore = await cookies();
+  const language = normalizeCatalogLanguage(cookieStore.get("poplog_catalog_language")?.value);
+  const region = normalizeCatalogRegion(cookieStore.get("poplog_region")?.value);
 
   const identity = await resolveSlug(clean);
   if (!identity) notFound();
@@ -117,6 +120,8 @@ export default async function PublicSlugTitlePage({ params }: PageProps) {
     mediaType: identity.mediaType,
     id,
     sourceHint,
+    country: region,
+    language,
   });
 
   if (!title) notFound();
@@ -127,8 +132,8 @@ export default async function PublicSlugTitlePage({ params }: PageProps) {
       legacyTitlePath({ mediaType: title.mediaType, id: title.poplogId ?? title.externalIds?.imdbId ?? clean }),
   );
   const jsonLd = buildTitleJsonLd(title, titleCanonicalPath, {
-    language: "pt-BR",
-    region: title.country ?? "BR",
+    language,
+    region: title.country ?? region,
     imageId: title.poplogId ?? title.externalIds?.imdbId ?? clean,
     slug: title.externalIds?.slug ?? clean,
   });

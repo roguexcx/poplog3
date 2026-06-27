@@ -20,7 +20,6 @@ export async function DELETE() {
     db.userCuradoriaPreference.deleteMany({ where: { userId } }),
     db.userCuradoriaState.deleteMany({ where: { userId } }),
     db.userEvent.deleteMany({ where: { userId } }),
-    db.userWatching.deleteMany({ where: { userId } }),
     db.userTitle.deleteMany({ where: { userId } }),
     db.continuitySectionCache.deleteMany({ where: { userId } }),
   ]);

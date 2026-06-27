@@ -1,58 +1,60 @@
 import type { ApiSourceDefinition, ApiSourceId } from "./types";
 
-export const API_SOURCES: Record<ApiSourceId, ApiSourceDefinition> = {
-  tmdb: {
-    id: "tmdb",
-    name: "TMDB",
-    role:
-      "Metadados, imagens, posters, backdrops, elenco, temporadas, episódios, recomendações, tendências e providers.",
-    officialUrl: "https://www.themoviedb.org/",
-    logoUrl:
-      "https://www.themoviedb.org/assets/2/v4/logos/v2/blue_long_1-5bf0a8e3a0d5f2bb5f39a34c8d5e6a933dd67c0d8f6e4f18298e61f4782bc8c3.svg",
-    legalNotice:
-      "This product uses the TMDB API but is not endorsed or certified by TMDB.",
-    contexts: ["metadata", "images", "availability", "ratings", "community"],
-    alwaysInGlobalCredits: true,
-  },
-  watchmode: {
-    id: "watchmode",
-    name: "Watchmode",
-    role: "Disponibilidade complementar e validação de streaming.",
-    officialUrl: "https://www.watchmode.com/",
-    contexts: ["availability"],
-  },
+/**
+ * Fontes de dados efetivamente usadas e creditadas pelo POPLOG.
+ *
+ * Atualizado para refletir a arquitetura real (POPLOG-first, IMDb-first):
+ * TMDB, Watchmode, Movie of the Night e Banco de Series foram REMOVIDOS da
+ * operacao e nao devem mais aparecer nos creditos ao usuario. As entradas vivas
+ * sao Trakt (catalogo + comunidade + calendario do Radar) e JustWatch (camada
+ * de disponibilidade, servida via proxy Balloonerismm).
+ *
+ * Atribuicoes ainda pendentes na UI (ver POPLOG_GLOBAL_UNIFICATION_PLAN.md):
+ * Wikidata, Wikipedia e OMDb. Adiciona-las exige ampliar `ApiSourceId`.
+ */
+export const API_SOURCES: Partial<Record<ApiSourceId, ApiSourceDefinition>> = {
   trakt: {
     id: "trakt",
     name: "Trakt",
-    role: "Comentários, reviews e atividade da comunidade.",
+    role:
+      "Catalogo de filmes e series, trending, descoberta, relacionados, episodios, traducoes pt-BR, comentarios da comunidade e calendario do Radar.",
     officialUrl: "https://trakt.tv/",
-    contexts: ["community"],
-  },
-  movieofthenight: {
-    id: "movieofthenight",
-    name: "Movie of the Night",
-    shortName: "MotN",
-    role: "Radar editorial de catálogo, disponibilidade e eventos digitais.",
-    officialUrl: "https://www.movieofthenight.com/",
-    contexts: ["availability", "catalogRadar"],
-  },
-  bancodeseries: {
-    id: "bancodeseries",
-    name: "Banco de Séries",
-    role: "Calendário externo usado como sinal auxiliar de agenda.",
-    officialUrl: "https://www.bancodeseries.com.br/",
-    contexts: ["calendar"],
+    contexts: ["metadata", "community", "catalogRadar", "calendar"],
+    alwaysInGlobalCredits: true,
   },
   balloonerismm: {
     id: "balloonerismm",
     name: "JustWatch",
     shortName: "JustWatch",
-    role: "Disponibilidade de streaming, aluguel e compra no Brasil.",
+    role: "Disponibilidade de streaming, aluguel e compra por regiao.",
     officialUrl: "https://www.justwatch.com/",
+    legalNotice:
+      "Dados de disponibilidade via JustWatch. POPLOG nao hospeda nem distribui conteudo.",
     contexts: ["availability"],
+    alwaysInGlobalCredits: true,
+  },
+  wikidata: {
+    id: "wikidata",
+    name: "Wikidata",
+    role: "Dados financeiros (orcamento e bilheteria) por IMDb e relacoes de franquia/universo.",
+    officialUrl: "https://www.wikidata.org/",
+    legalNotice: "Dados sob licenca CC0.",
+    contexts: ["metadata"],
+    alwaysInGlobalCredits: true,
+  },
+  wikipedia: {
+    id: "wikipedia",
+    name: "Wikipedia",
+    role: "Fallback de dados financeiros (infobox de orcamento e bilheteria).",
+    officialUrl: "https://www.wikipedia.org/",
+    legalNotice: "Conteudo sob licenca CC BY-SA.",
+    contexts: ["metadata"],
+    alwaysInGlobalCredits: true,
   },
 };
 
 export const GLOBAL_CREDIT_SOURCE_IDS = Object.values(API_SOURCES)
-  .filter((source) => source.alwaysInGlobalCredits)
+  .filter((source): source is ApiSourceDefinition =>
+    Boolean(source?.alwaysInGlobalCredits),
+  )
   .map((source) => source.id);

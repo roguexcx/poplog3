@@ -1,4 +1,4 @@
-import { uiMessage } from "@/lib/i18n/ui-message";
+import { uiMessageFor } from "@/lib/i18n/ui-message";
 import Link from "next/link";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
@@ -17,7 +17,7 @@ import { getPoplogTitleDetails } from "@/server/titles/poplog-title-details";
 import { formatDuration, logger } from "@/server/logging/logger";
 import { resolvePoplogTitleIdentity, type PoplogTitleSourceHint, } from "@/server/titles/poplog-title-identity";
 import { legacyTitlePath, publicTitlePathFromSlug, } from "@/server/titles/title-public-routes";
-import { normalizeCatalogLanguage, normalizeCatalogRegion } from "@/server/source-engine/locale";
+import { normalizeCatalogLanguage, normalizeCatalogRegion, normalizeInterfaceLanguage } from "@/server/source-engine/locale";
 type MediaType = "movie" | "tv";
 type PageProps = {
     params: Promise<{
@@ -28,10 +28,11 @@ type PageProps = {
 };
 export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
     const { mediaType, id } = await params;
-    if (mediaType !== "movie" && mediaType !== "tv") {
-        return { title: uiMessage("ui.98a5efa60beb") };
-    }
     const cookieStore = await cookies();
+    const interfaceLanguage = normalizeInterfaceLanguage(cookieStore.get("poplog_interface_language")?.value);
+    if (mediaType !== "movie" && mediaType !== "tv") {
+        return { title: uiMessageFor(interfaceLanguage, "ui.98a5efa60beb") };
+    }
     const language = normalizeCatalogLanguage(cookieStore.get("poplog_catalog_language")?.value);
     const region = normalizeCatalogRegion(cookieStore.get("poplog_region")?.value);
     const localIdentity = await resolvePoplogTitleIdentity({
@@ -101,6 +102,12 @@ function pickFlag(value: string | string[] | undefined): boolean {
 export default async function TitlePage({ params, searchParams }: PageProps) {
     const startedAt = Date.now();
     const { mediaType, id } = await params;
+    const cookieStore = await cookies();
+    const interfaceLanguage = normalizeInterfaceLanguage(cookieStore.get("poplog_interface_language")?.value);
+    const language = normalizeCatalogLanguage(cookieStore.get("poplog_catalog_language")?.value);
+    const region = normalizeCatalogRegion(cookieStore.get("poplog_region")?.value);
+    const ui = (key: string, replacements?: Record<string, string | number | null | undefined>) =>
+        uiMessageFor(interfaceLanguage, key, replacements);
     const resolvedSearch = searchParams ? await searchParams : undefined;
     const refresh = pickFlag(resolvedSearch?.refresh) || pickFlag(resolvedSearch?.force);
     const sourceHint = Array.isArray(resolvedSearch?.sourceHint)
@@ -108,13 +115,13 @@ export default async function TitlePage({ params, searchParams }: PageProps) {
         : resolvedSearch?.sourceHint;
     if (mediaType !== "movie" && mediaType !== "tv") {
         return (<section className="px-4 py-10 sm:px-6 md:px-10">
-        <EmptyState kicker="Rota invalida" title={uiMessage("ui.110c405bba79")} description={uiMessage("ui.64084f1d9199")} accent="rose"/>
+        <EmptyState kicker={interfaceLanguage === "en-US" ? "Invalid route" : "Rota invalida"} title={ui("ui.110c405bba79")} description={ui("ui.64084f1d9199")} accent="rose"/>
       </section>);
     }
     if (!id?.trim()) {
         return (<section className="px-4 py-10 sm:px-6 md:px-10">
-        <EmptyState kicker="ID invalido" title={uiMessage("ui.310ab52b9602")} description={uiMessage("ui.cd8e4f045232")} accent="rose" action={<Link href="/buscar">
-              <ActionButton variant="primary">{uiMessage("ui.8f1a85bb1fef")}</ActionButton>
+        <EmptyState kicker={interfaceLanguage === "en-US" ? "Invalid ID" : "ID invalido"} title={ui("ui.310ab52b9602")} description={ui("ui.cd8e4f045232")} accent="rose" action={<Link href="/buscar">
+              <ActionButton variant="primary">{ui("ui.8f1a85bb1fef")}</ActionButton>
             </Link>}/>
       </section>);
     }
@@ -142,6 +149,8 @@ export default async function TitlePage({ params, searchParams }: PageProps) {
         id,
         sourceHint: (sourceHint ?? "auto") as PoplogTitleSourceHint,
         force: refresh,
+        country: region,
+        language,
     });
     // Normalização da URL canônica:
     // A URL oficial é sempre /title/{resolvedMediaType}/{poplogId}. Qualquer alias
@@ -179,8 +188,8 @@ export default async function TitlePage({ params, searchParams }: PageProps) {
     if (!title) {
         logger.warn(`[PAGE] /title/${mediaType}/${id} | failed | ${formatDuration(Date.now() - startedAt)}`);
         return (<section className="px-4 py-10 sm:px-6 md:px-10">
-        <EmptyState kicker="Sem dados" title={uiMessage("ui.20ab66e32e83")} description={uiMessage("ui.eb187cee8966")} accent="rose" action={<Link href="/buscar">
-              <ActionButton variant="primary">{uiMessage("ui.8f1a85bb1fef")}</ActionButton>
+        <EmptyState kicker={interfaceLanguage === "en-US" ? "No data" : "Sem dados"} title={ui("ui.20ab66e32e83")} description={ui("ui.eb187cee8966")} accent="rose" action={<Link href="/buscar">
+              <ActionButton variant="primary">{ui("ui.8f1a85bb1fef")}</ActionButton>
             </Link>}/>
       </section>);
     }
@@ -190,8 +199,8 @@ export default async function TitlePage({ params, searchParams }: PageProps) {
     logger.info(`[RATINGS] loaded | userRating=${title.userState?.userRating == null ? "none" : "ok"} | aggregate=${title.communityRating == null && title.ratings == null ? "none" : "ok"}`);
     const canonicalPath = canonicalTitlePath(title, legacyTitlePath({ mediaType: title.mediaType, id: title.poplogId ?? title.externalIds?.imdbId ?? id }));
     const jsonLd = buildTitleJsonLd(title, canonicalPath, {
-        language: "pt-BR",
-        region: title.country ?? "BR",
+        language,
+        region: title.country ?? region,
         imageId: title.poplogId ?? title.externalIds?.imdbId ?? id,
         slug: title.externalIds?.slug ?? null,
     });

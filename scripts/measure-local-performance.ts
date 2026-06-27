@@ -15,7 +15,7 @@ const endpoints: Endpoint[] = [
   { name: "Home", path: "/" },
   { name: "Trending", path: "/api/trending?includeProviders=0&fast=1&language=pt-BR&region=BR" },
   { name: "Busca", path: "/api/search?q=superman&language=pt-BR&region=BR" },
-  { name: "Providers tt0993846", path: "/api/poplog3/providers?id=tt0993846&media_type=movie&region=BR&debug=1&force_live=1" },
+  { name: "Providers tt0993846", path: "/api/providers?id=tt0993846&media_type=movie&region=BR&debug=1&force_live=1" },
   { name: "Radar", path: "/api/radar?language=pt-BR&region=BR" },
   {
     name: "Para Você",

@@ -83,6 +83,8 @@
     "smoke:providers:commercial-fixtures": "tsx -r tsconfig-paths/register scripts/smoke-test-provider-commercial-normalization.ts",
     "smoke:provider-normalization": "tsx -r tsconfig-paths/register scripts/smoke-test-provider-normalization.ts",
     "smoke:synthetic-id": "tsx -r tsconfig-paths/register scripts/smoke-test-synthetic-id.ts",
+    "smoke:catalog-localization": "tsx -r tsconfig-paths/register scripts/smoke-test-catalog-localization.ts",
+    "smoke:trending-v2": "tsx -r tsconfig-paths/register scripts/smoke-test-trending-v2.ts",
     "smoke:library-identity": "tsx -r tsconfig-paths/register scripts/smoke-test-library-identity.ts",
     "smoke:seo:title": "tsx -r tsconfig-paths/register scripts/smoke-test-title-seo.ts"
   },

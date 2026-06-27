@@ -9,7 +9,6 @@ import {
   Database,
   FileSearch,
   ImageIcon,
-  Languages,
   Play,
   RefreshCw,
   Search,
@@ -408,7 +407,7 @@ export function TabOperationsAdmin({ secret }: { secret: string }) {
                   <div key={asset.id} className="rounded-lg border border-white/10 bg-white/[0.03] p-2">
                     <div className="aspect-[2/3] overflow-hidden rounded bg-black/30">
                       {asset.publicUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
+                         
                         <img src={asset.publicUrl} alt="" className="h-full w-full object-cover" />
                       ) : null}
                     </div>

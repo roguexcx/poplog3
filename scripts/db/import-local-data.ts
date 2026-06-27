@@ -124,7 +124,6 @@ async function clearAll(): Promise<void> {
     await tx.userEpisode.deleteMany();
     await tx.userTitleState.deleteMany(); // sem FK mas tem userId
     await tx.userTitle.deleteMany();
-    await tx.userWatching.deleteMany();
     await tx.user.deleteMany();
     // Catálogo (sem FK para users)
     await tx.catalogAvailability.deleteMany();
@@ -249,9 +248,6 @@ async function main() {
       prisma.userTitleState.createMany({ data: data as Parameters<typeof prisma.userTitleState.createMany>[0]["data"], skipDuplicates: true }),
   );
 
-  results.user_watching = await importTable("user_watching", tables.user_watching ?? [], (data) =>
-    prisma.userWatching.createMany({ data: data as Parameters<typeof prisma.userWatching.createMany>[0]["data"], skipDuplicates: true }),
-  );
 
   results.user_episodes = await importTable("user_episodes", tables.user_episodes ?? [], (data) =>
     prisma.userEpisode.createMany({ data: data as Parameters<typeof prisma.userEpisode.createMany>[0]["data"], skipDuplicates: true }),

@@ -1,13 +1,28 @@
-# POPLOG 3.0 CLEAN
+# POPLOG v3
 
-Base limpa para reconstrução controlada do POPLOG.
+POPLOG é um indexador/curador de catálogo de filmes e séries (não hospeda nem
+distribui mídia — ver `docs/legal/DISCLAIMER.md`). Stack: **Next.js (App Router)
++ TypeScript**, **Prisma sobre MySQL**, **NextAuth**, **Zustand**, **Tailwind**.
 
-Esta branch mantém a identidade visual e a estrutura mínima do frontend, mas remove a lógica funcional antiga: APIs internas, integrações externas, autenticação, sessões, cache, pipelines, heurísticas, radar, providers e migrations.
+Princípio operacional: **POPLOG-first / IMDb-first** — as APIs externas
+identificam e renovam dados; o app lê preferencialmente do banco/cache local.
 
-## Como rodar
+## Documentação
+
+A fonte de verdade do sistema vive em `docs/`:
+
+- **`docs/POPLOG_SYSTEM_OVERVIEW.md`** — visão geral completa (fonte de verdade).
+- `docs/architecture/POPLOG_GLOBAL_UNIFICATION_PLAN.md` — pendências e migrações.
+- `docs/DOCS_AUDIT_AND_CLEANUP.md` — auditoria/organização da documentação.
+- `docs/modules/` · `docs/operations/` · `docs/production/` · `docs/legal/` ·
+  `docs/monetization/` · `docs/archive/` (histórico).
+
+## Como rodar (local)
 
 ```bash
 docker compose up -d mysql redis
+npm run db:push        # aplica o schema
+npm run db:seed        # cria o usuário local
 npm run dev
 ```
 
@@ -15,45 +30,33 @@ Abra `http://localhost:3000`.
 
 ## Redis local
 
-O Redis local roda via Docker Compose em `redis://127.0.0.1:6379`.
+Roda via Docker Compose em `redis://127.0.0.1:6379`.
 
 ```bash
 docker compose up -d redis
-npm run cache:smoke:redis
+npm run cache:smoke:redis   # valida PING, SET/GET JSON e DEL por namespace
 ```
-
-O smoke valida PING, escrita JSON, leitura JSON e limpeza por namespace.
 
 ## Cron de workers
 
-A fila de refresh pode rodar de duas formas:
+A fila de refresh (`PoplogRefreshQueue`) pode rodar de duas formas:
 
 ```bash
-npm run workers:refresh
-npm run workers:cron:smoke
+npm run workers:refresh        # worker contínuo
+npm run workers:cron:smoke     # valida o endpoint protegido de cron
 ```
 
-Em produção, configure um scheduler externo para chamar `POST /api/cron/refresh-workers` com `Authorization: Bearer $POPLOG_CRON_SECRET`. O workflow `.github/workflows/poplog-worker-cron.yml` já faz essa chamada a cada 5 minutos quando os secrets `POPLOG_CRON_URL` e `POPLOG_CRON_SECRET` estiverem configurados.
+Em produção, um scheduler externo chama `POST /api/cron/refresh-workers` com
+`Authorization: Bearer $POPLOG_CRON_SECRET`. O workflow
+`.github/workflows/poplog-worker-cron.yml` faz isso a cada 5 min quando
+`POPLOG_CRON_URL` e `POPLOG_CRON_SECRET` estão configurados.
 
-## O que ficou
+## Validação
 
-- Next.js App Router
-- React
-- Tailwind CSS
-- `lucide-react`
-- Layout base
-- Sidebar desktop/mobile
-- Estilos globais
-- Páginas neutras para as rotas principais
-
-## O que saiu
-
-- Rotas em `src/app/api`
-- Integrações de catálogo e streaming
-- Autenticação e middleware de sessão legados
-- Hooks e providers de usuário
-- Cache e sincronização
-- Regras de recomendação, confiança e contexto
-- Migrations e scripts de banco antigos
-
-Use o histórico do git como referência técnica do sistema anterior quando precisar consultar a implementação antiga.
+```bash
+npm run typecheck
+npm run lint
+npm run regression:local -- --skip-http
+npm run audit:i18n -- --fail-on-hardcoded
+npm run smoke:ads-placement
+```

@@ -92,7 +92,7 @@ async function readEpisodeApiError(res: Response) {
 export async function postEpisodeProgress(
   payload: Record<string, unknown>
 ): Promise<EpisodeProgressResponse> {
-  const res = await fetch("/api/poplog3/episodes", {
+  const res = await fetch("/api/episodes", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify(payload),

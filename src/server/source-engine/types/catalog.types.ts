@@ -208,18 +208,24 @@ export type TrendingParams = {
   mediaType: "movie" | "show";
   limit?: number;
   page?: number;
+  language?: string | null;
+  region?: string | null;
 };
 
 export type PopularParams = {
   mediaType: "movie" | "show";
   limit?: number;
   page?: number;
+  language?: string | null;
+  region?: string | null;
 };
 
 export type DiscoverParams = {
   mediaType: "movie" | "show";
   genreId: number;
   page?: number;
+  language?: string | null;
+  region?: string | null;
 };
 
 export type RelatedParams = {
@@ -228,6 +234,8 @@ export type RelatedParams = {
   imdbId?: string;
   traktId?: number;
   traktSlug?: string;
+  language?: string | null;
+  region?: string | null;
 };
 
 export type RatingParams = {

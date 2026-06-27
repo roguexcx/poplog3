@@ -21,7 +21,7 @@ export default function SourceLogo({
           className,
         ].join(" ")}
       >
-        {/* eslint-disable-next-line @next/next/no-img-element */}
+        { }
         <img
           src={source.logoUrl}
           alt={source.name}

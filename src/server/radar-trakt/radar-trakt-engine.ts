@@ -17,6 +17,8 @@ import { buildRadarFilters } from "./radar-event-filters";
 import type { RadarEvent, RadarPayload } from "./types";
 import { addDays, toDateStr } from "./radar-event-utils";
 import { resolveAssetUrl } from "@/server/source-engine/asset-urls";
+import { resolveCatalogLocalization } from "@/lib/i18n/catalog-localization";
+import { getCatalogLocalizationsByPoplogId } from "@/server/catalog/catalog-localization-store";
 
 export const RADAR_TRAKT_CACHE_VERSION = 3;
 
@@ -138,7 +140,8 @@ async function enrichWithLocalCatalog(
   ]);
   const byKey = new Map([...movies, ...shows].map((row) => [`${row.mediaType}:${row.tmdbId}`, row]));
   const imdbIds = [...new Set([...movies, ...shows].map((row) => row.imdbId).filter((id): id is string => Boolean(id)))];
-  const [translations, assets] = await Promise.all([
+  const poplogIds = [...new Set([...movies, ...shows].map((row) => row.id).filter(Boolean))];
+  const [translations, assets, catalogLocalizations] = await Promise.all([
     imdbIds.length
       ? db.titleTranslation.findMany({ where: { imdbId: { in: imdbIds } } }).catch(() => [])
       : Promise.resolve([]),
@@ -148,6 +151,12 @@ async function enrichWithLocalCatalog(
           orderBy: [{ isOverride: "desc" }, { isPrimary: "desc" }, { updatedAt: "desc" }],
         }).catch(() => [])
       : Promise.resolve([]),
+    Promise.all(
+      poplogIds.map(async (poplogId) => ({
+        poplogId,
+        rows: await getCatalogLocalizationsByPoplogId(poplogId).catch(() => []),
+      })),
+    ),
   ]);
   const translationsByImdb = new Map<string, typeof translations>();
   for (const translation of translations) {
@@ -161,6 +170,7 @@ async function enrichWithLocalCatalog(
     list.push(asset);
     assetsByImdb.set(asset.imdbId, list);
   }
+  const localizationsByPoplogId = new Map(catalogLocalizations.map((entry) => [entry.poplogId, entry.rows]));
 
   function pickTranslation(imdbId: string | null | undefined) {
     if (!imdbId) return null;
@@ -195,12 +205,21 @@ async function enrichWithLocalCatalog(
     const translation = pickTranslation(row.imdbId);
     const poster = pickAsset(row.imdbId, "poster");
     const backdrop = pickAsset(row.imdbId, "backdrop");
+    const resolved = resolveCatalogLocalization(
+      {
+        title: translation?.title ?? row.title ?? event.title,
+        originalTitle: row.originalTitle ?? event.originalTitle,
+        overview: translation?.overview ?? row.overview ?? event.overview,
+        localizations: localizationsByPoplogId.get(row.id) ?? [],
+      },
+      options.language,
+    );
     return {
       ...event,
       poplogId: row.id,
-      title: translation?.title ?? row.title ?? event.title,
+      title: resolved.title ?? event.title,
       originalTitle: row.originalTitle ?? event.originalTitle,
-      overview: translation?.overview ?? row.overview ?? event.overview,
+      overview: resolved.overview ?? event.overview,
       poster: poster ?? row.posterPath ?? event.poster,
       backdrop: backdrop ?? row.backdropPath ?? event.backdrop,
       ids: { ...event.ids, poplog: row.id, imdb: row.imdbId ?? event.ids.imdb },

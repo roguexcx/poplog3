@@ -1,6 +1,6 @@
 "use client";
 import { uiMessage } from "@/lib/i18n/ui-message";
-import type { RecentlyWatchedItem } from "@/app/api/poplog3/continuity/recently-watched/route";
+import type { RecentlyWatchedItem } from "@/app/api/continuity/recently-watched/route";
 import { useRandomizedTitleDisplay } from "@/components/titles/LocalizedTitle";
 import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 import CardProviderBadge from "@/components/ui/CardProviderBadge";

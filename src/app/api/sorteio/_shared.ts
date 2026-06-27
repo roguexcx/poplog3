@@ -38,6 +38,11 @@ export function parseSorteioFilters(input: URLSearchParams | Record<string, unkn
   };
 }
 
-export function sorteioSectionKey(filters: SorteioFilters) {
-  return `sorteio_pool_${filters.mode}_${filters.type}_${filters.vibe}`;
+export function sorteioSectionKey(
+  filters: SorteioFilters,
+  scope?: { region?: string | null; language?: string | null },
+) {
+  const region = scope?.region?.trim() || "BR";
+  const language = scope?.language?.trim() || "pt-BR";
+  return `sorteio_pool_${filters.mode}_${filters.type}_${filters.vibe}_${language}_${region}`;
 }

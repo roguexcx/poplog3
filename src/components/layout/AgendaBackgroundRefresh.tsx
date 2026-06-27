@@ -19,11 +19,6 @@ export default function AgendaBackgroundRefresh() {
       keepalive: true,
     })
       .then((res) => res.json())
-      .then((data) => {
-        if (data.triggered) {
-          console.log("[AgendaRefresh] background refresh triggered (cache age:", data.ageHours, "h)");
-        }
-      })
       .catch(() => {
         // Silently ignore — this is best-effort
       })

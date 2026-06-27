@@ -102,11 +102,13 @@ export async function processRefreshJob(job: PoplogRefreshQueue) {
     if (!job.imdbId || (job.mediaType !== "movie" && job.mediaType !== "tv")) {
       throw new Error(`Invalid title job: ${job.cacheKey}`);
     }
+    const parsed = parseLocaleParts(job.cacheKey);
     await getTitlePageData({
       mediaType: job.mediaType,
       id: job.imdbId,
       sourceHint: "imdb",
-      country: "BR",
+      country: parsed.region,
+      language: parsed.language,
       force: true,
       debugSource: true,
     });

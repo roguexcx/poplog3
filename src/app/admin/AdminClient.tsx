@@ -1,16 +1,17 @@
 "use client";
 import { uiMessage } from "@/lib/i18n/ui-message";
 import { useState } from "react";
-import { Activity, AlertTriangle, BookOpen, Database, ListChecks, ServerCog, Users } from "lucide-react";
+import { Activity, AlertTriangle, BookOpen, Database, History, ListChecks, ServerCog, Users } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { TabRadarCache } from "./tabs/TabRadarCache";
 import { TabEngineMonitor } from "./tabs/TabEngineMonitor";
+import { TabApiHistory } from "./tabs/TabApiHistory";
 import { TabCatalogAdmin } from "./tabs/TabCatalogAdmin";
 import { TabUsersAdmin } from "./tabs/TabUsersAdmin";
 import { TabWorkersAdmin } from "./tabs/TabWorkersAdmin";
 import { TabOperationsAdmin } from "./tabs/TabOperationsAdmin";
 // ─── tabs ─────────────────────────────────────────────────────────────────────
-type TabId = "operations" | "catalog" | "users" | "radar" | "workers" | "engine";
+type TabId = "operations" | "catalog" | "users" | "radar" | "workers" | "engine" | "api";
 const TABS: {
     id: TabId;
     label: string;
@@ -52,6 +53,12 @@ const TABS: {
         label: uiMessage("ui.d30d0f766455"),
         icon: <Activity size={15}/>,
         desc: uiMessage("ui.662e731d7b06"),
+    },
+    {
+        id: "api",
+        label: "API",
+        icon: <History size={15}/>,
+        desc: uiMessage("admin.api.desc"),
     },
 ];
 // ─── component ────────────────────────────────────────────────────────────────
@@ -107,6 +114,7 @@ export default function AdminClient() {
           {activeTab === "radar" && <TabRadarCache secret={secret}/>}
           {activeTab === "workers" && <TabWorkersAdmin secret={secret}/>}
           {activeTab === "engine" && <TabEngineMonitor secret={secret}/>}
+          {activeTab === "api" && <TabApiHistory secret={secret}/>}
         </div>
 
       </div>

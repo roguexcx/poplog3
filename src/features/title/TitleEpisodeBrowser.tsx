@@ -176,7 +176,7 @@ export default function TitleEpisodeBrowser({ seriesTmdbId, progressSeriesId, se
         setSeason(null);
         setVisibleCount(EPISODES_PER_PAGE);
         setActiveEpisode(null);
-        fetch(`/api/poplog3/tv/${seriesTmdbId}/seasons/${selected}`, {
+        fetch(`/api/tv/${seriesTmdbId}/seasons/${selected}`, {
             signal: controller.signal,
         })
             .then(async (res) => {
@@ -217,7 +217,7 @@ export default function TitleEpisodeBrowser({ seriesTmdbId, progressSeriesId, se
             if (customEvent.detail?.seriesTmdbId !== numericSeriesId)
                 return;
             try {
-                const res = await fetch(`/api/poplog3/series/${numericSeriesId}/progress`);
+                const res = await fetch(`/api/series/${numericSeriesId}/progress`);
                 if (!res.ok) {
                     throw new Error(`HTTP ${res.status}`);
                 }
@@ -424,7 +424,7 @@ export default function TitleEpisodeBrowser({ seriesTmdbId, progressSeriesId, se
                 if (seasonCacheRef.current.has(s.seasonNumber))
                     return;
                 try {
-                    const res = await fetch(`/api/poplog3/tv/${seriesTmdbId}/seasons/${s.seasonNumber}`);
+                    const res = await fetch(`/api/tv/${seriesTmdbId}/seasons/${s.seasonNumber}`);
                     if (!res.ok)
                         return;
                     const data = (await res.json()) as SeasonDto;

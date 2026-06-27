@@ -4,7 +4,7 @@
  * Gera: exports/poplog-export-YYYY-MM-DD-HH-mm.json
  *
  * Tabelas incluídas:
- *   User data  : users, user_titles, user_title_state, user_watching,
+ *   User data  : users, user_titles, user_title_state,
  *                user_episodes, user_ratings, user_title_feedback,
  *                user_events, user_curadoria_preferences,
  *                user_curadoria_signals, user_curadoria_state,
@@ -70,7 +70,6 @@ async function main() {
     verificationTokens,
     userTitles,
     userTitleState,
-    userWatching,
     userEpisodes,
     userRatings,
     userTitleFeedback,
@@ -96,7 +95,6 @@ async function main() {
     prisma.verificationToken.findMany(),
     prisma.userTitle.findMany(),
     prisma.userTitleState.findMany(),
-    prisma.userWatching.findMany(),
     prisma.userEpisode.findMany(),
     prisma.userRating.findMany(),
     prisma.userTitleFeedback.findMany(),
@@ -124,7 +122,6 @@ async function main() {
     verification_tokens: verificationTokens,
     user_titles: userTitles,
     user_title_state: userTitleState,
-    user_watching: userWatching,
     user_episodes: userEpisodes,
     user_ratings: userRatings,
     user_title_feedback: userTitleFeedback,

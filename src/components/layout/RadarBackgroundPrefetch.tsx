@@ -30,9 +30,6 @@ export default function RadarBackgroundPrefetch() {
       })
         .then((res) => {
           if (res.ok) {
-            if (process.env.NODE_ENV === "development") {
-              console.log("[RadarPrefetch] cache aquecido com sucesso");
-            }
           }
         })
         .catch(() => {

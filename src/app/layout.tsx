@@ -1,33 +1,46 @@
-import { uiMessage } from "@/lib/i18n/ui-message";
+import { setServerUiMessageLanguage, uiMessageFor } from "@/lib/i18n/ui-message";
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
 import Sidebar from "@/components/layout/Sidebar";
 import GlobalSearchHeader from "@/components/layout/GlobalSearchHeader";
 import AgendaBackgroundRefresh from "@/components/layout/AgendaBackgroundRefresh";
 import RadarBackgroundPrefetch from "@/components/layout/RadarBackgroundPrefetch";
-import LocaleFooterSwitch from "@/components/layout/LocaleFooterSwitch";
 import SiteFooter from "@/components/layout/SiteFooter";
 import ConsentBanner from "@/components/legal/ConsentBanner";
 import AuthSessionProvider from "@/components/auth/AuthSessionProvider";
 import AdSenseBootstrap from "@/components/ads/AdSenseBootstrap";
 import { FEATURES } from "@/lib/features";
-import { normalizeInterfaceLanguage } from "@/server/source-engine/locale";
+import {
+  normalizeCatalogLanguage,
+  normalizeCatalogRegion,
+  normalizeInterfaceLanguage,
+} from "@/server/source-engine/locale";
 import "./globals.css";
-export const metadata: Metadata = {
+
+export async function generateMetadata(): Promise<Metadata> {
+    const cookieStore = await cookies();
+    const interfaceLanguage = normalizeInterfaceLanguage(cookieStore.get("poplog_interface_language")?.value);
+    return {
     title: {
         default: "POPLOG",
         template: "POPLOG — %s",
     },
-    description: uiMessage("ui.81f21ae2a76d"),
-};
+        description: uiMessageFor(interfaceLanguage, "ui.81f21ae2a76d"),
+    };
+}
 export default async function RootLayout({ children, }: {
     children: React.ReactNode;
 }) {
     const cookieStore = await cookies();
-    const interfaceLanguage = normalizeInterfaceLanguage(cookieStore.get("poplog_interface_language")?.value);
-    return (<html lang={interfaceLanguage} className="dark antialiased">
+    const initialLocale = {
+        interfaceLanguage: normalizeInterfaceLanguage(cookieStore.get("poplog_interface_language")?.value) as "pt-BR" | "en-US",
+        catalogLanguage: normalizeCatalogLanguage(cookieStore.get("poplog_catalog_language")?.value) as "pt-BR" | "en-US",
+        region: normalizeCatalogRegion(cookieStore.get("poplog_region")?.value) as "BR" | "US",
+    };
+    setServerUiMessageLanguage(initialLocale.interfaceLanguage);
+    return (<html lang={initialLocale.interfaceLanguage} data-interface-language={initialLocale.interfaceLanguage} data-catalog-language={initialLocale.catalogLanguage} data-region={initialLocale.region} className="dark antialiased">
       <body>
-        <AuthSessionProvider>
+        <AuthSessionProvider initialLocale={initialLocale}>
           <AdSenseBootstrap />
           <Sidebar />
           <AgendaBackgroundRefresh />
@@ -39,10 +52,8 @@ export default async function RootLayout({ children, }: {
               <SiteFooter />
             </div>
           </main>
-          <LocaleFooterSwitch />
           <ConsentBanner />
         </AuthSessionProvider>
       </body>
     </html>);
 }
-

@@ -44,4 +44,10 @@ export type PoplogTitle = {
 
   /** Timestamp de quando o registro foi sincronizado no cache. */
   last_synced_at?: string | null;
+
+  /** Versões localizadas (pt-BR/en-US) quando a origem é multilíngue (ex.: Trending). */
+  localized?: Partial<import("@/lib/i18n/catalog-localization").CatalogLocalized>;
+
+  /** Sinais de recência/relevância do ranking de trending, quando aplicável. */
+  recency?: import("@/lib/trakt-index/types").TrendingRecency;
 };
