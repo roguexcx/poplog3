@@ -39,6 +39,15 @@ export type Poplog3UserLibraryItem = Poplog3UserTitle & {
   availability_us?: TitleAvailabilitySummary | null;
   /** IMDb ID derivado quando tmdb_id é sintético negativo — usado para links e display. */
   imdb_id?: string | null;
+  /** IDs externos do título — incluindo slug para gerar links diretos sem redirect. */
+  externalIds?: {
+    tmdbId?: number;
+    imdbId?: string;
+    tvdbId?: number;
+    traktId?: number | string;
+    balloonerismmId?: string;
+    slug?: string | null;
+  };
   title: {
     tmdb_id: number;
     media_type: "movie" | "tv";

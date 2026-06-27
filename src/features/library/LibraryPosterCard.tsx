@@ -6,6 +6,7 @@ import { TmdbImageLegacy as TmdbImage } from "@/components/images/TmdbImage";
 import { getCanonicalProviderDisplayName, resolveProviderLogoForRender, } from "@/lib/streaming/provider-display";
 import { resolveDisplayTitle } from "@/lib/titles/display-title";
 import type { Poplog3UserLibraryItem } from "@/server/library/library-service";
+import { publicTitlePathFromSlug } from "@/server/titles/title-public-routes";
 import { getComingSoonInfo, getTheatricalStatus } from "./library-coming-soon";
 const STATUS_BADGE: Record<string, string> = {
     watching: "border-violet-300/35 bg-violet-500/20 text-violet-100",
@@ -45,9 +46,10 @@ export default function LibraryPosterCard({ item, priority, inCustomList = false
     });
     const subtitle = getPosterSubtitle(item);
     const runtimeLabels = getRuntimeLabels(item);
-    // Prefer imdbId for links when tmdb_id is synthetic (negative), gives cleaner URLs
+    // Prefer slug -> imdbId -> tmdb_id for links (slug = link direto sem redirect)
     const linkId = item.imdb_id ?? item.tmdb_id;
-    return (<Link href={`/title/${item.media_type}/${linkId}`} className="group block">
+    const titleHref = publicTitlePathFromSlug(item.externalIds?.slug) ?? `/title/${item.media_type}/${linkId}`;
+    return (<Link href={titleHref} className="group block">
       <article className="relative">
         <div className={[
             "absolute -inset-2 rounded-[1.5rem] opacity-0 blur-2xl transition duration-500 group-hover:opacity-100 sm:-inset-2.5 sm:rounded-[2rem]",

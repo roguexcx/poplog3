@@ -9,6 +9,7 @@ import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import { getOriginalTitle, getRating, getReleaseYear, getTitle } from "@/lib/tmdb-utils";
 import { useDebouncedGlobalSearch } from "@/hooks/useDebouncedGlobalSearch";
 import { type QuickSearchCompany, type QuickSearchPerson, type QuickSearchTitle, } from "./useSearch";
+import { publicTitlePathFromSlug } from "@/server/titles/title-public-routes";
 // Static so the hook's effect deps stay stable across renders.
 const SEARCH_EXTRA_PARAMS = { type: "all", page: "1" } as const;
 const MAX_VISIBLE_TITLES = 5;
@@ -32,7 +33,7 @@ function titleLinkId(item: QuickSearchTitle) {
         item.id);
 }
 function titleHref(item: QuickSearchTitle) {
-    return `/title/${item.media_type}/${titleLinkId(item)}`;
+    return publicTitlePathFromSlug(item.externalIds?.slug) ?? `/title/${item.media_type}/${titleLinkId(item)}`;
 }
 function searchHref(query: string) {
     return `/buscar?q=${encodeURIComponent(query.trim())}`;

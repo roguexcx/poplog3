@@ -5,7 +5,7 @@ export {
   type ImageSizeOf,
 } from "./sizes";
 
-export { buildTmdbUrlLoose, buildTmdbRawUrl } from "./url";
+export { resolveCatalogImageByKind, buildTmdbUrlLoose, buildTmdbRawUrl } from "./url";
 
 /** Helper canônico para resolver qualquer campo de imagem. Seguro para server + client. */
 export { resolveCatalogImage, resolveCatalogImageUrl, type CatalogImageSize } from "./resolve";

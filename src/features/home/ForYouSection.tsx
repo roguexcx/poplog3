@@ -16,6 +16,7 @@ import TmdbImage from "@/components/images/TmdbImage";
 import SectionHeader from "@/components/ui/SectionHeader";
 import CardProviderBadge from "@/components/ui/CardProviderBadge";
 import { titleIdentityKeys, userTitleIdentityKeys } from "@/lib/user-title-identity";
+import { publicTitlePathFromSlug } from "@/server/titles/title-public-routes";
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 type ForYouItem = {
     id: number;
@@ -125,7 +126,9 @@ function FeaturedForYouCard({ item, onDismiss }: {
     const rating = formatRating(item.rating);
     const isLongTitle = item.title.length > 24;
     const isLongOverview = (item.overview?.length ?? 0) > 140;
-    const slug = `/title/${item.mediaType}/${item.linkId ?? item.id}`;
+    const slug =
+      publicTitlePathFromSlug(item.slug) ??
+      `/title/${item.mediaType}/${item.linkId ?? item.id}`;
     return (<article className="group relative h-[320px] overflow-hidden rounded-[1.65rem] border border-white/10 bg-white/[0.04] shadow-[0_20px_80px_rgba(0,0,0,0.42)] transition duration-300 hover:-translate-y-1 hover:border-sky-300/40 hover:shadow-[0_24px_90px_rgba(56,189,248,0.16)]">
       <Link href={slug} className="absolute inset-0 z-[5]" aria-label={uiMessage("ui.cd8829d56b63", { v1: item.title })}/>
 
@@ -180,7 +183,7 @@ function SmallForYouCard({ item, onDismiss }: {
     const imageKind: "poster" | "backdrop" = item.posterUrl ? "poster" : "backdrop";
     const rating = formatRating(item.rating);
     return (<article className="group relative h-[320px] overflow-hidden rounded-[1.35rem] border border-white/10 bg-white/[0.04] shadow-[0_16px_55px_rgba(0,0,0,0.38)] transition duration-300 hover:-translate-y-1 hover:border-sky-300/40 hover:shadow-[0_20px_75px_rgba(56,189,248,0.14)]">
-      <Link href={`/title/${item.mediaType}/${item.linkId ?? item.id}`} className="absolute inset-0 z-10" aria-label={uiMessage("ui.cd8829d56b63", { v1: item.title })}/>
+      <Link href={publicTitlePathFromSlug(item.slug) ?? `/title/${item.mediaType}/${item.linkId ?? item.id}`} className="absolute inset-0 z-10" aria-label={uiMessage("ui.cd8829d56b63", { v1: item.title })}/>
 
       <ForYouActions item={item} onDismiss={onDismiss}/>
 

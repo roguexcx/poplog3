@@ -43,6 +43,7 @@ export type Poplog3UserLibraryItem = Poplog3UserTitle & {
     tvdbId?: number;
     traktId?: number | string;
     balloonerismmId?: string;
+    slug?: string | null;
   };
   identityUsed?: string;
   linkIdUsed?: string | number;
@@ -298,6 +299,8 @@ async function enrichLibraryItem(row: UserTitle, prefetched?: PrefetchedLibraryD
     ...(externalImdbId ? { imdbId: externalImdbId, balloonerismmId: externalImdbId } : {}),
     ...(Number.isFinite(tvdbId) ? { tvdbId } : {}),
     ...(externalRow?.traktId ? { traktId: externalRow.traktId } : {}),
+    // slug do título (traktSlug) — usado para gerar links /slug diretos sem redirect
+    ...(titleRow?.slug ? { slug: titleRow.slug } : {}),
   };
   const linkIdUsed = titleRow?.id ?? externalImdbId ?? row.tmdbId;
 

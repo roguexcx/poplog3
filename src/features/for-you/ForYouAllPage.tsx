@@ -12,6 +12,7 @@ import { useUserAction } from "@/hooks/useUserAction";
 import { useUserFeedbackToggle } from "@/hooks/useUserFeedbackToggle";
 import { usePoplogUserState } from "@/stores/user-states-store";
 import { titleIdentityKeys, userTitleIdentityKeys } from "@/lib/user-title-identity";
+import { publicTitlePathFromSlug } from "@/server/titles/title-public-routes";
 // ─── Types ────────────────────────────────────────────────────────────────────
 type ForYouItem = {
     id: number;
@@ -108,7 +109,7 @@ function ForYouCard({ item, onDismiss }: {
     const imageKind: "poster" | "backdrop" = item.posterUrl ? "poster" : "backdrop";
     const rating = formatRating(item.rating);
     return (<article className="group relative overflow-hidden rounded-[1.35rem] border border-white/10 bg-white/[0.04] shadow-[0_16px_55px_rgba(0,0,0,0.38)] transition duration-300 hover:-translate-y-1 hover:border-sky-300/40 hover:shadow-[0_20px_75px_rgba(56,189,248,0.14)]" style={{ aspectRatio: "2/3" }}>
-      <Link href={`/title/${item.mediaType}/${item.linkId ?? item.id}`} className="absolute inset-0 z-10" aria-label={uiMessage("ui.cd8829d56b63", { v1: item.title })}/>
+      <Link href={publicTitlePathFromSlug(item.slug) ?? `/title/${item.mediaType}/${item.linkId ?? item.id}`} className="absolute inset-0 z-10" aria-label={uiMessage("ui.cd8829d56b63", { v1: item.title })}/>
 
       <ForYouActions item={item} onDismiss={onDismiss}/>
       <LibraryStateBadge tmdbId={item.id > 0 ? item.id : undefined} mediaType={item.mediaType} className="bottom-[4.5rem] left-2.5 top-auto group-hover:opacity-0 transition-opacity duration-200"/>

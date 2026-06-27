@@ -160,17 +160,6 @@ availabilityRegion = região de disponibilidade (providers, janelas)
   trocar `catalogLanguage` ou `region` invalida o pool e dispara nova recomendação.
   Helper compartilhado: `src/lib/for-you/reason.ts` (`renderForYouReason`,
   `renderForYouMediaLabel`). Chaves i18n: `for_you.reason.*`, `for_you.media.*`.
-- **Troca de idioma fluida — sem reload (2026-06-27):** `saveLocale()` em
-  `LocaleContext` faz PATCH `/api/user/locale` (persiste no DB + seta cookies via
-  `Set-Cookie`) e chama `setLocaleState()` internamente. Todos os componentes com
-  `useLocale()` re-renderizam imediatamente via contexto React. `applyLocaleToDocument()`
-  atualiza `document.documentElement.lang` / `data-*` client-side.
-  `window.location.reload()` que existia em `LocaleFooterSwitch` e
-  `ProfilePageClient` foi removido — era completamente redundante e causava F5
-  visual desnecessário. **Regra**: nunca chamar `reload()` ou `router.refresh()`
-  após `saveLocale()` — o contexto já propaga a mudança para todos os consumers.
-  Componentes que dependem de `catalogLanguage`/`region` (ex: `ForYouSection`)
-  re-disparam seus fetches via `useEffect` deps, sem reload.
 
 ## 7. APIs internas (App Router) — destaques
 

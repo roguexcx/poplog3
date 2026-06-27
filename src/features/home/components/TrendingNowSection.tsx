@@ -15,6 +15,7 @@ import LocalizedTitle from "@/components/titles/LocalizedTitle";
 import SectionHeader from "@/components/ui/SectionHeader";
 import LibraryStateBadge from "@/components/ui/LibraryStateBadge";
 import CardProviderBadge from "@/components/ui/CardProviderBadge";
+import { publicTitlePathFromSlug } from "@/server/titles/title-public-routes";
 // ─── Types ────────────────────────────────────────────────────────────────────
 type MediaFilter = "all" | "movie" | "tv";
 interface TrendingItem {
@@ -193,7 +194,9 @@ function TrendingCard({ item, rank }: {
     const [imgErr, setImgErr] = useState(false);
     const posterPath = item.poster_path;
     const isMovie = item.media_type === "movie";
-    const slug = `/title/${item.media_type}/${item.poplogId ?? item.linkIdUsed ?? item.externalIds?.imdbId ?? item.id}`;
+    const slug =
+      publicTitlePathFromSlug(item.externalIds?.slug) ??
+      `/title/${item.media_type}/${item.poplogId ?? item.linkIdUsed ?? item.externalIds?.imdbId ?? item.id}`;
     const userData = useOptionalUserData();
     const isLoggedIn = Boolean(userData && !userData.loading);
     const { executeAction, effectiveKey } = useUserAction({

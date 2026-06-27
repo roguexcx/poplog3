@@ -3730,5 +3730,133 @@
   "ui.ff82a6038441": {
     "pt-BR": "Deseja marcá-los também?",
     "en-US": "Want to tag them too?"
+  },
+  "home.hero.type.movies": {
+    "pt-BR": "os filmes",
+    "en-US": "movies"
+  },
+  "home.hero.fallback_title": {
+    "pt-BR": "Destaque do momento",
+    "en-US": "Current highlight"
+  },
+  "ui.add_to_watchlist": {
+    "pt-BR": "Adicionar à watchlist",
+    "en-US": "Add to watchlist"
+  },
+  "ui.remove_not_interested": {
+    "pt-BR": "Remover sem interesse",
+    "en-US": "Remove not interested"
+  },
+  "legal.consent.title": {
+    "pt-BR": "Privacidade e cookies",
+    "en-US": "Privacy and cookies"
+  },
+  "legal.consent.description": {
+    "pt-BR": "Usamos cookies essenciais para login, idioma, região e funcionamento básico. Cookies de analytics, anúncios e personalização só são ativados com o seu consentimento. Veja os",
+    "en-US": "We use essential cookies for login, language, region and basic functionality. Analytics, ads and personalization cookies are only enabled with your consent. See the"
+  },
+  "legal.consent.policyLink": {
+    "pt-BR": "Termos e a Política de Privacidade",
+    "en-US": "Terms and the Privacy Policy"
+  },
+  "legal.consent.category.analytics": {
+    "pt-BR": "Analytics",
+    "en-US": "Analytics"
+  },
+  "legal.consent.category.analytics.description": {
+    "pt-BR": "Métricas de uso para melhorar o produto.",
+    "en-US": "Usage metrics to improve the product."
+  },
+  "legal.consent.category.ads": {
+    "pt-BR": "Anúncios",
+    "en-US": "Ads"
+  },
+  "legal.consent.category.ads.description": {
+    "pt-BR": "Publicidade não essencial e medição.",
+    "en-US": "Non-essential advertising and measurement."
+  },
+  "legal.consent.category.personalization": {
+    "pt-BR": "Personalização",
+    "en-US": "Personalization"
+  },
+  "legal.consent.category.personalization.description": {
+    "pt-BR": "Recomendações baseadas no seu uso.",
+    "en-US": "Recommendations based on your usage."
+  },
+  "legal.consent.save": {
+    "pt-BR": "Salvar preferências",
+    "en-US": "Save preferences"
+  },
+  "legal.consent.acceptAll": {
+    "pt-BR": "Aceitar todos",
+    "en-US": "Accept all"
+  },
+  "legal.consent.essentialOnly": {
+    "pt-BR": "Somente essenciais",
+    "en-US": "Essential only"
+  },
+  "legal.consent.hide": {
+    "pt-BR": "Ocultar",
+    "en-US": "Hide"
+  },
+  "legal.consent.customize": {
+    "pt-BR": "Personalizar",
+    "en-US": "Customize"
+  },
+  "auth.login.close": {
+    "pt-BR": "Fechar",
+    "en-US": "Close"
+  },
+  "auth.login.google": {
+    "pt-BR": "Continuar com Google",
+    "en-US": "Continue with Google"
+  },
+  "auth.login.redirecting": {
+    "pt-BR": "Redirecionando...",
+    "en-US": "Redirecting..."
+  },
+  "for_you.reason.because_favorited": {
+    "pt-BR": "Porque você favoritou {title}",
+    "en-US": "Because you favorited {title}"
+  },
+  "for_you.reason.because_watching": {
+    "pt-BR": "Porque você está assistindo {title}",
+    "en-US": "Because you're watching {title}"
+  },
+  "for_you.reason.based_on_watched": {
+    "pt-BR": "Baseado em {title}",
+    "en-US": "Based on {title}"
+  },
+  "for_you.reason.from_watchlist": {
+    "pt-BR": "Da sua watchlist · {title}",
+    "en-US": "From your watchlist · {title}"
+  },
+  "for_you.reason.based_on_library": {
+    "pt-BR": "Baseado na sua biblioteca",
+    "en-US": "Based on your library"
+  },
+  "for_you.reason.library_match": {
+    "pt-BR": "Combina com seu gosto em {title}",
+    "en-US": "Matches your taste in {title}"
+  },
+  "for_you.reason.more_suffix_one": {
+    "pt-BR": " e outro título",
+    "en-US": " and one other title"
+  },
+  "for_you.reason.more_suffix_other": {
+    "pt-BR": " e mais {count}",
+    "en-US": " and {count} more"
+  },
+  "for_you.reason.fallback_title": {
+    "pt-BR": "títulos que você gostou",
+    "en-US": "titles you enjoyed"
+  },
+  "for_you.media.movie": {
+    "pt-BR": "Filme",
+    "en-US": "Movie"
+  },
+  "for_you.media.tv": {
+    "pt-BR": "Série",
+    "en-US": "Series"
   }
 }

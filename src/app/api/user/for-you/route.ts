@@ -27,6 +27,10 @@ import {
 import { withOrigin } from "@/server/engine-logger";
 import { attachBestProvider } from "@/server/availability/attach-best-provider";
 import { resolveDisplayTitle } from "@/lib/titles/display-title";
+import {
+  orderCatalogTitlesByLanguage,
+  normalizeCatalogLanguageStrict,
+} from "@/lib/i18n/catalog-localization";
 import type { UserTitle } from "@/types/user";
 import {
   readContinuitySectionCache,
@@ -40,6 +44,13 @@ import {
 import { titleIdentityKeys } from "@/lib/user-title-identity";
 import { resolveLocaleScope, type LocaleScope } from "@/server/source-engine/locale";
 import { sourceEngineLog } from "@/server/source-engine/source-log";
+import { uiMessageFor } from "@/lib/i18n/ui-message";
+import {
+  renderForYouReason,
+  renderForYouMediaLabel,
+  type ForYouReasonCode,
+  type ForYouReasonData,
+} from "@/lib/for-you/reason";
 
 // ─── Config ───────────────────────────────────────────────────────────────────
 
@@ -53,7 +64,9 @@ const HOME_FAST_COUNT       = 6;
 const BALLOON_CONCURRENCY   = 4;
 const HYDRATION_CAP         = 40; // top-N candidates to enrich via Trakt single-item lookup
 const HYDRATION_CONCURRENCY = 8;
-const FOR_YOU_POOL_CACHE_VERSION = 2;
+// v4: pool agora armazena dados de razão NEUTROS de idioma (_reasonData) em vez da
+// string final, para que o interfaceLanguage não invalide nem contamine o cache.
+const FOR_YOU_POOL_CACHE_VERSION = 4;
 const PERSISTENT_POOL_TTL_MS     = 60 * 60_000;
 const LOCAL_FALLBACK_TTL_MS      = 8 * 60_000;
 
@@ -109,6 +122,30 @@ const GENRE_MAP: Record<number, string> = {
   10759: "Ação & Aventura", 10762: "Infantil", 10763: "Notícias",
   10764: "Reality", 10765: "Sci-Fi & Fantasia", 10768: "Guerra & Política",
 };
+
+const GENRE_MAP_EN: Record<number, string> = {
+  28: "Action", 12: "Adventure", 16: "Animation", 35: "Comedy",
+  80: "Crime", 99: "Documentary", 18: "Drama", 10751: "Family",
+  14: "Fantasy", 36: "History", 27: "Horror", 10402: "Music",
+  9648: "Mystery", 10749: "Romance", 878: "Science Fiction",
+  53: "Thriller", 10752: "War", 37: "Western",
+  10759: "Action & Adventure", 10762: "Kids", 10763: "News",
+  10764: "Reality", 10765: "Sci-Fi & Fantasy", 10768: "War & Politics",
+};
+
+/** Rótulo de gênero no idioma de catálogo. */
+function genreLabelFor(genreId: number | null | undefined, language: string): string | null {
+  if (genreId == null) return null;
+  const map = normalizeCatalogLanguageStrict(language) === "en-US" ? GENRE_MAP_EN : GENRE_MAP;
+  return map[genreId] ?? null;
+}
+
+/** Rótulo de mídia (Filme/Série) — texto de interface, montado via interfaceLanguage. */
+function mediaLabelFor(mediaType: "movie" | "tv", interfaceLanguage: string): string {
+  return renderForYouMediaLabel(mediaType, (key, params) =>
+    uiMessageFor(interfaceLanguage, key, params),
+  );
+}
 
 // ─── pt-BR heuristic (mirrors poplog-title-details.ts) ───────────────────────
 // Returns true only when text has strong Portuguese signals unlikely in English:
@@ -213,7 +250,8 @@ type RecCandidate = {
   mediaType: "movie" | "tv";
   seedEffectiveWeight: number;
   relationStrength: number; // 0–100 (index 0 in Trakt list = 100)
-  reason: string;
+  // Dados estruturais neutros de idioma — a string é montada no payload/borda.
+  _reasonData: ForYouReasonData;
   // debug
   _imageSource: string;  // "db:poster" | "db:backdrop" | "trakt:poster" | "trakt:fanart" | "none"
   _langSource: string;   // "pt-BR" | "en" | "trakt-en"
@@ -267,9 +305,20 @@ export type ForYouApiItem = {
   rating?: number;
   year?: string | null;
   mediaType: "movie" | "tv";
+  /** Rótulo de mídia já traduzido (interfaceLanguage no momento do request).
+   *  Back-compat: clientes novos renderizam via `reasonCode`/`mediaType` + ui(). */
   mediaLabel: string;
   genreLabel?: string | null;
+  /** Frase de explicação já montada (interfaceLanguage do request). Back-compat. */
   reason: string;
+  // ── Dados estruturais NEUTROS de idioma (preferidos pelo client) ──────────────
+  reasonCode: ForYouReasonCode;
+  /** Título da semente, já localizado no catálogo (catalogLanguage). */
+  reasonSeedTitle?: string | null;
+  /** "+N outros títulos que você gostou" — 0/ausente = sem sufixo. */
+  reasonMoreCount?: number;
+  /** Prefixo de gênero (catalogLanguage) prepended à frase. */
+  reasonGenrePrefix?: string | null;
   sourceSeed?: string;
   debug?: string;
   /** imdbId quando conhecido — usado para hidratar disponibilidade. */
@@ -362,14 +411,25 @@ function pickSeeds(seeds: WeightedSeed[]): WeightedSeed[] {
   return Array.from(picked);
 }
 
-// ─── Reason strings ───────────────────────────────────────────────────────────
+// ─── Reason (dados estruturais neutros) ───────────────────────────────────────
+// O motor NÃO produz mais a string final da explicação. Ele deriva apenas o CODE
+// estrutural da semente; o `seedTitle` (metadado de catálogo já localizado) e a
+// frase final são montados na borda (servidor para back-compat, client via ui()).
 
-function buildReason(seed: WeightedSeed): string {
-  if (seed.title.favorite)               return `Porque você favoritou "${seed.label}"`;
-  if (seed.title.status === "watching")  return `Porque você está assistindo "${seed.label}"`;
-  if (seed.title.status === "watched")   return `Baseado em "${seed.label}"`;
-  if (seed.title.status === "watchlist") return `Da sua watchlist: "${seed.label}"`;
-  return `Baseado na sua biblioteca`;
+/** Código estrutural da razão a partir do estado da semente na biblioteca. */
+function reasonCodeForSeed(seed: WeightedSeed): ForYouReasonCode {
+  if (seed.title.favorite) return "because_favorited";
+  switch (seed.title.status) {
+    case "watching":  return "because_watching";
+    case "watched":   return "based_on_watched";
+    case "watchlist": return "from_watchlist";
+  }
+  return "based_on_library";
+}
+
+/** Render da string final via interfaceLanguage (back-compat para clientes legados). */
+function renderReasonString(data: ForYouReasonData, interfaceLanguage: string): string {
+  return renderForYouReason(data, (key, params) => uiMessageFor(interfaceLanguage, key, params));
 }
 
 // ─── Seed source label ────────────────────────────────────────────────────────
@@ -854,6 +914,7 @@ async function buildLocalFallbackCandidates(
   titles: UserTitle[],
   libraryIdentities: LibraryIdentityIndex,
   limit: number,
+  scope: LocaleScope,
 ): Promise<RecCandidate[]> {
   const allSeeds = buildWeightedSeeds(titles);
   const picks = pickSeeds(allSeeds);
@@ -912,10 +973,16 @@ async function buildLocalFallbackCandidates(
   for (const row of rows) {
     const genreIds = parseGenreIds(row.genres);
     const primaryGenre = genreIds.find((id) => genreWeights.has(id)) ?? genreIds[0] ?? null;
-    const genreLabel = primaryGenre ? GENRE_MAP[primaryGenre] : null;
     const genreBonus = primaryGenre ? (genreWeights.get(primaryGenre) ?? 0) * 8 : 0;
     const mediaType = row.mediaType as "movie" | "tv";
-    const title = row.title ?? row.originalTitle ?? "";
+    // Título no idioma de catálogo (en-US → original).
+    const orderedTitle = orderCatalogTitlesByLanguage({
+      title: row.title,
+      originalTitle: row.originalTitle,
+      language: scope.catalogLanguage,
+    });
+    const title = orderedTitle.primary ?? orderedTitle.secondary ?? "";
+    const localizedGenreLabel = genreLabelFor(primaryGenre, scope.catalogLanguage);
 
     const candidate: RecCandidate = {
       tmdbId: row.tmdbId,
@@ -940,9 +1007,7 @@ async function buildLocalFallbackCandidates(
       mediaType,
       seedEffectiveWeight: 35 + genreBonus,
       relationStrength: Math.max(10, 100 - out.length * 3),
-      reason: genreLabel
-        ? `${genreLabel} · Combina com sua biblioteca`
-        : "Combina com sua biblioteca",
+      _reasonData: { code: "library_match", genrePrefix: localizedGenreLabel },
       _imageSource: row.posterPath ? "db:poster" : row.backdropPath ? "db:backdrop" : "none",
       _langSource: looksPortuguese(title) ? "pt-BR:db" : "en:db",
       _inLocalDb: true,
@@ -1025,36 +1090,55 @@ async function buildForYouResponse(
   // Seleção ponderada (roulette-wheel sem reposição).
   const selected = weightedSample(pool, score, Math.min(FINAL_COUNT, pool.length));
 
+  const catalogLanguage = options.scope.catalogLanguage;
+  const interfaceLanguage = options.scope.interfaceLanguage;
   const items: ForYouApiItem[] = selected.map((c) => {
-    const genreLabel = c.genreIds?.[0] ? (GENRE_MAP[c.genreIds[0]] ?? null) : null;
+    // genreLabel é metadado de catálogo → catalogLanguage.
+    // mediaLabel é texto de interface → interfaceLanguage.
+    const genreLabel = genreLabelFor(c.genreIds?.[0], catalogLanguage);
     // Prioridade de linkId: Poplog CUID (rota garantida) > tmdbId local > imdbId externo.
     // Usar imdbId como linkId só quando o título não está no DB local — e nesse caso
     // é a única opção viável para abrir a página do título.
     const linkId = c._poplogId
       ?? (c._inLocalDb ? String(c.tmdbId) : (c.imdbId ?? String(c.tmdbId)));
 
+    // Título no idioma de catálogo (en-US → original) preservando a sanitização.
+    const orderedTitle = orderCatalogTitlesByLanguage({
+      title: c.title,
+      originalTitle: c.originalTitle,
+      language: catalogLanguage,
+    });
+    const displayedTitle = resolveDisplayTitle({
+      title: orderedTitle.primary,
+      originalTitle: orderedTitle.secondary,
+      tmdbId: c.tmdbId,
+      imdbId: c.imdbId,
+      poplogId: c._poplogId,
+      mediaType: c.mediaType,
+    });
+
     return {
       id:            c.tmdbId,
       poplogId:      c._poplogId ?? null,
       linkId,
-      title:         resolveDisplayTitle({
-        title: c.title,
-        originalTitle: c.originalTitle,
-        tmdbId: c.tmdbId,
-        imdbId: c.imdbId,
-        poplogId: c._poplogId,
-        mediaType: c.mediaType,
-      }),
-      originalTitle: c.originalTitle !== c.title ? (c.originalTitle ?? null) : null,
+      title:         displayedTitle,
+      // Subtítulo = título original, só quando difere do exibido (evita duplicar
+      // em en-US, onde o exibido já é o original).
+      originalTitle: c.originalTitle && c.originalTitle !== displayedTitle ? c.originalTitle : null,
       overview:      options.compact ? undefined : c.overview ?? undefined,
       posterUrl:     c.posterUrl   ?? null,
       backdropUrl:   c.backdropUrl ?? null,
       rating:        c.voteAverage ?? undefined,
       year:          c.year,
       mediaType:     c.mediaType,
-      mediaLabel:    c.mediaType === "movie" ? "Filme" : "Série",
+      mediaLabel:    mediaLabelFor(c.mediaType, interfaceLanguage),
       genreLabel,
-      reason:        c.reason,
+      // Dados estruturais neutros (preferidos pelo client) + string back-compat.
+      reasonCode:        c._reasonData.code,
+      reasonSeedTitle:   c._reasonData.seedTitle ?? null,
+      reasonMoreCount:   c._reasonData.moreCount ?? 0,
+      reasonGenrePrefix: c._reasonData.genrePrefix ?? null,
+      reason:        renderReasonString(c._reasonData, interfaceLanguage),
       sourceSeed:    c.seedEffectiveWeight > 0 ? undefined : "popular",
       imdbId:        c.imdbId ?? null,
       traktId:       c.traktId ?? null,
@@ -1219,6 +1303,7 @@ async function runForYouPipeline(
         titles,
         libraryIdentities,
         Math.max(HOME_FAST_COUNT, FINAL_COUNT),
+        options.scope,
       );
       markPerf(options.perf, "local_fallback");
 
@@ -1300,9 +1385,16 @@ async function runForYouPipeline(
         try {
           const row = await db.poplog3Title.findFirst({
             where:  { tmdbId: seed.title.tmdb_id, mediaType: seed.title.media_type },
-            select: { title: true },
+            select: { title: true, originalTitle: true },
           });
-          if (row?.title) seed.label = row.title;
+          // Rótulo da semente no idioma de catálogo (en-US → título original).
+          const ordered = orderCatalogTitlesByLanguage({
+            title: row?.title,
+            originalTitle: row?.originalTitle,
+            language: options.scope.catalogLanguage,
+          });
+          const resolved = ordered.primary ?? ordered.secondary;
+          if (resolved) seed.label = resolved;
         } catch { /* keep defensively-extracted label */ }
       }),
     );
@@ -1365,7 +1457,8 @@ async function runForYouPipeline(
             seedMediaType: seed.title.media_type,
             seedWeight:    seed.effectiveWeight,
             seedTitle:     seed.label,
-            seedReason:    buildReason(seed),
+            // seedReason carrega agora o CODE estrutural (não a string final).
+            seedReason:    reasonCodeForSeed(seed),
             items:         fetchResult.items,
           });
         }
@@ -1487,20 +1580,23 @@ async function runForYouPipeline(
         h.hydrationSource === "trakt" && hasFanart  ? "trakt:fanart"  :
         hasPoster                                    ? "balloon:poster" : "pending";
 
-      // Reason: base no seed + contexto de gênero do candidato para melhorar explicabilidade.
-      // "Drama · Porque você favoritou 'The Pitt'" deixa claro a conexão ao usuário.
-      const candidateGenreLabel = h.genreIds?.[0] ? (GENRE_MAP[h.genreIds[0]] ?? null) : null;
-
-      let reason = h.seedReason;
+      // Reason (dados NEUTROS): base no seed + contexto de gênero do candidato.
+      // "Drama · Porque você favoritou 'The Pitt'" é montado na borda via ui().
+      // h.seedReason é o CODE; h.seedTitle é o rótulo já localizado da melhor semente.
+      const candidateGenreLabel = genreLabelFor(h.genreIds?.[0], options.scope.catalogLanguage);
+      const reasonData: ForYouReasonData = {
+        code:      h.seedReason as ForYouReasonCode,
+        seedTitle: h.seedTitle ?? null,
+        moreCount: 0,
+        genrePrefix: null,
+      };
+      // Multi-seed → sufixo "+N outros títulos". Single-seed → prefixo de gênero.
+      // (mutuamente exclusivos, espelhando o comportamento anterior.)
       if (h.appearedFromSeeds > 1 && h.seedOrigins.length > 1) {
-        const top  = h.seedOrigins[0];
-        const rest = h.appearedFromSeeds - 1;
-        reason = `${top.seedReason} e mais ${rest} título${rest > 1 ? "s" : ""} que você gostou`;
+        reasonData.moreCount = h.appearedFromSeeds - 1;
       }
-      // Prefixo de gênero: só para recomendações single-seed onde o gênero acrescenta contexto.
-      // Multi-seed já tem razão composta; não sobrecarregar com mais info.
       if (candidateGenreLabel && h.appearedFromSeeds === 1) {
-        reason = `${candidateGenreLabel} · ${reason}`;
+        reasonData.genrePrefix = candidateGenreLabel;
       }
 
       rawCandidates.push({
@@ -1520,7 +1616,7 @@ async function runForYouPipeline(
         mediaType:           h.mediaType,
         seedEffectiveWeight: h.seedBestWeight,
         relationStrength,
-        reason,
+        _reasonData:         reasonData,
         _imageSource:        imgSrc,
         _langSource:         h.langSource,
         _inLocalDb:          h.tmdbId != null ? undefined : false,
@@ -1724,26 +1820,7 @@ export async function POST(req: NextRequest) {
       perf,
       scope,
     })
-  ).catch((err: unknown) => {
-    console.error("[for-you]", err);
-    markPerf(perf, "response_build");
-    return {
-      featured: null,
-      items: [],
-      recommendationSource: "error",
-      meta: {
-        surface,
-        mode,
-        cacheStatus: "error",
-        stale: false,
-        source: "error",
-        returned: 0,
-        perf: finishPerf(perf),
-        language: scope.catalogLanguage,
-        region: scope.region,
-      },
-    } as ForYouApiResponse;
-  });
+  );
 
   ROUTE_IN_FLIGHT.set(routeKey, pipelinePromise);
   const data = (await pipelinePromise) as ForYouApiResponse;

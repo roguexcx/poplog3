@@ -21,6 +21,7 @@ import LibraryPosterCard from "./LibraryPosterCard";
 import ListsShelf from "./ListsShelf";
 import { type LibraryTab } from "./LibraryTabs";
 import { getComingSoonInfo, getConfirmedReleaseDate, getTheatricalStatus, } from "./library-coming-soon";
+import { publicTitlePathFromSlug } from "@/server/titles/title-public-routes";
 // ── Types ─────────────────────────────────────────────────────────────────────
 type MediaFilter = "all" | "movie" | "tv";
 type SortBy = "random" | "release-desc" | "recent" | "title-asc" | "release-asc" | "popularity-desc" | "runtime-asc" | "runtime-desc";
@@ -650,7 +651,8 @@ function ComingSoonCard({ item, priority, }: {
                 ? "VOD: sem disponibilidade encontrada"
                 : null;
     const linkId = item.imdb_id ?? item.tmdb_id;
-    return (<Link href={`/title/${item.media_type}/${linkId}`} className="group block">
+    const titleHref = publicTitlePathFromSlug(item.externalIds?.slug) ?? `/title/${item.media_type}/${linkId}`;
+    return (<Link href={titleHref} className="group block">
       <div className="relative overflow-hidden rounded-[1.35rem] border border-white/[0.07] bg-[#07080f] shadow-[0_12px_40px_rgba(0,0,0,0.52)] transition duration-300 group-hover:border-amber-300/[0.18] group-hover:shadow-[0_20px_60px_rgba(0,0,0,0.68)]" style={{ aspectRatio: "16/9" }}>
         {(title?.backdrop_path ?? title?.poster_path) && (<TmdbImage path={title.backdrop_path ?? title.poster_path ?? null} fallbackPath={title.backdrop_path ? (title.poster_path ?? null) : null} size="w780" alt={displayTitle} fallbackLabel={displayTitle} priority={priority} className="absolute inset-0 h-full w-full object-cover opacity-55 transition duration-500 group-hover:scale-[1.04] group-hover:opacity-70"/>)}
         <div className="absolute inset-0 bg-[linear-gradient(to_top,rgba(3,4,10,0.96)_0%,rgba(3,4,10,0.38)_55%,rgba(3,4,10,0.18)_100%)]"/>
@@ -713,7 +715,8 @@ function SpotlightCard({ item }: {
             : "",
     ].filter(Boolean);
     const linkId = item.imdb_id ?? item.tmdb_id;
-    return (<Link href={`/title/${item.media_type}/${linkId}`} className="group block h-full">
+    const titleHref = publicTitlePathFromSlug(item.externalIds?.slug) ?? `/title/${item.media_type}/${linkId}`;
+    return (<Link href={titleHref} className="group block h-full">
       <div className="relative min-h-[300px] overflow-hidden rounded-[1.5rem] border border-white/[0.08] bg-black/40 shadow-[0_24px_80px_rgba(0,0,0,0.55)] transition duration-300 group-hover:border-white/[0.16] sm:min-h-[380px] sm:rounded-[1.75rem]">
         {/* Backdrop */}
         {(title?.backdrop_path ?? title?.poster_path) && (<TmdbImage path={title.backdrop_path ?? title.poster_path ?? null} fallbackPath={title.backdrop_path ? (title.poster_path ?? null) : null} size="w1280" alt={displayTitle} fallbackLabel={displayTitle} priority className="absolute inset-0 h-full w-full object-cover opacity-55 transition duration-500 group-hover:scale-[1.03] group-hover:opacity-65"/>)}

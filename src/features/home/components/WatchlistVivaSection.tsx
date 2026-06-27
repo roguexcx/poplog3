@@ -11,6 +11,7 @@ import { notifyUserTitlesUpdated } from "@/hooks/useTitleToggle";
 import { IconCheck } from "@/components/ui/icons";
 import { useScrollRow } from "@/hooks/useScrollRow";
 import SectionHeader from "@/components/ui/SectionHeader";
+import { publicTitlePathFromSlug } from "@/server/titles/title-public-routes";
 // ─── Types ────────────────────────────────────────────────────────────────────
 type StreamStatus = "streaming" | "chegando" | "cinemas" | "confirmado" | "unavailable";
 type WatchlistRow = {
@@ -179,7 +180,9 @@ function WatchlistCard({ item, onDismiss, }: {
     const [imgErr, setImgErr] = useState(false);
     const [dismissed, setDismissed] = useState(false);
     const [watchedActive, setWatched] = useState(false);
-    const slug = `/title/${item.media_type}/${item.poplogId ?? item.tmdb_id}`;
+    const slug =
+      publicTitlePathFromSlug(item.externalIds?.slug) ??
+      `/title/${item.media_type}/${item.poplogId ?? item.tmdb_id}`;
     const posterPath = item.poster_path ?? null;
     const flatrateProvider = item.providers.find((p) => p.type === "flatrate") ?? null;
     const rentProvider = item.providers.find((p) => p.type === "rent") ?? null;

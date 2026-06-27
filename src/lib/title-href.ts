@@ -1,4 +1,5 @@
 import type { PoplogMediaType } from "@/types/poplog-card";
+import { publicTitlePathFromSlug } from "@/server/titles/title-public-routes";
 
 type TitleHrefInput = {
   poplogId?: string | number | null;
@@ -14,23 +15,25 @@ type TitleHrefInput = {
 /**
  * Constrói o href canônico para a página de um título.
  *
- * Prioridade de identificador na URL:
- *   1. poplogId (CUID — identidade canônica local)
- *   2. imdbId (alias amigável e estável — tt...)
- *   3. slug (alias legível — "breaking-bad")
- *   4. traktId (numérico externo)
- *   5. tmdbId (alias numérico externo)
+ * Prioridade:
+ *   1. slug legível ("barbarian-2022") -> "/barbarian-2022"  (link direto, sem redirect)
+ *   2. imdbId  -> /title/{mediaType}/tt...
+ *   3. poplogId (CUID) -> /title/{mediaType}/{cuid}
+ *   4. traktId / tmdbId -> /title/{mediaType}/{id}
  *
- * URLs baseadas em alias (2–5) serão redirecionadas 308 para a URL canônica
- * pelo roteador de título quando o poplogId for resolvido.
+ * Regra: nunca gerar /title/... quando houver slug válido disponível.
  */
 export function buildTitleHref(input: TitleHrefInput): string {
   const { poplogId, mediaType, externalIds } = input;
 
+  // Slug é o formato público preferido — link direto sem redirect.
+  const slugPath = publicTitlePathFromSlug(externalIds?.slug);
+  if (slugPath) return slugPath;
+
+  // Fallback para URL legada /title/mediaType/id
   const id =
-    (poplogId != null ? String(poplogId) : null) ??
     externalIds?.imdbId ??
-    externalIds?.slug ??
+    (poplogId != null ? String(poplogId) : null) ??
     (externalIds?.traktId != null ? String(externalIds.traktId) : null) ??
     (externalIds?.tmdbId != null ? String(externalIds.tmdbId) : null);
 

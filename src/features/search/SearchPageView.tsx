@@ -12,6 +12,7 @@ import SectionHeader from "@/components/ui/SectionHeader";
 import ExploreShortcuts from "./ExploreShortcuts";
 import { MediaGridSkeleton } from "@/components/skeletons/MediaGridSkeleton";
 import { findShortcut } from "@/lib/discovery/shortcuts-config";
+import { publicTitlePathFromSlug } from "@/server/titles/title-public-routes";
 import { resolveForRender as resolveCatalogImage } from "@/lib/images/proxy";
 // ── Types ─────────────────────────────────────────────────────────────────────
 type SearchMediaType = "all" | "movie" | "tv";
@@ -147,7 +148,7 @@ function TitleGrid({ titles }: {
     titles: SearchTitle[];
 }) {
     return (<div className="grid grid-cols-2 gap-x-4 gap-y-8 md:grid-cols-4 lg:grid-cols-6">
-      {titles.map((title, index) => (<InteractivePosterCard key={`${title.media_type}-${title.tmdb_id}-${index}`} id={title.tmdb_id} poplogId={title.poplogId ?? null} imdbId={title.externalIds?.imdbId ?? null} slug={title.externalIds?.slug ?? null} href={`/title/${title.media_type}/${titleLinkId(title)}`} mediaType={title.media_type} title={title.title} originalTitle={title.original_title ?? null} posterPath={title.poster_path} fallbackPath={title.backdrop_path} year={getYear(title)} source="search" priority={index < 2} bestProviderName={title.best_provider_name ?? null} bestProviderType={title.best_provider_type ?? null} bestProviderLogo={title.best_provider_logo ?? null}/>))}
+      {titles.map((title, index) => (<InteractivePosterCard key={`${title.media_type}-${title.tmdb_id}-${index}`} id={title.tmdb_id} poplogId={title.poplogId ?? null} imdbId={title.externalIds?.imdbId ?? null} slug={title.externalIds?.slug ?? null} href={publicTitlePathFromSlug(title.externalIds?.slug) ?? `/title/${title.media_type}/${titleLinkId(title)}`} mediaType={title.media_type} title={title.title} originalTitle={title.original_title ?? null} posterPath={title.poster_path} fallbackPath={title.backdrop_path} year={getYear(title)} source="search" priority={index < 2} bestProviderName={title.best_provider_name ?? null} bestProviderType={title.best_provider_type ?? null} bestProviderLogo={title.best_provider_logo ?? null}/>))}
     </div>);
 }
 function PeopleSection({ people }: {

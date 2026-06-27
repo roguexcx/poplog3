@@ -1,18 +1,19 @@
-import { uiMessage } from "@/lib/i18n/ui-message";
+import { uiMessageFor } from "@/lib/i18n/ui-message";
 import HomeMemberSections from "@/features/home/HomeMemberSections";
 import HeroSection from "@/features/home/components/HeroSection";
 import TrendingNowSection from "@/features/home/components/TrendingNowSection";
 import { getTrending } from "@/features/home/home-api";
 import { parseYear, translateGenres, } from "@/features/home/home-utils";
 import { getCurrentUser } from "@/server/auth/get-current-user";
-import { buildTmdbUrlLoose } from "@/lib/images";
+import { resolveCatalogImage } from "@/lib/images";
 import { getMediaType, getTitle } from "@/lib/tmdb-utils";
 import { cookies } from "next/headers";
-import { normalizeCatalogLanguage, normalizeCatalogRegion, } from "@/server/source-engine/locale";
+import { normalizeCatalogLanguage, normalizeCatalogRegion, normalizeInterfaceLanguage, } from "@/server/source-engine/locale";
 export const dynamic = "force-dynamic";
 export default async function HomePage() {
     const initialUser = await getCurrentUser();
     const cookieStore = await cookies();
+    const interfaceLanguage = normalizeInterfaceLanguage(cookieStore.get("poplog_interface_language")?.value);
     const catalogLanguage = normalizeCatalogLanguage(cookieStore.get("poplog_catalog_language")?.value);
     const region = normalizeCatalogRegion(cookieStore.get("poplog_region")?.value);
     const trendingItems = await getTrending(initialUser?.id, {
@@ -33,25 +34,27 @@ export default async function HomePage() {
     const featuredRank = featuredItem
         ? featuredItemsByType.findIndex((item) => item.id === featuredItem.id) + 1
         : null;
-    const featuredTypeLabel = featuredType === "tv" ? uiMessage("ui.b9a6a1c349af") : "os filmes";
+    const featuredTypeLabel = featuredType === "tv"
+        ? uiMessageFor(interfaceLanguage, "ui.b9a6a1c349af")
+        : uiMessageFor(interfaceLanguage, "home.hero.type.movies");
     const featuredTitle = featuredItem
         ? getTitle(featuredItem)
-        : "Destaque do momento";
+        : uiMessageFor(interfaceLanguage, "home.hero.fallback_title");
     const backdropUrl = featuredItem
-        ? buildTmdbUrlLoose("backdrop", "hero", featuredItem.backdrop_path)
+        ? resolveCatalogImage(featuredItem.backdrop_path, "w1280")
         : null;
     const posterUrl = featuredItem
-        ? buildTmdbUrlLoose("poster", "detail", featuredItem.poster_path)
+        ? resolveCatalogImage(featuredItem.poster_path, "w500")
         : null;
     const year = parseYear(featuredItem?.release_date, featuredItem?.first_air_date);
     const genres = featuredItem?.genres?.length
-        ? translateGenres(featuredItem.genres)
+        ? translateGenres(featuredItem.genres, 2, catalogLanguage)
         : null;
     const runtime = null;
     const seasons = featuredType === "tv" ? featuredItem?.number_of_seasons ?? null : null;
     const overview = featuredItem?.overview ?? null;
     return (<>
-      <HeroSection backdropUrl={backdropUrl} featuredItem={featuredItem} featuredType={featuredType} featuredTitle={featuredTitle} featuredRank={featuredRank} featuredTypeLabel={featuredTypeLabel} posterUrl={posterUrl} year={year} runtime={runtime} seasons={seasons} genres={genres} overview={overview}/>
+      <HeroSection backdropUrl={backdropUrl} featuredItem={featuredItem} featuredType={featuredType} featuredTitle={featuredTitle} featuredRank={featuredRank} featuredTypeLabel={featuredTypeLabel} posterUrl={posterUrl} year={year} runtime={runtime} seasons={seasons} genres={genres} overview={overview} interfaceLanguage={interfaceLanguage}/>
 
       <div className="relative z-10 mx-auto max-w-[1560px] pb-16">
         <div className="flex flex-col gap-14">
@@ -64,4 +67,3 @@ export default async function HomePage() {
       </div>
     </>);
 }
-
